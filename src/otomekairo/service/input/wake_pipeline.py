@@ -19,6 +19,8 @@ class ServiceInputWakePipelineMixin:
         selected_candidate: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None = None,
         cycle_id: str | None = None,
+        observation_summary: dict[str, Any] | None = None,
+        reference_context: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], str, dict[str, Any]]:
         cycle_label = self._debug_cycle_label(cycle_id)
         # 入力テキスト
@@ -37,27 +39,29 @@ class ServiceInputWakePipelineMixin:
         )
 
         # 判断機会ポリシー
-        due = self._wake_is_due(state=state, current_time=started_at)
-        if due["should_skip"]:
-            debug_log("Wake", f"{cycle_label} skipped reason={self._clamp(due['reason_summary'])}")
-            return (
-                self._noop_pipeline(state=state, started_at=started_at, reason_summary=due["reason_summary"]),
-                input_text,
-                client_context,
-            )
+        if trigger_kind == "background_thinking":
+            due = self._wake_is_due(state=state, current_time=started_at)
+            if due["should_skip"]:
+                debug_log("Wake", f"{cycle_label} skipped reason={self._clamp(due['reason_summary'])}")
+                return (
+                    self._noop_pipeline(state=state, started_at=started_at, reason_summary=due["reason_summary"]),
+                    input_text,
+                    client_context,
+                )
 
         # 定期観測
-        client_context = self._run_wake_policy_observations(
-            state=state,
-            started_at=started_at,
-            client_context=client_context,
-            cycle_id=cycle_id,
-        )
-        input_text = self._build_wake_input_text(
-            state=state,
-            client_context=client_context,
-            selected_candidate=selected_candidate,
-        )
+        if trigger_kind == "background_thinking":
+            client_context = self._run_wake_policy_observations(
+                state=state,
+                started_at=started_at,
+                client_context=client_context,
+                cycle_id=cycle_id,
+            )
+            input_text = self._build_wake_input_text(
+                state=state,
+                client_context=client_context,
+                selected_candidate=selected_candidate,
+            )
         if trigger_kind == "background_thinking" and (
             self._user_response_cycle_active()
             or self._recent_turns_added_since(state=state, started_at=started_at)
@@ -163,6 +167,8 @@ class ServiceInputWakePipelineMixin:
             client_context=client_context,
             selected_candidate=selected_candidate,
             pending_intent_selection=pending_intent_selection,
+            observation_summary=observation_summary,
+            reference_context=reference_context,
         )
         return pipeline, input_text, client_context
 

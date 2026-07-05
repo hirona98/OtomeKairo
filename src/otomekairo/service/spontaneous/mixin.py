@@ -24,12 +24,15 @@ class ServiceSpontaneousMixin(
         if not isinstance(client_context, dict):
             raise ServiceError(400, "invalid_client_context", "The client_context field must be an object.")
 
+        reference_payload = payload.get("reference")
+
         # 実行
         debug_log("Wake", f"manual trigger context_keys={self._debug_context_keys(client_context)}", level="DEBUG")
         return self._execute_wake_cycle(
             state=state,
             client_context=client_context,
             trigger_kind="wake",
+            reference_payload=reference_payload,
         )
 
     def submit_capability_result(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:

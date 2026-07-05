@@ -45,6 +45,7 @@ class ServiceInputPipelineMixin:
         observation_summary: dict[str, Any] | None = None,
         capability_request_summary: dict[str, Any] | None = None,
         assistant_message_target_client_id: str | None = None,
+        reference_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         cycle_label = self._debug_cycle_label(cycle_id)
         current_client_context = client_context or {}
@@ -158,6 +159,7 @@ class ServiceInputPipelineMixin:
             recall_hint=recall_hint,
             recall_pack=recall_pack,
             visual_observation_context=visual_observation_context,
+            reference_context=reference_context,
             decision_role=decision_role,
             persona_context=self._build_selected_persona_context(state=state, role="decision_generation"),
             cycle_label=cycle_label,
@@ -184,6 +186,7 @@ class ServiceInputPipelineMixin:
             recall_hint=recall_hint,
             recall_pack=recall_pack,
             visual_observation_context=visual_observation_context,
+            reference_context=reference_context,
             speech_role=speech_role,
             persona_context=self._build_selected_persona_context(
                 state=state,
@@ -1548,6 +1551,7 @@ class ServiceInputPipelineMixin:
         default_mode_context: dict[str, Any] | None,
         workspace_context: dict[str, Any] | None,
         visual_observation_context: dict[str, Any] | None,
+        reference_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
         decision_role: dict[str, Any],
@@ -1579,6 +1583,7 @@ class ServiceInputPipelineMixin:
             workspace_context=workspace_context,
             recall_hint=recall_hint,
             recall_pack=recall_pack,
+            reference_context=reference_context,
         )
         decision = self.llm.generate_decision(
             role_definition=decision_role,
@@ -1611,6 +1616,7 @@ class ServiceInputPipelineMixin:
         prediction_error_context: dict[str, Any] | None,
         workspace_context: dict[str, Any] | None,
         visual_observation_context: dict[str, Any] | None,
+        reference_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
         speech_role: dict[str, Any],
@@ -1740,6 +1746,7 @@ class ServiceInputPipelineMixin:
                 workspace_context=workspace_context,
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
+                reference_context=reference_context,
                 decision=decision,
             )
             speech_payload = self.llm.generate_speech(
@@ -1790,6 +1797,7 @@ class ServiceInputPipelineMixin:
         workspace_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
+        reference_context: dict[str, Any] | None = None,
     ) -> DecisionContext:
         return DecisionContext(
             input_text=input_text,
@@ -1814,6 +1822,7 @@ class ServiceInputPipelineMixin:
             workspace_context=workspace_context,
             recall_hint=recall_hint,
             recall_pack=recall_pack,
+            reference_context=reference_context,
         )
 
     def _build_speech_context(
@@ -1837,6 +1846,7 @@ class ServiceInputPipelineMixin:
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
         decision: dict[str, Any],
+        reference_context: dict[str, Any] | None = None,
     ) -> SpeechContext:
         return SpeechContext(
             input_text=input_text,
@@ -1856,5 +1866,6 @@ class ServiceInputPipelineMixin:
             workspace_context=workspace_context,
             recall_hint=recall_hint,
             recall_pack=recall_pack,
+            reference_context=reference_context,
             decision=decision,
         )

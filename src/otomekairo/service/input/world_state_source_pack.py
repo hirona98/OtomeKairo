@@ -435,6 +435,8 @@ class ServiceInputWorldStateSourcePackMixin:
     ) -> bool:
         if not isinstance(observation_summary, dict):
             return False
+        if observation_summary.get("source") == "wake_reference":
+            return True
         return (
             observation_summary.get("source") == "capability_result"
             and observation_summary.get("capability_id") == "vision.capture"

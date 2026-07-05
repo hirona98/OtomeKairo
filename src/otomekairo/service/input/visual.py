@@ -276,6 +276,9 @@ class ServiceInputVisualMixin:
         elif self._observation_summary_is_vision_capture(observation_summary):
             source = "vision_capture_result"
             image_input_kind = "vision_capture_result"
+        elif observation_summary.get("source") == "wake_reference":
+            source = "wake_reference"
+            image_input_kind = "wake_reference"
         else:
             return None
 
@@ -296,7 +299,7 @@ class ServiceInputVisualMixin:
         source_owner = visual_source_owner(payload.get("source_kind"))
         if source_owner is not None:
             payload["source_owner"] = source_owner
-        if source == "vision_capture_result":
+        if source in {"vision_capture_result", "wake_reference"}:
             payload["retention_policy"] = "visual_record_candidate"
         return payload
 

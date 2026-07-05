@@ -265,6 +265,7 @@ class DecisionContext:
     workspace_context: dict[str, Any] | None
     recall_hint: dict[str, Any]
     recall_pack: dict[str, Any]
+    reference_context: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,3 +314,4 @@ class SpeechContext:
     recall_hint: dict[str, Any]
     recall_pack: dict[str, Any]
     decision: dict[str, Any]
+    reference_context: dict[str, Any] | None = None

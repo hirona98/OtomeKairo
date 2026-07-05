@@ -252,11 +252,26 @@ request:
     "active_app": "Slack",
     "window_title": "general | Slack",
     "locale": "ja-JP"
+  },
+  "reference": {
+    "uri": "/tmp/otomekairo-watch/camera/latest.jpg",
+    "label": "部屋カメラの変化",
+    "reason_summary": "軽量CVが前回との差分を検出した。",
+    "content_hint": "auto"
   }
 }
 ```
 
 - `client_context` は object とする。値がないときは省略する
+- `reference` は object とする。値がないときは省略する
+- `reference.uri` は必須文字列であり、ローカルパス、`file://` URL、`http://` URL、`https://` URL を受け付ける。最大長は 2048 文字である
+- `reference.label` は参照先の短い名前である。値がないときは `reference.uri` を使う。最大長は 512 文字である
+- `reference.reason_summary` は外部監視プロセスが wake を要求した理由の短い要約である。最大長は 512 文字である
+- `reference.content_hint` は `auto / image / text` のいずれかである。値がないときは `auto` とする
+- server は `reference.uri` を wake サイクル開始時に 1 回だけ解決する
+- server は `reference` の PNG、JPEG、GIF、WebP 画像を visual observation として判断へ渡し、視覚記録と `world_state` の候補へ使う
+- server は `reference` の UTF-8 テキストをその wake サイクルの判断入力へ一時的に渡す
+- server は `reference` の raw text と raw image を cycle trace の `client_context` へ保存しない。trace には `uri / label / reason_summary / content_kind / media_type / byte_count / resolved_at` を保存し、画像理解に成功した場合は `visual_summary_text` も保存する
 - wake でも `client_context` の `source / active_app / window_title / locale` を起床入力の整形に使う
 - wake でも `client_context` の `social_context_summary / environment_summary / location_summary / external_service_summary / body_state_summary / device_state_summary / schedule_summary` があれば、`world_state` source pack の補助文脈へ使う
 
@@ -288,13 +303,19 @@ capability 実行を開始した場合は、`POST /api/conversation` と同じ `
 
 API起床は少なくとも次の挙動を持つ。
 
-- `wake_policy.mode=disabled` なら `noop`
-- `mode=interval` で次回時刻にまだ達していなければ `noop`
-- `mode=interval` で `wake_policy.observations` がある場合、enabled observation を順番に取得し、成功結果をその回の判断へ進む前景シグナルとして扱い、visual capture は `visual_observation` の構造化出力で `change_state` を受け取り、視覚記録と `world_state` を整理してから wake 判断を 1 回だけ行う
-- 思考前観測 が vision source 未接続の一時失敗だけで終わった場合、server は interval を消費せず短い再試行待ちにする
-- 思考前観測 の同期 capability request は内部観測として扱い、`ongoing_action` を作らない
+- API起床は `wake_policy.mode` と `wake_policy.interval_seconds` による due 判定を使わず即時に wake 1 サイクルを実行する
+- API起床は `wake_policy.observations` を実行しない
+- API起床に `reference` がある場合、server は参照先の解決結果を判断根拠として使う
+- `reference` の取得結果が 5 MiB を超える場合、server は `413 wake_reference_too_large` を返す
+- `reference` のテキストが 64 KiB を超える場合、server は `413 wake_reference_too_large` を返す
+- `reference.uri` を読み取れない場合、server は `502 wake_reference_unavailable` を返す
+- `reference` の内容が画像または UTF-8 テキストとして扱えない場合、server は `415 unsupported_wake_reference_content` を返す
 - server は wake 入力を `current_input.sender=system`、`source_kind=wake`、`response_target=none` として shared pipeline に渡す
 - server 内の定期思考スケジューラは `current_input.sender=system`、`source_kind=background_thinking`、`response_target=none` として shared pipeline に渡す
+- server 内の定期思考スケジューラだけが `wake_policy.mode`、`wake_policy.interval_seconds`、`wake_policy.observations` を使う
+- 定期思考で `mode=interval` かつ `wake_policy.observations` がある場合、enabled observation を順番に取得し、成功結果をその回の判断へ進む前景シグナルとして扱い、visual capture は `visual_observation` の構造化出力で `change_state` を受け取り、視覚記録と `world_state` を整理してから wake 判断を 1 回だけ行う
+- 思考前観測 が vision source 未接続の一時失敗だけで終わった場合、server は interval を消費せず短い再試行待ちにする
+- 思考前観測 の同期 capability request は内部観測として扱い、`ongoing_action` を作らない
 - capability request は dispatch 時点の `current_input` を request record の `source_current_input` に保存し、capability result の `response_target` は `source_current_input.response_target` を引き継ぐ
 - `source_current_input.response_target=none` の capability result は内部観測結果として扱い、実効判断を `noop` に正規化し、assistant message を送信しない
 - `source_current_input.response_target=user` の capability request は request record に外向き応答先 client を内部保存し、follow-up capability request へ引き継ぐ
@@ -316,3 +337,7 @@ server 内の定期思考スケジューラも、同じ wake 1 サイクルを�
 | HTTP | `error.code` | 意味 |
 |------|--------------|------|
 | `400` | `invalid_client_context` | `client_context` が object ではない |
+| `400` | `invalid_wake_reference` | `reference` の形式が不正 |
+| `413` | `wake_reference_too_large` | `reference` の取得結果が大きすぎる |
+| `415` | `unsupported_wake_reference_content` | `reference` の内容が画像または UTF-8 テキストとして扱えない |
+| `502` | `wake_reference_unavailable` | `reference.uri` を読み取れない |

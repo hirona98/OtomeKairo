@@ -68,6 +68,7 @@ class ServiceSpontaneousWakeMixin:
         state: dict[str, Any],
         client_context: dict[str, Any],
         trigger_kind: str,
+        reference_payload: Any = None,
     ) -> dict[str, Any]:
         # 直列化実行
         with self._wake_execution_lock:
@@ -77,6 +78,8 @@ class ServiceSpontaneousWakeMixin:
             recent_turns = self._load_recent_turns(state)
             runtime_summary = self._build_runtime_summary(state)
             pending_intent_selection = self._empty_pending_intent_selection_trace()
+            observation_summary: dict[str, Any] | None = None
+            reference_context: dict[str, Any] | None = None
             input_text = self._build_wake_input_text(
                 state=state,
                 client_context=client_context,
@@ -92,6 +95,19 @@ class ServiceSpontaneousWakeMixin:
             )
 
             try:
+                if trigger_kind == "wake":
+                    client_context, observation_summary, reference_context = self._prepare_wake_reference_context(
+                        state=state,
+                        started_at=started_at,
+                        input_text=input_text,
+                        client_context=client_context,
+                        reference_payload=reference_payload,
+                    )
+                    input_text = self._build_wake_input_text(
+                        state=state,
+                        client_context=client_context,
+                        selected_candidate=None,
+                    )
                 if trigger_kind == "background_thinking" and self._user_response_cycle_active():
                     reason_summary = "ユーザー向け応答サイクルが進行中のため、定期思考の自発発話は行わない。"
                     self._set_last_wake_at(started_at)
@@ -114,30 +130,33 @@ class ServiceSpontaneousWakeMixin:
                         input_event_role="system",
                         consolidate_memory=False,
                         pending_intent_selection=pending_intent_selection,
+                        observation_summary=observation_summary,
                     )
                 # due 判定
-                due = self._wake_is_due(state=state, current_time=started_at)
-                if due["should_skip"]:
-                    debug_log("Wake", f"{self._short_cycle_id(cycle_id)} skip due reason={self._clamp(due['reason_summary'])}")
-                    pipeline = self._noop_pipeline(
-                        state=state,
-                        started_at=started_at,
-                        reason_summary=due["reason_summary"],
-                    )
-                    return self._complete_input_success(
-                        cycle_id=cycle_id,
-                        started_at=started_at,
-                        state=state,
-                        runtime_summary=runtime_summary,
-                        input_text=input_text,
-                        client_context=client_context,
-                        pipeline=pipeline,
-                        trigger_kind=trigger_kind,
-                        input_event_kind=input_event_kind,
-                        input_event_role="system",
-                        consolidate_memory=False,
-                        pending_intent_selection=pending_intent_selection,
-                    )
+                if trigger_kind == "background_thinking":
+                    due = self._wake_is_due(state=state, current_time=started_at)
+                    if due["should_skip"]:
+                        debug_log("Wake", f"{self._short_cycle_id(cycle_id)} skip due reason={self._clamp(due['reason_summary'])}")
+                        pipeline = self._noop_pipeline(
+                            state=state,
+                            started_at=started_at,
+                            reason_summary=due["reason_summary"],
+                        )
+                        return self._complete_input_success(
+                            cycle_id=cycle_id,
+                            started_at=started_at,
+                            state=state,
+                            runtime_summary=runtime_summary,
+                            input_text=input_text,
+                            client_context=client_context,
+                            pipeline=pipeline,
+                            trigger_kind=trigger_kind,
+                            input_event_kind=input_event_kind,
+                            input_event_role="system",
+                            consolidate_memory=False,
+                            pending_intent_selection=pending_intent_selection,
+                            observation_summary=observation_summary,
+                        )
                 # パイプライン
                 selection_result = self._select_due_pending_intent_candidate(
                     state=state,
@@ -166,6 +185,8 @@ class ServiceSpontaneousWakeMixin:
                     selected_candidate=selected_candidate,
                     pending_intent_selection=pending_intent_selection,
                     cycle_id=cycle_id,
+                    observation_summary=observation_summary,
+                    reference_context=reference_context,
                 )
 
                 # 成功
@@ -183,10 +204,11 @@ class ServiceSpontaneousWakeMixin:
                     consolidate_memory=self._should_consolidate_spontaneous_cycle(
                         trigger_kind=trigger_kind,
                         pipeline=pipeline,
-                        observation_summary=None,
+                        observation_summary=observation_summary,
                         client_context=client_context,
                     ),
                     pending_intent_selection=pending_intent_selection,
+                    observation_summary=observation_summary,
                 )
 
                 # 発話後処理
@@ -232,6 +254,7 @@ class ServiceSpontaneousWakeMixin:
                         "failure_stage": exc.failure_stage,
                     },
                     pending_intent_selection=exc.pending_intent_selection,
+                    observation_summary=observation_summary,
                 )
             except RecallPackSelectionError as exc:
                 debug_log(
@@ -262,6 +285,7 @@ class ServiceSpontaneousWakeMixin:
                         "failure_stage": exc.failure_stage,
                     },
                     pending_intent_selection=pending_intent_selection,
+                    observation_summary=observation_summary,
                 )
             except (LLMError, KeyError, ValueError) as exc:
                 capability_request_summary, ongoing_action_transition_summary = self._exception_capability_dispatch_trace(
@@ -284,6 +308,7 @@ class ServiceSpontaneousWakeMixin:
                     input_event_kind=input_event_kind,
                     input_event_role="system",
                     pending_intent_selection=pending_intent_selection,
+                    observation_summary=observation_summary,
                     capability_request_summary=capability_request_summary,
                     ongoing_action_transition_summary=ongoing_action_transition_summary,
                 )
@@ -619,6 +644,18 @@ class ServiceSpontaneousWakeMixin:
         )
         if isinstance(wake_observation_summary, str):
             parts.append(f"定期観測では、{wake_observation_summary}")
+        wake_reference = client_context.get("wake_reference")
+        if isinstance(wake_reference, dict):
+            label = self._client_context_text(wake_reference.get("label"), limit=120)
+            content_kind = self._client_context_text(wake_reference.get("content_kind"), limit=32)
+            media_type = self._client_context_text(wake_reference.get("media_type"), limit=80)
+            reason_summary = self._client_context_text(wake_reference.get("reason_summary"), limit=180)
+            if label is not None and content_kind is not None:
+                parts.append(f"wake 参照は {label}。content_kind={content_kind}。")
+            if media_type is not None:
+                parts.append(f"wake 参照 media_type={media_type}。")
+            if reason_summary is not None:
+                parts.append(f"wake 参照理由は {reason_summary}")
         visual_signals = self._compact_visual_observation_signals(
             client_context.get("visual_observation_signals")
         )
