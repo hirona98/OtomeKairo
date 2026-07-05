@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 from otomekairo.service.common import ServiceError
@@ -378,6 +379,12 @@ class ServiceConfigResourcesMixin:
         # 正規化と検証
         stored_definition = self._normalize_camera_source_definition(vision_source_id, definition)
         self._validate_camera_source_definition(vision_source_id, stored_definition)
+        self._validate_unique_camera_source_watcher_ids(
+            {
+                **camera_sources,
+                vision_source_id: stored_definition,
+            }
+        )
 
         # 永続化
         camera_sources[vision_source_id] = deepcopy(stored_definition)
@@ -417,6 +424,7 @@ class ServiceConfigResourcesMixin:
             stored_definition = self._normalize_camera_source_definition(vision_source_id, camera_source)
             self._validate_camera_source_definition(vision_source_id, stored_definition)
             normalized_sources[vision_source_id] = stored_definition
+        self._validate_unique_camera_source_watcher_ids(normalized_sources)
 
         # 永続化
         state["camera_sources"] = normalized_sources
@@ -547,6 +555,38 @@ class ServiceConfigResourcesMixin:
             ),
         }
 
+    def get_watcher_runtime_config(self, token: str | None, watcher_id: str) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+        if not isinstance(watcher_id, str) or not watcher_id.strip():
+            raise ServiceError(400, "invalid_watcher_id", "watcher_id must be a non-empty string.")
+        normalized_watcher_id = watcher_id.strip()
+        camera_source = self._camera_source_for_watcher_id(state=state, watcher_id=normalized_watcher_id)
+        if camera_source is None:
+            raise ServiceError(
+                404,
+                "watcher_runtime_config_not_found",
+                "The requested watcher runtime config does not exist.",
+            )
+        watcher = deepcopy(camera_source.get("watcher"))
+        if not isinstance(watcher, dict):
+            raise ServiceError(
+                404,
+                "watcher_runtime_config_not_found",
+                "The requested watcher runtime config does not exist.",
+            )
+        self._append_watcher_runtime_config_audit_event(
+            state=state,
+            watcher_id=normalized_watcher_id,
+            vision_source_id=str(camera_source.get("vision_source_id") or ""),
+        )
+        return {
+            "watcher_id": normalized_watcher_id,
+            "watcher": watcher,
+            "camera_source": deepcopy(camera_source),
+            "snapshot_dir": str(self._watcher_snapshot_dir(normalized_watcher_id)),
+        }
+
     def replace_editor_state(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
@@ -674,6 +714,24 @@ class ServiceConfigResourcesMixin:
                 )
             ],
         }
+
+    def _camera_source_for_watcher_id(self, *, state: dict[str, Any], watcher_id: str) -> dict[str, Any] | None:
+        for camera_source in self._camera_sources_from_state(state).values():
+            if not isinstance(camera_source, dict):
+                continue
+            watcher = camera_source.get("watcher")
+            if isinstance(watcher, dict) and watcher.get("watcher_id") == watcher_id:
+                return camera_source
+        return None
+
+    def _watcher_snapshot_dir(self, watcher_id: str) -> Path:
+        safe_name = "".join(
+            character if character.isalnum() or character in {"-", "_"} else "-"
+            for character in watcher_id
+        ).strip("-")
+        if not safe_name:
+            safe_name = "watcher"
+        return Path(self.store.root_dir) / "wake-references" / safe_name
 
     def _build_mcp_servers_editor_state(self, state: dict[str, Any]) -> dict[str, Any]:
         mcp_servers = self._mcp_servers_from_state(state)
@@ -978,6 +1036,32 @@ class ServiceConfigResourcesMixin:
             ]
         )
 
+    def _append_watcher_runtime_config_audit_event(
+        self,
+        *,
+        state: dict[str, Any],
+        watcher_id: str,
+        vision_source_id: str,
+    ) -> None:
+        # 秘密値を含む watcher runtime config 本文は audit に残さない。
+        self.store.append_events(
+            events=[
+                {
+                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
+                    "cycle_id": "config:watcher-runtime-config",
+                    "memory_set_id": state["selected_memory_set_id"],
+                    "kind": "watcher_runtime_config_read",
+                    "role": "system",
+                    "created_at": self._now_iso(),
+                    "selected_persona_id": state["selected_persona_id"],
+                    "selected_memory_set_id": state["selected_memory_set_id"],
+                    "selected_model_preset_id": state["selected_model_preset_id"],
+                    "watcher_id": watcher_id,
+                    "vision_source_id": vision_source_id,
+                }
+            ]
+        )
+
     def _embedding_definition_changed(
         self,
         previous_definition: dict[str, Any] | None,
@@ -1029,6 +1113,24 @@ class ServiceConfigResourcesMixin:
             state["camera_sources"] = {}
             return state["camera_sources"]
         return camera_sources
+
+    def _validate_unique_camera_source_watcher_ids(self, camera_sources: dict[str, dict[str, Any]]) -> None:
+        seen_ids: set[str] = set()
+        for camera_source in camera_sources.values():
+            watcher = camera_source.get("watcher") if isinstance(camera_source, dict) else None
+            if not isinstance(watcher, dict):
+                continue
+            watcher_id = watcher.get("watcher_id")
+            if not isinstance(watcher_id, str) or not watcher_id.strip():
+                continue
+            normalized_watcher_id = watcher_id.strip()
+            if normalized_watcher_id in seen_ids:
+                raise ServiceError(
+                    400,
+                    "duplicate_camera_source_watcher_id",
+                    f"{normalized_watcher_id} is duplicated in camera_sources.",
+                )
+            seen_ids.add(normalized_watcher_id)
 
     def _mcp_servers_from_state(self, state: dict[str, Any]) -> dict[str, dict[str, Any]]:
         mcp_servers = state.get("mcp_servers")

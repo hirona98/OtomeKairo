@@ -157,6 +157,16 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                     self.server.service.get_connector_runtime_config(token, client_id),
                 )
                 return
+            if method == "GET" and parsed.path.startswith("/api/config/watchers/") and parsed.path.endswith("/runtime-config"):
+                path_parts = parsed.path.split("/")
+                if len(path_parts) != 6 or path_parts[5] != "runtime-config":
+                    raise ServiceError(404, "route_not_found", "The requested route does not exist.")
+                watcher_id = unquote(path_parts[4])
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.get_watcher_runtime_config(token, watcher_id),
+                )
+                return
             if method == "GET" and parsed.path == "/api/catalog":
                 self._write_success(HTTPStatus.OK, self.server.service.get_catalog(token))
                 return

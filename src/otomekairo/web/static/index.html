@@ -154,6 +154,14 @@
               <label>接続種別<input id="camera-connector-kind" readonly></label>
               <label>接続クライアント<input id="camera-client-id" readonly></label>
               <label>視覚ソースID<input id="camera-vision-source-id" readonly></label>
+              <label class="checkbox-field">監視<input id="camera-watcher-enabled" type="checkbox"></label>
+              <label>watcher ID<input id="camera-watcher-id"></label>
+              <label>監視頻度秒<input id="camera-watcher-poll-interval" type="number" min="0.2" step="0.1"></label>
+              <label>wake最小間隔秒<input id="camera-watcher-min-wake-interval" type="number" min="1" step="1"></label>
+              <label>差分比閾値<input id="camera-watcher-motion-threshold" type="number" min="0.001" max="1" step="0.001"></label>
+              <label>画素差分閾値<input id="camera-watcher-pixel-threshold" type="number" min="1" max="255" step="1"></label>
+              <label>縮小幅<input id="camera-watcher-resize-width" type="number" min="64" max="1920" step="1"></label>
+              <label>JPEG品質<input id="camera-watcher-jpeg-quality" type="number" min="1" max="100" step="1"></label>
             </div>
           </fieldset>
 

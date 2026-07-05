@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "otomekairo-tapo-c220-watcher"
+version = "0.1.0"
+description = "Tapo C220 watcher for OtomeKairo wake references"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache License 2.0" }
+authors = [
+  { name = "hiro9" }
+]
+dependencies = [
+  "opencv-python>=4.9"
+]
+
+[project.scripts]
+otomekairo-tapo-c220-watcher = "otomekairo_tapo_c220_watcher.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import errno
 import os
 import ssl
+import sys
 from pathlib import Path
 
 from otomekairo.http_server import OtomeKairoHttpServer
@@ -35,7 +37,18 @@ def main() -> None:
     debug_log("Run", f"starting host={host} port={port} data_dir={root_dir}")
     debug_log("Run", f"tls cert={cert_file} key={key_file}")
     service = OtomeKairoService(root_dir=root_dir)
-    server = OtomeKairoHttpServer((host, port), service)
+    try:
+        server = OtomeKairoHttpServer((host, port), service)
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            message = (
+                f"OtomeKairo server cannot listen on {host}:{port}: address is already in use. "
+                "Stop the existing server process or set OTOMEKAIRO_PORT to another port."
+            )
+            debug_log("Run", message)
+            print(message, file=sys.stderr)
+            raise SystemExit(2) from None
+        raise
 
     # TLSコンテキスト
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

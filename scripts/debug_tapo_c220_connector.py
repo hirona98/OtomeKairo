@@ -7,6 +7,16 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
+from connector_runtime_config_ready import (
+    FATAL,
+    SKIP,
+    START,
+    PreflightError,
+    RuntimeConfigNotFound,
+    decide_start,
+    fetch_runtime_config,
+    load_settings,
+)
 from otomekairo_tapo_c220_connector.__main__ import main
 
 
@@ -49,7 +59,38 @@ def _wait_for_server() -> None:
             time.sleep(0.2)
 
 
+def _connector_config_path() -> Path | None:
+    path = _repo_root() / "connectors" / "tapo_c220" / "config.local.json"
+    if path.exists():
+        return path
+    return None
+
+
+def _runtime_config_ready() -> int:
+    try:
+        settings = load_settings(
+            config_path=_connector_config_path(),
+            default_client_id="tapo-c220-connector-main",
+            environ=os.environ,
+        )
+        runtime_config = fetch_runtime_config(settings)
+        return decide_start("tapo_c220", runtime_config)
+    except RuntimeConfigNotFound as exc:
+        print(f"Tapo C220 connector debug をスキップします: {exc}", file=sys.stderr)
+        print("先に camera source を登録し、有効化してください。", file=sys.stderr)
+        return SKIP
+    except PreflightError as exc:
+        print(f"Tapo C220 connector debug の preflight に失敗しました: {exc}", file=sys.stderr)
+        return FATAL
+
+
 if __name__ == "__main__":
     _load_optional_env_file()
     _wait_for_server()
-    raise SystemExit(main())
+    status = _runtime_config_ready()
+    if status == START:
+        exit_code = main()
+        if exit_code != 0:
+            raise SystemExit(exit_code)
+    elif status == FATAL:
+        raise SystemExit(2)

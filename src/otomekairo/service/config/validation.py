@@ -205,6 +205,7 @@ class ServiceConfigValidationMixin:
             "enabled",
             "label",
             "connection",
+            "watcher",
         }
         unsupported_fields = sorted(set(definition.keys()) - supported_fields)
         if unsupported_fields:
@@ -249,6 +250,9 @@ class ServiceConfigValidationMixin:
             {"host", "camera_username", "camera_password"},
             "camera_source.connection",
         )
+        watcher = definition.get("watcher")
+        if watcher is not None:
+            self._validate_camera_source_watcher_definition(watcher)
 
     def _normalize_camera_source_definition(self, vision_source_id: str, definition: dict[str, Any]) -> dict[str, Any]:
         normalized = {
@@ -261,6 +265,8 @@ class ServiceConfigValidationMixin:
             "label": definition.get("label"),
             "connection": definition.get("connection"),
         }
+        if "watcher" in definition:
+            normalized["watcher"] = self._normalize_camera_source_watcher_definition(definition.get("watcher"))
         for field_name in ("vision_source_id", "connector_kind", "client_id", "label"):
             value = normalized.get(field_name)
             if isinstance(value, str):
@@ -273,6 +279,110 @@ class ServiceConfigValidationMixin:
                 ("host", "camera_username", "camera_password"),
             )
         return normalized
+
+    def _normalize_camera_source_watcher_definition(self, watcher: Any) -> dict[str, Any] | None:
+        if watcher is None:
+            return None
+        if not isinstance(watcher, dict):
+            return watcher
+        normalized = dict(watcher)
+        for field_name in ("watcher_id", "kind"):
+            value = normalized.get(field_name)
+            if isinstance(value, str):
+                normalized[field_name] = value.strip()
+        return normalized
+
+    def _validate_camera_source_watcher_definition(self, watcher: Any) -> None:
+        if not isinstance(watcher, dict):
+            raise ServiceError(400, "invalid_camera_source_watcher", "camera_source.watcher must be an object.")
+        supported_fields = {
+            "enabled",
+            "watcher_id",
+            "kind",
+            "poll_interval_seconds",
+            "min_wake_interval_seconds",
+            "motion_ratio_threshold",
+            "pixel_diff_threshold",
+            "resize_width",
+            "jpeg_quality",
+        }
+        unsupported_fields = sorted(set(watcher.keys()) - supported_fields)
+        if unsupported_fields:
+            raise ServiceError(
+                400,
+                "unsupported_camera_source_watcher_field",
+                f"camera_source.watcher has unsupported fields: {', '.join(unsupported_fields)}.",
+            )
+        if not isinstance(watcher.get("enabled"), bool):
+            raise ServiceError(400, "invalid_camera_source_watcher", "camera_source.watcher.enabled must be a boolean.")
+        watcher_id = watcher.get("watcher_id")
+        if not isinstance(watcher_id, str) or not watcher_id.strip() or not watcher_id.strip().startswith("watcher:"):
+            raise ServiceError(
+                400,
+                "invalid_camera_source_watcher",
+                "camera_source.watcher.watcher_id must start with watcher:.",
+            )
+        if watcher.get("kind") != "tapo_c220_motion":
+            raise ServiceError(
+                400,
+                "unsupported_camera_source_watcher_kind",
+                "camera_source.watcher.kind must be tapo_c220_motion.",
+            )
+        self._validate_positive_number_field(
+            watcher,
+            "poll_interval_seconds",
+            "camera_source.watcher.poll_interval_seconds",
+            minimum=0.2,
+        )
+        self._validate_positive_number_field(
+            watcher,
+            "min_wake_interval_seconds",
+            "camera_source.watcher.min_wake_interval_seconds",
+            minimum=1.0,
+        )
+        self._validate_ratio_field(
+            watcher,
+            "motion_ratio_threshold",
+            "camera_source.watcher.motion_ratio_threshold",
+        )
+        pixel_diff_threshold = watcher.get("pixel_diff_threshold")
+        if type(pixel_diff_threshold) is not int or pixel_diff_threshold < 1 or pixel_diff_threshold > 255:
+            raise ServiceError(
+                400,
+                "invalid_camera_source_watcher",
+                "camera_source.watcher.pixel_diff_threshold must be an integer from 1 to 255.",
+            )
+        resize_width = watcher.get("resize_width")
+        if type(resize_width) is not int or resize_width < 64 or resize_width > 1920:
+            raise ServiceError(
+                400,
+                "invalid_camera_source_watcher",
+                "camera_source.watcher.resize_width must be an integer from 64 to 1920.",
+            )
+        jpeg_quality = watcher.get("jpeg_quality")
+        if type(jpeg_quality) is not int or jpeg_quality < 1 or jpeg_quality > 100:
+            raise ServiceError(
+                400,
+                "invalid_camera_source_watcher",
+                "camera_source.watcher.jpeg_quality must be an integer from 1 to 100.",
+            )
+
+    def _validate_positive_number_field(
+        self,
+        definition: dict[str, Any],
+        key: str,
+        label: str,
+        *,
+        minimum: float,
+    ) -> None:
+        value = definition.get(key)
+        if type(value) not in {int, float} or float(value) < minimum:
+            raise ServiceError(400, "invalid_camera_source_watcher", f"{label} must be >= {minimum}.")
+
+    def _validate_ratio_field(self, definition: dict[str, Any], key: str, label: str) -> None:
+        value = definition.get(key)
+        if type(value) not in {int, float} or float(value) <= 0.0 or float(value) > 1.0:
+            raise ServiceError(400, "invalid_camera_source_watcher", f"{label} must be > 0 and <= 1.")
 
     def _validate_required_text_field(self, definition: dict[str, Any], key: str, label: str) -> None:
         value = definition.get(key)

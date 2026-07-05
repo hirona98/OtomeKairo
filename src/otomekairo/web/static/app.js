@@ -131,6 +131,11 @@ function intValue(id, fallback = 1) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+function numberValue(id, fallback = 1) {
+  const value = Number.parseFloat(element(id).value);
+  return Number.isFinite(value) ? value : fallback;
+}
+
 function boolValue(id) {
   return element(id).checked;
 }
@@ -685,6 +690,7 @@ function renderCamera() {
   setSelectOptions(element("camera-select"), state.camera.camera_sources, "vision_source_id", state.selectedCameraId);
   const camera = arrayById(state.camera.camera_sources, "vision_source_id", state.selectedCameraId);
   const connection = camera?.connection || {};
+  const watcher = cameraWatcher(camera);
   element("camera-enabled").checked = camera?.enabled === true;
   element("camera-display-name").value = camera?.label || "";
   element("camera-host").value = connection.host || "";
@@ -693,6 +699,14 @@ function renderCamera() {
   element("camera-connector-kind").value = camera?.connector_kind || "tapo_c220";
   element("camera-client-id").value = camera?.client_id || "tapo-c220-connector-main";
   element("camera-vision-source-id").value = camera?.vision_source_id || "";
+  element("camera-watcher-enabled").checked = watcher.enabled === true;
+  element("camera-watcher-id").value = watcher.watcher_id;
+  element("camera-watcher-poll-interval").value = watcher.poll_interval_seconds;
+  element("camera-watcher-min-wake-interval").value = watcher.min_wake_interval_seconds;
+  element("camera-watcher-motion-threshold").value = watcher.motion_ratio_threshold;
+  element("camera-watcher-pixel-threshold").value = watcher.pixel_diff_threshold;
+  element("camera-watcher-resize-width").value = watcher.resize_width;
+  element("camera-watcher-jpeg-quality").value = watcher.jpeg_quality;
 }
 
 function syncCamera() {
@@ -712,7 +726,39 @@ function syncCamera() {
     camera_username: textValue("camera-username"),
     camera_password: textValue("camera-password"),
   };
+  camera.watcher = {
+    enabled: boolValue("camera-watcher-enabled"),
+    watcher_id: textValue("camera-watcher-id") || defaultWatcherId(camera),
+    kind: "tapo_c220_motion",
+    poll_interval_seconds: numberValue("camera-watcher-poll-interval", 1.0),
+    min_wake_interval_seconds: numberValue("camera-watcher-min-wake-interval", 30),
+    motion_ratio_threshold: numberValue("camera-watcher-motion-threshold", 0.03),
+    pixel_diff_threshold: intValue("camera-watcher-pixel-threshold", 25),
+    resize_width: intValue("camera-watcher-resize-width", 320),
+    jpeg_quality: intValue("camera-watcher-jpeg-quality", 88),
+  };
   state.selectedCameraId = camera.vision_source_id;
+}
+
+function cameraWatcher(camera) {
+  const watcher = camera?.watcher || {};
+  return {
+    enabled: watcher.enabled === true,
+    watcher_id: watcher.watcher_id || defaultWatcherId(camera),
+    kind: "tapo_c220_motion",
+    poll_interval_seconds: watcher.poll_interval_seconds ?? 1.0,
+    min_wake_interval_seconds: watcher.min_wake_interval_seconds ?? 30,
+    motion_ratio_threshold: watcher.motion_ratio_threshold ?? 0.03,
+    pixel_diff_threshold: watcher.pixel_diff_threshold ?? 25,
+    resize_width: watcher.resize_width ?? 320,
+    jpeg_quality: watcher.jpeg_quality ?? 88,
+  };
+}
+
+function defaultWatcherId(camera) {
+  const sourceId = camera?.vision_source_id || "vision_source:tapo_c220_main";
+  const suffix = sourceId.replace(/^vision_source:/, "").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
+  return `watcher:${suffix || "tapo_c220_main"}`;
 }
 
 function renderMcp() {
@@ -853,7 +899,7 @@ function deleteMemory() {
 function addCamera() {
   syncAllForms();
   const id = `vision_source:camera:${idSuffix()}`;
-  state.camera.camera_sources.push({
+  const camera = {
     vision_source_id: id,
     connector_kind: "tapo_c220",
     client_id: "tapo-c220-connector-main",
@@ -866,7 +912,20 @@ function addCamera() {
       camera_username: "",
       camera_password: "",
     },
-  });
+    watcher: {
+      enabled: false,
+      watcher_id: "",
+      kind: "tapo_c220_motion",
+      poll_interval_seconds: 1.0,
+      min_wake_interval_seconds: 30,
+      motion_ratio_threshold: 0.03,
+      pixel_diff_threshold: 25,
+      resize_width: 320,
+      jpeg_quality: 88,
+    },
+  };
+  camera.watcher.watcher_id = defaultWatcherId(camera);
+  state.camera.camera_sources.push(camera);
   state.selectedCameraId = id;
   renderCapabilities();
 }

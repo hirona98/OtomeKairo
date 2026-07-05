@@ -1,21 +1,26 @@
-# 外部接続 connector 配置方針
+# 外部接続 process 配置方針
 
 ## 目的
 
-この文書は、Webカメラ、各種センサ、外部サービス、物理デバイスを OtomeKairo へ接続する外部接続 connector の配置方針を定める。
+この文書は、Webカメラ、各種センサ、外部サービス、物理デバイスを OtomeKairo へ接続する外部接続 process の配置方針を定める。
 
 capability の意味境界、manifest、availability、decision view は [../capability/capability_manifest.md](../capability/capability_manifest.md) を正とする。
 capability request / result の wire 契約は [../api/実行連携.md](../api/実行連携.md) を正とする。
-この文書は、connector 実装をどの repository 階層に置き、OtomeKairo 本体とどこで分けるかを正本にする。
+この文書は、connector と watcher の実装をどの repository 階層に置き、OtomeKairo 本体とどこで分けるかを正本にする。
 
 ## 基本方針
 
 外部接続 connector は、OtomeKairo 本体とは別の実行 client として扱う。
 OtomeKairo 本体は capability manifest、判断、状態、記憶、inspection の正本を持つ。
 connector は接続先の機器、サービス、OS API を扱い、capability request を実行し、result を返す。
+外部 watcher は、OtomeKairo 本体とは別の実行 process として扱う。
+watcher は軽量な外部監視を行い、変化時に `/api/wake` へ参照付き wake を送る。
+watcher は capability request を受けず、hello を送らず、capability binding 候補を持たない。
 
 最初の connector 群はこの repository 内の `connectors/` 配下に置く。
+最初の watcher 群はこの repository 内の `watchers/` 配下に置く。
 connector 実装を `src/otomekairo/` 配下へ入れない。
+watcher 実装を `src/otomekairo/` 配下へ入れない。
 `src/otomekairo/` は OtomeKairo server 本体の package とする。
 
 外部接続 connector は capability manifest を定義しない。
@@ -23,6 +28,8 @@ connector は `hello.caps` と必要な source metadata を送る。
 server は既知の manifest、binding、state、権限から availability と dispatch 先を決める。
 camera connector は機器接続に必要な host と camera account を OtomeKairo の runtime config API から取得する。
 camera connector は host と camera account をローカル設定の正本として持たない。
+watcher は機器接続に必要な host と camera account、監視閾値、snapshot 保存先を OtomeKairo の runtime config API から取得する。
+watcher は host、camera account、監視閾値をローカル設定の正本として持たない。
 
 ## repository 配置
 
@@ -42,21 +49,42 @@ connectors/
         capture.py
 ```
 
+外部 watcher は次の配置を基準にする。
+
+```text
+watchers/
+  tapo_c220/
+    pyproject.toml
+    README.md
+    config.example.json
+    src/
+      otomekairo_tapo_c220_watcher/
+        __main__.py
+        config.py
+        app.py
+        capture.py
+        diff.py
+```
+
 connector ごとに独立した `pyproject.toml` を置く。
+watcher ごとに独立した `pyproject.toml` を置く。
 connector 固有の依存関係を repository root の `pyproject.toml` へ入れない。
+watcher 固有の依存関係を repository root の `pyproject.toml` へ入れない。
 OpenCV、デバイス SDK、外部サービス SDK、OS 固有ライブラリは対象 connector の package 依存に閉じる。
+軽量 CV、デバイス SDK、OS 固有ライブラリは対象 watcher の package 依存に閉じる。
 
 2 個以上の connector で同じ処理が継続して必要になった段階で、共通 package の要否を判断する。
 共通 package を作る場合も、OtomeKairo server 本体 package へ connector 実装依存を入れない。
 
 ## 簡易常駐起動
 
-専用 PC で運用する場合、repository を `/opt/OtomeKairo` に固定し、OtomeKairo server、Tapo C220 connector、MCP client connector を単一の systemd service lifecycle でまとめて起動してよい。
-これは運用上の process 管理単位であり、connector の実行 client 境界、hello、capability request / result、runtime config API の意味境界は変更しない。
+専用 PC で運用する場合、repository を `/opt/OtomeKairo` に固定し、OtomeKairo server、Tapo C220 connector、Tapo C220 watcher、MCP client connector を単一の systemd service lifecycle でまとめて起動する。
+これは運用上の process 管理単位であり、connector の実行 client 境界、watcher の外部監視境界、hello、capability request / result、runtime config API、wake reference API の意味境界は変更しない。
 
-この単一 service は、server を `0.0.0.0:55601` で listen させ、同一 PC 上の connector は `https://127.0.0.1:55601` へ接続する。
+この単一 service は、server を `0.0.0.0:55601` で listen させ、同一 PC 上の connector と watcher は `https://127.0.0.1:55601` へ接続する。
 どれか 1 つの process が終了した場合は service 全体を終了させ、systemd の restart に任せる。
-camera source または MCP server の runtime config が未登録の場合も、connector を自動的に無効化せず、service 起動失敗として扱う。
+camera source または MCP server の runtime config が未登録の場合、connector は起動しない。
+watcher runtime config が未登録または無効の場合、watcher は起動しない。
 
 ## Webカメラ connector
 
@@ -156,6 +184,20 @@ host、camera account、OtomeKairo access token を repository、docs のサン�
 privacy mode、録画、検知設定、アラーム、再起動は C220 connector の OtomeKairo capability として実装しない。
 失敗時は `camera.ptz` result に `status=failed` と短い `error` を返す。
 
+## Tapo C220 watcher
+
+Tapo C220 watcher は、C220 の RTSP 映像を軽量 CV で高頻度監視し、画像差分が閾値を超えたときだけ OtomeKairo の `/api/wake` へ参照付き wake を送る外部 process である。
+この repository 内の初期実装は `watchers/tapo_c220/` に置く。
+
+watcher は起動時と監視中に `GET /api/config/watchers/{watcher_id}/runtime-config` を呼び、自分に割り当てられた camera source、監視閾値、snapshot 保存先を取得する。
+watcher のローカル設定は server URL、TLS 検証、再接続間隔、`watcher_id`、token 明示上書きに限定する。
+C220 の host、camera account、監視閾値、snapshot 保存先は OtomeKairo 本体の `camera_source.watcher` と runtime config が正本である。
+
+watcher は RTSP から frame を取得し、縮小済み grayscale 画像の前回差分を計算する。
+差分比が `motion_ratio_threshold` 以上で、前回 wake から `min_wake_interval_seconds` 以上経過している場合、watcher は snapshot を `snapshot_dir` へ保存し、`/api/wake` に `reference.uri` として snapshot path を渡す。
+watcher は snapshot 画像本体を wake payload に埋め込まない。
+watcher は camera account、OtomeKairo access token、内部 URL の秘密部分を repository、docs のサンプル、debug log、wake payload に保存しない。
+
 ## 汎用 MCP client connector
 
 MCP client connector は、stdio MCP server を OtomeKairo の `mcp.call_tool` capability として接続する汎用 connector である。
@@ -208,10 +250,34 @@ connector は次を担わない。
 - OtomeKairo server の設定定義編集
 - LLM role、API key、記憶集合の管理
 
+## watcher の責務
+
+watcher は少なくとも次を担う。
+
+- server への認証済み HTTP 接続
+- `GET /api/config/watchers/{watcher_id}/runtime-config` による runtime config 取得
+- 対象機器からの軽量観測取得
+- ローカル画像差分などの軽量判定
+- wake reference snapshot の保存
+- 変化時の `POST /api/wake` 送信
+- snapshot の世代管理
+
+watcher は次を担わない。
+
+- capability manifest の定義
+- hello による capability binding 候補の通知
+- server からの capability request 受信
+- 判断結果の生成
+- raw 動画の常時録画
+- OtomeKairo server の設定定義編集
+- LLM role、API key、記憶集合の管理
+
 ## 設定と秘密情報
 
 connector のローカル設定は server URL、TLS 検証、再接続間隔、`client_id`、token 明示上書きなど、OtomeKairo へ接続するための項目に限定する。
+watcher のローカル設定は server URL、TLS 検証、再接続間隔、`watcher_id`、token 明示上書きなど、OtomeKairo へ接続するための項目に限定する。
 camera connector の host と camera account は OtomeKairo 本体の `camera_source` 設定定義で扱う。
+watcher の host、camera account、監視閾値、snapshot 保存先は OtomeKairo 本体の `camera_source.watcher` と runtime config で扱う。
 MCP client connector の command、args、cwd、env は OtomeKairo 本体の `mcp_server` 設定定義で扱う。
 `config.example.json` には秘密値を入れない。
 実 token、API key、password、内部 URL の秘密部分を repository に保存しない。

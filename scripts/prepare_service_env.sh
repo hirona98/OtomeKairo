@@ -8,6 +8,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SERVER_VENV_DIR="${REPO_ROOT}/.venv"
 TAPO_CONNECTOR_DIR="${REPO_ROOT}/connectors/tapo_c220"
 TAPO_VENV_DIR="${TAPO_CONNECTOR_DIR}/.venv"
+TAPO_WATCHER_DIR="${REPO_ROOT}/watchers/tapo_c220"
+TAPO_WATCHER_VENV_DIR="${TAPO_WATCHER_DIR}/.venv"
 MCP_CONNECTOR_DIR="${REPO_ROOT}/connectors/mcp_client"
 MCP_VENV_DIR="${MCP_CONNECTOR_DIR}/.venv"
 TLS_DIR="${REPO_ROOT}/var/dev-tls"
@@ -32,6 +34,11 @@ if [[ ! -d "${TAPO_VENV_DIR}" ]]; then
 fi
 "${TAPO_VENV_DIR}/bin/python" -m pip install -e "${TAPO_CONNECTOR_DIR}"
 
+if [[ ! -d "${TAPO_WATCHER_VENV_DIR}" ]]; then
+  python3 -m venv "${TAPO_WATCHER_VENV_DIR}"
+fi
+"${TAPO_WATCHER_VENV_DIR}/bin/python" -m pip install -e "${TAPO_WATCHER_DIR}"
+
 if [[ ! -d "${MCP_VENV_DIR}" ]]; then
   python3 -m venv "${MCP_VENV_DIR}"
 fi
@@ -55,6 +62,7 @@ echo "service 実行環境を準備しました。"
 echo "Repo   : ${REPO_ROOT}"
 echo "Server : ${SERVER_VENV_DIR}/bin/python"
 echo "Tapo   : ${TAPO_VENV_DIR}/bin/python"
+echo "Watcher: ${TAPO_WATCHER_VENV_DIR}/bin/python"
 echo "MCP    : ${MCP_VENV_DIR}/bin/python"
 echo "Data   : ${DATA_DIR}"
 echo "TLS    : ${CERT_FILE}"

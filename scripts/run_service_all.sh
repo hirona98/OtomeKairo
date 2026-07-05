@@ -2,13 +2,16 @@
 
 set -euo pipefail
 
-# systemd から 1 プロセスとして起動され、本体と connector 群を同じ lifecycle で扱う。
+# systemd から 1 プロセスとして起動され、本体、connector 群、watcher 群を同じ lifecycle で扱う。
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SERVER_VENV_DIR="${REPO_ROOT}/.venv"
 TAPO_CONNECTOR_DIR="${REPO_ROOT}/connectors/tapo_c220"
 TAPO_VENV_DIR="${TAPO_CONNECTOR_DIR}/.venv"
 TAPO_CONFIG_FILE="${TAPO_CONNECTOR_DIR}/config.local.json"
+TAPO_WATCHER_DIR="${REPO_ROOT}/watchers/tapo_c220"
+TAPO_WATCHER_VENV_DIR="${TAPO_WATCHER_DIR}/.venv"
+TAPO_WATCHER_CONFIG_FILE="${TAPO_WATCHER_DIR}/config.local.json"
 MCP_CONNECTOR_DIR="${REPO_ROOT}/connectors/mcp_client"
 MCP_VENV_DIR="${MCP_CONNECTOR_DIR}/.venv"
 MCP_CONFIG_FILE="${MCP_CONNECTOR_DIR}/config.local.json"
@@ -22,6 +25,7 @@ CONNECTOR_SERVER_URL="${OTOMEKAIRO_SERVER_URL:-https://127.0.0.1:${SERVER_PORT}}
 
 SERVER_PID=""
 TAPO_PID=""
+TAPO_WATCHER_PID=""
 MCP_PID=""
 CHILD_PIDS=()
 
@@ -42,13 +46,13 @@ cleanup() {
 
   trap - EXIT INT TERM
 
-  for pid in "${MCP_PID}" "${TAPO_PID}" "${SERVER_PID}"; do
+  for pid in "${MCP_PID}" "${TAPO_WATCHER_PID}" "${TAPO_PID}" "${SERVER_PID}"; do
     if [[ -n "${pid}" ]] && kill -0 "${pid}" >/dev/null 2>&1; then
       kill "${pid}" >/dev/null 2>&1 || true
     fi
   done
 
-  for pid in "${MCP_PID}" "${TAPO_PID}" "${SERVER_PID}"; do
+  for pid in "${MCP_PID}" "${TAPO_WATCHER_PID}" "${TAPO_PID}" "${SERVER_PID}"; do
     if [[ -n "${pid}" ]]; then
       wait "${pid}" >/dev/null 2>&1 || true
     fi
@@ -112,11 +116,44 @@ connector_runtime_config_ready() {
   esac
 }
 
+watcher_runtime_config_ready() {
+  local label="$1"
+  local default_watcher_id="$2"
+  local config_file="$3"
+  local config_args=()
+
+  if [[ -f "${config_file}" ]]; then
+    config_args=(--config "${config_file}")
+  fi
+
+  set +e
+  "${SERVER_VENV_DIR}/bin/python" "${SCRIPT_DIR}/watcher_runtime_config_ready.py" \
+    --default-watcher-id "${default_watcher_id}" \
+    "${config_args[@]}"
+  local status="$?"
+  set -e
+
+  case "${status}" in
+    0)
+      return 0
+      ;;
+    10)
+      echo "skipping ${label} watcher: no enabled runtime config" >&2
+      return 1
+      ;;
+    *)
+      echo "${label} watcher runtime config preflight failed: status=${status}" >&2
+      exit "${status}"
+      ;;
+  esac
+}
+
 trap 'cleanup 143' INT TERM
 trap 'cleanup $?' EXIT
 
 require_executable "${SERVER_VENV_DIR}/bin/python" "server venv"
 require_executable "${TAPO_VENV_DIR}/bin/python" "Tapo connector venv"
+require_executable "${TAPO_WATCHER_VENV_DIR}/bin/python" "Tapo watcher venv"
 require_executable "${MCP_VENV_DIR}/bin/python" "MCP connector venv"
 
 if [[ ! -f "${CERT_FILE}" || ! -f "${KEY_FILE}" ]]; then
@@ -146,6 +183,11 @@ if [[ -f "${TAPO_CONFIG_FILE}" ]]; then
   tapo_args=(--config "${TAPO_CONFIG_FILE}")
 fi
 
+tapo_watcher_args=()
+if [[ -f "${TAPO_WATCHER_CONFIG_FILE}" ]]; then
+  tapo_watcher_args=(--config "${TAPO_WATCHER_CONFIG_FILE}")
+fi
+
 mcp_args=()
 if [[ -f "${MCP_CONFIG_FILE}" ]]; then
   mcp_args=(--config "${MCP_CONFIG_FILE}")
@@ -156,6 +198,13 @@ if connector_runtime_config_ready "Tapo C220" "tapo_c220" "tapo-c220-connector-m
   "${TAPO_VENV_DIR}/bin/python" -m otomekairo_tapo_c220_connector "${tapo_args[@]}" &
   TAPO_PID="$!"
   CHILD_PIDS+=("${TAPO_PID}")
+fi
+
+if watcher_runtime_config_ready "Tapo C220" "watcher:tapo_c220_main" "${TAPO_WATCHER_CONFIG_FILE}"; then
+  echo "starting Tapo C220 watcher" >&2
+  "${TAPO_WATCHER_VENV_DIR}/bin/python" -m otomekairo_tapo_c220_watcher "${tapo_watcher_args[@]}" &
+  TAPO_WATCHER_PID="$!"
+  CHILD_PIDS+=("${TAPO_WATCHER_PID}")
 fi
 
 if connector_runtime_config_ready "MCP client" "mcp_client" "mcp-client-connector-main" "${MCP_CONFIG_FILE}"; then

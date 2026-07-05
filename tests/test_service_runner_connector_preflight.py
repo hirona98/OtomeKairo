@@ -16,6 +16,14 @@ assert SPEC.loader is not None
 sys.modules["connector_runtime_config_ready"] = preflight
 SPEC.loader.exec_module(preflight)
 
+WATCHER_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "watcher_runtime_config_ready.py"
+WATCHER_SPEC = importlib.util.spec_from_file_location("watcher_runtime_config_ready", WATCHER_SCRIPT_PATH)
+assert WATCHER_SPEC is not None
+watcher_preflight = importlib.util.module_from_spec(WATCHER_SPEC)
+assert WATCHER_SPEC.loader is not None
+sys.modules["watcher_runtime_config_ready"] = watcher_preflight
+WATCHER_SPEC.loader.exec_module(watcher_preflight)
+
 
 class ConnectorRuntimeConfigPreflightTests(unittest.TestCase):
     def test_tapo_skips_without_enabled_camera_source(self) -> None:
@@ -138,6 +146,61 @@ class ConnectorRuntimeConfigPreflightTests(unittest.TestCase):
             )
 
         self.assertEqual(settings.access_token, "db-token")
+
+
+class WatcherRuntimeConfigPreflightTests(unittest.TestCase):
+    def test_watcher_main_skips_when_camera_source_is_disabled(self) -> None:
+        original_fetch = watcher_preflight.fetch_runtime_config
+        original_load = watcher_preflight.load_settings
+        original_argv = sys.argv[:]
+        try:
+            sys.argv = ["watcher_runtime_config_ready.py", "--default-watcher-id", "watcher:tapo_c220_main"]
+            watcher_preflight.load_settings = lambda **_: {"watcher_id": "watcher:tapo_c220_main"}
+            watcher_preflight.fetch_runtime_config = lambda _: {
+                "watcher": {"enabled": True},
+                "camera_source": {"enabled": False},
+            }
+
+            status = watcher_preflight.main()
+        finally:
+            watcher_preflight.fetch_runtime_config = original_fetch
+            watcher_preflight.load_settings = original_load
+            sys.argv = original_argv
+
+        self.assertEqual(status, watcher_preflight.SKIP)
+
+    def test_watcher_load_settings_uses_configured_watcher_id_and_env_token(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.local.json"
+            config_path.write_text(
+                """
+                {
+                  "server": {
+                    "base_url": "https://127.0.0.1:55601",
+                    "access_token_env": "CUSTOM_TOKEN"
+                  },
+                  "watcher": {
+                    "watcher_id": "watcher:custom"
+                  }
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            original_environ = dict(watcher_preflight.os.environ)
+            try:
+                watcher_preflight.os.environ.clear()
+                watcher_preflight.os.environ["CUSTOM_TOKEN"] = "token"
+                settings = watcher_preflight.load_settings(
+                    config_path=config_path,
+                    default_watcher_id="watcher:default",
+                )
+            finally:
+                watcher_preflight.os.environ.clear()
+                watcher_preflight.os.environ.update(original_environ)
+
+        self.assertEqual(settings["watcher_id"], "watcher:custom")
+        self.assertEqual(settings["access_token"], "token")
 
 
 if __name__ == "__main__":
