@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import ssl
 import sys
 import urllib.error
@@ -17,26 +18,21 @@ from connector_runtime_config_ready import (  # type: ignore[import-not-found]
     START,
     PreflightError,
     RuntimeConfigNotFound,
-    _bool_value,
+    _candidate_config_db_paths,
     _env_value,
     _error_code,
     _normalize_base_url,
-    _object,
-    _positive_float,
-    _read_json_config,
     _resolve_access_token,
-    _string_value,
 )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check whether an OtomeKairo watcher has runtime config.")
     parser.add_argument("--default-watcher-id", required=True)
-    parser.add_argument("--config", type=Path, default=None)
     args = parser.parse_args()
 
     try:
-        settings = load_settings(config_path=args.config, default_watcher_id=args.default_watcher_id)
+        settings = load_settings(default_watcher_id=args.default_watcher_id)
         runtime_config = fetch_runtime_config(settings)
         watcher = runtime_config.get("watcher")
         if not isinstance(watcher, dict) or watcher.get("enabled") is not True:
@@ -56,23 +52,14 @@ def main() -> int:
         return FATAL
 
 
-def load_settings(*, config_path: Path | None, default_watcher_id: str) -> dict[str, object]:
-    raw = _read_json_config(config_path)
-    server = _object(raw.get("server", {}), "server")
-    watcher = _object(raw.get("watcher", {}), "watcher")
-    base_url = _normalize_base_url(
-        _string_value(
-            server,
-            "base_url",
-            default=_env_value(os.environ, "OTOMEKAIRO_SERVER_URL", "https://127.0.0.1:55601"),
-        )
-    )
-    tls_verify = _bool_value(server, "tls_verify", default=False)
-    timeout_seconds = _positive_float(server, "request_timeout_seconds", default=10.0)
+def load_settings(*, default_watcher_id: str) -> dict[str, object]:
+    base_url = _normalize_base_url(_env_value(os.environ, "OTOMEKAIRO_SERVER_URL", "https://127.0.0.1:55601"))
+    tls_verify = _env_bool_value("OTOMEKAIRO_TLS_VERIFY", default=False)
+    timeout_seconds = _env_positive_float("OTOMEKAIRO_WATCHER_PREFLIGHT_TIMEOUT_SECONDS", default=10.0)
     access_token = _resolve_access_token(
-        server=server,
+        server={},
         environ=os.environ,
-        config_path=config_path,
+        config_path=None,
         base_url=base_url,
         tls_verify=tls_verify,
         timeout_seconds=timeout_seconds,
@@ -82,7 +69,9 @@ def load_settings(*, config_path: Path | None, default_watcher_id: str) -> dict[
         "tls_verify": tls_verify,
         "timeout_seconds": timeout_seconds,
         "access_token": access_token,
-        "watcher_id": _string_value(watcher, "watcher_id", default=default_watcher_id),
+        "watcher_id": _configured_watcher_id(
+            default_watcher_id=default_watcher_id,
+        ),
     }
 
 
@@ -126,6 +115,82 @@ def fetch_runtime_config(settings: dict[str, object]) -> dict:
     if not isinstance(data, dict):
         raise PreflightError(f"GET {path} returned a non-object data payload.")
     return data
+
+
+def _configured_watcher_id(
+    *,
+    default_watcher_id: str,
+) -> str:
+    configured = _env_value(os.environ, "OTOMEKAIRO_WATCHER_ID", "")
+    if configured:
+        return _watcher_id(configured)
+
+    discovered_ids: list[str] = []
+    for db_path in _candidate_config_db_paths(server={}, environ=os.environ, config_path=None):
+        discovered_ids.extend(_enabled_watcher_ids_from_config_db(db_path))
+    unique_ids = sorted(set(discovered_ids))
+    if len(unique_ids) == 1:
+        return _watcher_id(unique_ids[0])
+    if len(unique_ids) > 1:
+        raise PreflightError("watcher.watcher_id must be set when multiple enabled watchers exist.")
+    return _watcher_id(default_watcher_id)
+
+
+def _enabled_watcher_ids_from_config_db(db_path: Path) -> list[str]:
+    if not db_path.is_file():
+        return []
+    try:
+        with sqlite3.connect(db_path) as conn:
+            rows = conn.execute("SELECT payload_json FROM camera_sources").fetchall()
+    except sqlite3.Error:
+        return []
+
+    watcher_ids: list[str] = []
+    for row in rows:
+        try:
+            camera_source = json.loads(row[0])
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(camera_source, dict) or camera_source.get("enabled") is not True:
+            continue
+        watcher = camera_source.get("watcher")
+        if not isinstance(watcher, dict) or watcher.get("enabled") is not True:
+            continue
+        watcher_id = watcher.get("watcher_id")
+        if isinstance(watcher_id, str) and watcher_id.strip():
+            watcher_ids.append(watcher_id.strip())
+    return watcher_ids
+
+
+def _watcher_id(value: str) -> str:
+    if not value.startswith("watcher:"):
+        raise PreflightError("watcher.watcher_id must start with watcher:.")
+    return value
+
+
+def _env_bool_value(key: str, *, default: bool) -> bool:
+    value = os.environ.get(key)
+    if value is None or not value.strip():
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise PreflightError(f"{key} must be a boolean.")
+
+
+def _env_positive_float(key: str, *, default: float) -> float:
+    raw_value = os.environ.get(key)
+    if raw_value is None or not raw_value.strip():
+        return default
+    try:
+        value = float(raw_value.strip())
+    except ValueError as exc:
+        raise PreflightError(f"{key} must be a positive number.") from exc
+    if value <= 0:
+        raise PreflightError(f"{key} must be a positive number.")
+    return value
 
 
 if __name__ == "__main__":

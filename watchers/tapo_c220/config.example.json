@@ -1,9 +1,0 @@
-{
-  "server": {
-    "base_url": "https://127.0.0.1:55601",
-    "tls_verify": false
-  },
-  "watcher": {
-    "watcher_id": "watcher:tapo_c220_main"
-  }
-}

@@ -169,38 +169,70 @@ class WatcherRuntimeConfigPreflightTests(unittest.TestCase):
 
         self.assertEqual(status, watcher_preflight.SKIP)
 
-    def test_watcher_load_settings_uses_configured_watcher_id_and_env_token(self) -> None:
+    def test_watcher_load_settings_uses_db_watcher_id_and_env_token(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            config_path = Path(temp_dir) / "config.local.json"
-            config_path.write_text(
-                """
-                {
-                  "server": {
-                    "base_url": "https://127.0.0.1:55601",
-                    "access_token_env": "CUSTOM_TOKEN"
-                  },
-                  "watcher": {
-                    "watcher_id": "watcher:custom"
-                  }
-                }
-                """,
-                encoding="utf-8",
-            )
+            data_dir = Path(temp_dir)
+            with sqlite3.connect(data_dir / "config.db") as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE server_identity (
+                        id INTEGER PRIMARY KEY CHECK (id = 1),
+                        server_id TEXT NOT NULL,
+                        server_display_name TEXT NOT NULL,
+                        api_version TEXT NOT NULL,
+                        console_access_token TEXT
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO server_identity (
+                        id, server_id, server_display_name, api_version, console_access_token
+                    )
+                    VALUES (1, 'server:test', 'OtomeKairo', '0.1.0', 'db-token')
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE camera_sources (
+                        vision_source_id TEXT PRIMARY KEY,
+                        payload_json TEXT NOT NULL
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO camera_sources (vision_source_id, payload_json)
+                    VALUES ('vision_source:camera', ?)
+                    """,
+                    [
+                        """
+                        {
+                          "vision_source_id": "vision_source:camera",
+                          "enabled": true,
+                          "watcher": {
+                            "enabled": true,
+                            "watcher_id": "watcher:camera"
+                          }
+                        }
+                        """
+                    ],
+                )
 
             original_environ = dict(watcher_preflight.os.environ)
             try:
                 watcher_preflight.os.environ.clear()
-                watcher_preflight.os.environ["CUSTOM_TOKEN"] = "token"
+                watcher_preflight.os.environ["OTOMEKAIRO_DATA_DIR"] = str(data_dir)
+                watcher_preflight.os.environ["OTOMEKAIRO_SERVER_URL"] = "https://127.0.0.1:55601"
                 settings = watcher_preflight.load_settings(
-                    config_path=config_path,
                     default_watcher_id="watcher:default",
                 )
             finally:
                 watcher_preflight.os.environ.clear()
                 watcher_preflight.os.environ.update(original_environ)
 
-        self.assertEqual(settings["watcher_id"], "watcher:custom")
-        self.assertEqual(settings["access_token"], "token")
+        self.assertEqual(settings["watcher_id"], "watcher:camera")
+        self.assertEqual(settings["access_token"], "db-token")
 
 
 if __name__ == "__main__":

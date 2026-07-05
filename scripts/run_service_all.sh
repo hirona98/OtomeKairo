@@ -11,7 +11,6 @@ TAPO_VENV_DIR="${TAPO_CONNECTOR_DIR}/.venv"
 TAPO_CONFIG_FILE="${TAPO_CONNECTOR_DIR}/config.local.json"
 TAPO_WATCHER_DIR="${REPO_ROOT}/watchers/tapo_c220"
 TAPO_WATCHER_VENV_DIR="${TAPO_WATCHER_DIR}/.venv"
-TAPO_WATCHER_CONFIG_FILE="${TAPO_WATCHER_DIR}/config.local.json"
 MCP_CONNECTOR_DIR="${REPO_ROOT}/connectors/mcp_client"
 MCP_VENV_DIR="${MCP_CONNECTOR_DIR}/.venv"
 MCP_CONFIG_FILE="${MCP_CONNECTOR_DIR}/config.local.json"
@@ -119,17 +118,10 @@ connector_runtime_config_ready() {
 watcher_runtime_config_ready() {
   local label="$1"
   local default_watcher_id="$2"
-  local config_file="$3"
-  local config_args=()
-
-  if [[ -f "${config_file}" ]]; then
-    config_args=(--config "${config_file}")
-  fi
 
   set +e
   "${SERVER_VENV_DIR}/bin/python" "${SCRIPT_DIR}/watcher_runtime_config_ready.py" \
-    --default-watcher-id "${default_watcher_id}" \
-    "${config_args[@]}"
+    --default-watcher-id "${default_watcher_id}"
   local status="$?"
   set -e
 
@@ -183,11 +175,6 @@ if [[ -f "${TAPO_CONFIG_FILE}" ]]; then
   tapo_args=(--config "${TAPO_CONFIG_FILE}")
 fi
 
-tapo_watcher_args=()
-if [[ -f "${TAPO_WATCHER_CONFIG_FILE}" ]]; then
-  tapo_watcher_args=(--config "${TAPO_WATCHER_CONFIG_FILE}")
-fi
-
 mcp_args=()
 if [[ -f "${MCP_CONFIG_FILE}" ]]; then
   mcp_args=(--config "${MCP_CONFIG_FILE}")
@@ -200,9 +187,9 @@ if connector_runtime_config_ready "Tapo C220" "tapo_c220" "tapo-c220-connector-m
   CHILD_PIDS+=("${TAPO_PID}")
 fi
 
-if watcher_runtime_config_ready "Tapo C220" "watcher:tapo_c220_main" "${TAPO_WATCHER_CONFIG_FILE}"; then
+if watcher_runtime_config_ready "Tapo C220" "watcher:tapo_c220_main"; then
   echo "starting Tapo C220 watcher" >&2
-  "${TAPO_WATCHER_VENV_DIR}/bin/python" -m otomekairo_tapo_c220_watcher "${tapo_watcher_args[@]}" &
+  "${TAPO_WATCHER_VENV_DIR}/bin/python" -m otomekairo_tapo_c220_watcher &
   TAPO_WATCHER_PID="$!"
   CHILD_PIDS+=("${TAPO_WATCHER_PID}")
 fi

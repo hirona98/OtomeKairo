@@ -41,15 +41,34 @@
       "presentation": {
         "hidden": true
       }
+    },
+    {
+      // watcher venv で Tapo C220 watcher を起動する。
+      "name": "OtomeKairo: Tapo C220 Watcher",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/debug_tapo_c220_watcher.py",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/watchers/tapo_c220/.venv/bin/python",
+      "justMyCode": true,
+      "console": "integratedTerminal",
+      "env": {
+        "OTOMEKAIRO_SERVER_URL": "https://127.0.0.1:55601",
+        "OTOMEKAIRO_DATA_DIR": "${workspaceFolder}/var/otomekairo"
+      },
+      "presentation": {
+        "hidden": true
+      }
     }
   ],
   "compounds": [
     {
-      // F5 では server と connector を同時に起動し、停止もまとめる。
+      // F5 では server、connector、watcher を同時に起動し、停止もまとめる。
       "name": "OtomeKairo: Debug Server",
       "configurations": [
         "OtomeKairo: Server",
-        "OtomeKairo: Tapo C220 Connector"
+        "OtomeKairo: Tapo C220 Connector",
+        "OtomeKairo: Tapo C220 Watcher"
       ],
       "preLaunchTask": "otomekairo: prepare full debug env",
       "stopAll": true

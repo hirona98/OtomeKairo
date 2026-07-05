@@ -56,7 +56,6 @@ watchers/
   tapo_c220/
     pyproject.toml
     README.md
-    config.example.json
     src/
       otomekairo_tapo_c220_watcher/
         __main__.py
@@ -190,7 +189,10 @@ Tapo C220 watcher は、C220 の RTSP 映像を軽量 CV で高頻度監視し�
 この repository 内の初期実装は `watchers/tapo_c220/` に置く。
 
 watcher は起動時と監視中に `GET /api/config/watchers/{watcher_id}/runtime-config` を呼び、自分に割り当てられた camera source、監視閾値、snapshot 保存先を取得する。
-watcher のローカル設定は server URL、TLS 検証、再接続間隔、`watcher_id`、token 明示上書きに限定する。
+watcher は `config.local.json` を使わない。
+watcher は `config.db` から `console_access_token` と有効な `watcher_id` を読む。
+有効な watcher が複数存在する場合は `OTOMEKAIRO_WATCHER_ID` で対象を明示する。
+server URL、TLS 検証、再接続間隔、token 明示上書きは環境変数で扱う。
 C220 の host、camera account、監視閾値、snapshot 保存先は OtomeKairo 本体の `camera_source.watcher` と runtime config が正本である。
 
 watcher は RTSP から frame を取得し、縮小済み grayscale 画像の前回差分を計算する。
@@ -275,7 +277,8 @@ watcher は次を担わない。
 ## 設定と秘密情報
 
 connector のローカル設定は server URL、TLS 検証、再接続間隔、`client_id`、token 明示上書きなど、OtomeKairo へ接続するための項目に限定する。
-watcher のローカル設定は server URL、TLS 検証、再接続間隔、`watcher_id`、token 明示上書きなど、OtomeKairo へ接続するための項目に限定する。
+watcher はローカル設定ファイルを持たず、`config.db` から `console_access_token` と有効な `watcher_id` を読む。
+watcher の server URL、TLS 検証、再接続間隔、token 明示上書きは環境変数で扱う。
 camera connector の host と camera account は OtomeKairo 本体の `camera_source` 設定定義で扱う。
 watcher の host、camera account、監視閾値、snapshot 保存先は OtomeKairo 本体の `camera_source.watcher` と runtime config で扱う。
 MCP client connector の command、args、cwd、env は OtomeKairo 本体の `mcp_server` 設定定義で扱う。
