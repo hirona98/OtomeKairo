@@ -19,6 +19,7 @@ class RtspCameraConfig:
     rtsp_path: str = "stream1"
     rtsp_transport: str = "tcp"
     rtsp_open_timeout_seconds: float = 8.0
+    opencv_ffmpeg_loglevel: str = "error"
 
 
 class RtspFrameCapture:
@@ -34,7 +35,9 @@ class RtspFrameCapture:
         timeout = timeout_seconds or self.config.rtsp_open_timeout_seconds
         deadline = time.monotonic() + timeout
         old_options = os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS")
+        old_loglevel = os.environ.get("OPENCV_FFMPEG_LOGLEVEL")
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = f"rtsp_transport;{self.config.rtsp_transport}"
+        os.environ["OPENCV_FFMPEG_LOGLEVEL"] = self.config.opencv_ffmpeg_loglevel
         capture = cv2.VideoCapture(self._rtsp_url(), cv2.CAP_FFMPEG)
         try:
             while time.monotonic() < deadline:
@@ -49,6 +52,10 @@ class RtspFrameCapture:
                 os.environ.pop("OPENCV_FFMPEG_CAPTURE_OPTIONS", None)
             else:
                 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = old_options
+            if old_loglevel is None:
+                os.environ.pop("OPENCV_FFMPEG_LOGLEVEL", None)
+            else:
+                os.environ["OPENCV_FFMPEG_LOGLEVEL"] = old_loglevel
 
     def _rtsp_url(self) -> str:
         username = quote(self.config.camera_username, safe="")

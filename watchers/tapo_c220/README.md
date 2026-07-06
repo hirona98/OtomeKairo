@@ -29,6 +29,8 @@ python3 -m venv .venv
 有効な watcher が 1 件だけの場合、watcher はその `watcher_id` を `config.db` から採用する。
 `console_access_token` が未発行の場合は bootstrap API で初回発行する。
 
+FFmpeg 警告ログは watcher 内で `error` まで抑制する。
+
 ## 実行
 
 ```bash
