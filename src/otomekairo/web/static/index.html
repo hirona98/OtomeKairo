@@ -61,6 +61,7 @@
       <button type="button" class="tab-button" data-tab="memory">記憶</button>
       <button type="button" class="tab-button" data-tab="system">システム</button>
       <button type="button" class="tab-button" data-tab="capability">能力</button>
+      <button type="button" class="tab-button" data-tab="watcher">Watcher</button>
     </div>
 
     <div class="settings-body">
@@ -154,14 +155,6 @@
               <label>接続種別<input id="camera-connector-kind" readonly></label>
               <label>接続クライアント<input id="camera-client-id" readonly></label>
               <label>視覚ソースID<input id="camera-vision-source-id" readonly></label>
-              <label class="checkbox-field">監視<input id="camera-watcher-enabled" type="checkbox"></label>
-              <label>watcher ID<input id="camera-watcher-id"></label>
-              <label>監視頻度秒<input id="camera-watcher-poll-interval" type="number" min="0.2" step="0.1"></label>
-              <label>wake最小間隔秒<input id="camera-watcher-min-wake-interval" type="number" min="1" step="1"></label>
-              <label>差分比閾値<input id="camera-watcher-motion-threshold" type="number" min="0.001" max="1" step="0.001"></label>
-              <label>画素差分閾値<input id="camera-watcher-pixel-threshold" type="number" min="1" max="255" step="1"></label>
-              <label>縮小幅<input id="camera-watcher-resize-width" type="number" min="64" max="1920" step="1"></label>
-              <label>JPEG品質<input id="camera-watcher-jpeg-quality" type="number" min="1" max="100" step="1"></label>
             </div>
           </fieldset>
 
@@ -190,6 +183,29 @@
             </div>
           </fieldset>
         </div>
+      </section>
+
+      <section class="tab-page" data-page="watcher">
+        <fieldset class="settings-group capability-group">
+          <legend>カメラ</legend>
+          <div class="field-caption">登録済みカメラ</div>
+          <div class="selector-row">
+            <select id="watcher-select"></select>
+          </div>
+          <div class="form-grid mcp-form-grid">
+            <label class="checkbox-field">有効<input id="watcher-enabled" type="checkbox"></label>
+            <label>対象カメラ<input id="watcher-camera-label" readonly></label>
+            <label>watcher ID<input id="watcher-id"></label>
+            <label>種別<input id="watcher-kind" readonly></label>
+            <label>監視頻度（秒）<input id="watcher-poll-interval" type="number" min="0.2" step="0.1"></label>
+            <label>wake最小間隔（秒）<input id="watcher-min-wake-interval" type="number" min="1" step="1"></label>
+            <label>差分比閾値（変化した画素の割合 0～1）<input id="watcher-motion-threshold" type="number" min="0.001" max="1"
+                step="0.001"></label>
+            <label>画素差分閾値（1画素を変化扱いする明暗差 1～255）<input id="watcher-pixel-threshold" type="number" min="1"
+                max="255" step="1"></label>
+            <label>縮小幅<input id="watcher-resize-width" type="number" min="64" max="1920" step="1"></label>
+          </div>
+        </fieldset>
       </section>
     </div>
 

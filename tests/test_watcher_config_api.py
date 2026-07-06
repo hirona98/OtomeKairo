@@ -49,12 +49,11 @@ def camera_source(
             "enabled": True,
             "watcher_id": watcher_id,
             "kind": "tapo_c220_motion",
-            "poll_interval_seconds": 1.0,
-            "min_wake_interval_seconds": 30,
+            "poll_interval_seconds": 60,
+            "min_wake_interval_seconds": 60,
             "motion_ratio_threshold": 0.03,
             "pixel_diff_threshold": 25,
             "resize_width": 320,
-            "jpeg_quality": 88,
         },
     }
 
@@ -111,6 +110,16 @@ class WatcherConfigApiTests(unittest.TestCase):
             service.replace_camera_source("token", "vision_source:tapo_c220_main", source)
 
         self.assertEqual(raised.exception.error_code, "invalid_camera_source_watcher")
+
+    def test_watcher_jpeg_quality_is_not_configurable(self) -> None:
+        service = DummyService()
+        source = camera_source()
+        source["watcher"]["jpeg_quality"] = 88
+
+        with self.assertRaises(ServiceError) as raised:
+            service.replace_camera_source("token", "vision_source:tapo_c220_main", source)
+
+        self.assertEqual(raised.exception.error_code, "unsupported_camera_source_watcher_field")
 
     def test_missing_watcher_runtime_config_returns_not_found(self) -> None:
         service = DummyService()

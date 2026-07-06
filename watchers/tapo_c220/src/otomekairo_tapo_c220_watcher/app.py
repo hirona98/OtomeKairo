@@ -13,6 +13,9 @@ from .diff import FrameDiffer
 from .http import HttpError, JsonApiClient
 
 
+SNAPSHOT_JPEG_QUALITY = 88
+
+
 class TapoC220Watcher:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
@@ -58,7 +61,6 @@ class TapoC220Watcher:
         capture = RtspFrameCapture(camera_config)
         poll_interval = self._float_value(watcher, "poll_interval_seconds")
         min_wake_interval = self._float_value(watcher, "min_wake_interval_seconds")
-        jpeg_quality = self._int_value(watcher, "jpeg_quality")
         snapshot_dir = Path(self._text_value(runtime, "snapshot_dir"))
         label = self._text_value(camera_source, "label")
 
@@ -73,9 +75,17 @@ class TapoC220Watcher:
 
             frame = capture.capture_frame(timeout_seconds=camera_config.rtsp_open_timeout_seconds)
             diff = differ.compare(frame)
-            if diff.changed and self._wake_due(min_wake_interval):
+            wake_due = self._wake_due(min_wake_interval)
+            self._log_diff_result(
+                changed_ratio=diff.changed_ratio,
+                threshold=self._float_value(watcher, "motion_ratio_threshold"),
+                changed=diff.changed,
+                wake_due=wake_due,
+                cooldown_remaining_seconds=self._cooldown_remaining_seconds(min_wake_interval),
+            )
+            if diff.changed and wake_due:
                 snapshot_path = self._snapshot_path(snapshot_dir)
-                differ.save_snapshot(frame=frame, path=snapshot_path, jpeg_quality=jpeg_quality)
+                differ.save_snapshot(frame=frame, path=snapshot_path, jpeg_quality=SNAPSHOT_JPEG_QUALITY)
                 self.last_wake_monotonic = time.monotonic()
                 self._post_wake(
                     snapshot_path=snapshot_path,
@@ -102,6 +112,37 @@ class TapoC220Watcher:
         if self.last_wake_monotonic is None:
             return True
         return time.monotonic() - self.last_wake_monotonic >= min_wake_interval
+
+    def _cooldown_remaining_seconds(self, min_wake_interval: float) -> float:
+        if self.last_wake_monotonic is None:
+            return 0.0
+        elapsed = time.monotonic() - self.last_wake_monotonic
+        return max(0.0, min_wake_interval - elapsed)
+
+    def _log_diff_result(
+        self,
+        *,
+        changed_ratio: float,
+        threshold: float,
+        changed: bool,
+        wake_due: bool,
+        cooldown_remaining_seconds: float,
+    ) -> None:
+        if changed and wake_due:
+            action = "wake"
+        elif changed:
+            action = "cooldown"
+        else:
+            action = "none"
+        self._log(
+            "diff result "
+            f"changed={str(changed).lower()} "
+            f"changed_ratio={changed_ratio:.4f} "
+            f"threshold={threshold:.4f} "
+            f"wake_due={str(wake_due).lower()} "
+            f"cooldown_remaining_seconds={cooldown_remaining_seconds:.1f} "
+            f"action={action}"
+        )
 
     def _snapshot_path(self, snapshot_dir: Path) -> Path:
         timestamp_ms = int(time.time() * 1000)

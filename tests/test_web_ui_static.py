@@ -66,6 +66,11 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn("人格設定", html)
         self.assertIn("システム", html)
         self.assertIn("判断機会ポリシー", html)
+        self.assertIn('data-tab="watcher"', html)
+        self.assertIn("登録済みカメラ", html)
+        self.assertIn("差分比閾値（変化した画素の割合 0～1）", html)
+        self.assertIn("画素差分閾値（1画素を変化扱いする明暗差 1～255）", html)
+        self.assertNotIn("camera-watcher-motion-threshold", html)
         self.assertEqual(headers["Cache-Control"], "no-store")
 
     def test_web_ui_assets_are_served_without_token(self) -> None:

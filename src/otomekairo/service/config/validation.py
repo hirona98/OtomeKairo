@@ -304,7 +304,6 @@ class ServiceConfigValidationMixin:
             "motion_ratio_threshold",
             "pixel_diff_threshold",
             "resize_width",
-            "jpeg_quality",
         }
         unsupported_fields = sorted(set(watcher.keys()) - supported_fields)
         if unsupported_fields:
@@ -359,14 +358,6 @@ class ServiceConfigValidationMixin:
                 "invalid_camera_source_watcher",
                 "camera_source.watcher.resize_width must be an integer from 64 to 1920.",
             )
-        jpeg_quality = watcher.get("jpeg_quality")
-        if type(jpeg_quality) is not int or jpeg_quality < 1 or jpeg_quality > 100:
-            raise ServiceError(
-                400,
-                "invalid_camera_source_watcher",
-                "camera_source.watcher.jpeg_quality must be an integer from 1 to 100.",
-            )
-
     def _validate_positive_number_field(
         self,
         definition: dict[str, Any],

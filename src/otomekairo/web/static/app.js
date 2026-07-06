@@ -31,6 +31,7 @@ const state = {
   selectedModelPresetId: "",
   selectedMemorySetId: "",
   selectedCameraId: "",
+  selectedWatcherSourceId: "",
   selectedMcpId: "",
   attachment: null,
   settingsOpen: false,
@@ -683,6 +684,7 @@ function preferredLlmApiKey() {
 function renderCapabilities() {
   renderCamera();
   renderMcp();
+  renderWatcher();
 }
 
 function renderCamera() {
@@ -690,7 +692,6 @@ function renderCamera() {
   setSelectOptions(element("camera-select"), state.camera.camera_sources, "vision_source_id", state.selectedCameraId);
   const camera = arrayById(state.camera.camera_sources, "vision_source_id", state.selectedCameraId);
   const connection = camera?.connection || {};
-  const watcher = cameraWatcher(camera);
   element("camera-enabled").checked = camera?.enabled === true;
   element("camera-display-name").value = camera?.label || "";
   element("camera-host").value = connection.host || "";
@@ -699,14 +700,6 @@ function renderCamera() {
   element("camera-connector-kind").value = camera?.connector_kind || "tapo_c220";
   element("camera-client-id").value = camera?.client_id || "tapo-c220-connector-main";
   element("camera-vision-source-id").value = camera?.vision_source_id || "";
-  element("camera-watcher-enabled").checked = watcher.enabled === true;
-  element("camera-watcher-id").value = watcher.watcher_id;
-  element("camera-watcher-poll-interval").value = watcher.poll_interval_seconds;
-  element("camera-watcher-min-wake-interval").value = watcher.min_wake_interval_seconds;
-  element("camera-watcher-motion-threshold").value = watcher.motion_ratio_threshold;
-  element("camera-watcher-pixel-threshold").value = watcher.pixel_diff_threshold;
-  element("camera-watcher-resize-width").value = watcher.resize_width;
-  element("camera-watcher-jpeg-quality").value = watcher.jpeg_quality;
 }
 
 function syncCamera() {
@@ -726,18 +719,51 @@ function syncCamera() {
     camera_username: textValue("camera-username"),
     camera_password: textValue("camera-password"),
   };
-  camera.watcher = {
-    enabled: boolValue("camera-watcher-enabled"),
-    watcher_id: textValue("camera-watcher-id") || defaultWatcherId(camera),
-    kind: "tapo_c220_motion",
-    poll_interval_seconds: numberValue("camera-watcher-poll-interval", 1.0),
-    min_wake_interval_seconds: numberValue("camera-watcher-min-wake-interval", 30),
-    motion_ratio_threshold: numberValue("camera-watcher-motion-threshold", 0.03),
-    pixel_diff_threshold: intValue("camera-watcher-pixel-threshold", 25),
-    resize_width: intValue("camera-watcher-resize-width", 320),
-    jpeg_quality: intValue("camera-watcher-jpeg-quality", 88),
-  };
   state.selectedCameraId = camera.vision_source_id;
+}
+
+function watcherItems() {
+  return (state.camera?.camera_sources || []).map((camera) => {
+    const watcher = cameraWatcher(camera);
+    return {
+      vision_source_id: camera.vision_source_id,
+      label: `${watcher.watcher_id} / ${camera.label || camera.vision_source_id}`,
+    };
+  });
+}
+
+function renderWatcher() {
+  const items = watcherItems();
+  state.selectedWatcherSourceId = selectedOrFirst(items, "vision_source_id", state.selectedWatcherSourceId);
+  setSelectOptions(element("watcher-select"), items, "vision_source_id", state.selectedWatcherSourceId);
+  const camera = arrayById(state.camera.camera_sources, "vision_source_id", state.selectedWatcherSourceId);
+  const watcher = cameraWatcher(camera);
+  element("watcher-enabled").checked = watcher.enabled === true;
+  element("watcher-camera-label").value = camera?.label || "";
+  element("watcher-id").value = watcher.watcher_id;
+  element("watcher-kind").value = watcher.kind;
+  element("watcher-poll-interval").value = watcher.poll_interval_seconds;
+  element("watcher-min-wake-interval").value = watcher.min_wake_interval_seconds;
+  element("watcher-motion-threshold").value = watcher.motion_ratio_threshold;
+  element("watcher-pixel-threshold").value = watcher.pixel_diff_threshold;
+  element("watcher-resize-width").value = watcher.resize_width;
+}
+
+function syncWatcher() {
+  const camera = arrayById(state.camera.camera_sources, "vision_source_id", state.selectedWatcherSourceId);
+  if (!camera) {
+    return;
+  }
+  camera.watcher = {
+    enabled: boolValue("watcher-enabled"),
+    watcher_id: textValue("watcher-id") || defaultWatcherId(camera),
+    kind: "tapo_c220_motion",
+    poll_interval_seconds: numberValue("watcher-poll-interval", 60),
+    min_wake_interval_seconds: numberValue("watcher-min-wake-interval", 60),
+    motion_ratio_threshold: numberValue("watcher-motion-threshold", 0.03),
+    pixel_diff_threshold: intValue("watcher-pixel-threshold", 25),
+    resize_width: intValue("watcher-resize-width", 320),
+  };
 }
 
 function cameraWatcher(camera) {
@@ -746,12 +772,11 @@ function cameraWatcher(camera) {
     enabled: watcher.enabled === true,
     watcher_id: watcher.watcher_id || defaultWatcherId(camera),
     kind: "tapo_c220_motion",
-    poll_interval_seconds: watcher.poll_interval_seconds ?? 1.0,
-    min_wake_interval_seconds: watcher.min_wake_interval_seconds ?? 30,
+    poll_interval_seconds: watcher.poll_interval_seconds ?? 60,
+    min_wake_interval_seconds: watcher.min_wake_interval_seconds ?? 60,
     motion_ratio_threshold: watcher.motion_ratio_threshold ?? 0.03,
     pixel_diff_threshold: watcher.pixel_diff_threshold ?? 25,
     resize_width: watcher.resize_width ?? 320,
-    jpeg_quality: watcher.jpeg_quality ?? 88,
   };
 }
 
@@ -800,6 +825,7 @@ function syncAllForms() {
   syncModel();
   syncMemory();
   syncCamera();
+  syncWatcher();
   syncMcp();
 }
 
@@ -916,23 +942,24 @@ function addCamera() {
       enabled: false,
       watcher_id: "",
       kind: "tapo_c220_motion",
-      poll_interval_seconds: 1.0,
-      min_wake_interval_seconds: 30,
+      poll_interval_seconds: 60,
+      min_wake_interval_seconds: 60,
       motion_ratio_threshold: 0.03,
       pixel_diff_threshold: 25,
       resize_width: 320,
-      jpeg_quality: 88,
     },
   };
   camera.watcher.watcher_id = defaultWatcherId(camera);
   state.camera.camera_sources.push(camera);
   state.selectedCameraId = id;
+  state.selectedWatcherSourceId = id;
   renderCapabilities();
 }
 
 function deleteCamera() {
   removeById(state.camera.camera_sources, "vision_source_id", state.selectedCameraId);
   state.selectedCameraId = state.camera.camera_sources[0]?.vision_source_id || "";
+  state.selectedWatcherSourceId = selectedOrFirst(state.camera.camera_sources, "vision_source_id", state.selectedWatcherSourceId);
   renderCapabilities();
 }
 
@@ -1019,7 +1046,14 @@ function bindEvents() {
   element("camera-select").addEventListener("change", () => {
     syncCamera();
     state.selectedCameraId = element("camera-select").value;
+    state.selectedWatcherSourceId = state.selectedCameraId;
     renderCamera();
+    renderWatcher();
+  });
+  element("watcher-select").addEventListener("change", () => {
+    syncWatcher();
+    state.selectedWatcherSourceId = element("watcher-select").value;
+    renderWatcher();
   });
   element("mcp-select").addEventListener("change", () => {
     syncMcp();
