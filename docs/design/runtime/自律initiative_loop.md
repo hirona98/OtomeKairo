@@ -99,6 +99,8 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 `candidate_families` は追加観測を提案する場合に限り、`preferred_result_kind=capability_request / preferred_result_reason_summary / preferred_capability_id / preferred_capability_input` を持つ。
 `activity_context.current_activity` は現在活動の短期推定として扱う。
 `activity_context.previous_activity` は直前活動の参照情報として扱う。
+`activity_context.current_activity.transition` は直前活動に対する `start / continue / switch / end / none` の推定として扱う。
+`activity_context.current_activity / previous_activity` の `started_age_label / duration_label / ended_age_label` は、活動がいつ始まりどの程度続いたかを生活文脈で比較するための判断材料である。
 `activity_context.current_activity.actor` は活動主体を表す。`actor=user` はユーザー側の活動、`actor=self` は AI 本体の活動である。
 activity の `label / target` は自然文として LLM へ渡す。
 タイミング判断と結果選択は、activity を含む `initiative_context` 全体で行う。
@@ -117,6 +119,8 @@ initiative loop は、候補を次の 3 系統に分ける。
 
 自発系は、強く前景化した `drive_state`、`ongoing_action`、`pending_intent`、強い `entry_basis` を持つ `initiative_entry_summary`、または視覚観測の `first_seen / changed` と現在文脈の噛み合いを材料にする。
 視覚観測の `first_seen / changed` は `workspace_context` の `visual_observation` 候補として扱う。
+視覚観測の `first_seen / changed` で通常判断へ direct entry する場合も、判断前観測で更新された `activity_context` は `initiative_context` と `workspace_context` に残す。
+direct entry は視覚新規性だけへ判断材料を縮約する仕組みではなく、活動遷移、継続時間、source の整合、抑制候補を同じ盤面で比較する入口である。
 `background_thinking` は定期思考による自己評価である。
 `decision_generation` は観測、候補、抑制、能力提案を比較し、`speech / noop / pending_intent / capability_request` から 1 つ選ぶ。
 `visual_observations[].change_state=first_seen / changed` は前景候補、`stable` は現在状態の継続シグナル、`same_as_recent_speech` は直近重複の抑制候補である。

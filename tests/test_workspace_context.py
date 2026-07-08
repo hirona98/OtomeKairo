@@ -72,6 +72,62 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertIn("prediction_error", kinds)
         self.assertIn("default_mode", kinds)
 
+    def test_workspace_context_includes_activity_transition_candidate(self) -> None:
+        service = ServiceInputPipelineMixin()
+
+        payload = service._build_workspace_context(
+            current_input=CurrentInput(
+                sender="system",
+                source_kind="background_thinking",
+                response_target="none",
+                text="定期思考。",
+            ),
+            recall_pack={},
+            drive_state_summary=None,
+            foreground_world_state=None,
+            activity_context={
+                "current_activity": {
+                    "label": "アプリケーション起動検討",
+                    "actor": "user",
+                    "target": "desktop",
+                    "transition": "start",
+                    "started_age_label": "直前",
+                    "duration_label": "1分未満",
+                    "age_label": "直前",
+                    "reason_summary": "desktop で新しい操作が始まっている。",
+                },
+                "previous_activity": {
+                    "label": "離席中",
+                    "actor": "user",
+                    "target": "workspace",
+                    "started_age_label": "19時間前",
+                    "duration_label": "約19時間",
+                    "ended_age_label": "直前",
+                    "reason_summary": "長く作業場に不在だった。",
+                },
+            },
+            ongoing_action_summary=None,
+            autonomous_run_summaries=None,
+            capability_decision_view=None,
+            initiative_context=None,
+            capability_result_context=None,
+            visual_observation_context=None,
+            self_state_context=None,
+            relationship_context=None,
+            prediction_error_context=None,
+            default_mode_context=None,
+        )
+
+        candidates = payload["workspace_candidates"]
+        refs = [candidate["factor_ref"] for candidate in candidates]
+        transition = next(candidate for candidate in candidates if candidate["factor_ref"] == "activity:transition")
+
+        self.assertLess(refs.index("activity:transition"), refs.index("activity:current_activity"))
+        self.assertEqual(transition["kind"], "activity_transition")
+        self.assertEqual(transition["metadata"]["transition"], "start")
+        self.assertEqual(transition["metadata"]["previous_duration_label"], "約19時間")
+        self.assertIn("前活動の継続時間: 約19時間", transition["summary_text"])
+
     def test_default_mode_context_keeps_resurfacing_as_candidate(self) -> None:
         service = ServiceInputPipelineMixin()
         text = "まだ気になっている未完了"

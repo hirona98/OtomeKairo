@@ -93,6 +93,55 @@ class TextTruncationTests(unittest.TestCase):
         self.assertIn(text, summaries)
         self.assertTrue(all(summary.endswith("末尾") for summary in summaries if summary.startswith("w")))
 
+    def test_workspace_activity_transition_text_is_not_truncated(self) -> None:
+        service = ServiceInputPipelineMixin()
+        text = "t" * 240 + "末尾"
+
+        payload = service._build_workspace_context(
+            current_input=CurrentInput(
+                sender="system",
+                source_kind="background_thinking",
+                response_target="none",
+                text="定期思考。",
+            ),
+            recall_pack={},
+            drive_state_summary=None,
+            foreground_world_state=None,
+            activity_context={
+                "current_activity": {
+                    "label": "現在活動",
+                    "actor": "user",
+                    "transition": "switch",
+                    "reason_summary": text,
+                },
+                "previous_activity": {
+                    "label": "直前活動",
+                    "actor": "user",
+                    "duration_label": "約19時間",
+                    "reason_summary": text,
+                },
+            },
+            ongoing_action_summary=None,
+            autonomous_run_summaries=None,
+            capability_decision_view=None,
+            initiative_context=None,
+            capability_result_context=None,
+            visual_observation_context=None,
+            self_state_context=None,
+            relationship_context=None,
+            prediction_error_context=None,
+            default_mode_context=None,
+        )
+
+        transition = next(
+            candidate
+            for candidate in payload["workspace_candidates"]
+            if candidate["factor_ref"] == "activity:transition"
+        )
+
+        self.assertIn(text, transition["summary_text"])
+        self.assertIn("末尾", transition["summary_text"])
+
     def test_memory_context_keeps_event_text_and_count_limit(self) -> None:
         consolidator = MemoryConsolidator.__new__(MemoryConsolidator)
         events = [
