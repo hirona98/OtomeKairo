@@ -298,10 +298,10 @@ class ServiceConfigValidationMixin:
         normalized["watcher_id"] = self._default_camera_source_watcher_id(vision_source_id)
         normalized.setdefault("enabled", False)
         normalized.setdefault("kind", "tapo_c220_motion")
-        normalized.setdefault("poll_interval_seconds", 60)
-        normalized.setdefault("min_wake_interval_seconds", 60)
-        normalized.setdefault("motion_ratio_threshold", 0.03)
-        normalized.setdefault("pixel_diff_threshold", 25)
+        normalized.setdefault("poll_interval_seconds", 10)
+        normalized.setdefault("min_wake_interval_seconds", 30)
+        normalized.setdefault("motion_ratio_threshold", 0.2)
+        normalized.setdefault("pixel_diff_threshold", 10)
         normalized.setdefault("resize_width", 320)
         return normalized
 
@@ -310,10 +310,10 @@ class ServiceConfigValidationMixin:
             "enabled": False,
             "watcher_id": self._default_camera_source_watcher_id(vision_source_id),
             "kind": "tapo_c220_motion",
-            "poll_interval_seconds": 60,
-            "min_wake_interval_seconds": 60,
-            "motion_ratio_threshold": 0.03,
-            "pixel_diff_threshold": 25,
+            "poll_interval_seconds": 10,
+            "min_wake_interval_seconds": 30,
+            "motion_ratio_threshold": 0.2,
+            "pixel_diff_threshold": 10,
             "resize_width": 320,
         }
 

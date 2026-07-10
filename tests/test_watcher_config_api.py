@@ -50,10 +50,10 @@ def camera_source(
             "enabled": True,
             "watcher_id": watcher_id,
             "kind": "tapo_c220_motion",
-            "poll_interval_seconds": 60,
-            "min_wake_interval_seconds": 60,
-            "motion_ratio_threshold": 0.03,
-            "pixel_diff_threshold": 25,
+            "poll_interval_seconds": 10,
+            "min_wake_interval_seconds": 30,
+            "motion_ratio_threshold": 0.2,
+            "pixel_diff_threshold": 10,
             "resize_width": 320,
         },
     }
@@ -75,8 +75,8 @@ class WatcherConfigApiTests(unittest.TestCase):
         self.assertEqual(stored_source["vision_source_id"], "vision_source:対面カメラ")
         self.assertEqual(watcher["enabled"], False)
         self.assertEqual(watcher["watcher_id"], "watcher:対面カメラ")
-        self.assertEqual(watcher["poll_interval_seconds"], 60)
-        self.assertEqual(watcher["min_wake_interval_seconds"], 60)
+        self.assertEqual(watcher["poll_interval_seconds"], 10)
+        self.assertEqual(watcher["min_wake_interval_seconds"], 30)
 
     def test_camera_source_ids_are_generated_from_display_name(self) -> None:
         service = DummyService()
