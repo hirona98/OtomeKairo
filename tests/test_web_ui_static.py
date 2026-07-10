@@ -70,6 +70,7 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn("登録済みカメラ", html)
         self.assertIn("差分比閾値（変化した画素の割合 0～1）", html)
         self.assertIn("画素差分閾値（1画素を変化扱いする明暗差 1～255）", html)
+        self.assertNotIn("対象カメラ", html)
         self.assertNotIn("camera-watcher-motion-threshold", html)
         self.assertEqual(headers["Cache-Control"], "no-store")
 

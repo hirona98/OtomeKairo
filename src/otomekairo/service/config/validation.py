@@ -188,8 +188,6 @@ class ServiceConfigValidationMixin:
     def _validate_camera_source_definition(self, vision_source_id: str, definition: dict[str, Any]) -> None:
         if not isinstance(definition, dict):
             raise ServiceError(400, "invalid_camera_source", "camera_source must be an object.")
-        if definition.get("vision_source_id") != vision_source_id:
-            raise ServiceError(400, "vision_source_id_mismatch", "vision_source_id must match the path.")
         if not isinstance(vision_source_id, str) or not vision_source_id.startswith("vision_source:"):
             raise ServiceError(
                 400,
@@ -203,7 +201,7 @@ class ServiceConfigValidationMixin:
             "kind",
             "source_owner",
             "enabled",
-            "label",
+            "display_name",
             "connection",
             "watcher",
         }
@@ -225,7 +223,7 @@ class ServiceConfigValidationMixin:
         enabled = definition.get("enabled")
         if not isinstance(enabled, bool):
             raise ServiceError(400, "invalid_camera_source_field", "camera_source.enabled must be a boolean.")
-        self._validate_required_text_field(definition, "label", "camera_source.label")
+        self._validate_required_text_field(definition, "display_name", "camera_source.display_name")
         if definition.get("kind") != "camera":
             raise ServiceError(400, "invalid_camera_source_field", "camera_source.kind must be camera.")
         if definition.get("source_owner") != "self":
@@ -256,18 +254,20 @@ class ServiceConfigValidationMixin:
 
     def _normalize_camera_source_definition(self, vision_source_id: str, definition: dict[str, Any]) -> dict[str, Any]:
         normalized = {
-            "vision_source_id": definition.get("vision_source_id", vision_source_id),
+            "vision_source_id": vision_source_id,
             "connector_kind": definition.get("connector_kind", CAMERA_DEFAULT_CONNECTOR_KIND),
             "client_id": definition.get("client_id", CAMERA_DEFAULT_CLIENT_ID),
             "kind": "camera",
             "source_owner": "self",
             "enabled": definition.get("enabled"),
-            "label": definition.get("label"),
+            "display_name": definition.get("display_name"),
             "connection": definition.get("connection"),
         }
-        if "watcher" in definition:
-            normalized["watcher"] = self._normalize_camera_source_watcher_definition(definition.get("watcher"))
-        for field_name in ("vision_source_id", "connector_kind", "client_id", "label"):
+        normalized["watcher"] = self._normalize_camera_source_watcher_definition(
+            definition.get("watcher") if "watcher" in definition else None,
+            vision_source_id=vision_source_id,
+        )
+        for field_name in ("vision_source_id", "connector_kind", "client_id", "display_name"):
             value = normalized.get(field_name)
             if isinstance(value, str):
                 normalized[field_name] = value.strip()
@@ -280,17 +280,67 @@ class ServiceConfigValidationMixin:
             )
         return normalized
 
-    def _normalize_camera_source_watcher_definition(self, watcher: Any) -> dict[str, Any] | None:
+    def _normalize_camera_source_watcher_definition(
+        self,
+        watcher: Any,
+        *,
+        vision_source_id: str,
+    ) -> dict[str, Any]:
         if watcher is None:
-            return None
+            return self._default_camera_source_watcher_definition(vision_source_id)
         if not isinstance(watcher, dict):
             return watcher
         normalized = dict(watcher)
-        for field_name in ("watcher_id", "kind"):
+        for field_name in ("kind",):
             value = normalized.get(field_name)
             if isinstance(value, str):
                 normalized[field_name] = value.strip()
+        normalized["watcher_id"] = self._default_camera_source_watcher_id(vision_source_id)
+        normalized.setdefault("enabled", False)
+        normalized.setdefault("kind", "tapo_c220_motion")
+        normalized.setdefault("poll_interval_seconds", 60)
+        normalized.setdefault("min_wake_interval_seconds", 60)
+        normalized.setdefault("motion_ratio_threshold", 0.03)
+        normalized.setdefault("pixel_diff_threshold", 25)
+        normalized.setdefault("resize_width", 320)
         return normalized
+
+    def _default_camera_source_watcher_definition(self, vision_source_id: str) -> dict[str, Any]:
+        return {
+            "enabled": False,
+            "watcher_id": self._default_camera_source_watcher_id(vision_source_id),
+            "kind": "tapo_c220_motion",
+            "poll_interval_seconds": 60,
+            "min_wake_interval_seconds": 60,
+            "motion_ratio_threshold": 0.03,
+            "pixel_diff_threshold": 25,
+            "resize_width": 320,
+        }
+
+    def _default_camera_source_watcher_id(self, vision_source_id: str) -> str:
+        source_id = (
+            vision_source_id
+            if isinstance(vision_source_id, str) and vision_source_id.strip()
+            else "vision_source:camera"
+        )
+        safe_suffix = self._camera_source_identifier_suffix(source_id.removeprefix("vision_source:"))
+        return f"watcher:{safe_suffix or 'camera'}"
+
+    def _camera_source_id_from_display_name(self, display_name: Any) -> str:
+        if not isinstance(display_name, str) or not display_name.strip():
+            raise ServiceError(
+                400,
+                "invalid_camera_source_field",
+                "camera_source.display_name must be a non-empty string.",
+            )
+        suffix = self._camera_source_identifier_suffix(display_name)
+        return f"vision_source:{suffix or 'camera'}"
+
+    def _camera_source_identifier_suffix(self, value: str) -> str:
+        return "".join(
+            character if character.isalnum() or character in "._-" else "_"
+            for character in value.strip()
+        ).strip("_")
 
     def _validate_camera_source_watcher_definition(self, watcher: Any) -> None:
         if not isinstance(watcher, dict):

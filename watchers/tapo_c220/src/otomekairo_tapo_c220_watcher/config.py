@@ -66,7 +66,7 @@ def load_config(
             watcher_id=_watcher_id(
                 _configured_watcher_id(
                     environ=env,
-                    default="watcher:tapo_c220_main",
+                    default="watcher:camera",
                 )
             )
         ),
@@ -179,7 +179,7 @@ def _enabled_watcher_ids_from_config_db(db_path: Path) -> list[str]:
             camera_source = json.loads(row[0])
         except (TypeError, json.JSONDecodeError):
             continue
-        if not isinstance(camera_source, dict) or camera_source.get("enabled") is not True:
+        if not isinstance(camera_source, dict):
             continue
         watcher = camera_source.get("watcher")
         if not isinstance(watcher, dict) or watcher.get("enabled") is not True:

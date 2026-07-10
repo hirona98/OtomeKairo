@@ -820,7 +820,7 @@ class LongSmokeRunner:
                         "kind": "camera",
                         "source_owner": "self",
                         "enabled": True,
-                        "label": "long smoke camera",
+                        "display_name": "long smoke camera",
                         "connection": {
                             "host": "127.0.0.1",
                             "camera_username": "long-smoke",

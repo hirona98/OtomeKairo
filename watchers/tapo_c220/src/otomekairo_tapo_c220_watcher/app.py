@@ -41,7 +41,7 @@ class TapoC220Watcher:
     def _run_runtime(self, runtime: dict[str, Any]) -> None:
         watcher = self._object(runtime.get("watcher"), "runtime.watcher")
         camera_source = self._object(runtime.get("camera_source"), "runtime.camera_source")
-        if watcher.get("enabled") is not True or camera_source.get("enabled") is not True:
+        if watcher.get("enabled") is not True:
             self._log("watcher disabled")
             time.sleep(self.config.server.reconnect_delay_seconds)
             return
@@ -62,7 +62,7 @@ class TapoC220Watcher:
         poll_interval = self._float_value(watcher, "poll_interval_seconds")
         min_wake_interval = self._float_value(watcher, "min_wake_interval_seconds")
         snapshot_dir = Path(self._text_value(runtime, "snapshot_dir"))
-        label = self._text_value(camera_source, "label")
+        display_name = self._text_value(camera_source, "display_name")
 
         self._log(f"watching vision_source_id={camera_source.get('vision_source_id')} interval={poll_interval}")
         while True:
@@ -89,7 +89,7 @@ class TapoC220Watcher:
                 self.last_wake_monotonic = time.monotonic()
                 self._post_wake(
                     snapshot_path=snapshot_path,
-                    label=label,
+                    label=display_name,
                     changed_ratio=diff.changed_ratio,
                     threshold=self._float_value(watcher, "motion_ratio_threshold"),
                 )

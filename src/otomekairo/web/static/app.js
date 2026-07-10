@@ -693,7 +693,7 @@ function renderCamera() {
   const camera = arrayById(state.camera.camera_sources, "vision_source_id", state.selectedCameraId);
   const connection = camera?.connection || {};
   element("camera-enabled").checked = camera?.enabled === true;
-  element("camera-display-name").value = camera?.label || "";
+  element("camera-display-name").value = camera?.display_name || "";
   element("camera-host").value = connection.host || "";
   element("camera-username").value = connection.camera_username || "";
   element("camera-password").value = connection.camera_password || "";
@@ -708,10 +708,10 @@ function syncCamera() {
     return;
   }
   camera.enabled = boolValue("camera-enabled");
-  camera.label = textValue("camera-display-name");
+  camera.display_name = textValue("camera-display-name");
+  camera.vision_source_id = defaultVisionSourceId(camera);
   camera.connector_kind = textValue("camera-connector-kind");
   camera.client_id = textValue("camera-client-id");
-  camera.vision_source_id = textValue("camera-vision-source-id");
   camera.kind = "camera";
   camera.source_owner = "self";
   camera.connection = {
@@ -719,15 +719,17 @@ function syncCamera() {
     camera_username: textValue("camera-username"),
     camera_password: textValue("camera-password"),
   };
+  camera.watcher = cameraWatcher(camera);
   state.selectedCameraId = camera.vision_source_id;
 }
 
 function watcherItems() {
   return (state.camera?.camera_sources || []).map((camera) => {
     const watcher = cameraWatcher(camera);
+    const displayName = camera.display_name || camera.vision_source_id;
     return {
       vision_source_id: camera.vision_source_id,
-      label: `${watcher.watcher_id} / ${camera.label || camera.vision_source_id}`,
+      display_name: `${displayName} (${camera.vision_source_id} / ${watcher.watcher_id})`,
     };
   });
 }
@@ -738,8 +740,9 @@ function renderWatcher() {
   setSelectOptions(element("watcher-select"), items, "vision_source_id", state.selectedWatcherSourceId);
   const camera = arrayById(state.camera.camera_sources, "vision_source_id", state.selectedWatcherSourceId);
   const watcher = cameraWatcher(camera);
+  element("watcher-display-name").value = camera?.display_name || "";
+  element("watcher-vision-source-id").value = camera?.vision_source_id || "";
   element("watcher-enabled").checked = watcher.enabled === true;
-  element("watcher-camera-label").value = camera?.label || "";
   element("watcher-id").value = watcher.watcher_id;
   element("watcher-kind").value = watcher.kind;
   element("watcher-poll-interval").value = watcher.poll_interval_seconds;
@@ -756,7 +759,7 @@ function syncWatcher() {
   }
   camera.watcher = {
     enabled: boolValue("watcher-enabled"),
-    watcher_id: textValue("watcher-id") || defaultWatcherId(camera),
+    watcher_id: defaultWatcherId(camera),
     kind: "tapo_c220_motion",
     poll_interval_seconds: numberValue("watcher-poll-interval", 60),
     min_wake_interval_seconds: numberValue("watcher-min-wake-interval", 60),
@@ -770,7 +773,7 @@ function cameraWatcher(camera) {
   const watcher = camera?.watcher || {};
   return {
     enabled: watcher.enabled === true,
-    watcher_id: watcher.watcher_id || defaultWatcherId(camera),
+    watcher_id: defaultWatcherId(camera),
     kind: "tapo_c220_motion",
     poll_interval_seconds: watcher.poll_interval_seconds ?? 60,
     min_wake_interval_seconds: watcher.min_wake_interval_seconds ?? 60,
@@ -780,10 +783,23 @@ function cameraWatcher(camera) {
   };
 }
 
+function defaultVisionSourceId(camera) {
+  const displayName = camera?.display_name || "新規カメラ";
+  const suffix = identifierSuffix(displayName);
+  return `vision_source:${suffix || "camera"}`;
+}
+
 function defaultWatcherId(camera) {
-  const sourceId = camera?.vision_source_id || "vision_source:tapo_c220_main";
-  const suffix = sourceId.replace(/^vision_source:/, "").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
-  return `watcher:${suffix || "tapo_c220_main"}`;
+  const sourceId = camera?.vision_source_id || defaultVisionSourceId(camera);
+  const suffix = identifierSuffix(sourceId.replace(/^vision_source:/, ""));
+  return `watcher:${suffix || "camera"}`;
+}
+
+function identifierSuffix(value) {
+  return Array.from(String(value || "").trim())
+    .map((character) => (/[\p{L}\p{N}._-]/u.test(character) ? character : "_"))
+    .join("")
+    .replace(/^_+|_+$/g, "");
 }
 
 function renderMcp() {
@@ -924,15 +940,14 @@ function deleteMemory() {
 
 function addCamera() {
   syncAllForms();
-  const id = `vision_source:camera:${idSuffix()}`;
   const camera = {
-    vision_source_id: id,
+    display_name: `新規カメラ${idSuffix()}`,
+    vision_source_id: "",
     connector_kind: "tapo_c220",
     client_id: "tapo-c220-connector-main",
     kind: "camera",
     source_owner: "self",
     enabled: false,
-    label: "新規カメラ",
     connection: {
       host: "127.0.0.1",
       camera_username: "",
@@ -949,10 +964,11 @@ function addCamera() {
       resize_width: 320,
     },
   };
+  camera.vision_source_id = defaultVisionSourceId(camera);
   camera.watcher.watcher_id = defaultWatcherId(camera);
   state.camera.camera_sources.push(camera);
-  state.selectedCameraId = id;
-  state.selectedWatcherSourceId = id;
+  state.selectedCameraId = camera.vision_source_id;
+  state.selectedWatcherSourceId = camera.vision_source_id;
   renderCapabilities();
 }
 

@@ -187,7 +187,7 @@ if connector_runtime_config_ready "Tapo C220" "tapo_c220" "tapo-c220-connector-m
   CHILD_PIDS+=("${TAPO_PID}")
 fi
 
-if watcher_runtime_config_ready "Tapo C220" "watcher:tapo_c220_main"; then
+if watcher_runtime_config_ready "Tapo C220" "watcher:camera"; then
   echo "starting Tapo C220 watcher" >&2
   "${TAPO_WATCHER_VENV_DIR}/bin/python" -m otomekairo_tapo_c220_watcher &
   TAPO_WATCHER_PID="$!"

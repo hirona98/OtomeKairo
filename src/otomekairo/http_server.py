@@ -298,14 +298,6 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 vision_source_id = unquote(parsed.path.rsplit("/", 1)[-1])
                 self._write_success(HTTPStatus.OK, self.server.service.get_camera_source(token, vision_source_id))
                 return
-            if method == "PUT" and parsed.path.startswith("/api/config/camera-sources/"):
-                vision_source_id = unquote(parsed.path.rsplit("/", 1)[-1])
-                payload = self._read_json_body()
-                self._write_success(
-                    HTTPStatus.OK,
-                    self.server.service.replace_camera_source(token, vision_source_id, payload),
-                )
-                return
             if method == "DELETE" and parsed.path.startswith("/api/config/camera-sources/"):
                 vision_source_id = unquote(parsed.path.rsplit("/", 1)[-1])
                 self._write_success(HTTPStatus.OK, self.server.service.delete_camera_source(token, vision_source_id))

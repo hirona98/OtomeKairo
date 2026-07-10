@@ -148,7 +148,7 @@
             </div>
             <div class="form-grid mcp-form-grid">
               <label class="checkbox-field">有効<input id="camera-enabled" type="checkbox"></label>
-              <label>表示名<input id="camera-display-name"></label>
+              <label>表示名（LLMが理解しやすい名前）<input id="camera-display-name"></label>
               <label>ホスト/IP<input id="camera-host"></label>
               <label>ユーザー名<input id="camera-username"></label>
               <label>パスワード<input id="camera-password" type="password" autocomplete="new-password"></label>
@@ -194,8 +194,9 @@
           </div>
           <div class="form-grid mcp-form-grid">
             <label class="checkbox-field">有効<input id="watcher-enabled" type="checkbox"></label>
-            <label>対象カメラ<input id="watcher-camera-label" readonly></label>
-            <label>watcher ID<input id="watcher-id"></label>
+            <label>表示名<input id="watcher-display-name" readonly></label>
+            <label>視覚ソースID<input id="watcher-vision-source-id" readonly></label>
+            <label>watcher ID<input id="watcher-id" readonly></label>
             <label>種別<input id="watcher-kind" readonly></label>
             <label>監視頻度（秒）<input id="watcher-poll-interval" type="number" min="0.2" step="0.1"></label>
             <label>wake最小間隔（秒）<input id="watcher-min-wake-interval" type="number" min="1" step="1"></label>

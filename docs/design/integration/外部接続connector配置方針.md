@@ -109,7 +109,7 @@ Webカメラ connector の hello は次の形を基準にする。
   ],
   "vision_sources": [
     {
-      "vision_source_id": "vision_source:webcam_main",
+      "vision_source_id": "vision_source:Webカメラ",
       "kind": "camera",
       "label": "Webカメラ",
       "aliases": ["カメラ", "Webカメラ", "部屋のカメラ"],
@@ -122,8 +122,8 @@ Webカメラ connector の hello は次の形を基準にする。
 }
 ```
 
-`vision_source_id` は server 内で一意にする。
-複数の Webカメラを扱う場合は、`vision_source_id` と `label` を `camera_source` 設定定義で明示的に分ける。
+`vision_source_id` は `camera_source.display_name` から生成する。
+複数の Webカメラを扱う場合は、区別できる `display_name` を `camera_source` 設定定義に保存する。
 source が一意に定まらない状態で connector は登録しない。
 固定 Webカメラのように向きや画角を制御できない source は `supported_controls` を出さない。
 
@@ -146,7 +146,7 @@ C220 connector の hello は次の形を基準にする。
   ],
   "vision_sources": [
     {
-      "vision_source_id": "vision_source:tapo_c220_main",
+      "vision_source_id": "vision_source:C220",
       "kind": "camera",
       "label": "C220",
       "aliases": ["カメラ", "部屋のカメラ", "C220"],

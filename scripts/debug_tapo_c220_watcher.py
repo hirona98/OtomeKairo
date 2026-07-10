@@ -41,7 +41,7 @@ def _wait_for_server() -> None:
 
 def _runtime_config_ready() -> int:
     try:
-        settings = load_settings(default_watcher_id="watcher:tapo_c220_main")
+        settings = load_settings(default_watcher_id="watcher:camera")
         runtime_config = fetch_runtime_config(settings)
     except RuntimeConfigNotFound as exc:
         print(f"Tapo C220 watcher debug をスキップします: {exc}", file=sys.stderr)
@@ -56,8 +56,8 @@ def _runtime_config_ready() -> int:
     if not isinstance(watcher, dict) or watcher.get("enabled") is not True:
         print("Tapo C220 watcher debug をスキップします: watcher が無効です。", file=sys.stderr)
         return SKIP
-    if not isinstance(camera_source, dict) or camera_source.get("enabled") is not True:
-        print("Tapo C220 watcher debug をスキップします: camera source が無効です。", file=sys.stderr)
+    if not isinstance(camera_source, dict):
+        print("Tapo C220 watcher debug をスキップします: camera source がありません。", file=sys.stderr)
         return SKIP
     return 0
 

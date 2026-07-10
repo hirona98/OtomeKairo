@@ -82,7 +82,7 @@ connector は起動時に自分の `client_id` に紐づく runtime config を s
 
 ```json
 {
-  "vision_source_id": "vision_source:tapo_c220_main",
+  "vision_source_id": "vision_source:C220",
   "kind": "camera",
   "label": "C220",
   "aliases": ["C220"],
@@ -152,7 +152,7 @@ result は少なくとも次を持つ。
   "operation": "move_up",
   "amount": "small",
   "client_context": {
-    "vision_source_id": "vision_source:tapo_c220_main",
+    "vision_source_id": "vision_source:C220",
     "source_kind": "camera",
     "source_label": "C220"
   },

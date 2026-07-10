@@ -133,14 +133,14 @@ def load_config(
     runtime_source = _fetch_runtime_camera_source(server_config=server_config, client_id=client_id)
     if runtime_source.get("enabled") is not True:
         raise ConfigError("runtime camera_source.enabled must be true.")
-    label = _required_string(runtime_source, "label", "runtime camera_source.label")
+    display_name = _required_string(runtime_source, "display_name", "runtime camera_source.display_name")
     connector_config = ConnectorConfig(
         client_id=client_id,
         vision_source_id=_vision_source_id(
             _required_string(runtime_source, "vision_source_id", "runtime camera_source.vision_source_id")
         ),
-        label=label,
-        aliases=[label],
+        label=display_name,
+        aliases=[display_name],
         default_for=["camera"],
     )
 

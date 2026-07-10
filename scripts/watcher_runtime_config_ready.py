@@ -38,10 +38,6 @@ def main() -> int:
         if not isinstance(watcher, dict) or watcher.get("enabled") is not True:
             print("skipping watcher: watcher is disabled.", file=sys.stderr)
             return SKIP
-        camera_source = runtime_config.get("camera_source")
-        if not isinstance(camera_source, dict) or camera_source.get("enabled") is not True:
-            print("skipping watcher: camera source is disabled.", file=sys.stderr)
-            return SKIP
         print("watcher runtime config found.", file=sys.stderr)
         return START
     except RuntimeConfigNotFound as exc:
@@ -151,7 +147,7 @@ def _enabled_watcher_ids_from_config_db(db_path: Path) -> list[str]:
             camera_source = json.loads(row[0])
         except (TypeError, json.JSONDecodeError):
             continue
-        if not isinstance(camera_source, dict) or camera_source.get("enabled") is not True:
+        if not isinstance(camera_source, dict):
             continue
         watcher = camera_source.get("watcher")
         if not isinstance(watcher, dict) or watcher.get("enabled") is not True:

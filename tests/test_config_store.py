@@ -21,7 +21,7 @@ class ConfigStoreTests(unittest.TestCase):
                     "kind": "camera",
                     "source_owner": "self",
                     "enabled": True,
-                    "label": "C220",
+                    "display_name": "C220",
                     "connection": {
                         "host": "192.0.2.10",
                         "camera_username": "user",

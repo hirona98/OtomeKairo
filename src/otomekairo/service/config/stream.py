@@ -495,7 +495,7 @@ class ServiceConfigStreamMixin:
         hello_source: dict[str, Any],
         registered_source: dict[str, Any],
     ) -> None:
-        expected_fields = ("client_id", "kind", "source_owner", "label")
+        expected_fields = ("client_id", "kind", "source_owner")
         for field_name in expected_fields:
             if hello_source.get(field_name) != registered_source.get(field_name):
                 raise ServiceError(
@@ -503,12 +503,19 @@ class ServiceConfigStreamMixin:
                     "invalid_vision_sources",
                     f"hello.vision_sources[].{field_name} does not match registered camera_source.",
                 )
-        expected_aliases = [registered_source["label"]]
+        display_name = registered_source.get("display_name")
+        if hello_source.get("label") != display_name:
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                "hello.vision_sources[].label does not match registered camera_source.display_name.",
+            )
+        expected_aliases = [display_name]
         if hello_source.get("aliases") != expected_aliases:
             raise ServiceError(
                 400,
                 "invalid_vision_sources",
-                "hello.vision_sources[].aliases does not match registered camera_source.",
+                "hello.vision_sources[].aliases does not match registered camera_source.display_name.",
             )
         if hello_source.get("default_for") != ["camera"]:
             raise ServiceError(

@@ -84,10 +84,26 @@ def _runtime_config_ready() -> int:
         return FATAL
 
 
+def _wait_for_runtime_config() -> int:
+    # compound debug では server 起動完了直後は runtime config がまだ取得できないことがある。
+    deadline = time.monotonic() + 30.0
+    last_status = SKIP
+
+    while True:
+        status = _runtime_config_ready()
+        if status == START:
+            return START
+        last_status = status
+        if time.monotonic() >= deadline:
+            print("Tapo C220 connector debug の runtime config 待機が timeout しました。", file=sys.stderr)
+            return last_status if last_status == FATAL else FATAL
+        time.sleep(0.5)
+
+
 if __name__ == "__main__":
     _load_optional_env_file()
     _wait_for_server()
-    status = _runtime_config_ready()
+    status = _wait_for_runtime_config()
     if status == START:
         exit_code = main()
         if exit_code != 0:

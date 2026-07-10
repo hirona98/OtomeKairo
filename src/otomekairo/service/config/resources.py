@@ -366,33 +366,6 @@ class ServiceConfigResourcesMixin:
             "camera_source": self._public_camera_source(camera_source),
         }
 
-    def replace_camera_source(
-        self,
-        token: str | None,
-        vision_source_id: str,
-        definition: dict[str, Any],
-    ) -> dict[str, Any]:
-        # 認可
-        state = self._require_token(token)
-        camera_sources = self._camera_sources_from_state(state)
-
-        # 正規化と検証
-        stored_definition = self._normalize_camera_source_definition(vision_source_id, definition)
-        self._validate_camera_source_definition(vision_source_id, stored_definition)
-        self._validate_unique_camera_source_watcher_ids(
-            {
-                **camera_sources,
-                vision_source_id: stored_definition,
-            }
-        )
-
-        # 永続化
-        camera_sources[vision_source_id] = deepcopy(stored_definition)
-        self.store.write_state(state)
-        return {
-            "camera_source": self._public_camera_source(stored_definition),
-        }
-
     def delete_camera_source(self, token: str | None, vision_source_id: str) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
@@ -580,10 +553,12 @@ class ServiceConfigResourcesMixin:
             watcher_id=normalized_watcher_id,
             vision_source_id=str(camera_source.get("vision_source_id") or ""),
         )
+        runtime_camera_source = deepcopy(camera_source)
+        runtime_camera_source.pop("enabled", None)
         return {
             "watcher_id": normalized_watcher_id,
             "watcher": watcher,
-            "camera_source": deepcopy(camera_source),
+            "camera_source": runtime_camera_source,
             "snapshot_dir": str(self._watcher_snapshot_dir(normalized_watcher_id)),
         }
 
@@ -880,7 +855,7 @@ class ServiceConfigResourcesMixin:
         for entry in entries:
             if not isinstance(entry, dict):
                 raise ServiceError(400, "invalid_camera_source", "Each camera_source entry must be an object.")
-            vision_source_id = self._camera_source_entry_id(entry, set(result))
+            vision_source_id = self._camera_source_entry_id(entry)
             if vision_source_id in result:
                 raise ServiceError(
                     400,
@@ -890,41 +865,8 @@ class ServiceConfigResourcesMixin:
             result[vision_source_id] = entry
         return result
 
-    def _camera_source_entry_id(self, entry: dict[str, Any], existing_ids: set[str]) -> str:
-        vision_source_id = entry.get("vision_source_id")
-        if isinstance(vision_source_id, str) and vision_source_id.strip():
-            normalized = vision_source_id.strip()
-            if not normalized.startswith("vision_source:"):
-                raise ServiceError(
-                    400,
-                    "invalid_camera_source_field",
-                    "camera_source.vision_source_id must start with vision_source:.",
-                )
-            return normalized
-
-        label = entry.get("label")
-        connection = entry.get("connection")
-        host = connection.get("host") if isinstance(connection, dict) else None
-        source_text = label if isinstance(label, str) and label.strip() else host
-        if not isinstance(source_text, str) or not source_text.strip():
-            raise ServiceError(
-                400,
-                "invalid_camera_source_field",
-                "camera_source requires label or connection.host to generate vision_source_id.",
-            )
-        slug = "".join(
-            character if character.isalnum() or character in "._-" else "_"
-            for character in source_text.strip().lower()
-        ).strip("_")
-        if not slug:
-            slug = "camera"
-        base_id = f"vision_source:camera:{slug}"
-        if base_id not in existing_ids:
-            return base_id
-        index = 2
-        while f"{base_id}_{index}" in existing_ids:
-            index += 1
-        return f"{base_id}_{index}"
+    def _camera_source_entry_id(self, entry: dict[str, Any]) -> str:
+        return self._camera_source_id_from_display_name(entry.get("display_name"))
 
     def _mcp_server_entries_by_id(self, entries: Any) -> dict[str, dict[str, Any]]:
         if not isinstance(entries, list):

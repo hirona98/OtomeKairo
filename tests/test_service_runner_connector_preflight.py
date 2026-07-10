@@ -149,13 +149,13 @@ class ConnectorRuntimeConfigPreflightTests(unittest.TestCase):
 
 
 class WatcherRuntimeConfigPreflightTests(unittest.TestCase):
-    def test_watcher_main_skips_when_camera_source_is_disabled(self) -> None:
+    def test_watcher_main_starts_when_watcher_is_enabled(self) -> None:
         original_fetch = watcher_preflight.fetch_runtime_config
         original_load = watcher_preflight.load_settings
         original_argv = sys.argv[:]
         try:
-            sys.argv = ["watcher_runtime_config_ready.py", "--default-watcher-id", "watcher:tapo_c220_main"]
-            watcher_preflight.load_settings = lambda **_: {"watcher_id": "watcher:tapo_c220_main"}
+            sys.argv = ["watcher_runtime_config_ready.py", "--default-watcher-id", "watcher:camera"]
+            watcher_preflight.load_settings = lambda **_: {"watcher_id": "watcher:camera"}
             watcher_preflight.fetch_runtime_config = lambda _: {
                 "watcher": {"enabled": True},
                 "camera_source": {"enabled": False},
@@ -167,7 +167,7 @@ class WatcherRuntimeConfigPreflightTests(unittest.TestCase):
             watcher_preflight.load_settings = original_load
             sys.argv = original_argv
 
-        self.assertEqual(status, watcher_preflight.SKIP)
+        self.assertEqual(status, watcher_preflight.START)
 
     def test_watcher_load_settings_uses_db_watcher_id_and_env_token(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -209,7 +209,8 @@ class WatcherRuntimeConfigPreflightTests(unittest.TestCase):
                         """
                         {
                           "vision_source_id": "vision_source:camera",
-                          "enabled": true,
+                          "display_name": "camera",
+                          "enabled": false,
                           "watcher": {
                             "enabled": true,
                             "watcher_id": "watcher:camera"

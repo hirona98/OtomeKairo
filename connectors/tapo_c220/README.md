@@ -16,8 +16,9 @@ OtomeKairo server 本体へ C220 固有依存を入れない。
 
 OtomeKairo 側に `camera_source` を登録する。
 通常は CocoroConsole の camera source 設定画面から登録する。
-API で登録する場合は `PUT /api/config/camera-sources/{vision_source_id}` を使う。
+API で登録する場合は `PUT /api/config/camera-sources/editor-state` を使う。
 CocoroConsole では有効/無効、識別名、IP address または hostname、camera account だけを設定する。
+`vision_source_id` と `watcher.watcher_id` は OtomeKairo が `display_name` から生成する。
 RTSP / ONVIF / PTZ の詳細値は connector 実装の既定値として扱う。
 
 connector のローカル設定には OtomeKairo への接続情報と `client_id` だけを置く。
@@ -97,7 +98,7 @@ hello で送る source metadata は次の形に固定する。
 
 ```json
 {
-  "vision_source_id": "vision_source:tapo_c220_main",
+  "vision_source_id": "vision_source:C220",
   "capability_id": "vision.capture",
   "kind": "camera",
   "source_owner": "self",
