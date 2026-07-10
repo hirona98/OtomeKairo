@@ -1351,6 +1351,12 @@ class ServiceInputPipelineMixin:
     ) -> None:
         if not isinstance(activity_context, dict):
             return
+        self._append_workspace_activity_transition_candidate(
+            candidates=candidates,
+            used_refs=used_refs,
+            source_counts=source_counts,
+            activity_context=activity_context,
+        )
         for key in ("current_activity", "previous_activity"):
             activity = activity_context.get(key)
             if not isinstance(activity, dict):
@@ -1369,9 +1375,95 @@ class ServiceInputPipelineMixin:
                 summary_text=summary_text,
                 metadata=self._workspace_metadata(
                     activity,
-                    ("label", "actor", "target", "confidence", "salience", "age_label", "ended_age_label"),
+                    (
+                        "label",
+                        "actor",
+                        "target",
+                        "transition",
+                        "confidence",
+                        "salience",
+                        "started_age_label",
+                        "duration_label",
+                        "age_label",
+                        "ended_age_label",
+                    ),
                 ),
             )
+
+    def _append_workspace_activity_transition_candidate(
+        self,
+        *,
+        candidates: list[dict[str, Any]],
+        used_refs: set[str],
+        source_counts: dict[str, int],
+        activity_context: dict[str, Any],
+    ) -> None:
+        current_activity = activity_context.get("current_activity")
+        previous_activity = activity_context.get("previous_activity")
+        if not isinstance(current_activity, dict) or not isinstance(previous_activity, dict):
+            return
+        transition = self._workspace_text(current_activity.get("transition"))
+        if transition not in {"start", "switch"}:
+            return
+        previous_summary = self._workspace_item_summary(
+            previous_activity,
+            ("reason_summary", "label", "target", "actor", "duration_label"),
+        )
+        current_summary = self._workspace_item_summary(
+            current_activity,
+            ("reason_summary", "label", "target", "actor"),
+        )
+        if previous_summary is None or current_summary is None:
+            return
+        duration_label = self._workspace_text(previous_activity.get("duration_label"))
+        summary_parts = [
+            f"直前までの活動: {previous_summary}",
+            f"現在活動: {current_summary}",
+            f"activity transition={transition}",
+        ]
+        if duration_label is not None:
+            summary_parts.append(f"前活動の継続時間: {duration_label}")
+        self._append_workspace_candidate(
+            candidates=candidates,
+            used_refs=used_refs,
+            source_counts=source_counts,
+            factor_ref="activity:transition",
+            kind="activity_transition",
+            source="activity_context",
+            summary_text=" / ".join(summary_parts),
+            metadata=self._workspace_metadata(
+                {
+                    "transition": transition,
+                    "previous_label": previous_activity.get("label"),
+                    "previous_actor": previous_activity.get("actor"),
+                    "previous_target": previous_activity.get("target"),
+                    "previous_started_age_label": previous_activity.get("started_age_label"),
+                    "previous_duration_label": previous_activity.get("duration_label"),
+                    "previous_ended_age_label": previous_activity.get("ended_age_label"),
+                    "current_label": current_activity.get("label"),
+                    "current_actor": current_activity.get("actor"),
+                    "current_target": current_activity.get("target"),
+                    "current_started_age_label": current_activity.get("started_age_label"),
+                    "current_duration_label": current_activity.get("duration_label"),
+                    "current_age_label": current_activity.get("age_label"),
+                },
+                (
+                    "transition",
+                    "previous_label",
+                    "previous_actor",
+                    "previous_target",
+                    "previous_started_age_label",
+                    "previous_duration_label",
+                    "previous_ended_age_label",
+                    "current_label",
+                    "current_actor",
+                    "current_target",
+                    "current_started_age_label",
+                    "current_duration_label",
+                    "current_age_label",
+                ),
+            ),
+        )
 
     def _append_workspace_memory_candidates(
         self,

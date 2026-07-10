@@ -420,6 +420,26 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertNotIn("speech-ready", reason)
         self.assertNotIn("speech の入口", reason)
 
+    def test_initiative_activity_summary_keeps_transition_duration(self) -> None:
+        service = DummyInputService()
+
+        summary = service._initiative_activity_summary(
+            {
+                "label": "アプリケーション起動検討",
+                "actor": "user",
+                "target": "desktop",
+                "transition": "start",
+                "started_age_label": "直前",
+                "duration_label": "1分未満",
+                "age_label": "直前",
+                "reason_summary": "desktop で新しい操作が始まっている。",
+            }
+        )
+
+        self.assertEqual(summary["transition"], "start")
+        self.assertEqual(summary["started_age_label"], "直前")
+        self.assertEqual(summary["duration_label"], "1分未満")
+
 
 if __name__ == "__main__":
     unittest.main()

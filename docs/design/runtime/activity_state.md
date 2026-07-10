@@ -58,6 +58,7 @@ OtomeKairo は、対話入力、API起床要求、観測能力の結果、外部
 | `started_at` | 活動が始まったと推定した時刻 |
 | `updated_at` | 最終更新時刻 |
 | `expires_at` | 状態の失効時刻 |
+| `transition` | 直前活動に対する `start / continue / switch / end / none` の推定 |
 | `previous_activity` | 直前活動の短い要約 |
 
 `expires_at` は必須とする。
@@ -170,20 +171,28 @@ LLM は `status` を出力しない。
 判断文脈へ出す `activity_context` には `status` を含めない。
 判断文脈へ出す `activity_context.current_activity.actor` は speech の主体境界に使う。
 `actor=user` の活動に触れる発話は、ユーザー側の状況へのコメントとして表現する。
+判断文脈へ出す `activity_context.current_activity` には、活動推定 LLM が返した `transition` を含める。
+判断文脈へ出す `activity_context.current_activity / previous_activity` には、時刻そのものではなく `started_age_label / duration_label / ended_age_label` のような生活文脈向けラベルを含める。
+これにより、長く続いた直前活動が `直前` という終了時点だけへ圧縮されないようにする。
 
 ```json
 {
   "current_activity": {
     "actor": "user",
     "label": "現在活動を短く表す自然文",
+    "transition": "switch",
     "confidence": 0.7,
     "salience": 0.5,
+    "started_age_label": "直前",
+    "duration_label": "1分未満",
     "age_label": "直前"
   },
   "previous_activity": {
     "actor": "user",
     "label": "直前活動を短く表す自然文",
     "target": "直前活動の対象",
+    "started_age_label": "6時間前",
+    "duration_label": "約6時間",
     "ended_age_label": "直前",
     "confidence": 0.82
   }

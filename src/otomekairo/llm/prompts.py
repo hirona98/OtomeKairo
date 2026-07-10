@@ -1218,10 +1218,14 @@ def _build_decision_trigger_policy(
                     "InitiativeContext.activity_context は自律判断時のタイミング補助材料です。"
                     "previous_activity から current_activity への意味ある活動モード遷移は、"
                     "initiative_entry_summary.entry_basis=activity_mode_transition との整合を見て扱ってください。"
+                    "WorkspaceContext の kind=activity_transition は、活動推定層が作った previous/current の構造化遷移です。"
+                    "単なる current_activity だけでなく、前活動の duration_label や source_owner の食い違いも合わせて speech / noop / pending_intent を比較してください。"
+                    "activity_transition だけで speech を選ばず、他候補と比較してください。"
                 ),
                 (
                     "活動遷移に触れる speech は、終わった・サボった・遊び始めたなどを断定せず、"
-                    "区切りや切り替えとして短く表現してください。"
+                    "区切りや切り替えとして短く表現してください。desktop と camera などの source が食い違う場合は、"
+                    "確定した帰着や在席ではなく、観測根拠に沿った控えめな認識として扱ってください。"
                 ),
                 (
                     "suppression_summary.same_as_recent_speech_present や WorkspaceContext の kind=suppression は、"

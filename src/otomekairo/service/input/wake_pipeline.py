@@ -51,12 +51,24 @@ class ServiceInputWakePipelineMixin:
 
         # 定期観測
         if trigger_kind == "background_thinking":
+            pre_observation_activity_context = self._summarize_activity_context(
+                self.store.get_current_activity_state(
+                    memory_set_id=state["selected_memory_set_id"],
+                    current_time=started_at,
+                ),
+                current_time=started_at,
+            )
             client_context = self._run_wake_policy_observations(
                 state=state,
                 started_at=started_at,
                 client_context=client_context,
                 cycle_id=cycle_id,
             )
+            if isinstance(pre_observation_activity_context, dict):
+                client_context = {
+                    **client_context,
+                    "pre_observation_activity_context": pre_observation_activity_context,
+                }
             input_text = self._build_wake_input_text(
                 state=state,
                 client_context=client_context,

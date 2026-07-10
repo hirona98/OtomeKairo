@@ -150,6 +150,11 @@ class ServiceInputActivityMixin:
         previous_context = self._summarize_activity_context(previous_activity_state, current_time=started_at)
         if previous_context:
             payload["previous_activity_context"] = previous_context
+        pre_observation_context = self._activity_context_payload(
+            client_context.get("pre_observation_activity_context")
+        )
+        if pre_observation_context:
+            payload["pre_observation_activity_context"] = pre_observation_context
         source_owner = self._activity_source_owner(
             client_context=client_context,
             observation_summary=observation_summary,
@@ -283,7 +288,10 @@ class ServiceInputActivityMixin:
             previous_id = previous_state.get("activity_id") if isinstance(previous_state, dict) else None
             return None, previous_id if isinstance(previous_id, str) else None
 
-        previous_activity = self._activity_previous_summary(previous_state, current_time=started_at)
+        previous_activity = self._activity_transition_baseline_previous(
+            source_pack=source_pack,
+            transition=transition,
+        ) or self._activity_previous_summary(previous_state, current_time=started_at)
         activity_id = previous_state.get("activity_id") if transition == "continue" and isinstance(previous_state, dict) else None
         if not isinstance(activity_id, str) or not activity_id.strip():
             activity_id = f"activity:{uuid.uuid4().hex}"
@@ -299,6 +307,7 @@ class ServiceInputActivityMixin:
             "status": "active",
             "confidence": self._activity_score_from_hint(str(candidate["confidence_hint"])),
             "salience": self._activity_score_from_hint(str(candidate["salience_hint"])),
+            "transition": transition,
             "source_kinds": self._activity_source_kinds(source_pack),
             "source_refs": [cycle_id] if isinstance(cycle_id, str) and cycle_id.strip() else [],
             "reason_summary": str(candidate["reason_summary"]).strip(),
@@ -334,6 +343,8 @@ class ServiceInputActivityMixin:
             kinds.append("visual_observation_context")
         if source_pack.get("foreground_world_state"):
             kinds.append("world_state")
+        if source_pack.get("pre_observation_activity_context"):
+            kinds.append("pre_observation_activity_context")
         return kinds
 
     def _summarize_activity_context(
@@ -372,10 +383,19 @@ class ServiceInputActivityMixin:
         actor = activity_state.get("actor")
         if isinstance(actor, str) and actor.strip():
             payload["actor"] = actor.strip()
+        transition = activity_state.get("transition")
+        if isinstance(transition, str) and transition.strip():
+            payload["transition"] = transition.strip()
         for key in ("confidence", "salience"):
             value = activity_state.get(key)
             if isinstance(value, (int, float)):
                 payload[key] = round(float(value), 3)
+        started_at = activity_state.get("started_at")
+        if isinstance(started_at, str) and started_at.strip():
+            payload["started_age_label"] = self._activity_age_label(started_at, current_time=current_time)
+            duration_label = self._activity_duration_label(started_at, current_time)
+            if duration_label is not None:
+                payload["duration_label"] = duration_label
         updated_at = activity_state.get("updated_at")
         if isinstance(updated_at, str) and updated_at.strip():
             payload["age_label"] = self._activity_age_label(updated_at, current_time=current_time)
@@ -399,11 +419,25 @@ class ServiceInputActivityMixin:
             str(activity_state.get("updated_at") or current_time),
             current_time=current_time,
         )
+        started_at = activity_state.get("started_at")
+        if isinstance(started_at, str) and started_at.strip():
+            duration_label = self._activity_duration_label(started_at, current_time)
+            if duration_label is not None:
+                payload["duration_label"] = duration_label
         return self._activity_previous_prompt_summary(payload)
 
     def _activity_previous_prompt_summary(self, activity_state: dict[str, Any]) -> dict[str, Any]:
         payload: dict[str, Any] = {}
-        for key in ("label", "actor", "target", "reason_summary", "ended_age_label"):
+        for key in (
+            "label",
+            "actor",
+            "target",
+            "transition",
+            "reason_summary",
+            "started_age_label",
+            "duration_label",
+            "ended_age_label",
+        ):
             value = activity_state.get(key)
             if isinstance(value, str) and value.strip():
                 payload[key] = value.strip()
@@ -412,6 +446,39 @@ class ServiceInputActivityMixin:
             if isinstance(value, (int, float)):
                 payload[key] = round(float(value), 3)
         return payload
+
+    def _activity_transition_baseline_previous(
+        self,
+        *,
+        source_pack: dict[str, Any],
+        transition: str,
+    ) -> dict[str, Any] | None:
+        if transition not in {"start", "switch"}:
+            return None
+        baseline = source_pack.get("pre_observation_activity_context")
+        if not isinstance(baseline, dict):
+            return None
+        current_activity = baseline.get("current_activity")
+        if not isinstance(current_activity, dict):
+            return None
+        previous_activity = self._activity_previous_prompt_summary(current_activity)
+        if not previous_activity:
+            return None
+        previous_activity.setdefault("ended_age_label", "直前")
+        return previous_activity
+
+    def _activity_context_payload(self, value: Any) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        payload: dict[str, Any] = {}
+        for key in ("current_activity", "previous_activity"):
+            activity = value.get(key)
+            if not isinstance(activity, dict):
+                continue
+            compact = self._activity_previous_prompt_summary(activity)
+            if compact:
+                payload[key] = compact
+        return payload or None
 
     def _activity_age_label(self, updated_at: str, *, current_time: str) -> str:
         try:
@@ -425,6 +492,22 @@ class ServiceInputActivityMixin:
             return f"{minutes}分前"
         return f"{minutes // 60}時間前"
 
+    def _activity_duration_label(self, started_at: str, ended_at: str) -> str | None:
+        try:
+            seconds = max(0, int((self._parse_iso(ended_at) - self._parse_iso(started_at)).total_seconds()))
+        except ValueError:
+            return None
+        if seconds < 90:
+            return "1分未満"
+        minutes = seconds // 60
+        if minutes < 60:
+            return f"{minutes}分間"
+        hours = minutes // 60
+        if hours < 24:
+            return f"約{hours}時間"
+        days = hours // 24
+        return f"約{days}日"
+
     def _summarize_activity_source_pack(self, source_pack: dict[str, Any]) -> dict[str, Any]:
         summary = {
             "trigger_kind": source_pack.get("trigger_kind"),
@@ -432,6 +515,10 @@ class ServiceInputActivityMixin:
             "has_observation_summary": isinstance(source_pack.get("observation_summary"), dict),
             "has_visual_observation_context": isinstance(source_pack.get("visual_observation_context"), dict),
             "has_previous_activity_context": isinstance(source_pack.get("previous_activity_context"), dict),
+            "has_pre_observation_activity_context": isinstance(
+                source_pack.get("pre_observation_activity_context"),
+                dict,
+            ),
             "recent_turn_count": len(source_pack.get("recent_turns", [])) if isinstance(source_pack.get("recent_turns"), list) else 0,
         }
         persona_summary = self._persona_context_trace_summary(source_pack.get("persona_context"))
