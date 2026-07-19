@@ -446,7 +446,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         # 接続
         websocket = ServerWebSocket(self.connection)
         session_id = self.server.service.register_event_stream_connection(websocket)
-        debug_log("HTTP", f"events/stream connected session={session_id}")
+        debug_log("HTTP", f"events/stream connected session={session_id}", level="DEBUG")
         try:
             # 受信ループ
             while True:
@@ -459,7 +459,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         finally:
             # 後始末
             self.server.service.unregister_event_stream_connection(session_id)
-            debug_log("HTTP", f"events/stream disconnected session={session_id}")
+            debug_log("HTTP", f"events/stream disconnected session={session_id}", level="DEBUG")
 
     def _handle_logs_stream(self, token: str | None) -> None:
         # 認可
@@ -489,7 +489,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         # 接続
         websocket = ServerWebSocket(self.connection)
         session_id = self.server.service.register_log_stream_connection(websocket)
-        debug_log("HTTP", f"logs/stream connected session={session_id}")
+        debug_log("HTTP", f"logs/stream connected session={session_id}", level="DEBUG")
         try:
             # 受信ループ
             while True:
@@ -501,7 +501,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         finally:
             # 後始末
             self.server.service.remove_log_stream_connection(session_id)
-            debug_log("HTTP", f"logs/stream disconnected session={session_id}")
+            debug_log("HTTP", f"logs/stream disconnected session={session_id}", level="DEBUG")
 
     # リクエスト補助
     def _read_json_body(self) -> dict:
@@ -532,7 +532,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 self.close_connection = True
                 raise ClientDisconnectedError(str(exc)) from exc
             raise
-        debug_log("HTTP", f"{self.command} {urlparse(self.path).path} -> {HTTPStatus.FOUND}")
+        debug_log("HTTP", f"{self.command} {urlparse(self.path).path} -> {HTTPStatus.FOUND}", level="DEBUG")
 
     def _handle_web_static(self, path: str) -> None:
         static_file = WEB_STATIC_FILES.get(path)
@@ -582,7 +582,8 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 self.close_connection = True
                 raise ClientDisconnectedError(str(exc)) from exc
             raise
-        debug_log("HTTP", f"{self.command} {urlparse(self.path).path} -> {status}")
+        level = "ERROR" if status >= 500 else "WARNING" if status >= 400 else "DEBUG"
+        debug_log("HTTP", f"{self.command} {urlparse(self.path).path} -> {status}", level=level)
 
     def _handle_web_ui_api(self, method: str, path: str) -> None:
         token = self._web_ui_console_token()
@@ -684,7 +685,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             debug_log("HTTP", f"{self.command} {parsed.path} -> {status} error={error_code or '-'}", level=level)
             return
 
-        debug_log("HTTP", f"{self.command} {parsed.path} -> {status}")
+        debug_log("HTTP", f"{self.command} {parsed.path} -> {status}", level="DEBUG")
 
     def _debug_log_client_disconnect(self, exc: BaseException) -> None:
         parsed = urlparse(self.path)
