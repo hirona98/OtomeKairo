@@ -24,6 +24,7 @@ class StoreCloneMixin:
             conn.execute("DELETE FROM memory_postprocess_jobs WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM entity_aliases WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM entity_registry WHERE memory_set_id = ?", (memory_set_id,))
+            conn.execute("DELETE FROM relation_index WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM memory_links WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM revisions WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM episode_affects WHERE memory_set_id = ?", (memory_set_id,))
@@ -83,6 +84,11 @@ class StoreCloneMixin:
                 target_memory_set_id=target_memory_set_id,
                 event_id_map=event_id_map,
                 memory_unit_id_map=memory_unit_id_map,
+            )
+            self._rebuild_relation_index(
+                conn,
+                memory_set_id=target_memory_set_id,
+                updated_at=self._relation_index_latest_source_time(conn, target_memory_set_id),
             )
             self._clone_episode_affect_records(
                 conn,

@@ -10,7 +10,7 @@ from otomekairo.service.common import debug_log
 
 # 定数
 MEMORY_DB_FILE_NAME = "memory.db"
-CURRENT_MEMORY_DB_VERSION = 15
+CURRENT_MEMORY_DB_VERSION = 16
 SUPPORTED_MEMORY_DB_VERSIONS = {0, CURRENT_MEMORY_DB_VERSION}
 
 
@@ -393,6 +393,31 @@ class StoreSchemaMixin:
 
             CREATE INDEX IF NOT EXISTS idx_memory_links_target
             ON memory_links(memory_set_id, target_memory_unit_id, updated_at);
+
+            CREATE TABLE IF NOT EXISTS relation_index (
+                relation_index_id TEXT PRIMARY KEY,
+                memory_set_id TEXT NOT NULL,
+                source_ref TEXT NOT NULL,
+                target_ref TEXT NOT NULL,
+                relation_predicate TEXT NOT NULL,
+                supporting_memory_unit_ids_json TEXT NOT NULL,
+                supporting_memory_link_ids_json TEXT NOT NULL,
+                derived_status TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                salience REAL NOT NULL,
+                last_evidence_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_relation_index_identity
+            ON relation_index(memory_set_id, source_ref, target_ref, relation_predicate);
+
+            CREATE INDEX IF NOT EXISTS idx_relation_index_source_recall
+            ON relation_index(memory_set_id, source_ref, derived_status, salience, last_evidence_at);
+
+            CREATE INDEX IF NOT EXISTS idx_relation_index_target_recall
+            ON relation_index(memory_set_id, target_ref, derived_status, salience, last_evidence_at);
 
             CREATE TABLE IF NOT EXISTS episode_affects (
                 episode_affect_id TEXT PRIMARY KEY,

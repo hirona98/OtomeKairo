@@ -224,6 +224,7 @@ class ServiceVisualDailyMixin:
                 "promoted_memory_unit_ids": [],
                 "skipped_candidate_count": 0,
                 "failure_reason": None,
+                "relation_index_sync": None,
             },
         }
 
@@ -316,7 +317,7 @@ class ServiceVisualDailyMixin:
         state = self.store.read_state()
         for digest in reversed(digests):
             promotion = digest.get("memory_promotion")
-            if isinstance(promotion, dict) and promotion.get("result_status") in {"succeeded", "skipped"}:
+            if isinstance(promotion, dict) and promotion.get("result_status") in {"succeeded", "skipped", "failed"}:
                 continue
             self._promote_visual_daily_digest_memory_candidates(
                 digest=digest,
@@ -342,6 +343,7 @@ class ServiceVisualDailyMixin:
                 promoted_memory_unit_ids=[],
                 skipped_candidate_count=0,
                 failure_reason=None,
+                relation_index_sync=None,
             )
             return
 
@@ -373,17 +375,12 @@ class ServiceVisualDailyMixin:
                 promoted_memory_unit_ids=[],
                 skipped_candidate_count=skipped_count,
                 failure_reason=None,
+                relation_index_sync=None,
             )
             return
 
         try:
             self.store.persist_memory_actions(memory_actions=actions)
-            self.memory.vector_indexer.sync(
-                state=state,
-                finished_at=finished_at,
-                episode=None,
-                memory_actions=actions,
-            )
         except Exception as exc:  # noqa: BLE001
             self._store_visual_daily_promotion_result(
                 digest=digest,
@@ -391,9 +388,41 @@ class ServiceVisualDailyMixin:
                 promoted_memory_unit_ids=[],
                 skipped_candidate_count=skipped_count,
                 failure_reason=str(exc),
+                relation_index_sync=None,
             )
-            debug_log("VisualDaily", f"promotion failed digest={digest['digest_id']} error={type(exc).__name__}: {exc}", level="ERROR")
+            debug_log("VisualDaily", f"promotion persist failed digest={digest['digest_id']} error={type(exc).__name__}: {exc}", level="ERROR")
             return
+
+        auxiliary_failures: list[str] = []
+        try:
+            self.memory.vector_indexer.sync(
+                state=state,
+                finished_at=finished_at,
+                episode=None,
+                memory_actions=actions,
+            )
+        except Exception as exc:  # noqa: BLE001
+            auxiliary_failures.append(f"vector_index_sync: {exc}")
+
+        try:
+            relation_index_sync = self.store.rebuild_relation_index(
+                memory_set_id=memory_set_id,
+                updated_at=self._now_iso(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            relation_index_sync = self._relation_index_sync_trace("failed", failure_reason=str(exc))
+            auxiliary_failures.append(f"relation_index_sync: {exc}")
+            self.store.append_events(
+                events=[
+                    self._build_memory_audit_event(
+                        cycle_id=f"visual_daily:{digest['digest_id']}",
+                        memory_set_id=memory_set_id,
+                        kind="relation_index_sync_failure",
+                        created_at=self._now_iso(),
+                        payload={"failure_reason": str(exc)},
+                    )
+                ]
+            )
 
         promoted_ids = [
             action["memory_unit_id"]
@@ -402,10 +431,11 @@ class ServiceVisualDailyMixin:
         ]
         self._store_visual_daily_promotion_result(
             digest=digest,
-            result_status="succeeded",
+            result_status="failed" if auxiliary_failures else "succeeded",
             promoted_memory_unit_ids=promoted_ids,
             skipped_candidate_count=skipped_count,
-            failure_reason=None,
+            failure_reason="; ".join(auxiliary_failures) or None,
+            relation_index_sync=relation_index_sync,
         )
         debug_log(
             "VisualDaily",
@@ -487,6 +517,7 @@ class ServiceVisualDailyMixin:
         promoted_memory_unit_ids: list[str],
         skipped_candidate_count: int,
         failure_reason: str | None,
+        relation_index_sync: dict[str, Any] | None,
     ) -> None:
         # digest payload に昇格結果を残す。
         updated_digest = {
@@ -496,6 +527,7 @@ class ServiceVisualDailyMixin:
                 "promoted_memory_unit_ids": promoted_memory_unit_ids,
                 "skipped_candidate_count": skipped_candidate_count,
                 "failure_reason": failure_reason,
+                "relation_index_sync": relation_index_sync,
             },
         }
         self.store.upsert_daily_visual_digest(digest=updated_digest, updated_records=[])

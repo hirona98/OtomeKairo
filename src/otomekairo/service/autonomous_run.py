@@ -1762,11 +1762,32 @@ class ServiceAutonomousRunMixin:
                     "result_status": "not_started",
                     "failure_reason": None,
                 },
+                "relation_index_sync": self._relation_index_sync_trace("not_started"),
             }
             debug_log(
                 "AutonomousRun",
                 f"commitment resolution failed run={run.get('run_id')} error={type(exc).__name__}: {self._clamp(str(exc))}",
                 level="ERROR",
+            )
+
+        relation_index_sync = resolution.get("relation_index_sync")
+        if (
+            isinstance(relation_index_sync, dict)
+            and relation_index_sync.get("result_status") == "failed"
+        ):
+            self.store.append_events(
+                events=[
+                    self._build_memory_audit_event(
+                        cycle_id=self._autonomous_run_event_cycle_id(run),
+                        memory_set_id=run["memory_set_id"],
+                        kind="relation_index_sync_failure",
+                        created_at=current_time,
+                        payload={
+                            "failure_reason": relation_index_sync.get("failure_reason"),
+                            "autonomous_run_id": run.get("run_id"),
+                        },
+                    )
+                ]
             )
 
         updated = {
