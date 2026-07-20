@@ -96,7 +96,8 @@ def _wait_for_runtime_config() -> int:
         last_status = status
         if time.monotonic() >= deadline:
             print("Tapo C220 connector debug の runtime config 待機が timeout しました。", file=sys.stderr)
-            return last_status if last_status == FATAL else FATAL
+            # 有効な camera source がない状態はデバッグ対象なしとして正常終了する。
+            return last_status
         time.sleep(0.5)
 
 
