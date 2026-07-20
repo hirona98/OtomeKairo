@@ -353,7 +353,7 @@ decision contract validation の repair 対象は、契約 shape、capability av
 `preferred_result_kind=capability_request` は追加観測の提案として扱う。
 重複再取得の制御点は判断文脈と decision contract validation に限定する。
 ユーザーが明示的に再観測を依頼した capability request は、新規観測 intent として扱う。
-通常会話の明示的な現在状態確認は自律判断ではないため、対応 capability が `available=true` なら `capability_request` へ repair する。
+通常会話は自律 initiative の強制規則を適用せず、現在状態を取得するか、既存文脈から発話するかを `decision_generation` が判断する。
 
 この matrix が失敗した場合、修正先を次の順に切り分ける。
 

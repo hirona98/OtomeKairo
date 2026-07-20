@@ -323,12 +323,6 @@ class LLMClient:
             payload=payload,
             context=context,
         )
-        self._validate_decision_explicit_status_request(
-            payload=payload,
-            input_text=context.input_text,
-            trigger_kind=context.trigger_kind,
-            capability_decision_view=context.capability_decision_view,
-        )
         if isinstance(context.capability_result_context, dict):
             self._validate_decision_capability_result_context(
                 payload=payload,
@@ -337,8 +331,6 @@ class LLMClient:
         try:
             self._validate_decision_fresh_world_state_reuse(
                 payload=payload,
-                input_text=context.input_text,
-                trigger_kind=context.trigger_kind,
                 capability_decision_view=context.capability_decision_view,
                 capability_result_context=context.capability_result_context,
             )
@@ -583,73 +575,10 @@ class LLMClient:
             "decision coerced_to_noop reason=fresh_world_state_reuse_non_user_trigger",
         )
 
-    def _validate_decision_explicit_status_request(
-        self,
-        *,
-        payload: dict[str, Any],
-        input_text: str,
-        trigger_kind: str,
-        capability_decision_view: list[dict[str, Any]] | None,
-    ) -> None:
-        if trigger_kind != "user_message":
-            return
-        expected_capability_id = self._explicit_status_request_capability_id(input_text)
-        if expected_capability_id is None:
-            return
-        capability_entry = self._capability_decision_view_entry(
-            capability_decision_view=capability_decision_view,
-            capability_id=expected_capability_id,
-        )
-        if not isinstance(capability_entry, dict) or capability_entry.get("available") is not True:
-            return
-        request_payload = payload.get("capability_request")
-        request_capability_id = (
-            request_payload.get("capability_id")
-            if isinstance(request_payload, dict)
-            else None
-        )
-        if payload.get("kind") == "capability_request" and request_capability_id == expected_capability_id:
-            return
-        raise LLMError(
-            "ユーザーは現在状態の確認を明示的に依頼しています。"
-            f"CapabilityDecisionView で {expected_capability_id} が available=true のため、"
-            f"kind=capability_request で capability_id={expected_capability_id} を返してください。"
-        )
-
-    def _explicit_status_request_capability_id(self, input_text: str) -> str | None:
-        normalized = input_text.strip()
-        if not normalized:
-            return None
-        action_terms = (
-            "確認",
-            "教えて",
-            "知りたい",
-            "チェック",
-            "見て",
-        )
-        if not any(term in normalized for term in action_terms):
-            return None
-        capability_terms = (
-            ("external.status", ("GitHub", "github", "外部サービス", "サービス状態", "レビュー")),
-            ("schedule.status", ("予定", "カレンダー", "このあと", "今日", "近日")),
-            ("social.status", ("対人文脈", "会話状況", "会話文脈", "連絡状況", "会議文脈")),
-            ("device.status", ("端末", "接続", "電源", "バッテリー", "ネットワーク")),
-            ("body.status", ("体調", "身体", "疲労", "眠気", "姿勢")),
-            ("environment.status", ("周囲", "作業環境", "部屋", "騒音", "明るさ")),
-            ("location.status", ("場所", "居場所", "移動中", "作業場所")),
-            ("vision.capture", ("視覚", "画面", "スクリーン", "表示", "ウィンドウ", "デスクトップ", "カメラ")),
-        )
-        for capability_id, terms in capability_terms:
-            if any(term in normalized for term in terms):
-                return capability_id
-        return None
-
     def _validate_decision_fresh_world_state_reuse(
         self,
         *,
         payload: dict[str, Any],
-        input_text: str,
-        trigger_kind: str,
         capability_decision_view: list[dict[str, Any]] | None,
         capability_result_context: dict[str, Any] | None = None,
     ) -> None:
@@ -664,11 +593,6 @@ class LLMClient:
         if not isinstance(request_capability_id, str) or not request_capability_id.strip():
             return
         normalized_request_capability_id = request_capability_id.strip()
-        if (
-            trigger_kind == "user_message"
-            and self._explicit_status_request_capability_id(input_text) == normalized_request_capability_id
-        ):
-            return
         if self._capability_result_context_allows_same_vision_source_capture(
             request_payload=request_payload,
             capability_result_context=capability_result_context,
@@ -709,7 +633,7 @@ class LLMClient:
         raise LLMError(
             f"CapabilityDecisionView の {normalized_request_capability_id} は "
             f"fresh_world_state_available=true です。{state_summary}"
-            "明示的なユーザー依頼なしで同じ現在状態を再取得する capability_request は不正です。"
+            "判断前から存在する同じ現在状態を再取得する capability_request は不正です。"
             "既存の foreground_world_state を使って speech / noop / pending_intent を返してください。"
         )
 

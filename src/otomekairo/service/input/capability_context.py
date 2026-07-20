@@ -67,7 +67,7 @@ class ServiceInputCapabilityContextMixin:
                             {
                                 **item,
                                 "fresh_world_state_by_vision_source": fresh_visual_sources,
-                                "fresh_world_state_policy": "明示的なユーザー依頼なしでは同じ vision_source_id の現在状態を再取得しない。",
+                                "fresh_world_state_policy": "同じ vision_source_id の新鮮な現在状態を再取得しない。",
                             }
                         )
                         changed = True
@@ -88,7 +88,7 @@ class ServiceInputCapabilityContextMixin:
                 **item,
                 "fresh_world_state_available": True,
                 "fresh_world_state": fresh_state,
-                "fresh_world_state_policy": "明示的なユーザー依頼なしでは同じ現在状態を再取得しない。",
+                "fresh_world_state_policy": "同じ state type の新鮮な現在状態を再取得しない。",
             }
             if isinstance(readiness_digest, dict):
                 annotated_item["fresh_world_state_readiness_digest"] = readiness_digest

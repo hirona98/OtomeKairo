@@ -364,8 +364,8 @@ server は `camera.ptz` の decision view に、対象 camera source ごとの `
 `camera.ptz` の decision view には target client、host、credential、内部 URL、機器 API 名、角度を入れない。
 `camera.ptz` は `user_message / wake / background_thinking / capability_result` の全起点で available な場合に出す。
 `camera.ptz` result follow-up では、同じ `vision_source_id` の `vision.capture` request だけを許可された follow-up capability request として扱う。
-通常会話でユーザーが明示的に現在状態確認を依頼した場合、この freshness による遮断は適用しない。
-通常会話でユーザーが `status` 系または観測系 capability に対応する現在状態確認を明示した場合、対応 capability が `available=true` なら decision contract validation は `capability_request` 以外の判断を repair 対象にする。
+通常会話では `fresh_world_state_available` と `fresh_world_state_by_vision_source` を付けない。
+現在入力に対して capability を実行するか、既存文脈から発話するかは `decision_generation` が判断し、server はユーザー発話の意味から特定 capability の実行を強制しない。
 自律判断で強い `drive_state` が特定の status family を要求し、対応 state type が不足または古い場合、server は `initiative_context.candidate_families` の selected autonomous entry に capability 提案として `preferred_result_kind=capability_request` と対応 `preferred_capability_id` を入れる。
 
 inspection の `CapabilityState` は少なくとも次を持つ。
