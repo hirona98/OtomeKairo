@@ -9,7 +9,7 @@ from otomekairo.llm.contexts import build_persona_context
 from otomekairo.memory.actions import MemoryActionResolver
 from otomekairo.memory.correction import MemoryCorrectionReconciler
 from otomekairo.memory.reflection.consolidator import ReflectiveConsolidator
-from otomekairo.memory.utils import clamp_score, merged_event_ids, normalized_text_list, optional_text
+from otomekairo.memory.utils import clamp_score, merged_event_ids, normalized_text_list, now_iso, optional_text
 from otomekairo.memory.vector import MemoryVectorIndexer
 from otomekairo.store.file_store import FileStore
 
@@ -162,6 +162,7 @@ class MemoryConsolidator:
                     "result_status": "queued",
                     "failure_reason": None,
                 },
+                "relation_index_sync": self._relation_index_sync_trace("queued"),
                 "reflective_consolidation": {
                     "started": False,
                     "result_status": "queued",
@@ -315,6 +316,10 @@ class MemoryConsolidator:
         except Exception as exc:  # noqa: BLE001
             vector_status = "failed"
             vector_failure_reason = str(exc)
+        relation_index_sync = self._sync_relation_index(
+            memory_set_id=memory_set_id,
+            updated_at=finished_at,
+        )
 
         return {
             "result_status": "updated",
@@ -329,6 +334,7 @@ class MemoryConsolidator:
                 "result_status": vector_status,
                 "failure_reason": vector_failure_reason,
             },
+            "relation_index_sync": relation_index_sync,
         }
 
     def _autonomous_run_commitment_resolution_trace(
@@ -350,6 +356,7 @@ class MemoryConsolidator:
                 "result_status": "not_started",
                 "failure_reason": None,
             },
+            "relation_index_sync": self._relation_index_sync_trace("not_started"),
         }
 
     def run_postprocess_job(self, *, job: dict[str, Any]) -> dict[str, Any]:
@@ -371,6 +378,10 @@ class MemoryConsolidator:
         all_memory_actions = [*memory_actions, *correction_actions]
 
         # ベクトル索引
+        vector_index_sync = {
+            "result_status": "succeeded",
+            "failure_reason": None,
+        }
         try:
             self.vector_indexer.sync(
                 state=state_snapshot,
@@ -379,63 +390,94 @@ class MemoryConsolidator:
                 memory_actions=all_memory_actions,
             )
         except Exception as exc:  # noqa: BLE001
-            return {
-                "vector_index_sync": {
-                    "result_status": "failed",
-                    "failure_reason": str(exc),
-                },
-                "correction_reconciliation": correction_trace,
-                "reflective_consolidation": {
-                    "started": False,
-                    "result_status": "not_started",
-                    "trigger_reasons": [],
-                    "affected_memory_unit_ids": [],
-                    "summary_generation": {
-                        "requested_scope_count": 0,
-                        "succeeded_scope_count": 0,
-                        "failed_scopes": [],
-                    },
-                    "drive_state_update": {
-                        "result_status": "not_started",
-                        "active_drive_ids": [],
-                        "removed_drive_ids": [],
-                        "drive_summaries": [],
-                        "scope_supports": [],
-                    },
-                    "affect_state_update": {
-                        "result_status": "not_started",
-                        "created_affect_state_ids": [],
-                        "updated_affect_state_ids": [],
-                        "weakened_affect_state_ids": [],
-                        "pruned_affect_state_ids": [],
-                        "affect_state_summaries": [],
-                    },
-                    "memory_link_update": {
-                        "result_status": "not_started",
-                        "link_count": 0,
-                        "labels": {},
-                        "memory_link_ids": [],
-                    },
-                    "failure_reason": None,
-                },
+            vector_index_sync = {
+                "result_status": "failed",
+                "failure_reason": str(exc),
             }
 
         # 内省統合
-        reflective_result = self.reflective.run(
-            state=state_snapshot,
-            finished_at=finished_at,
-            episode=episode,
-            memory_actions=all_memory_actions,
+        if vector_index_sync["result_status"] == "succeeded":
+            reflective_result = self.reflective.run(
+                state=state_snapshot,
+                finished_at=finished_at,
+                episode=episode,
+                memory_actions=all_memory_actions,
+            )
+        else:
+            reflective_result = self._not_started_reflective_result()
+
+        # 関係索引は先行する補助処理の成否にかかわらず、保存済み正本から再生成する。
+        relation_index_sync = self._sync_relation_index(
+            memory_set_id=state_snapshot["selected_memory_set_id"],
+            updated_at=now_iso(),
         )
 
         # 結果
         return {
-            "vector_index_sync": {
-                "result_status": "succeeded",
-                "failure_reason": None,
-            },
+            "vector_index_sync": vector_index_sync,
+            "relation_index_sync": relation_index_sync,
             "correction_reconciliation": correction_trace,
             "reflective_consolidation": reflective_result,
+        }
+
+    def _sync_relation_index(self, *, memory_set_id: str, updated_at: str) -> dict[str, Any]:
+        # relation_index failure は正本保存を取り消さない。
+        try:
+            return self.store.rebuild_relation_index(
+                memory_set_id=memory_set_id,
+                updated_at=updated_at,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return self._relation_index_sync_trace("failed", failure_reason=str(exc))
+
+    def _relation_index_sync_trace(
+        self,
+        result_status: str,
+        *,
+        failure_reason: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "result_status": result_status,
+            "edge_count": 0,
+            "status_counts": {"active": 0, "weak": 0, "inactive": 0},
+            "skipped_multi_party_count": 0,
+            "skipped_invalid_count": 0,
+            "failure_reason": failure_reason,
+        }
+
+    def _not_started_reflective_result(self) -> dict[str, Any]:
+        return {
+            "started": False,
+            "result_status": "not_started",
+            "trigger_reasons": [],
+            "affected_memory_unit_ids": [],
+            "summary_generation": {
+                "requested_scope_count": 0,
+                "succeeded_scope_count": 0,
+                "failed_scopes": [],
+            },
+            "drive_state_update": {
+                "result_status": "not_started",
+                "active_drive_ids": [],
+                "removed_drive_ids": [],
+                "drive_summaries": [],
+                "scope_supports": [],
+            },
+            "affect_state_update": {
+                "result_status": "not_started",
+                "created_affect_state_ids": [],
+                "updated_affect_state_ids": [],
+                "weakened_affect_state_ids": [],
+                "pruned_affect_state_ids": [],
+                "affect_state_summaries": [],
+            },
+            "memory_link_update": {
+                "result_status": "not_started",
+                "link_count": 0,
+                "labels": {},
+                "memory_link_ids": [],
+            },
+            "failure_reason": None,
         }
 
     def _run_correction_reconciliation(

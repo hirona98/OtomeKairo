@@ -76,6 +76,7 @@ class ServiceMemoryMixin:
                 "result_status": "queued",
                 "failure_reason": None,
             },
+            relation_index_sync=self._relation_index_sync_trace("queued"),
             correction_reconciliation=self._correction_reconciliation_trace("queued"),
             reflective_consolidation={
                 "started": False,
@@ -149,6 +150,7 @@ class ServiceMemoryMixin:
             self._update_memory_trace_postprocess(
                 cycle_id=started_job["cycle_id"],
                 vector_index_sync=postprocess_result["vector_index_sync"],
+                relation_index_sync=postprocess_result["relation_index_sync"],
                 correction_reconciliation=postprocess_result["correction_reconciliation"],
                 reflective_consolidation=postprocess_result["reflective_consolidation"],
             )
@@ -156,6 +158,11 @@ class ServiceMemoryMixin:
                 cycle_id=started_job["cycle_id"],
                 memory_set_id=started_job["memory_set_id"],
                 vector_index_sync=postprocess_result["vector_index_sync"],
+            )
+            self._append_relation_index_failure_events(
+                cycle_id=started_job["cycle_id"],
+                memory_set_id=started_job["memory_set_id"],
+                relation_index_sync=postprocess_result["relation_index_sync"],
             )
 
             # 完了
@@ -166,6 +173,7 @@ class ServiceMemoryMixin:
                     "failed"
                     if (
                         postprocess_result["vector_index_sync"]["result_status"] == "failed"
+                        or postprocess_result["relation_index_sync"]["result_status"] == "failed"
                         or postprocess_result["correction_reconciliation"]["result_status"] == "failed"
                         or postprocess_result["reflective_consolidation"]["result_status"] == "failed"
                     )
@@ -179,6 +187,7 @@ class ServiceMemoryMixin:
                     f"job done cycle={self._short_cycle_id(started_job['cycle_id'])} "
                     f"status={completed_job['result_status']} "
                     f"vector={postprocess_result['vector_index_sync']['result_status']} "
+                    f"relation={postprocess_result['relation_index_sync']['result_status']} "
                     f"correction={postprocess_result['correction_reconciliation']['result_status']} "
                     f"reflection={postprocess_result['reflective_consolidation']['result_status']}"
                 ),
@@ -197,6 +206,7 @@ class ServiceMemoryMixin:
                     "result_status": "failed",
                     "failure_reason": failure_reason,
                 },
+                relation_index_sync=self._relation_index_sync_trace("not_started"),
                 correction_reconciliation=self._correction_reconciliation_trace(
                     "not_started",
                     failure_reason=None,
@@ -254,6 +264,7 @@ class ServiceMemoryMixin:
         *,
         cycle_id: str,
         vector_index_sync: dict[str, Any],
+        relation_index_sync: dict[str, Any],
         reflective_consolidation: dict[str, Any],
         correction_reconciliation: dict[str, Any] | None = None,
         emit_logs: bool = True,
@@ -268,6 +279,7 @@ class ServiceMemoryMixin:
         if not isinstance(memory_trace, dict):
             memory_trace = self._pending_memory_trace()
         memory_trace["vector_index_sync"] = vector_index_sync
+        memory_trace["relation_index_sync"] = relation_index_sync
         if correction_reconciliation is not None:
             memory_trace["correction_reconciliation"] = correction_reconciliation
         memory_trace["reflective_consolidation"] = reflective_consolidation
@@ -384,6 +396,7 @@ class ServiceMemoryMixin:
                     "result_status": "failed",
                     "failure_reason": str(exc),
                 },
+                "relation_index_sync": self._relation_index_sync_trace("not_started"),
                 "correction_reconciliation": self._correction_reconciliation_trace(
                     "failed",
                     failure_reason=str(exc),
@@ -478,6 +491,7 @@ class ServiceMemoryMixin:
                 "result_status": "not_started",
                 "failure_reason": None,
             },
+            "relation_index_sync": self._relation_index_sync_trace("not_started"),
             "correction_reconciliation": self._correction_reconciliation_trace("not_started"),
             "reflective_consolidation": {
                 "started": False,
@@ -519,6 +533,7 @@ class ServiceMemoryMixin:
                 "result_status": "skipped",
                 "failure_reason": None,
             },
+            "relation_index_sync": self._relation_index_sync_trace("skipped"),
             "correction_reconciliation": self._correction_reconciliation_trace("skipped"),
             "reflective_consolidation": {
                 "started": False,
@@ -559,6 +574,30 @@ class ServiceMemoryMixin:
                     created_at=self._now_iso(),
                     payload={
                         "failure_reason": vector_index_sync.get("failure_reason"),
+                    },
+                )
+            ]
+        )
+
+    def _append_relation_index_failure_events(
+        self,
+        *,
+        cycle_id: str,
+        memory_set_id: str,
+        relation_index_sync: dict[str, Any],
+    ) -> None:
+        # relation_index failure は補助構造の監査eventとして残す。
+        if relation_index_sync.get("result_status") != "failed":
+            return
+        self.store.append_events(
+            events=[
+                self._build_memory_audit_event(
+                    cycle_id=cycle_id,
+                    memory_set_id=memory_set_id,
+                    kind="relation_index_sync_failure",
+                    created_at=self._now_iso(),
+                    payload={
+                        "failure_reason": relation_index_sync.get("failure_reason"),
                     },
                 )
             ]
@@ -647,6 +686,7 @@ class ServiceMemoryMixin:
                 "result_status": "not_started",
                 "failure_reason": None,
             },
+            "relation_index_sync": self._relation_index_sync_trace("not_started"),
             "correction_reconciliation": self._correction_reconciliation_trace("not_started"),
             "reflective_consolidation": {
                 "started": False,
@@ -699,6 +739,21 @@ class ServiceMemoryMixin:
             "entity_count": 0,
             "entity_refs": [],
             "failure_reason": None,
+        }
+
+    def _relation_index_sync_trace(
+        self,
+        result_status: str,
+        *,
+        failure_reason: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "result_status": result_status,
+            "edge_count": 0,
+            "status_counts": {"active": 0, "weak": 0, "inactive": 0},
+            "skipped_multi_party_count": 0,
+            "skipped_invalid_count": 0,
+            "failure_reason": failure_reason,
         }
 
     def _correction_reconciliation_trace(

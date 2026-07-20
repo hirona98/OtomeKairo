@@ -13,6 +13,7 @@ from otomekairo.store.config import ConfigStore
 from otomekairo.store.cycle import StoreCycleMixin
 from otomekairo.store.entity_registry import StoreEntityRegistryMixin
 from otomekairo.store.memory_links import StoreMemoryLinksMixin
+from otomekairo.store.relation_index import StoreRelationIndexMixin
 from otomekairo.store.schema import MEMORY_DB_FILE_NAME, StoreSchemaMixin
 from otomekairo.store.vector import StoreVectorMixin
 from otomekairo.store.visual import StoreVisualMixin
@@ -22,6 +23,7 @@ from otomekairo.store.visual import StoreVisualMixin
 class SQLiteMemoryStore(
     StoreCycleMixin,
     StoreMemoryLinksMixin,
+    StoreRelationIndexMixin,
     StoreEntityRegistryMixin,
     StoreAffectMixin,
     StoreActivityMixin,
