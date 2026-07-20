@@ -4,7 +4,7 @@ from typing import Any
 
 from otomekairo.llm.client import LLMClient
 from otomekairo.llm.contexts import build_persona_context
-from otomekairo.memory.utils import normalized_text_list
+from otomekairo.memory.utils import normalized_text_list, now_iso
 from otomekairo.recall.association import (
     ACTIVE_COMMITMENT_STATES,
     ACTIVE_MEMORY_STATUSES,
@@ -26,6 +26,7 @@ MEMORY_LINK_RECALL_HINT_LIMIT = 3
 MEMORY_LINK_RECALL_TRACE_LIMIT = 8
 VISUAL_OBSERVATION_RECALL_LIMIT = 3
 VISUAL_DAILY_DIGEST_RECALL_LIMIT = 2
+RELATION_INDEX_RECALL_LIMIT = 12
 
 
 # recall構築
@@ -145,22 +146,45 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         self._collect_raw_candidate_ids(raw_candidate_ids, association_sections["active_topics"])
         self._collect_raw_candidate_ids(raw_candidate_ids, association_sections["episodic_evidence"])
 
+        # canonical entity から 1-hop の関係根拠を補強する。
+        relation_index_result = self.store.list_relation_index_for_recall(
+            memory_set_id=memory_set_id,
+            entity_refs=[
+                entity_ref
+                for entity_ref in recall_hint.get("mentioned_entities", [])
+                if isinstance(entity_ref, str)
+            ],
+            current_time=current_time or now_iso(),
+            limit=RELATION_INDEX_RECALL_LIMIT,
+        )
+        relation_sections = self._relation_index_candidate_sections(relation_index_result)
+        for section_name in relation_sections:
+            self._collect_raw_candidate_ids(raw_candidate_ids, relation_sections[section_name])
+
         # 関連統合
         self_model = self._limit_memory_section(
-            raw_items=self_model + association_sections["self_model"],
-            limit=SECTION_LIMITS["self_model"],
+            raw_items=self_model + association_sections["self_model"] + relation_sections["self_model"],
+            limit=SECTION_LIMITS["self_model"] * 3,
         )
         user_model = self._limit_memory_section(
-            raw_items=user_model + association_sections["user_model"],
-            limit=SECTION_LIMITS["user_model"],
+            raw_items=user_model + association_sections["user_model"] + relation_sections["user_model"],
+            limit=SECTION_LIMITS["user_model"] * 3,
         )
         relationship_model = self._limit_memory_section(
-            raw_items=relationship_model + association_sections["relationship_model"],
-            limit=SECTION_LIMITS["relationship_model"],
+            raw_items=(
+                relationship_model
+                + association_sections["relationship_model"]
+                + relation_sections["relationship_model"]
+            ),
+            limit=SECTION_LIMITS["relationship_model"] * 3,
         )
         active_topics = self._limit_mixed_section(
-            raw_items=active_topics + association_sections["active_topics"],
-            limit=SECTION_LIMITS["active_topics"],
+            raw_items=active_topics + association_sections["active_topics"] + relation_sections["active_topics"],
+            limit=SECTION_LIMITS["active_topics"] * 3,
+        )
+        active_commitments = self._limit_memory_section(
+            raw_items=active_commitments + relation_sections["active_commitments"],
+            limit=SECTION_LIMITS["active_commitments"] * 3,
         )
         episodic_evidence = self._limit_episode_section(
             raw_items=episodic_evidence + association_sections["episodic_evidence"],
@@ -261,6 +285,10 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         )
         event_evidence = event_evidence_result["event_evidence"]
         selected_event_ids = event_evidence_result["selected_event_ids"]
+        relation_index_trace = self._relation_index_recall_trace(
+            result=relation_index_result,
+            selected_memory_ids=selected_memory_ids,
+        )
         visual_observations = self._build_visual_observations(
             memory_set_id=memory_set_id,
             augmented_query_text=augmented_query_text,
@@ -287,7 +315,81 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "memory_link_context": memory_link_context,
             "recall_pack_selection": recall_pack_selection,
             "entity_resolution": entity_resolution["entity_resolution"],
+            "relation_index": relation_index_trace,
             "candidate_count": len(raw_candidate_ids),
+        }
+
+    def _relation_index_candidate_sections(self, result: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+        # relation_index は独立sectionを作らず、記憶本来のsectionへ戻す。
+        sections = {
+            "self_model": [],
+            "user_model": [],
+            "relationship_model": [],
+            "active_topics": [],
+            "active_commitments": [],
+        }
+        for candidate in result.get("candidates", []):
+            if not isinstance(candidate, dict):
+                continue
+            unit = candidate.get("memory_unit")
+            if not isinstance(unit, dict):
+                continue
+            item = self._to_memory_item(unit)
+            item.update(
+                {
+                    "retrieval_lane": "relation_index",
+                    "relation_index_id": candidate.get("relation_index_id"),
+                    "relation_predicate": candidate.get("relation_predicate"),
+                    "relation_derived_status": candidate.get("relation_derived_status"),
+                    "relation_source_ref": candidate.get("relation_source_ref"),
+                    "relation_target_ref": candidate.get("relation_target_ref"),
+                }
+            )
+            section_name = self._relation_index_section_name(item)
+            if section_name is not None:
+                sections[section_name].append(item)
+        return sections
+
+    def _relation_index_section_name(self, item: dict[str, Any]) -> str | None:
+        if item.get("memory_type") == "commitment":
+            return (
+                "active_commitments"
+                if item.get("commitment_state") in ACTIVE_COMMITMENT_STATES
+                else None
+            )
+        scope_type = item.get("scope_type")
+        if scope_type == "self":
+            return "self_model"
+        if scope_type == "user":
+            return "user_model"
+        if scope_type == "relationship":
+            return "relationship_model"
+        if scope_type in {"entity", "topic", "world"}:
+            return "active_topics"
+        return None
+
+    def _relation_index_recall_trace(
+        self,
+        *,
+        result: dict[str, Any],
+        selected_memory_ids: list[str],
+    ) -> dict[str, Any]:
+        candidate_ids = [
+            candidate["memory_unit"]["memory_unit_id"]
+            for candidate in result.get("candidates", [])
+            if isinstance(candidate, dict)
+            and isinstance(candidate.get("memory_unit"), dict)
+            and isinstance(candidate["memory_unit"].get("memory_unit_id"), str)
+        ]
+        selected_ids = set(selected_memory_ids)
+        return {
+            "requested_entity_refs": result.get("requested_entity_refs", []),
+            "matched_edge_count": result.get("matched_edge_count", 0),
+            "used_edge_ids": result.get("used_edge_ids", []),
+            "status_counts": result.get("status_counts", {"active": 0, "weak": 0}),
+            "candidate_memory_unit_ids": candidate_ids,
+            "selected_memory_unit_ids": [memory_unit_id for memory_unit_id in candidate_ids if memory_unit_id in selected_ids],
+            "stale_memory_unit_ids": result.get("stale_memory_unit_ids", []),
         }
 
     def _build_scope_context(self, recall_hint: dict[str, Any]) -> dict[str, list[tuple[str, str]]]:
@@ -914,6 +1016,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "selected_event_ids": [],
             "memory_link_context": self._empty_memory_link_context(),
             "entity_resolution": self._empty_entity_resolution_trace(),
+            "relation_index": self._empty_relation_index_trace(),
             "candidate_count": 0,
         }
 
@@ -923,6 +1026,17 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "requested_entity_refs": [],
             "resolved_entities": [],
             "unresolved_entity_refs": [],
+        }
+
+    def _empty_relation_index_trace(self) -> dict[str, Any]:
+        return {
+            "requested_entity_refs": [],
+            "matched_edge_count": 0,
+            "used_edge_ids": [],
+            "status_counts": {"active": 0, "weak": 0},
+            "candidate_memory_unit_ids": [],
+            "selected_memory_unit_ids": [],
+            "stale_memory_unit_ids": [],
         }
 
     def _build_visual_observations(

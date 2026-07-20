@@ -190,6 +190,13 @@ class ServiceConfigInspectionMixin:
                     limit=12,
                 )
             ],
+            "relation_index": [
+                self._compact_relation_index_record(record)
+                for record in self.store.list_relation_index_records(
+                    memory_set_id=state["selected_memory_set_id"],
+                    limit=20,
+                )
+            ],
             "visual_daily_summary": self._current_visual_daily_summary(state=state),
         }
 
@@ -210,6 +217,23 @@ class ServiceConfigInspectionMixin:
             "salience": record.get("salience"),
             "evidence_event_count": len(record.get("evidence_event_ids", [])),
             "supporting_memory_unit_count": len(record.get("supporting_memory_unit_ids", [])),
+        }
+
+    def _compact_relation_index_record(self, record: dict[str, Any]) -> dict[str, Any]:
+        # 関係本文ではなく、派生索引の状態だけを inspection へ出す。
+        payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
+        return {
+            "relation_index_id": record.get("relation_index_id"),
+            "source_ref": record.get("source_ref"),
+            "target_ref": record.get("target_ref"),
+            "relation_predicate": record.get("relation_predicate"),
+            "derived_status": record.get("derived_status"),
+            "confidence": record.get("confidence"),
+            "salience": record.get("salience"),
+            "last_evidence_at": record.get("last_evidence_at"),
+            "supporting_memory_unit_count": len(record.get("supporting_memory_unit_ids", [])),
+            "supporting_memory_link_count": len(record.get("supporting_memory_link_ids", [])),
+            "representative_summary": payload.get("representative_summary"),
         }
 
     def get_visual_digest_inspection(

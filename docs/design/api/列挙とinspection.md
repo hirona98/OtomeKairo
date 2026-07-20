@@ -133,6 +133,21 @@ response:
       "mood_state": {},
       "affect_states": [],
       "entity_registry": [],
+      "relation_index": [
+        {
+          "relation_index_id": "relation_index:...",
+          "source_ref": "self",
+          "target_ref": "person:tanaka",
+          "relation_predicate": "trusts",
+          "derived_status": "active",
+          "confidence": 0.84,
+          "salience": 0.72,
+          "last_evidence_at": "2026-03-31T08:50:00+09:00",
+          "supporting_memory_unit_count": 2,
+          "supporting_memory_link_count": 1,
+          "representative_summary": "田中さんを信頼している。"
+        }
+      ],
       "visual_daily_summary": null
     },
     "capability_inspection": {
@@ -148,6 +163,9 @@ response:
 `current_state.entity_registry` は、選択中 `memory_set` の固有対象正規化を確認する compact snapshot である。
 `current_state.entity_registry` は `entity_ref / entity_type / display_name / aliases / first_seen_at / last_seen_at / confidence / salience / evidence_event_count / supporting_memory_unit_count` を返す。
 `current_state.entity_registry` は読み取り専用であり、対象の性格、好み、属性、関係本文を含めない。
+`current_state.relation_index` は、選択中 `memory_set` の完成済み関係索引を最大 20 件返す compact snapshot である。
+`current_state.relation_index` は `relation_index_id / source_ref / target_ref / relation_predicate / derived_status / confidence / salience / last_evidence_at / supporting_memory_unit_count / supporting_memory_link_count / representative_summary` を返す。
+`current_state.relation_index` は読み取り専用であり、支持元の本文や revision 本文を含めない。
 `runtime_detail` は scheduler、memory postprocess、visual daily worker、capability request 待ち、due `autonomous_run` のような runtime state を返す。
 `runtime_detail.autonomous_runs` と `current_state.autonomous_runs` は `run_id / status / objective_summary / current_step_summary / history_summary / next_run_at / waiting_request_id / pause_reason / created_at / updated_at / completed_at` の要約を返す。
 `runtime_detail.wake_policy_observations` は現在設定されている `wake_policy.observations` と process-local の直近実行結果を照合した snapshot である。

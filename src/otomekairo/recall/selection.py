@@ -278,6 +278,13 @@ class RecallSelectionMixin:
         }
         if item.get("association_score") is not None:
             payload["association_score"] = round(float(item["association_score"]), 4)
+        if item.get("retrieval_lane") == "relation_index":
+            payload["relation_evidence"] = {
+                "derived_status": item.get("relation_derived_status"),
+                "source_ref": item.get("relation_source_ref"),
+                "target_ref": item.get("relation_target_ref"),
+                "predicate": item.get("relation_predicate"),
+            }
 
         # 記憶単位
         if item["source_kind"] == "memory_unit":

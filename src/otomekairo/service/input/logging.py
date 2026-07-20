@@ -143,6 +143,7 @@ class ServiceInputLoggingMixin:
             )
         else:
             vector_sync = memory_trace.get("vector_index_sync") or {}
+            relation_sync = memory_trace.get("relation_index_sync") or {}
             correction = memory_trace.get("correction_reconciliation") or {}
             reflective = memory_trace.get("reflective_consolidation") or {}
             drive_update = memory_trace.get("drive_state_update") or {}
@@ -153,6 +154,7 @@ class ServiceInputLoggingMixin:
                 f"episode_affects={memory_trace.get('episode_affect_count', 0)} "
                 f"vector={vector_sync.get('result_status', 'unknown')}"
             )
+            message += f" relation={relation_sync.get('result_status', 'unknown')}"
             message += f" correction={correction.get('result_status', 'unknown')}"
             message += f" reflection={reflective.get('result_status', 'unknown')}"
             message += f" drive={drive_update.get('result_status', 'unknown')}"
