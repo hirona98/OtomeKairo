@@ -115,13 +115,16 @@ LLM の出力は JSON object 1 個に固定する。
 ```json
 {
   "summary_text": "遊園地の屋外風景が写っている。近くにメリーゴーランドがあり、周囲に人や柵が見える。背景には観覧車らしき大きな円形構造物が見える。案内看板や園内設備も一部見えている。",
-  "confidence_hint": "medium"
+  "confidence_hint": "medium",
+  "change_state": "first_seen",
+  "change_basis": "no_previous_observation",
+  "change_reason_summary": "同じ視覚 source の前回観測がない。"
 }
 ```
 
 契約は次とする。
 
-- トップレベルキーは `summary_text / confidence_hint` だけにする
+- トップレベルキーは `summary_text / confidence_hint / change_state / change_basis / change_reason_summary` だけにする
 - `summary_text` は詳細な視覚説明にする
 - `summary_text` は改行なし、内部識別子なしにする
 - 主要な物体、場所、背景要素、活動、状態、変化を落とさない
@@ -129,6 +132,8 @@ LLM の出力は JSON object 1 個に固定する。
 - 不確実な対象は断定せず、「らしき」「可能性がある」として残す
 - 細かな OCR 全文、座標、UI 構造、資格情報、内部 URL、配送先 client、base64 本文を書かない
 - `confidence_hint` は `low / medium / high` のいずれかにする
+- `change_state / change_basis` の値と意味は [視覚機能.md](視覚機能.md) の「視覚変化」を正本とする
+- `change_reason_summary` は変化判定の短い理由とし、改行と内部識別子を含めない
 
 ## パイプライン統合
 
@@ -136,7 +141,7 @@ LLM の出力は JSON object 1 個に固定する。
 
 1. 画像入力を受ける
 2. raw image を保存せず、LLM へ multimodal input として渡す
-3. LLM が詳細な `summary_text` を返す
+3. LLM が詳細な `summary_text` と構造化した視覚変化判定を返す
 4. `observation_summary.image_interpreted=true` と `visual_summary_text` を付ける
 5. `visual_summary_text` を `visual_observation_record.detailed_summary_text` として保存する
 6. `scene_entities / activity_labels / environment_labels` と検索用 index を派生する

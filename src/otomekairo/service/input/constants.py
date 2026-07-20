@@ -13,56 +13,18 @@ WORLD_STATE_CONTEXT_KEYS_BY_TYPE = (
     ("environment", "environment_context"),
     ("location", "location_context"),
 )
+WORLD_STATE_SCOPE_BY_TYPE = {
+    "visual_context": ("topic", "topic:current_work"),
+    "external_service": ("world", "world"),
+    "body": ("self", "self"),
+    "device": ("world", "world"),
+    "schedule": ("self", "self"),
+    "social_context": ("relationship", "self|user"),
+    "environment": ("world", "world"),
+    "location": ("world", "world"),
+}
 WORLD_STATE_FOREGROUND_LIMIT = 4
 WORLD_STATE_MAX_ACTIVE = 12
-WORLD_STATE_USER_INPUT_REQUEST_TERMS = (
-    "確認",
-    "教えて",
-    "知りたい",
-    "チェック",
-)
-WORLD_STATE_USER_INPUT_CURRENT_STATE_TERMS_BY_TYPE = {
-    "body": (
-        "体調",
-        "身体",
-        "疲労",
-        "眠気",
-        "姿勢",
-    ),
-    "device": (
-        "端末",
-        "接続",
-        "電源",
-        "バッテリー",
-        "ネットワーク",
-    ),
-    "environment": (
-        "環境",
-        "周囲",
-        "部屋",
-        "騒音",
-        "明るさ",
-        "作業環境",
-    ),
-    "location": (
-        "場所",
-        "居場所",
-        "現在地",
-        "作業場所",
-        "どこ",
-    ),
-    "social_context": (
-        "会話",
-        "連絡",
-        "通知",
-        "チャット",
-        "Slack",
-        "Discord",
-        "会議",
-        "打ち合わせ",
-        "やり取り",
-    ),
-}
 WORLD_STATE_HINT_SCORES = {
     "low": 0.35,
     "medium": 0.65,

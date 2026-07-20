@@ -100,53 +100,23 @@ LLM が返した自由文をそのまま正本状態へ入れない。
 `world_state` 更新に使う LLM 契約は、観測や実行結果から短期世界状態候補を抽出するための補助契約である。
 専用のモデル role を増やさず、`model_preset.roles.input_interpretation` を使う。
 
-LLM に渡す source pack は少なくとも次を持つ。
+LLM に渡す source pack の wire shape は
+[world_state source pack](../capability/world_state_source_pack.md) を正本とする。
+コードは非空の state-type 別 context ごとに `state_sources` を 1 件作り、`candidate_ref / state_type / scope_type / scope_key / evidence_summary` を与える。
+`candidate_ref` は request-local な `state_source:<state_type>` とする。
 
-```json
-{
-  "trigger_kind": "capability_result",
-  "current_input_summary": "vision.capture がチャットツールの general チャンネルを視覚前景として観測した。",
-  "source_kind": "capability_result",
-  "source_ref": "vision_capture_request:...",
-  "time_context": "2026年4月25日 土曜日 9時00分（日本時間）",
-  "client_context": {
-    "source": "vision.capture"
-  },
-  "visual_context": {
-    "summary_text": "チャットツールの general チャンネルが視覚前景で、会話一覧と現在のスレッドが見えている。",
-    "visual_summary_text": "チャットツールの general チャンネルが視覚前景で、会話一覧と現在のスレッドが見えている。",
-    "image_interpreted": true,
-    "visual_confidence_hint": "medium",
-    "image_count": 1,
-    "capability_id": "vision.capture",
-    "vision_source_id": "vision_source:shared_visual_context",
-    "source_kind": "virtual",
-    "source_label": "共有視覚文脈"
-  },
-  "social_context_context": {
-    "summary_text": "Slack 上のやり取りが近い判断文脈として前景にある。",
-    "social_context_summary": "Slack 上のやり取りが近い判断文脈として前景にある。",
-    "capability_id": "social.status"
-  },
-  "environment_context": {
-    "summary_text": "作業部屋は静かで、机上環境が整っている。",
-    "environment_summary": "作業部屋は静かで、机上環境が整っている。"
-  },
-  "location_context": {
-    "summary_text": "自宅デスクで作業している。",
-    "location_summary": "自宅デスクで作業している。"
-  },
-  "capability_result_summary": {
-    "capability_id": "vision.capture",
-    "image_count": 1,
-    "image_interpreted": true,
-    "visual_summary_text": "チャットツールの general チャンネルが視覚前景で、会話一覧と現在のスレッドが見えている。",
-    "visual_confidence_hint": "medium",
-    "error": null
-  },
-  "allowed_state_types": ["visual_context", "social_context", "environment", "location"]
-}
-```
+`state_sources` の scope は次に固定する。
+
+| `state_type` | `scope_type` | `scope_key` |
+|------|------|------|
+| `visual_context` | `topic` | `topic:current_work` |
+| `social_context` | `relationship` | `self|user` |
+| `body` | `self` | `self` |
+| `schedule` | `self` | `self` |
+| `external_service` | `world` | `world` |
+| `device` | `world` | `world` |
+| `environment` | `world` | `world` |
+| `location` | `world` | `world` |
 
 継続状態として持ち越す視覚前景の補助要約がある場合は `visual_context` を追加する。
 `vision.capture` は `source_kind` に関係なく `visual_context` の候補にする。
@@ -187,8 +157,7 @@ LLM の出力は JSON object 1 個に固定する。
 {
   "state_candidates": [
     {
-      "state_type": "visual_context",
-      "scope": "topic:current_work",
+      "candidate_ref": "state_source:visual_context",
       "summary_text": "チャットツールの general チャンネルが視覚前景にある。",
       "confidence_hint": "medium",
       "salience_hint": "medium",
@@ -202,10 +171,10 @@ LLM の出力は JSON object 1 個に固定する。
 
 - 必須トップレベルキーは `state_candidates` だけにする
 - `state_candidates` は配列にする
-- 各候補は `state_type / scope / summary_text / confidence_hint / salience_hint / ttl_hint` だけを持つ
-- `state_type` はこの文書の `state_type` enum かつ source pack の `allowed_state_types` に含まれる値だけを使う
-- `allowed_state_types` が空の場合は `state_candidates` を空配列にする
-- `scope` は `self / user / entity:<key> / topic:<key> / relationship:<key> / world` のいずれかにする
+- 各候補は `candidate_ref / summary_text / confidence_hint / salience_hint / ttl_hint` だけを持つ
+- `candidate_ref` は source pack の `state_sources` に存在する値だけを使う
+- 同じ `candidate_ref` を重複して返さない
+- `state_sources` が空の場合は `state_candidates` を空配列にする
 - `summary_text` は簡潔にし、改行なし、内部識別子なしにする
 - `confidence_hint` と `salience_hint` は `low / medium / high` のいずれかにする
 - `ttl_hint` は `short / medium / long` のいずれかにする
@@ -214,6 +183,7 @@ LLM の出力は JSON object 1 個に固定する。
 コードは LLM 出力を受けて次を決める。
 
 - `world_state_id`
+- `state_type`
 - `scope_type / scope_key`
 - `source_kind / source_ref`
 - 数値 `confidence / salience`
@@ -320,9 +290,9 @@ inspection では、`world_state` について少なくとも次を追えるよ�
 - 置換された state の件数
 - 失効した state の件数
 - source pack から `world_state` 更新へ渡した sanitized context summary
-- source pack で許可された `allowed_state_types`
+- source pack で提示した `state_sources` と request-local `candidate_ref`
 - `world_state_trace.source_pack_state_type_hooks` として、`visual_context / social_context / environment / location / external_service / body / device / schedule` ごとの `summary_text / summary_source / signal_fields / capability_id / vision_source_id` 要約
-- `world_state_trace.normalized_candidate_policies` として、候補ごとの `summary_source / effective_ttl_seconds / integration_key` 要約
+- `world_state_trace.normalized_candidate_policies` として、候補ごとの `candidate_ref / summary_source / effective_ttl_seconds / integration_key` 要約
 - source kind と source ref の要約
 - 失敗した更新の理由
 

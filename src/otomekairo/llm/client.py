@@ -1290,7 +1290,7 @@ class LLMClient:
         return self._generate_structured_payload(
             role_definition=role_definition,
             messages=messages,
-            validator=validate_world_state_contract,
+            validator=lambda payload: validate_world_state_contract(payload, source_pack=source_pack),
             repair_prompt_builder=build_world_state_repair_prompt,
             failure_message="WorldState の生成に失敗しました。解析可能な応答が得られませんでした。",
             wrap_validation_error=True,

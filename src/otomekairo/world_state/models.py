@@ -317,6 +317,24 @@ WorldStateContext: TypeAlias = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class WorldStateSourceCandidate:
+    candidate_ref: str
+    state_type: str
+    scope_type: str
+    scope_key: str
+    evidence_summary: str
+
+    def to_prompt_payload(self) -> dict[str, str]:
+        return {
+            "candidate_ref": self.candidate_ref,
+            "state_type": self.state_type,
+            "scope_type": self.scope_type,
+            "scope_key": self.scope_key,
+            "evidence_summary": self.evidence_summary,
+        }
+
+
 @dataclass(slots=True)
 class WorldStateSourcePack:
     trigger_kind: str
@@ -325,7 +343,7 @@ class WorldStateSourcePack:
     source_ref: str
     time_context: str
     client_context: WorldStateClientContext
-    allowed_state_types: tuple[str, ...] = field(default_factory=tuple)
+    state_sources: tuple[WorldStateSourceCandidate, ...] = field(default_factory=tuple)
     visual_context: WorldStateVisualContext | None = None
     external_service_context: WorldStateExternalServiceContext | None = None
     body_context: WorldStateBodyContext | None = None
@@ -356,6 +374,13 @@ class WorldStateSourcePack:
             return None
         return self.context(context_key)
 
+    def source_candidate(self, candidate_ref: str) -> WorldStateSourceCandidate | None:
+        normalized_ref = candidate_ref.strip()
+        for candidate in self.state_sources:
+            if candidate.candidate_ref == normalized_ref:
+                return candidate
+        return None
+
     def to_prompt_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "trigger_kind": self.trigger_kind,
@@ -364,7 +389,7 @@ class WorldStateSourcePack:
             "source_ref": self.source_ref,
             "time_context": self.time_context,
             "client_context": self.client_context.to_prompt_payload(),
-            "allowed_state_types": list(self.allowed_state_types),
+            "state_sources": [candidate.to_prompt_payload() for candidate in self.state_sources],
         }
         for key in (
             "visual_context",
@@ -469,8 +494,7 @@ class WorldStateTrace:
 
 @dataclass(frozen=True, slots=True)
 class WorldStateCandidate:
-    state_type: str
-    scope: str
+    candidate_ref: str
     summary_text: str
     confidence_hint: str
     salience_hint: str
@@ -482,8 +506,7 @@ class WorldStateCandidate:
             return None
         parts = []
         for key in (
-            "state_type",
-            "scope",
+            "candidate_ref",
             "summary_text",
             "confidence_hint",
             "salience_hint",

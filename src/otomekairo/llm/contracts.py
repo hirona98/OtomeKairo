@@ -5,6 +5,8 @@ import math
 import re
 from typing import Any
 
+from otomekairo.world_state.models import WorldStateSourcePack
+
 
 # エラー
 class LLMError(Exception):
@@ -51,16 +53,6 @@ RECALL_HINT_REQUIRED_KEYS = (
     "mentioned_topics",
     "risk_flags",
 )
-WORLD_STATE_TYPE_VALUES = {
-    "visual_context",
-    "environment",
-    "location",
-    "external_service",
-    "body",
-    "device",
-    "schedule",
-    "social_context",
-}
 WORLD_STATE_HINT_VALUES = {
     "low",
     "medium",
@@ -549,48 +541,6 @@ def _validate_vad(value: Any, label: str) -> None:
         axis_value = value[axis]
         if not isinstance(axis_value, (int, float)):
             raise LLMError(f"{label}.{axis} は数値である必要があります。")
-
-
-def _validate_world_state_scope_ref(value: Any, label: str) -> None:
-    # 型確認
-    if not isinstance(value, str) or not value.strip():
-        raise LLMError(f"{label} が不正です。")
-
-    # 固定scope
-    normalized = value.strip()
-    if normalized in {"self", "user", "world"}:
-        return
-
-    # 分解
-    scope_type, separator, scope_key = normalized.partition(":")
-    if not separator or not scope_key.strip():
-        raise LLMError(f"{label} は self / user / world / entity:<key> / topic:<key> / relationship:<key> 形式である必要があります。")
-
-    # 実体scope
-    if scope_type == "entity":
-        if not _has_named_ref_prefix(scope_key.strip()):
-            raise LLMError(f"{label} entity scope が不正です。")
-        return
-
-    # topic scope
-    if scope_type == "topic":
-        _validate_scope_identity(
-            scope_type="topic",
-            scope_key=f"topic:{scope_key.strip()}",
-            label=label,
-        )
-        return
-
-    # relationship scope
-    if scope_type == "relationship":
-        _validate_scope_identity(
-            scope_type="relationship",
-            scope_key=scope_key.strip(),
-            label=label,
-        )
-        return
-
-    raise LLMError(f"{label} scope_type が不正です。")
 
 
 # recall_hint検証
@@ -1113,7 +1063,11 @@ def validate_event_evidence_contract(payload: dict[str, Any]) -> None:
         raise LLMError("EventEvidence には少なくとも 1 つの null でない slot が必要です。")
 
 
-def validate_world_state_contract(payload: dict[str, Any]) -> None:
+def validate_world_state_contract(
+    payload: dict[str, Any],
+    *,
+    source_pack: WorldStateSourcePack,
+) -> None:
     # 必須キー群
     _validate_exact_keys(payload, {"state_candidates"}, "WorldState")
 
@@ -1124,17 +1078,26 @@ def validate_world_state_contract(payload: dict[str, Any]) -> None:
     if len(state_candidates) > 4:
         raise LLMError("WorldState state_candidates は最大 4 件までである必要があります。")
 
-    seen_keys: set[tuple[str, str]] = set()
+    source_candidate_refs = {candidate.candidate_ref for candidate in source_pack.state_sources}
+    if len(source_candidate_refs) != len(source_pack.state_sources):
+        raise LLMError("WorldState source_pack.state_sources の candidate_ref は一意である必要があります。")
+
+    seen_candidate_refs: set[str] = set()
     for candidate in state_candidates:
         _validate_exact_keys(
             candidate,
-            {"state_type", "scope", "summary_text", "confidence_hint", "salience_hint", "ttl_hint"},
+            {"candidate_ref", "summary_text", "confidence_hint", "salience_hint", "ttl_hint"},
             "WorldState candidate",
         )
-        state_type = candidate["state_type"]
-        if state_type not in WORLD_STATE_TYPE_VALUES:
-            raise LLMError("WorldState candidate.state_type が不正です。")
-        _validate_world_state_scope_ref(candidate["scope"], "WorldState candidate.scope")
+        candidate_ref = candidate["candidate_ref"]
+        if not isinstance(candidate_ref, str) or not candidate_ref.strip():
+            raise LLMError("WorldState candidate.candidate_ref が不正です。")
+        normalized_candidate_ref = candidate_ref.strip()
+        if normalized_candidate_ref not in source_candidate_refs:
+            raise LLMError("WorldState candidate.candidate_ref は source_pack.state_sources に存在する必要があります。")
+        if normalized_candidate_ref in seen_candidate_refs:
+            raise LLMError("WorldState state_candidates に同じ candidate_ref を重複して含めてはいけません。")
+        seen_candidate_refs.add(normalized_candidate_ref)
 
         summary_text = candidate["summary_text"]
         if not isinstance(summary_text, str):
@@ -1155,12 +1118,6 @@ def validate_world_state_contract(payload: dict[str, Any]) -> None:
             raise LLMError("WorldState candidate.salience_hint が不正です。")
         if ttl_hint not in WORLD_STATE_TTL_HINT_VALUES:
             raise LLMError("WorldState candidate.ttl_hint が不正です。")
-
-        dedupe_key = (state_type, str(candidate["scope"]).strip())
-        if dedupe_key in seen_keys:
-            raise LLMError("WorldState state_candidates に重複した state_type/scope の組を含めてはいけません。")
-        seen_keys.add(dedupe_key)
-
 
 def validate_visual_observation_contract(payload: dict[str, Any]) -> None:
     # 必須キー群

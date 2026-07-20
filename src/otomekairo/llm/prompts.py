@@ -27,7 +27,6 @@ from otomekairo.llm.contracts import (
     TIME_REFERENCE_VALUES,
     WORLD_STATE_HINT_VALUES,
     WORLD_STATE_TTL_HINT_VALUES,
-    WORLD_STATE_TYPE_VALUES,
 )
 from otomekairo.memory.utils import llm_local_time_text, localize_timestamp_fields
 from otomekairo.world_state.models import WorldStateSourcePack
@@ -652,11 +651,8 @@ def build_world_state_repair_prompt(validation_error: str) -> str:
         f"validator_error: {validation_error}\n"
         "同じ source pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
         "トップレベルキーは state_candidates だけです。\n"
-        "各候補は state_type, scope, summary_text, confidence_hint, salience_hint, ttl_hint だけを持つ object にしてください。\n"
-        "state_type は "
-        + " / ".join(sorted(WORLD_STATE_TYPE_VALUES))
-        + " のいずれかだけを使ってください。\n"
-        "scope は self / user / world / entity:<key> / topic:<key> / relationship:<key> 形式だけを使ってください。\n"
+        "各候補は candidate_ref, summary_text, confidence_hint, salience_hint, ttl_hint だけを持つ object にしてください。\n"
+        "candidate_ref は source_pack.state_sources に存在する値だけを使い、重複させないでください。\n"
         "summary_text は簡潔に、改行なし、内部識別子なしで返してください。\n"
         "confidence_hint と salience_hint は "
         + " / ".join(sorted(WORLD_STATE_HINT_VALUES))
@@ -1789,12 +1785,9 @@ def _build_world_state_system_prompt() -> str:
         "world_state は外界や環境の短期状態候補を作ります。ユーザー活動モードは activity_state、発話や見送りは decision_generation に残してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "返すトップレベルキーは state_candidates だけです。\n"
-        "各候補は state_type, scope, summary_text, confidence_hint, salience_hint, ttl_hint の 6 キーだけを持つ object にしてください。\n"
-        "state_type は source_pack.allowed_state_types に含まれる値だけを使ってください。allowed_state_types が空なら state_candidates は空配列です。\n"
-        "state_type の全体 enum は "
-        + " / ".join(sorted(WORLD_STATE_TYPE_VALUES))
-        + " のいずれかだけを使ってください。\n"
-        "scope は self / user / world / entity:<key> / topic:<key> / relationship:<key> 形式だけを使ってください。\n"
+        "各候補は candidate_ref, summary_text, confidence_hint, salience_hint, ttl_hint の 5 キーだけを持つ object にしてください。\n"
+        "candidate_ref は source_pack.state_sources に含まれる値だけを使い、同じ値を重複させないでください。state_sources が空なら state_candidates は空配列です。\n"
+        "state_type と scope_type / scope_key は state_sources にあるコード確定値であり、出力へ含めないでください。\n"
         "summary_text は簡潔に、改行なし、内部識別子なしにしてください。\n"
         "confidence_hint と salience_hint は "
         + " / ".join(sorted(WORLD_STATE_HINT_VALUES))
@@ -1804,7 +1797,7 @@ def _build_world_state_system_prompt() -> str:
         + " のいずれかだけを使ってください。\n"
         "raw payload、資格情報、内部 URL、配送先 client、base64、OCR 全文を書いてはいけません。\n"
         "画像由来の判断は source pack にある visual_summary_text を根拠にしてください。\n"
-        "visual_context / external_service_context / body_context / device_context / schedule_context / social_context_context / environment_context / location_context があるときは、その短い summary_text と補助 field だけを根拠に使ってください。\n"
+        "state_sources の evidence_summary と、対応する visual_context / external_service_context / body_context / device_context / schedule_context / social_context_context / environment_context / location_context の補助 field だけを根拠に使ってください。\n"
         "現在状態は source pack の context summary、capability result、client context、observation summary を根拠にしてください。\n"
         "visual_context.visual_summary_text は視覚前景の詳細な補助説明として使い、world_state candidate の summary_text は現在判断に効く短い状態要約にしてください。external_service_context.status_text / service は外部状態の補助情報として使ってください。\n"
         "external_service_context / body_context / device_context / schedule_context に client_summary_text や result_summary_text があるときは、summary_text と整合する補助比較用としてだけ使ってください。\n"

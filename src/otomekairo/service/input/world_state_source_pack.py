@@ -8,6 +8,7 @@ from otomekairo.service.input.constants import (
     WORLD_STATE_CONTEXT_KEYS_BY_TYPE,
     WORLD_STATE_FOREGROUND_LIMIT,
     WORLD_STATE_MAX_ACTIVE,
+    WORLD_STATE_SCOPE_BY_TYPE,
 )
 from otomekairo.service.input.source_owner import visual_source_owner
 from otomekairo.world_state.models import (
@@ -19,6 +20,7 @@ from otomekairo.world_state.models import (
     WorldStatePendingIntent,
     WorldStateScheduleContext,
     WorldStateScheduleSlot,
+    WorldStateSourceCandidate,
     WorldStateSourcePack,
     WorldStateTrace,
     WorldStateVisualContext,
@@ -137,6 +139,9 @@ class ServiceInputWorldStateSourcePackMixin:
                 )
             )
             normalized_candidate_policies = self._summarize_world_state_candidate_policies(world_states)
+            # request-local ref は trace にだけ残し、永続 world_state には保存しない。
+            for world_state in world_states:
+                world_state.pop("candidate_ref", None)
             refresh_summary = self.store.refresh_world_states(
                 memory_set_id=state["selected_memory_set_id"],
                 current_time=started_at,
@@ -266,19 +271,7 @@ class ServiceInputWorldStateSourcePackMixin:
             return True
         if isinstance(source_pack.capability_result_summary, WorldStateCapabilityResultSummary):
             return True
-        for key in (
-            "visual_context",
-            "external_service_context",
-            "body_context",
-            "device_context",
-            "schedule_context",
-            "social_context_context",
-            "environment_context",
-            "location_context",
-        ):
-            if source_pack.context(key) is not None:
-                return True
-        return False
+        return bool(source_pack.state_sources)
 
     def _build_world_state_source_pack(
         self,
@@ -372,7 +365,7 @@ class ServiceInputWorldStateSourcePackMixin:
             capability_result_summary = self._build_world_state_capability_result_summary(observation_summary)
             if capability_result_summary is not None:
                 payload.capability_result_summary = capability_result_summary
-        payload.allowed_state_types = tuple(self._world_state_allowed_state_types(source_pack=payload))
+        payload.state_sources = tuple(self._build_world_state_source_candidates(source_pack=payload))
         return payload
 
     def _build_world_state_visual_context(
@@ -809,8 +802,8 @@ class ServiceInputWorldStateSourcePackMixin:
 
     def _summarize_world_state_source_pack_contexts(self, source_pack: WorldStateSourcePack) -> dict[str, Any]:
         summary: dict[str, Any] = {}
-        if source_pack.allowed_state_types:
-            summary["allowed_state_types"] = list(source_pack.allowed_state_types)
+        if source_pack.state_sources:
+            summary["state_sources"] = [candidate.to_prompt_payload() for candidate in source_pack.state_sources]
         if isinstance(source_pack.persona_context, dict):
             persona_summary = self._persona_context_trace_summary(source_pack.persona_context)
             if persona_summary:
@@ -905,13 +898,44 @@ class ServiceInputWorldStateSourcePackMixin:
         _ = state_type
         return context.signal_fields()
 
-    def _world_state_allowed_state_types(self, *, source_pack: WorldStateSourcePack) -> list[str]:
-        allowed: list[str] = []
+    def _build_world_state_source_candidates(
+        self,
+        *,
+        source_pack: WorldStateSourcePack,
+    ) -> list[WorldStateSourceCandidate]:
+        candidates: list[WorldStateSourceCandidate] = []
         for state_type, context_key in WORLD_STATE_CONTEXT_KEYS_BY_TYPE:
             context = source_pack.context(context_key)
-            if context is not None:
-                allowed.append(state_type)
-        return allowed
+            if context is None:
+                continue
+            evidence_summary = self._world_state_source_evidence_summary(context)
+            if evidence_summary is None:
+                continue
+            scope_type, scope_key = WORLD_STATE_SCOPE_BY_TYPE[state_type]
+            candidates.append(
+                WorldStateSourceCandidate(
+                    candidate_ref=f"state_source:{state_type}",
+                    state_type=state_type,
+                    scope_type=scope_type,
+                    scope_key=scope_key,
+                    evidence_summary=evidence_summary,
+                )
+            )
+        return candidates
+
+    def _world_state_source_evidence_summary(self, context: WorldStateContext) -> str | None:
+        summary_text = getattr(context, "summary_text", None)
+        if isinstance(summary_text, str) and summary_text.strip():
+            return summary_text.strip()
+        if not isinstance(context, WorldStateScheduleContext):
+            return None
+        pending_intent = context.pending_intent
+        if not isinstance(pending_intent, WorldStatePendingIntent):
+            return None
+        for value in (pending_intent.intent_summary, pending_intent.reason_summary):
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
 
     def _world_state_source_kind(self, trigger_kind: str) -> str:
         if trigger_kind == "user_message":

@@ -7,8 +7,6 @@ from typing import Any
 from otomekairo.service.input.constants import (
     WORLD_STATE_HINT_SCORES,
     WORLD_STATE_TTL_SECONDS_BY_TYPE,
-    WORLD_STATE_USER_INPUT_CURRENT_STATE_TERMS_BY_TYPE,
-    WORLD_STATE_USER_INPUT_REQUEST_TERMS,
 )
 from otomekairo.service.input.source_owner import visual_source_owner
 from otomekairo.world_state.models import (
@@ -34,34 +32,21 @@ class ServiceInputWorldStateNormalizeMixin:
         source_pack: WorldStateSourcePack,
     ) -> list[dict[str, Any]]:
         normalized: list[dict[str, Any]] = []
-        seen_identity: set[tuple[str, str, str]] = set()
-        allowed_state_types = set(source_pack.allowed_state_types)
+        seen_candidate_refs: set[str] = set()
         for candidate in self._world_state_candidates_from_payload(payload):
-            state_type = candidate.state_type
-            if state_type not in allowed_state_types:
-                continue
-            scope_type, scope_key = self._parse_world_state_scope(candidate.scope)
-            identity = (state_type, scope_type, scope_key)
-            if identity in seen_identity:
-                continue
-            seen_identity.add(identity)
+            source_candidate = source_pack.source_candidate(candidate.candidate_ref)
+            if source_candidate is None:
+                raise ValueError("world_state candidate_ref is invalid.")
+            if source_candidate.candidate_ref in seen_candidate_refs:
+                raise ValueError("world_state candidate_ref is duplicated.")
+            seen_candidate_refs.add(source_candidate.candidate_ref)
+            state_type = source_candidate.state_type
+            scope_type = source_candidate.scope_type
+            scope_key = source_candidate.scope_key
             source_context = self._world_state_source_context(
                 state_type=state_type,
                 source_pack=source_pack,
             )
-            if self._should_skip_user_input_current_state_candidate(
-                state_type=state_type,
-                source_kind=source_kind,
-                source_context=source_context,
-                source_pack=source_pack,
-            ):
-                continue
-            if self._should_skip_system_wake_inferred_state_candidate(
-                state_type=state_type,
-                source_context=source_context,
-                source_pack=source_pack,
-            ):
-                continue
             ttl_hint = candidate.ttl_hint
             ttl_policy = self._world_state_ttl_policy(
                 current_time=observed_at,
@@ -77,6 +62,7 @@ class ServiceInputWorldStateNormalizeMixin:
             )
             normalized.append(
                 {
+                    "candidate_ref": source_candidate.candidate_ref,
                     "world_state_id": f"world_state:{uuid.uuid4().hex}",
                     "memory_set_id": memory_set_id,
                     "state_type": state_type,
@@ -124,42 +110,6 @@ class ServiceInputWorldStateNormalizeMixin:
                 return source_context.source_owner.strip()
             return visual_source_owner(source_context.source_kind)
         return None
-
-    def _should_skip_user_input_current_state_candidate(
-        self,
-        *,
-        state_type: str,
-        source_kind: str,
-        source_context: WorldStateContext | None,
-        source_pack: WorldStateSourcePack,
-    ) -> bool:
-        if source_kind != "user_input" or source_context is not None:
-            return False
-        state_terms = WORLD_STATE_USER_INPUT_CURRENT_STATE_TERMS_BY_TYPE.get(state_type)
-        if not state_terms:
-            return False
-        current_input = source_pack.current_input_summary.strip()
-        if not current_input:
-            return False
-        if not self._contains_any_text(current_input, WORLD_STATE_USER_INPUT_REQUEST_TERMS):
-            return False
-        return self._contains_any_text(current_input, state_terms)
-
-    def _should_skip_system_wake_inferred_state_candidate(
-        self,
-        *,
-        state_type: str,
-        source_context: WorldStateContext | None,
-        source_pack: WorldStateSourcePack,
-    ) -> bool:
-        if source_pack.trigger_kind not in {"wake", "background_thinking"}:
-            return False
-        if source_context is not None:
-            return False
-        return state_type in {"visual_context", "body", "schedule", "social_context", "environment", "location"}
-
-    def _contains_any_text(self, text: str, terms: tuple[str, ...]) -> bool:
-        return any(term in text for term in terms)
 
     def _world_state_source_context(
         self,
@@ -430,7 +380,7 @@ class ServiceInputWorldStateNormalizeMixin:
             scope_key = world_state.get("scope_key")
             if not isinstance(scope_type, str) or not isinstance(scope_key, str):
                 continue
-            summary = {
+            summary: dict[str, Any] = {
                 "state_type": world_state.get("state_type"),
                 "scope": self._world_state_scope_ref(scope_type=scope_type, scope_key=scope_key),
                 "summary_source": world_state.get("summary_source"),
@@ -439,40 +389,14 @@ class ServiceInputWorldStateNormalizeMixin:
                 "integration_mode": world_state.get("integration_mode"),
                 "integration_key": world_state.get("integration_key"),
             }
+            candidate_ref = world_state.get("candidate_ref")
+            if isinstance(candidate_ref, str) and candidate_ref.strip():
+                summary["candidate_ref"] = candidate_ref.strip()
             ttl_capped_by = world_state.get("ttl_capped_by")
             if isinstance(ttl_capped_by, str) and ttl_capped_by.strip():
                 summary["ttl_capped_by"] = ttl_capped_by.strip()
             summaries.append(summary)
         return summaries
-
-    def _parse_world_state_scope(self, value: str) -> tuple[str, str]:
-        if value in {"self", "user", "world"}:
-            return value, value
-        scope_type, separator, scope_key = value.partition(":")
-        normalized_scope_key = scope_key.strip()
-        if not separator or not normalized_scope_key:
-            raise ValueError("world_state scope is invalid.")
-        if scope_type == "entity":
-            if not any(
-                normalized_scope_key.startswith(prefix) and normalized_scope_key != prefix
-                for prefix in ("person:", "place:", "tool:")
-            ):
-                raise ValueError("world_state entity scope is invalid.")
-            return "entity", normalized_scope_key
-        if scope_type == "topic":
-            return "topic", value
-        if scope_type == "relationship":
-            refs = normalized_scope_key.split("|")
-            if len(refs) < 2 or len(refs) != len(set(refs)):
-                raise ValueError("world_state relationship scope is invalid.")
-            if "self" in refs:
-                expected_refs = ["self", *sorted(ref for ref in refs if ref != "self")]
-            else:
-                expected_refs = sorted(refs)
-            if refs != expected_refs:
-                raise ValueError("world_state relationship scope must be normalized.")
-            return "relationship", normalized_scope_key
-        raise ValueError("world_state scope_type is invalid.")
 
     def _world_state_score_from_hint(self, hint: Any) -> float:
         if not isinstance(hint, str) or hint.strip() not in WORLD_STATE_HINT_SCORES:

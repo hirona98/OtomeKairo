@@ -55,6 +55,64 @@ source pack 例:
   "client_context": {
     "source": "background_thinking_scheduler"
   },
+  "state_sources": [
+    {
+      "candidate_ref": "state_source:visual_context",
+      "state_type": "visual_context",
+      "scope_type": "topic",
+      "scope_key": "topic:current_work",
+      "evidence_summary": "チャットツールの general チャンネルが視覚前景で、やり取りが見えている。"
+    },
+    {
+      "candidate_ref": "state_source:social_context",
+      "state_type": "social_context",
+      "scope_type": "relationship",
+      "scope_key": "self|user",
+      "evidence_summary": "Slack 上のやり取りが近い判断文脈として前景にある。"
+    },
+    {
+      "candidate_ref": "state_source:environment",
+      "state_type": "environment",
+      "scope_type": "world",
+      "scope_key": "world",
+      "evidence_summary": "作業部屋は静かで、机上環境が整っている。"
+    },
+    {
+      "candidate_ref": "state_source:location",
+      "state_type": "location",
+      "scope_type": "world",
+      "scope_key": "world",
+      "evidence_summary": "自宅デスクで作業している。"
+    },
+    {
+      "candidate_ref": "state_source:external_service",
+      "state_type": "external_service",
+      "scope_type": "world",
+      "scope_key": "world",
+      "evidence_summary": "GitHub の通知に未確認レビューが 1 件ある。"
+    },
+    {
+      "candidate_ref": "state_source:body",
+      "state_type": "body",
+      "scope_type": "self",
+      "scope_key": "self",
+      "evidence_summary": "肩や首に疲れがありそう。"
+    },
+    {
+      "candidate_ref": "state_source:device",
+      "state_type": "device",
+      "scope_type": "world",
+      "scope_key": "world",
+      "evidence_summary": "接続機器は正常に応答している。"
+    },
+    {
+      "candidate_ref": "state_source:schedule",
+      "state_type": "schedule",
+      "scope_type": "self",
+      "scope_key": "self",
+      "evidence_summary": "このあとレビュー確認を続ける予定が近い。"
+    }
+  ],
   "visual_context": {
     "summary_text": "チャットツールの general チャンネルが視覚前景で、やり取りが見えている。",
     "visual_summary_text": "チャットツールの general チャンネルが視覚前景で、やり取りが見えている。",
@@ -118,21 +176,14 @@ source pack 例:
       "not_before": "2026-04-25T09:10:00+09:00",
       "expires_at": "2026-04-25T15:00:00+09:00"
     }
-  },
-  "allowed_state_types": [
-    "visual_context",
-    "social_context",
-    "environment",
-    "location",
-    "external_service",
-    "body",
-    "device",
-    "schedule"
-  ]
+  }
 }
 ```
 
 source pack では、標準の `client_context` と state-type 別の structured context を分ける。
+`state_sources` は LLM が選択できる候補集合の正本であり、各 structured context からコードが 1 件ずつ生成する。
+`candidate_ref` は request-local な `state_source:<state_type>` とし、`state_type / scope_type / scope_key` はコードが確定する。
+LLM は `state_sources` に存在しない候補を生成しない。
 視覚前景は `vision.capture` result の視覚説明を根拠に `visual_context` へ載せ、`vision_source_id` で観測 source を識別する。
 `vision.capture` result follow-up の `foreground_world_state` は、result の `vision_source_id` と一致する `visual_context` だけを decision / speech に渡す。
 一致しない `visual_context` は保存済み state と inspection 用 trace に残し、同じ follow-up の判断材料にしない。
@@ -171,8 +222,9 @@ real schedule source が複数あるときは、`schedule_context.schedule_slots
 - `summary_source` が `capability_result.<field>` と `client_context.<field>` を区別できるように context へ source hint を残す
 - `schedule_context.schedule_slots` があるときは deterministic な slot state を追加し、`schedule:self` と `schedule:<slot_key>` を併存させる
 - wake の selected pending-intent があるときだけ `schedule_context.pending_intent` を作り、`slot_key` を付ける
-- user input の確認依頼だけから作られた現在状態候補は、対応 structured context が無い場合に正規化で落とす
-- LLM が返した `state_type / scope / summary_text / hint` を validator で検証する
+- 対応 structured context が無い状態種別は `state_sources` に追加しない
+- LLM が返した `candidate_ref / summary_text / hint` を validator で検証する
+- `candidate_ref` からコード確定済みの `state_type / scope_type / scope_key` を解決する
 - TTL は `summary_source` と state_type ごとの規則で決める
 - `external_service` の統合単位は `service` を使う
 - `schedule` の TTL は pending-intent の `expires_at` を上限に使う
