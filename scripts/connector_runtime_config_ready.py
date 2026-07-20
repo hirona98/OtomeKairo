@@ -220,10 +220,10 @@ def _candidate_config_db_paths(
     environ: Mapping[str, str],
     config_path: Path | None,
 ) -> list[Path]:
-    paths: list[Path] = []
+    # 明示された DB は探索範囲そのものとして扱い、別環境の DB を混在させない。
     config_db_path = server.get("config_db_path")
     if isinstance(config_db_path, str) and config_db_path.strip():
-        paths.append(_resolve_config_relative_path(config_db_path.strip(), config_path))
+        return [_resolve_config_relative_path(config_db_path.strip(), config_path)]
 
     data_dirs: list[Path] = []
     env_data_dir = environ.get("OTOMEKAIRO_DATA_DIR")
@@ -233,15 +233,17 @@ def _candidate_config_db_paths(
     if isinstance(data_dir, str) and data_dir.strip():
         data_dirs.append(_resolve_config_relative_path(data_dir.strip(), config_path))
 
+    if data_dirs:
+        return _deduplicate_paths([data_dir / "config.db" for data_dir in data_dirs])
+
+    # 保存先が未指定の場合だけ repository の既定位置を探索する。
     repo_root = Path(__file__).resolve().parents[1]
-    data_dirs.extend(
+    return _deduplicate_paths(
         [
-            repo_root / "var" / "otomekairo",
-            Path.cwd() / "var" / "otomekairo",
+            repo_root / "var" / "otomekairo" / "config.db",
+            Path.cwd() / "var" / "otomekairo" / "config.db",
         ]
     )
-    paths.extend(data_dir / "config.db" for data_dir in data_dirs)
-    return _deduplicate_paths(paths)
 
 
 def _read_config_db_access_token(db_path: Path) -> str:
