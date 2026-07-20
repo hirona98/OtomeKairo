@@ -1114,12 +1114,12 @@ class LLMClient:
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
         operation = "event_evidence"
-        source_events = source_pack.get("events", []) if isinstance(source_pack, dict) else []
+        source_event = source_pack.get("event") if isinstance(source_pack, dict) else None
         debug_log(
             "LLM",
             (
                 f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} events={len(source_events) if isinstance(source_events, list) else 0}"
+                f"model={self._debug_model(role_definition)} events={1 if isinstance(source_event, dict) else 0}"
             ),
             level="DEBUG",
         )
