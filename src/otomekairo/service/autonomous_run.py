@@ -720,9 +720,8 @@ class ServiceAutonomousRunMixin:
                 last_result_context=last_result_context or run.get("last_result_context"),
             )
             selected_preset = state["model_presets"][state["selected_model_preset_id"]]
-            step_role = selected_preset["roles"]["autonomous_step_generation"]
             step = self.llm.generate_autonomous_step(
-                role_definition=step_role,
+                model_config=selected_preset,
                 persona_context=self._build_selected_persona_context(
                     state=state,
                     role="autonomous_step_generation",
@@ -1058,7 +1057,7 @@ class ServiceAutonomousRunMixin:
             decision=decision,
         )
         return self.llm.generate_speech(
-            role_definition=selected_preset["roles"]["expression_generation"],
+            model_config=selected_preset,
             persona_context=self._build_selected_persona_context(
                 state=state,
                 role="expression_generation",

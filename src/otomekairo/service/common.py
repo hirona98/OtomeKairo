@@ -22,18 +22,6 @@ def _read_non_negative_int_env(name: str, default: int) -> int:
 
 
 # 定数
-REQUIRED_MODEL_ROLE_NAMES = (
-    "expression_generation",
-    "decision_generation",
-    "autonomous_step_generation",
-    "input_interpretation",
-    "memory_interpretation",
-    "memory_correction_reconciliation",
-    "memory_reflection_summary",
-    "event_evidence_generation",
-    "recall_pack_selection",
-    "pending_intent_selection",
-)
 PENDING_INTENT_NOT_BEFORE_MINUTES = _read_non_negative_int_env(
     "OTOMEKAIRO_PENDING_INTENT_NOT_BEFORE_MINUTES",
     30,

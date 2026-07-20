@@ -98,7 +98,7 @@ LLM が返した自由文をそのまま正本状態へ入れない。
 ## LLM 更新契約
 
 `world_state` 更新に使う LLM 契約は、観測や実行結果から短期世界状態候補を抽出するための補助契約である。
-専用のモデル role を増やさず、`model_preset.roles.input_interpretation` を使う。
+専用モデル設定を増やさず、選択中の `model_preset` を使う。論理 role は `input_interpretation` とする。
 
 LLM に渡す source pack の wire shape は
 [world_state source pack](../capability/world_state_source_pack.md) を正本とする。

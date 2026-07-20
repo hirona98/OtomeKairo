@@ -1014,21 +1014,9 @@ class ServiceConfigResourcesMixin:
         return previous_definition.get("embedding") != current_definition.get("embedding")
 
     def _public_model_preset(self, definition: dict[str, Any]) -> dict[str, Any]:
-        public_definition = deepcopy(definition)
-        roles = public_definition.get("roles", {})
-        if not isinstance(roles, dict):
-            return public_definition
-        public_definition["roles"] = {
-            role_name: self._public_model_role(role_definition)
-            for role_name, role_definition in roles.items()
-        }
-        return public_definition
-
-    def _public_model_role(self, definition: Any) -> Any:
-        if not isinstance(definition, dict):
-            return definition
+        # 通常読み取りでは生成モデルの秘密値を有無だけに変換する。
         public_definition = {
-            **definition,
+            **deepcopy(definition),
             "api_key_present": bool(definition.get("api_key")),
         }
         public_definition.pop("api_key", None)

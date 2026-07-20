@@ -12,7 +12,7 @@ from otomekairo.llm.contracts import (
 class LLMMockMemoryMixin:
     def generate_memory_interpretation(
         self,
-        role_definition: dict,
+        model_config: dict,
         input_text: str,
         recall_hint: dict,
         decision: dict,
@@ -22,7 +22,7 @@ class LLMMockMemoryMixin:
         persona_context: Any,
     ) -> dict[str, Any]:
         # model確認
-        self._assert_mock_model(role_definition)
+        self._assert_mock_model(model_config)
         _ = memory_context
         _ = persona_context
 
@@ -56,11 +56,11 @@ class LLMMockMemoryMixin:
 
     def generate_memory_reflection_summary(
         self,
-        role_definition: dict,
+        model_config: dict,
         evidence_pack: dict[str, Any],
     ) -> dict[str, Any]:
         # model確認
-        self._assert_mock_model(role_definition)
+        self._assert_mock_model(model_config)
 
         # evidence pack
         scope_type = str(evidence_pack.get("scope_type") or "")
@@ -114,11 +114,11 @@ class LLMMockMemoryMixin:
 
     def generate_memory_correction_reconciliation(
         self,
-        role_definition: dict,
+        model_config: dict,
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
         # model確認
-        self._assert_mock_model(role_definition)
+        self._assert_mock_model(model_config)
         _ = source_pack
 
         # mock は訂正 reconciliation を自動選定しない。

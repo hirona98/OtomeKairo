@@ -91,6 +91,15 @@
         <div class="model-preset-name-row">
           <label>プリセット名<input id="model-display-name"></label>
         </div>
+        <div class="memory-settings-card">
+          <label>モデル<input id="model-model"></label>
+          <label>エンドポイントURL<input id="model-api-base"></label>
+          <label>推論の深さ<input id="model-reasoning-effort"></label>
+          <label>最大出力トークン<input id="model-max-output-tokens" type="number" min="1"></label>
+          <label>タイムアウト（秒）<input id="model-timeout-seconds" type="number" min="1"></label>
+          <label class="checkbox-field">Web検索を有効にする<input id="model-web-search-enabled" type="checkbox"></label>
+          <label>APIキー<input id="model-api-key" type="password" autocomplete="new-password"></label>
+        </div>
         <fieldset class="settings-group">
           <legend>直近会話の取り込み範囲（記憶は別途入ります）</legend>
           <div class="settings-group-grid">
@@ -98,7 +107,6 @@
             <label>時間（分）<input id="model-recent-turn-minutes" type="number" min="1"></label>
           </div>
         </fieldset>
-        <div class="role-list" id="role-list"></div>
       </section>
 
       <section class="tab-page" data-page="memory">

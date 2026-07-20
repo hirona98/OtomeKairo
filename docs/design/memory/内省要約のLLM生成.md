@@ -57,19 +57,19 @@ OtomeKairo では、`reflective consolidation` 全体を LLM 任せにはしな�
 
 ## 論理 role
 
-モデルプリセットは `memory_reflection_summary` という論理 role を持つ。
+この処理の論理 role は `memory_reflection_summary` とし、選択中の `model_preset` を使う。
 
 この role の責務は次だけである。
 
 - `reflective consolidation` 用 evidence pack を読んで `summary_text` を返す
 
-この role を `memory_interpretation` と分ける理由は次である。
+この論理 role を `memory_interpretation` と分ける理由は次である。
 
 - turn ごとの記憶解釈と、長期要約では入出力契約が異なる
-- background worker で別のモデル品質や token 上限を選べる
+- turn ごとの記憶解釈と独立したプロンプト、出力契約、失敗境界を持てる
 - prompt 改修が turn consolidation 側へ波及しにくい
 
-ただし、実際の設定値として同じ model を両 role に指定する。
+すべての論理 role は選択中の同じ `model_preset` を使う。
 
 ## `memory_postprocess_job` への追加情報
 
@@ -79,7 +79,7 @@ OtomeKairo では、`reflective consolidation` 全体を LLM 任せにはしな�
 - `selected_persona_id`
 - `personas.{selected_persona_id}` の snapshot
 - `selected_model_preset_id`
-- `roles.memory_reflection_summary` の snapshot
+- 選択中 `model_preset` の snapshot
 
 background worker は、会話時点の設定 snapshot を使って reflective summary を生成する。
 実行時の current 設定を引き直してはいけない。

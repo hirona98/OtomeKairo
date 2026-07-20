@@ -53,7 +53,6 @@ class MemoryConsolidator:
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         # モデル選択
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
-        memory_role = selected_preset["roles"]["memory_interpretation"]
         selected_memory_set_id = state["selected_memory_set_id"]
         embedding_definition = state["memory_sets"][selected_memory_set_id]["embedding"]
         selected_persona = state["personas"][state["selected_persona_id"]]
@@ -67,7 +66,7 @@ class MemoryConsolidator:
 
         # 解釈
         interpretation = self.llm.generate_memory_interpretation(
-            role_definition=memory_role,
+            model_config=selected_preset,
             persona_context=build_persona_context(
                 selected_persona,
                 role="memory_interpretation",
@@ -495,11 +494,10 @@ class MemoryConsolidator:
         try:
             state_snapshot = job["state_snapshot"]
             selected_model_preset = state_snapshot["model_presets"][state_snapshot["selected_model_preset_id"]]
-            role_definition = selected_model_preset["roles"]["memory_correction_reconciliation"]
             selected_persona = state_snapshot["personas"][state_snapshot["selected_persona_id"]]
             return self.correction.run(
                 llm=self.llm,
-                role_definition=role_definition,
+                model_config=selected_model_preset,
                 persona_context=build_persona_context(
                     selected_persona,
                     role="memory_correction_reconciliation",
@@ -536,11 +534,6 @@ class MemoryConsolidator:
         selected_model_preset_id = state["selected_model_preset_id"]
         selected_persona_id = state["selected_persona_id"]
         selected_model_preset = state["model_presets"][selected_model_preset_id]
-        reflection_summary_role = selected_model_preset["roles"]["memory_reflection_summary"]
-        correction_role = selected_model_preset["roles"].get(
-            "memory_correction_reconciliation",
-            selected_model_preset["roles"]["memory_interpretation"],
-        )
         return {
             "cycle_id": cycle_id,
             "memory_set_id": selected_memory_set_id,
@@ -564,12 +557,7 @@ class MemoryConsolidator:
                     }
                 },
                 "model_presets": {
-                    selected_model_preset_id: {
-                        "roles": {
-                            "memory_correction_reconciliation": deepcopy(correction_role),
-                            "memory_reflection_summary": deepcopy(reflection_summary_role),
-                        }
-                    }
+                    selected_model_preset_id: deepcopy(selected_model_preset),
                 },
             },
             "episode": deepcopy(episode),

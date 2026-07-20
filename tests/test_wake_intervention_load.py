@@ -201,7 +201,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
             augmented_query_text="定期思考。",
             visual_observation_context=None,
             activity_context=None,
-            recall_role={},
+            model_config={},
             persona_context=None,
             client_context={"autonomous_visual_observation_direct_entry": True},
             cycle_label="[test]",

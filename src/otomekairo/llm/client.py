@@ -83,7 +83,7 @@ class LLMClient:
     def generate_input_interpretation(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: PersonaContext,
         input_text: str,
         current_input: CurrentInput,
@@ -96,23 +96,23 @@ class LLMClient:
         debug_log(
             "LLM",
             (
-                f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} input_chars={len(input_text)} "
+                f"{operation} start mode={self._debug_mode(model_config)} "
+                f"model={self._debug_model(model_config)} input_chars={len(input_text)} "
                 f"recent_turns={len(recent_turns)}"
             ),
             level="DEBUG",
         )
         try:
-            if self._is_mock_role_definition(role_definition):
+            if self._is_mock_model_config(model_config):
                 recall_hint = self.mock_client.generate_recall_hint(
-                    role_definition,
+                    model_config,
                     input_text,
                     recent_turns,
                     current_time,
                     persona_context=persona_context,
                 )
                 answer_contract = self.mock_client.generate_answer_contract(
-                    role_definition,
+                    model_config,
                     input_text,
                     recall_hint,
                     current_time,
@@ -142,7 +142,7 @@ class LLMClient:
                 activity_context=activity_context,
             )
             payload = self._generate_structured_payload(
-                role_definition=role_definition,
+                model_config=model_config,
                 messages=messages,
                 validator=self._validate_input_interpretation_contract,
                 repair_prompt_builder=build_input_interpretation_repair_prompt,
@@ -180,7 +180,7 @@ class LLMClient:
     def generate_recall_hint(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: PersonaContext,
         input_text: str,
         current_input: CurrentInput,
@@ -191,17 +191,17 @@ class LLMClient:
         debug_log(
             "LLM",
             (
-                f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} input_chars={len(input_text)} "
+                f"{operation} start mode={self._debug_mode(model_config)} "
+                f"model={self._debug_model(model_config)} input_chars={len(input_text)} "
                 f"recent_turns={len(recent_turns)}"
             ),
             level="DEBUG",
         )
         try:
             # モック経路
-            if self._is_mock_role_definition(role_definition):
+            if self._is_mock_model_config(model_config):
                 payload = self.mock_client.generate_recall_hint(
-                    role_definition,
+                    model_config,
                     input_text,
                     recent_turns,
                     current_time,
@@ -229,7 +229,7 @@ class LLMClient:
             last_contract_error: LLMError | None = None
             for attempt in range(2):
                 debug_log("LLM", f"{operation} attempt={attempt + 1} request messages={len(messages)}", level="DEBUG")
-                content = complete_text(role_definition=role_definition, messages=messages)
+                content = complete_text(model_config=model_config, messages=messages)
                 try:
                     payload = parse_recall_hint_payload(content)
                     debug_log(
@@ -262,7 +262,7 @@ class LLMClient:
     def generate_decision(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: PersonaContext,
         context: DecisionContext,
     ) -> dict[str, Any]:
@@ -270,17 +270,17 @@ class LLMClient:
         debug_log(
             "LLM",
             (
-                f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} recent_turns={len(context.recent_turns)} "
+                f"{operation} start mode={self._debug_mode(model_config)} "
+                f"model={self._debug_model(model_config)} recent_turns={len(context.recent_turns)} "
                 f"recall_candidates={context.recall_pack.get('candidate_count', 0)}"
             ),
             level="DEBUG",
         )
         try:
             # モック経路
-            if self._is_mock_role_definition(role_definition):
+            if self._is_mock_model_config(model_config):
                 payload = self.mock_client.generate_decision(
-                    role_definition=role_definition,
+                    model_config=model_config,
                     persona_context=persona_context,
                     context=context,
                 )
@@ -294,7 +294,7 @@ class LLMClient:
             )
 
             return self._generate_structured_payload(
-                role_definition=role_definition,
+                model_config=model_config,
                 messages=messages,
                 validator=lambda payload: self._validate_decision_contract_for_context(
                     payload=payload,
@@ -438,7 +438,7 @@ class LLMClient:
     def generate_autonomous_step(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: PersonaContext,
         context: AutonomousStepContext,
     ) -> dict[str, Any]:
@@ -446,15 +446,15 @@ class LLMClient:
         debug_log(
             "LLM",
             (
-                f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} run={context.run.get('run_id')}"
+                f"{operation} start mode={self._debug_mode(model_config)} "
+                f"model={self._debug_model(model_config)} run={context.run.get('run_id')}"
             ),
             level="DEBUG",
         )
         try:
-            if self._is_mock_role_definition(role_definition):
+            if self._is_mock_model_config(model_config):
                 payload = self.mock_client.generate_autonomous_step(
-                    role_definition=role_definition,
+                    model_config=model_config,
                     persona_context=persona_context,
                     context=context,
                 )
@@ -474,7 +474,7 @@ class LLMClient:
                 context=context,
             )
             payload = self._generate_structured_payload(
-                role_definition=role_definition,
+                model_config=model_config,
                 messages=messages,
                 validator=validate_autonomous_step_contract,
                 repair_prompt_builder=build_autonomous_step_repair_prompt,
@@ -877,7 +877,7 @@ class LLMClient:
     def generate_speech(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: PersonaContext,
         context: SpeechContext,
     ) -> dict[str, Any]:
@@ -885,16 +885,16 @@ class LLMClient:
         debug_log(
             "LLM",
             (
-                f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} decision_kind={context.decision.get('kind')}"
+                f"{operation} start mode={self._debug_mode(model_config)} "
+                f"model={self._debug_model(model_config)} decision_kind={context.decision.get('kind')}"
             ),
             level="DEBUG",
         )
         try:
             # モック経路
-            if self._is_mock_role_definition(role_definition):
+            if self._is_mock_model_config(model_config):
                 payload = self.mock_client.generate_speech(
-                    role_definition=role_definition,
+                    model_config=model_config,
                     persona_context=persona_context,
                     context=context,
                 )
@@ -909,7 +909,7 @@ class LLMClient:
 
             # 補完
             debug_log("LLM", f"{operation} request messages={len(messages)}", level="DEBUG")
-            content = complete_text(role_definition=role_definition, messages=messages)
+            content = complete_text(model_config=model_config, messages=messages)
             speech_text = content.strip()
             if not speech_text:
                 raise LLMError("Speech の生成結果が空でした。")
@@ -917,7 +917,7 @@ class LLMClient:
             # payload作成
             payload = {
                 "speech_text": speech_text,
-                "speech_style_notes": f"model={role_definition.get('model')}",
+                "speech_style_notes": f"model={model_config.get('model')}",
                 "confidence_note": "litellm_model",
             }
             debug_log("LLM", f"{operation} done response_chars={len(content)} speech_chars={len(speech_text)}", level="DEBUG")
@@ -929,7 +929,7 @@ class LLMClient:
     def generate_answer_contract(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: PersonaContext,
         input_text: str,
         recall_hint: dict[str, Any],
@@ -939,14 +939,14 @@ class LLMClient:
         debug_log(
             "LLM",
             (
-                f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} input_chars={len(input_text)}"
+                f"{operation} start mode={self._debug_mode(model_config)} "
+                f"model={self._debug_model(model_config)} input_chars={len(input_text)}"
             ),
             level="DEBUG",
         )
-        if self._is_mock_role_definition(role_definition):
+        if self._is_mock_model_config(model_config):
             payload = self.mock_client.generate_answer_contract(
-                role_definition,
+                model_config,
                 input_text,
                 recall_hint,
                 current_time,
@@ -963,7 +963,7 @@ class LLMClient:
             current_time=current_time,
         )
         payload = self._generate_structured_payload(
-            role_definition=role_definition,
+            model_config=model_config,
             messages=messages,
             validator=validate_answer_contract_contract,
             repair_prompt_builder=build_answer_contract_repair_prompt,
@@ -977,7 +977,7 @@ class LLMClient:
     def generate_memory_interpretation(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: PersonaContext,
         input_text: str,
         recall_hint: dict,
@@ -990,16 +990,16 @@ class LLMClient:
         debug_log(
             "LLM",
             (
-                f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} input_chars={len(input_text)} "
+                f"{operation} start mode={self._debug_mode(model_config)} "
+                f"model={self._debug_model(model_config)} input_chars={len(input_text)} "
                 f"decision_kind={decision.get('kind')} speech_chars={len(speech_text or '')}"
             ),
             level="DEBUG",
         )
         # モック経路
-        if self._is_mock_role_definition(role_definition):
+        if self._is_mock_model_config(model_config):
             payload = self.mock_client.generate_memory_interpretation(
-                role_definition,
+                model_config,
                 input_text,
                 recall_hint,
                 decision,
@@ -1021,7 +1021,7 @@ class LLMClient:
             current_time=current_time,
         )
         return self._generate_structured_payload(
-            role_definition=role_definition,
+            model_config=model_config,
             messages=messages,
             validator=validate_memory_interpretation_contract,
             repair_prompt_builder=build_memory_interpretation_repair_prompt,
@@ -1032,7 +1032,7 @@ class LLMClient:
     def generate_memory_reflection_summary(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: PersonaContext,
         evidence_pack: dict[str, Any],
     ) -> dict[str, Any]:
@@ -1040,15 +1040,15 @@ class LLMClient:
         debug_log(
             "LLM",
             (
-                f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} evidence_keys={self._debug_payload_keys(evidence_pack)}"
+                f"{operation} start mode={self._debug_mode(model_config)} "
+                f"model={self._debug_model(model_config)} evidence_keys={self._debug_payload_keys(evidence_pack)}"
             ),
             level="DEBUG",
         )
         # モック経路
-        if self._is_mock_role_definition(role_definition):
+        if self._is_mock_model_config(model_config):
             payload = self.mock_client.generate_memory_reflection_summary(
-                role_definition,
+                model_config,
                 self._source_pack_with_persona_context(evidence_pack, persona_context),
             )
             debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
@@ -1060,7 +1060,7 @@ class LLMClient:
             evidence_pack=evidence_pack,
         )
         return self._generate_structured_payload(
-            role_definition=role_definition,
+            model_config=model_config,
             messages=messages,
             validator=validate_memory_reflection_summary_contract,
             repair_prompt_builder=build_memory_reflection_summary_repair_prompt,
@@ -1071,7 +1071,7 @@ class LLMClient:
     def generate_memory_correction_reconciliation(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: PersonaContext,
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
@@ -1080,15 +1080,15 @@ class LLMClient:
         debug_log(
             "LLM",
             (
-                f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} target_count={len(targets)}"
+                f"{operation} start mode={self._debug_mode(model_config)} "
+                f"model={self._debug_model(model_config)} target_count={len(targets)}"
             ),
             level="DEBUG",
         )
         source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
         # モック経路
-        if self._is_mock_role_definition(role_definition):
-            payload = self.mock_client.generate_memory_correction_reconciliation(role_definition, source_pack)
+        if self._is_mock_model_config(model_config):
+            payload = self.mock_client.generate_memory_correction_reconciliation(model_config, source_pack)
             debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
 
@@ -1098,7 +1098,7 @@ class LLMClient:
             source_pack=source_pack,
         )
         return self._generate_structured_payload(
-            role_definition=role_definition,
+            model_config=model_config,
             messages=messages,
             validator=validate_memory_correction_reconciliation_contract,
             repair_prompt_builder=build_memory_correction_reconciliation_repair_prompt,
@@ -1109,7 +1109,7 @@ class LLMClient:
     def generate_event_evidence(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: PersonaContext,
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
@@ -1118,15 +1118,15 @@ class LLMClient:
         debug_log(
             "LLM",
             (
-                f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} events={1 if isinstance(source_event, dict) else 0}"
+                f"{operation} start mode={self._debug_mode(model_config)} "
+                f"model={self._debug_model(model_config)} events={1 if isinstance(source_event, dict) else 0}"
             ),
             level="DEBUG",
         )
         source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
         # モック経路
-        if self._is_mock_role_definition(role_definition):
-            payload = self.mock_client.generate_event_evidence(role_definition, source_pack)
+        if self._is_mock_model_config(model_config):
+            payload = self.mock_client.generate_event_evidence(model_config, source_pack)
             debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
 
@@ -1136,7 +1136,7 @@ class LLMClient:
             source_pack=source_pack,
         )
         return self._generate_structured_payload(
-            role_definition=role_definition,
+            model_config=model_config,
             messages=messages,
             validator=validate_event_evidence_contract,
             repair_prompt_builder=build_event_evidence_repair_prompt,
@@ -1148,7 +1148,7 @@ class LLMClient:
     def generate_recall_pack_selection(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: PersonaContext,
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
@@ -1157,15 +1157,15 @@ class LLMClient:
         debug_log(
             "LLM",
             (
-                f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} candidates={len(candidates) if isinstance(candidates, list) else 0}"
+                f"{operation} start mode={self._debug_mode(model_config)} "
+                f"model={self._debug_model(model_config)} candidates={len(candidates) if isinstance(candidates, list) else 0}"
             ),
             level="DEBUG",
         )
         source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
         # モック経路
-        if self._is_mock_role_definition(role_definition):
-            payload = self.mock_client.generate_recall_pack_selection(role_definition, source_pack)
+        if self._is_mock_model_config(model_config):
+            payload = self.mock_client.generate_recall_pack_selection(model_config, source_pack)
             debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
 
@@ -1175,7 +1175,7 @@ class LLMClient:
             source_pack=source_pack,
         )
         return self._generate_structured_payload(
-            role_definition=role_definition,
+            model_config=model_config,
             messages=messages,
             validator=lambda payload: validate_recall_pack_selection_contract(payload, source_pack=source_pack),
             repair_prompt_builder=build_recall_pack_selection_repair_prompt,
@@ -1187,7 +1187,7 @@ class LLMClient:
     def generate_pending_intent_selection(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: PersonaContext,
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
@@ -1196,15 +1196,15 @@ class LLMClient:
         debug_log(
             "LLM",
             (
-                f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} candidates={len(candidates) if isinstance(candidates, list) else 0}"
+                f"{operation} start mode={self._debug_mode(model_config)} "
+                f"model={self._debug_model(model_config)} candidates={len(candidates) if isinstance(candidates, list) else 0}"
             ),
             level="DEBUG",
         )
         source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
         # モック経路
-        if self._is_mock_role_definition(role_definition):
-            payload = self.mock_client.generate_pending_intent_selection(role_definition, source_pack)
+        if self._is_mock_model_config(model_config):
+            payload = self.mock_client.generate_pending_intent_selection(model_config, source_pack)
             debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
 
@@ -1214,7 +1214,7 @@ class LLMClient:
             source_pack=source_pack,
         )
         return self._generate_structured_payload(
-            role_definition=role_definition,
+            model_config=model_config,
             messages=messages,
             validator=lambda payload: validate_pending_intent_selection_contract(payload, source_pack=source_pack),
             repair_prompt_builder=build_pending_intent_selection_repair_prompt,
@@ -1226,7 +1226,7 @@ class LLMClient:
     def generate_initiative_entry_check(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: PersonaContext,
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
@@ -1234,15 +1234,15 @@ class LLMClient:
         debug_log(
             "LLM",
             (
-                f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)}"
+                f"{operation} start mode={self._debug_mode(model_config)} "
+                f"model={self._debug_model(model_config)}"
             ),
             level="DEBUG",
         )
         source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
         # モック経路
-        if self._is_mock_role_definition(role_definition):
-            payload = self.mock_client.generate_initiative_entry_check(role_definition, source_pack)
+        if self._is_mock_model_config(model_config):
+            payload = self.mock_client.generate_initiative_entry_check(model_config, source_pack)
             debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
 
@@ -1252,7 +1252,7 @@ class LLMClient:
             source_pack=source_pack,
         )
         return self._generate_structured_payload(
-            role_definition=role_definition,
+            model_config=model_config,
             messages=messages,
             validator=validate_initiative_entry_check_contract,
             repair_prompt_builder=build_initiative_entry_check_repair_prompt,
@@ -1264,7 +1264,7 @@ class LLMClient:
     def generate_world_state(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: PersonaContext,
         source_pack: WorldStateSourcePack,
     ) -> dict[str, Any]:
@@ -1272,14 +1272,14 @@ class LLMClient:
         debug_log(
             "LLM",
             (
-                f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)}"
+                f"{operation} start mode={self._debug_mode(model_config)} "
+                f"model={self._debug_model(model_config)}"
             ),
             level="DEBUG",
         )
         source_pack.persona_context = persona_context.to_prompt_payload()
-        if self._is_mock_role_definition(role_definition):
-            payload = self.mock_client.generate_world_state(role_definition, source_pack)
+        if self._is_mock_model_config(model_config):
+            payload = self.mock_client.generate_world_state(model_config, source_pack)
             debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
 
@@ -1288,7 +1288,7 @@ class LLMClient:
             source_pack=source_pack,
         )
         return self._generate_structured_payload(
-            role_definition=role_definition,
+            model_config=model_config,
             messages=messages,
             validator=lambda payload: validate_world_state_contract(payload, source_pack=source_pack),
             repair_prompt_builder=build_world_state_repair_prompt,
@@ -1300,7 +1300,7 @@ class LLMClient:
     def generate_activity_state(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: PersonaContext,
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
@@ -1308,14 +1308,14 @@ class LLMClient:
         debug_log(
             "LLM",
             (
-                f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)}"
+                f"{operation} start mode={self._debug_mode(model_config)} "
+                f"model={self._debug_model(model_config)}"
             ),
             level="DEBUG",
         )
         source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
-        if self._is_mock_role_definition(role_definition):
-            payload = self.mock_client.generate_activity_state(role_definition, source_pack)
+        if self._is_mock_model_config(model_config):
+            payload = self.mock_client.generate_activity_state(model_config, source_pack)
             debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
 
@@ -1324,7 +1324,7 @@ class LLMClient:
             source_pack=source_pack,
         )
         return self._generate_structured_payload(
-            role_definition=role_definition,
+            model_config=model_config,
             messages=messages,
             validator=validate_activity_state_contract,
             repair_prompt_builder=build_activity_state_repair_prompt,
@@ -1336,7 +1336,7 @@ class LLMClient:
     def generate_visual_observation_summary(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: PersonaContext,
         source_pack: dict[str, Any],
         images: list[str],
@@ -1346,15 +1346,15 @@ class LLMClient:
             debug_log(
                 "LLM",
                 (
-                    f"{operation} start mode={self._debug_mode(role_definition)} "
-                    f"model={self._debug_model(role_definition)} images={len(images)}"
+                    f"{operation} start mode={self._debug_mode(model_config)} "
+                    f"model={self._debug_model(model_config)} images={len(images)}"
                 ),
                 level="DEBUG",
             )
         source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
-        if self._is_mock_role_definition(role_definition):
+        if self._is_mock_model_config(model_config):
             payload = self.mock_client.generate_visual_observation_summary(
-                role_definition,
+                model_config,
                 source_pack,
                 images,
             )
@@ -1368,7 +1368,7 @@ class LLMClient:
             images=images,
         )
         return self._generate_structured_payload(
-            role_definition=role_definition,
+            model_config=model_config,
             messages=messages,
             validator=validate_visual_observation_contract,
             repair_prompt_builder=build_visual_observation_repair_prompt,
@@ -1380,7 +1380,7 @@ class LLMClient:
     def generate_embeddings(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         texts: list[str],
     ) -> list[list[float]]:
         # 空
@@ -1389,28 +1389,28 @@ class LLMClient:
             return []
 
         # 次元
-        embedding_dimension = self._embedding_dimension(role_definition)
+        embedding_dimension = self._embedding_dimension(model_config)
         if not isinstance(embedding_dimension, int) or embedding_dimension <= 0:
             raise LLMError("embedding_dimension は正の整数である必要があります。")
 
         debug_log(
             "LLM",
             (
-                f"embeddings start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} texts={len(texts)} dimension={embedding_dimension}"
+                f"embeddings start mode={self._debug_mode(model_config)} "
+                f"model={self._debug_model(model_config)} texts={len(texts)} dimension={embedding_dimension}"
             ),
             level="DEBUG",
         )
 
         # モック経路
-        if self._is_mock_role_definition(role_definition):
-            vectors = self.mock_client.generate_embeddings(role_definition, texts, embedding_dimension)
+        if self._is_mock_model_config(model_config):
+            vectors = self.mock_client.generate_embeddings(model_config, texts, embedding_dimension)
             debug_log("LLM", f"embeddings done mode=mock vectors={len(vectors)}", level="DEBUG")
             return vectors
 
         # model差分込みの transport へ委譲する。
         vectors = transport_generate_embeddings(
-            role_definition=role_definition,
+            model_config=model_config,
             texts=texts,
             expected_dimension=embedding_dimension,
         )
@@ -1427,16 +1427,16 @@ class LLMClient:
         return payload
 
     # 設定補助
-    def _debug_model(self, role_definition: dict) -> str:
+    def _debug_model(self, model_config: dict) -> str:
         # 秘密情報を含まない model 名だけを出す。
-        model = role_definition.get("model")
+        model = model_config.get("model")
         if not isinstance(model, str) or not model.strip():
             return "-"
         return model.strip()
 
-    def _debug_mode(self, role_definition: dict) -> str:
+    def _debug_mode(self, model_config: dict) -> str:
         # 実行経路
-        return "mock" if self._is_mock_role_definition(role_definition) else "transport"
+        return "mock" if self._is_mock_model_config(model_config) else "transport"
 
     def _debug_error(self, exc: BaseException) -> str:
         # 長い応答本文をログへ出しすぎない。
@@ -1453,18 +1453,18 @@ class LLMClient:
     def _should_log_routine_llm_operation(self, operation: str) -> bool:
         return operation not in ROUTINE_SUPPRESSED_LLM_OPERATIONS
 
-    def _is_mock_role_definition(self, role_definition: dict) -> bool:
+    def _is_mock_model_config(self, model_config: dict) -> bool:
         # model=mock* は開発用の内蔵ロジックへ切り替える。
-        model = role_definition.get("model")
+        model = model_config.get("model")
         return isinstance(model, str) and model.strip().startswith("mock")
 
-    def _embedding_dimension(self, role_definition: dict) -> int:
-        return role_definition.get("embedding_dimension")
+    def _embedding_dimension(self, model_config: dict) -> int:
+        return model_config.get("embedding_dimension")
 
     def _generate_structured_payload(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         messages: list[dict[str, Any]],
         validator: Callable[[dict[str, Any]], None],
         repair_prompt_builder: Callable[[str], str],
@@ -1481,7 +1481,7 @@ class LLMClient:
                     f"{operation} attempt={attempt + 1} request messages={len(attempt_messages)}",
                     level="DEBUG",
                 )
-            content = complete_text(role_definition=role_definition, messages=attempt_messages)
+            content = complete_text(model_config=model_config, messages=attempt_messages)
             try:
                 payload = parse_json_object(content)
                 try:

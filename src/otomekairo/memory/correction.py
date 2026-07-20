@@ -79,7 +79,7 @@ class MemoryCorrectionReconciler:
         self,
         *,
         llm: "LLMClient",
-        role_definition: dict[str, Any],
+        model_config: dict[str, Any],
         persona_context: "PersonaContext",
         context: dict[str, Any] | None,
         finished_at: str,
@@ -105,7 +105,7 @@ class MemoryCorrectionReconciler:
             "persona_context": persona_context.to_prompt_payload(),
         }
         selection = llm.generate_memory_correction_reconciliation(
-            role_definition=role_definition,
+            model_config=model_config,
             persona_context=persona_context,
             source_pack=source_pack,
         )

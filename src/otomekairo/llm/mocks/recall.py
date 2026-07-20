@@ -18,7 +18,7 @@ from otomekairo.llm.contracts import (
 class LLMMockRecallMixin:
     def generate_answer_contract(
         self,
-        role_definition: dict,
+        model_config: dict,
         input_text: str,
         recall_hint: dict[str, Any],
         current_time: str,
@@ -26,7 +26,7 @@ class LLMMockRecallMixin:
         persona_context: Any,
     ) -> dict[str, Any]:
         # model確認
-        self._assert_mock_model(role_definition)
+        self._assert_mock_model(model_config)
         _ = recall_hint
         _ = current_time
         _ = persona_context
@@ -76,7 +76,7 @@ class LLMMockRecallMixin:
 
     def generate_recall_hint(
         self,
-        role_definition: dict,
+        model_config: dict,
         input_text: str,
         recent_turns: list[dict],
         current_time: str,
@@ -84,7 +84,7 @@ class LLMMockRecallMixin:
         persona_context: Any,
     ) -> dict[str, Any]:
         # model確認
-        self._assert_mock_model(role_definition)
+        self._assert_mock_model(model_config)
         _ = persona_context
 
         # ヒューリスティックfocus
@@ -211,11 +211,11 @@ class LLMMockRecallMixin:
 
     def generate_event_evidence(
         self,
-        role_definition: dict,
+        model_config: dict,
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
         # model確認
-        self._assert_mock_model(role_definition)
+        self._assert_mock_model(model_config)
 
         # source pack
         primary_recall_focus = str(source_pack.get("primary_recall_focus") or "user")
@@ -274,11 +274,11 @@ class LLMMockRecallMixin:
 
     def generate_recall_pack_selection(
         self,
-        role_definition: dict,
+        model_config: dict,
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
         # model確認
-        self._assert_mock_model(role_definition)
+        self._assert_mock_model(model_config)
 
         # source pack
         recall_hint = source_pack.get("recall_hint", {})
@@ -345,11 +345,11 @@ class LLMMockRecallMixin:
 
     def generate_pending_intent_selection(
         self,
-        role_definition: dict,
+        model_config: dict,
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
         # model確認
-        self._assert_mock_model(role_definition)
+        self._assert_mock_model(model_config)
 
         # source pack
         trigger_kind = str(source_pack.get("trigger_kind") or "wake")
@@ -404,11 +404,11 @@ class LLMMockRecallMixin:
 
     def generate_initiative_entry_check(
         self,
-        role_definition: dict,
+        model_config: dict,
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
         # model確認
-        self._assert_mock_model(role_definition)
+        self._assert_mock_model(model_config)
 
         activity_context = source_pack.get("activity_context")
         if self._mock_has_activity_transition(activity_context):

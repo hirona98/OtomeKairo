@@ -11,7 +11,7 @@ API 文書は stream、result endpoint、inspection response の wire 契約だ�
 capability は、観測、物理作用、外部サービス利用のいずれも同じ契約で扱う。
 具体的なセンサ、機器、アプリ、通信先は manifest の実行実体ではなく、能力を実現する接続先として扱う。
 
-モデル role の `web_search_enabled` は生成 provider への request option であり、capability manifest には入れない。
+選択中モデルプリセットの `web_search_enabled` は生成 provider への request option であり、capability manifest には入れない。
 OtomeKairo が主体的に外部サービスへアクセスする機能だけを capability として定義する。
 
 ## 三つの層

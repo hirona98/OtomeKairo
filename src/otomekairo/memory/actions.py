@@ -1333,7 +1333,7 @@ class MemoryActionResolver:
 
         # 埋め込み比較
         embeddings = self.llm.generate_embeddings(
-            role_definition=embedding_definition,
+            model_config=embedding_definition,
             texts=[candidate_text, *match_texts],
         )
         candidate_embedding = embeddings[0]

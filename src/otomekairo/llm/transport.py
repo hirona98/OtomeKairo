@@ -33,24 +33,24 @@ class _LiteLLMProviderLogicProxy:
 # text completion を model 差分込みで実行する。
 def complete_text(
     *,
-    role_definition: dict,
+    model_config: dict,
     messages: list[dict[str, Any]],
 ) -> str:
     completion = _load_litellm_completion()
     request_kwargs: dict[str, Any] = {
-        "model": _resolve_litellm_model(role_definition),
+        "model": _resolve_litellm_model(model_config),
         "messages": messages,
-        "timeout": _resolve_timeout_seconds(role_definition, default=DEFAULT_COMPLETION_TIMEOUT_SECONDS),
+        "timeout": _resolve_timeout_seconds(model_config, default=DEFAULT_COMPLETION_TIMEOUT_SECONDS),
     }
-    api_base = _resolve_api_base(role_definition)
+    api_base = _resolve_api_base(model_config)
     if isinstance(api_base, str) and api_base.strip():
         request_kwargs["api_base"] = api_base.strip()
-    api_key = _resolve_api_key(role_definition)
+    api_key = _resolve_api_key(model_config)
     if api_key is not None:
         request_kwargs["api_key"] = api_key
-    reasoning_effort = _resolve_reasoning_effort(role_definition)
+    reasoning_effort = _resolve_reasoning_effort(model_config)
     if reasoning_effort is not None:
-        if _model_provider_name(role_definition) == "openrouter":
+        if _model_provider_name(model_config) == "openrouter":
             request_kwargs["extra_body"] = {
                 "reasoning": {
                     "effort": reasoning_effort,
@@ -58,10 +58,10 @@ def complete_text(
             }
         else:
             request_kwargs["reasoning_effort"] = reasoning_effort
-    max_output_tokens = _resolve_max_output_tokens(role_definition)
+    max_output_tokens = _resolve_max_output_tokens(model_config)
     if max_output_tokens is not None:
         request_kwargs["max_tokens"] = max_output_tokens
-    web_search_options = _resolve_web_search_options(role_definition)
+    web_search_options = _resolve_web_search_options(model_config)
     if web_search_options is not None:
         request_kwargs["web_search_options"] = web_search_options
 
@@ -75,12 +75,12 @@ def complete_text(
 # embedding を model 差分込みで実行する。
 def generate_embeddings(
     *,
-    role_definition: dict,
+    model_config: dict,
     texts: list[str],
     expected_dimension: int,
 ) -> list[list[float]]:
-    if _is_openrouter_embedding_role_definition(role_definition):
-        response = _request_openrouter_embeddings(role_definition=role_definition, texts=texts)
+    if _is_openrouter_embedding_model_config(model_config):
+        response = _request_openrouter_embeddings(model_config=model_config, texts=texts)
         return extract_embedding_vectors(
             response,
             expected_count=len(texts),
@@ -90,13 +90,13 @@ def generate_embeddings(
 
     embedding = _load_litellm_embedding()
     request_kwargs: dict[str, Any] = {
-        "model": _resolve_litellm_model(role_definition),
+        "model": _resolve_litellm_model(model_config),
         "input": texts,
     }
-    api_base = _resolve_api_base(role_definition)
+    api_base = _resolve_api_base(model_config)
     if isinstance(api_base, str) and api_base.strip():
         request_kwargs["api_base"] = api_base.strip()
-    api_key = _resolve_api_key(role_definition)
+    api_key = _resolve_api_key(model_config)
     if api_key is not None:
         request_kwargs["api_key"] = api_key
 
@@ -146,26 +146,26 @@ def _configure_litellm_provider_list_suppression() -> None:
         get_llm_provider_logic._otomekairo_provider_list_suppressed = True
 
 
-def _is_openrouter_embedding_role_definition(role_definition: dict) -> bool:
-    return _model_provider_name(role_definition) == "openrouter"
+def _is_openrouter_embedding_model_config(model_config: dict) -> bool:
+    return _model_provider_name(model_config) == "openrouter"
 
 
-def _resolve_litellm_model(role_definition: dict) -> str:
-    model = role_definition.get("model")
+def _resolve_litellm_model(model_config: dict) -> str:
+    model = model_config.get("model")
     if not isinstance(model, str) or not model.strip():
-        raise LLMError("role_definition.model が設定されていません。")
+        raise LLMError("model_config.model が設定されていません。")
     return model.strip()
 
 
-def _resolve_openrouter_embedding_model(role_definition: dict) -> str:
-    model = _resolve_litellm_model(role_definition)
+def _resolve_openrouter_embedding_model(model_config: dict) -> str:
+    model = _resolve_litellm_model(model_config)
     if model.startswith("openrouter/"):
         return model.removeprefix("openrouter/")
     return model
 
 
-def _resolve_openrouter_api_base(role_definition: dict) -> str:
-    configured_api_base = _resolve_api_base(role_definition)
+def _resolve_openrouter_api_base(model_config: dict) -> str:
+    configured_api_base = _resolve_api_base(model_config)
     if configured_api_base is not None:
         return configured_api_base
     return OPENROUTER_DEFAULT_API_BASE
@@ -173,16 +173,16 @@ def _resolve_openrouter_api_base(role_definition: dict) -> str:
 
 def _request_openrouter_embeddings(
     *,
-    role_definition: dict,
+    model_config: dict,
     texts: list[str],
 ) -> dict[str, Any]:
-    api_key = _resolve_api_key(role_definition)
+    api_key = _resolve_api_key(model_config)
     if api_key is None:
         raise LLMError("OpenRouter の embedding には認証トークンが必要です。")
 
-    api_base = _resolve_openrouter_api_base(role_definition)
+    api_base = _resolve_openrouter_api_base(model_config)
     payload = {
-        "model": _resolve_openrouter_embedding_model(role_definition),
+        "model": _resolve_openrouter_embedding_model(model_config),
         "input": texts,
         "encoding_format": "float",
     }
@@ -215,17 +215,17 @@ def _request_openrouter_embeddings(
     return payload
 
 
-def _resolve_api_base(role_definition: dict) -> str | None:
-    configured_api_base = role_definition.get("api_base")
+def _resolve_api_base(model_config: dict) -> str | None:
+    configured_api_base = model_config.get("api_base")
     if isinstance(configured_api_base, str) and configured_api_base.strip():
         return configured_api_base.strip()
-    if _model_provider_name(role_definition) == "openrouter":
+    if _model_provider_name(model_config) == "openrouter":
         return OPENROUTER_DEFAULT_API_BASE
     return None
 
 
-def _model_provider_name(role_definition: dict) -> str:
-    model = role_definition.get("model")
+def _model_provider_name(model_config: dict) -> str:
+    model = model_config.get("model")
     if not isinstance(model, str):
         return ""
     normalized_model = model.strip()
@@ -234,24 +234,22 @@ def _model_provider_name(role_definition: dict) -> str:
     return normalized_model.split("/", 1)[0]
 
 
-def _resolve_api_key(role_definition: dict) -> str | None:
-    value = role_definition.get("api_key")
+def _resolve_api_key(model_config: dict) -> str | None:
+    value = model_config.get("api_key")
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
 
 
-def _resolve_max_output_tokens(role_definition: dict) -> int | None:
-    value = role_definition.get("max_output_tokens")
+def _resolve_max_output_tokens(model_config: dict) -> int | None:
+    value = model_config.get("max_output_tokens")
     if isinstance(value, int) and value >= 1:
         return value
     return None
 
 
-def _resolve_timeout_seconds(role_definition: dict, *, default: float) -> float:
-    value = role_definition.get("timeout_seconds")
-    if value is None:
-        value = role_definition.get("request_timeout_seconds")
+def _resolve_timeout_seconds(model_config: dict, *, default: float) -> float:
+    value = model_config.get("timeout_seconds")
     if isinstance(value, bool):
         return default
     if isinstance(value, (int, float)) and value > 0:
@@ -259,8 +257,8 @@ def _resolve_timeout_seconds(role_definition: dict, *, default: float) -> float:
     return default
 
 
-def _resolve_reasoning_effort(role_definition: dict) -> str | None:
-    value = role_definition.get("reasoning_effort")
+def _resolve_reasoning_effort(model_config: dict) -> str | None:
+    value = model_config.get("reasoning_effort")
     if not isinstance(value, str):
         return None
     trimmed_value = value.strip()
@@ -269,8 +267,8 @@ def _resolve_reasoning_effort(role_definition: dict) -> str | None:
     return trimmed_value
 
 
-def _resolve_web_search_options(role_definition: dict) -> dict[str, Any] | None:
-    value = role_definition.get("web_search_enabled")
+def _resolve_web_search_options(model_config: dict) -> dict[str, Any] | None:
+    value = model_config.get("web_search_enabled")
     if value is True:
         return {}
     return None

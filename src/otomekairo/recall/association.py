@@ -37,7 +37,7 @@ class RecallAssociationMixin:
 
         # クエリ埋め込み群
         query_embeddings = self.llm.generate_embeddings(
-            role_definition=embedding_definition,
+            model_config=embedding_definition,
             texts=[spec["text"] for spec in query_specs],
         )
 

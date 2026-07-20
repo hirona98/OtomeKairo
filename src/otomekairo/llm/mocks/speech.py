@@ -10,12 +10,12 @@ class LLMMockSpeechMixin:
     def generate_speech(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: Any,
         context: SpeechContext,
     ) -> dict[str, Any]:
         # model確認
-        self._assert_mock_model(role_definition)
+        self._assert_mock_model(model_config)
         input_text = context.input_text
         recent_turns = context.recent_turns
         time_context = context.time_context

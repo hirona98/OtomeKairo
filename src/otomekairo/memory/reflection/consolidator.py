@@ -101,7 +101,7 @@ class ReflectiveConsolidator(
                 limit=REFLECTION_MEMORY_LIMIT,
             )
             embedding_definition = state["memory_sets"][memory_set_id]["embedding"]
-            reflection_summary_role = self._reflection_summary_role_definition(state=state)
+            reflection_summary_model_config = self._reflection_summary_model_config(state=state)
             selected_persona = self._selected_persona_definition(state=state)
             mood_state = self.store.get_mood_state(
                 memory_set_id=memory_set_id,
@@ -152,7 +152,7 @@ class ReflectiveConsolidator(
                 episodes=episodes,
                 active_units=active_units,
                 embedding_definition=embedding_definition,
-                reflection_summary_role=reflection_summary_role,
+                reflection_summary_model_config=reflection_summary_model_config,
                 selected_persona=selected_persona,
                 scope_support_index=scope_support_index,
             )

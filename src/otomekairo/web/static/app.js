@@ -1,27 +1,3 @@
-const ROLE_LABELS = {
-  input_interpretation: "入力内容の整理",
-  decision_generation: "何をするかの判断",
-  expression_generation: "会話の返答生成",
-  memory_interpretation: "記憶更新の整理",
-  memory_reflection_summary: "内省結果の要約",
-  event_evidence_generation: "想起根拠の要約",
-  recall_pack_selection: "想起候補の選別",
-  pending_intent_selection: "保留候補の選別",
-  autonomous_step_generation: "自律ステップ",
-  memory_correction_reconciliation: "記憶補正",
-};
-
-const PRIMARY_MODEL_ROLE = "expression_generation";
-const SHARED_MODEL_ROLES = [
-  "input_interpretation",
-  "decision_generation",
-  "memory_interpretation",
-  "memory_reflection_summary",
-  "event_evidence_generation",
-  "recall_pack_selection",
-  "pending_intent_selection",
-];
-
 const state = {
   identity: null,
   editor: null,
@@ -430,123 +406,13 @@ function renderModel() {
   element("model-display-name").value = preset.display_name || "";
   element("model-recent-turn-limit").value = preset.prompt_window?.recent_turn_limit || 30;
   element("model-recent-turn-minutes").value = preset.prompt_window?.recent_turn_minutes || 30;
-  renderRoleList(preset);
-}
-
-function renderRoleList(preset) {
-  const list = element("role-list");
-  list.innerHTML = "";
-  const roles = preset.roles || {};
-  const expressionRole = roles[PRIMARY_MODEL_ROLE] || {};
-  if (roles[PRIMARY_MODEL_ROLE]) {
-    list.append(createModelRoleCard(PRIMARY_MODEL_ROLE, expressionRole, expressionRole, { primary: true }));
-  }
-  for (const roleName of SHARED_MODEL_ROLES) {
-    const role = roles[roleName];
-    if (role) {
-      list.append(createModelRoleCard(roleName, role, expressionRole, { primary: false }));
-    }
-  }
-}
-
-function createModelRoleCard(roleName, role, expressionRole, { primary }) {
-  const details = document.createElement("details");
-  details.className = primary ? "role-card model-primary-role-card" : "role-card";
-  details.open = primary;
-  const summary = document.createElement("summary");
-  summary.textContent = ROLE_LABELS[roleName] || roleName;
-
-  const body = document.createElement("div");
-  body.className = "role-card-body";
-  if (!primary) {
-    const sharedLabel = document.createElement("label");
-    sharedLabel.className = "checkbox-field";
-    sharedLabel.innerHTML = `表現生成と同じモデルを使用する<input data-role="${roleName}" data-share-expression="true" type="checkbox">`;
-    body.append(sharedLabel);
-  }
-
-  const grid = document.createElement("div");
-  grid.className = "model-role-grid";
-  grid.innerHTML = `
-    <label>モデル<input data-role="${roleName}" data-field="model"></label>
-    <label>エンドポイントURL<input data-role="${roleName}" data-field="api_base"></label>
-    <label>APIキー<input data-role="${roleName}" data-field="api_key" type="password" autocomplete="new-password"></label>
-    <label>推論の深さ<input data-role="${roleName}" data-field="reasoning_effort"></label>
-    <label>最大出力トークン<input data-role="${roleName}" data-field="max_output_tokens" type="number" min="1"></label>
-    <label class="checkbox-field">Web検索を有効にする<input data-role="${roleName}" data-field="web_search_enabled" type="checkbox"></label>
-  `;
-  body.append(grid);
-  details.append(summary, body);
-
-  const shared = !primary && modelRoleUsesExpression(role, expressionRole);
-  const shareInput = body.querySelector("[data-share-expression]");
-  if (shareInput) {
-    shareInput.checked = shared;
-    shareInput.addEventListener("change", () => applySharedModelState(body, currentExpressionRoleValues()));
-  }
-  for (const input of grid.querySelectorAll("[data-field]")) {
-    const field = input.dataset.field;
-    const value = shared && isSharedModelField(field) ? expressionRole[field] : role[field];
-    if (input.type === "checkbox") {
-      input.checked = value === true;
-    } else {
-      input.value = value ?? "";
-    }
-  }
-  if (primary) {
-    for (const input of grid.querySelectorAll("[data-field]")) {
-      if (isSharedModelField(input.dataset.field)) {
-        input.addEventListener("input", refreshSharedRoleInputs);
-      }
-    }
-  }
-  applySharedModelState(body, expressionRole);
-  return details;
-}
-
-function applySharedModelState(container, expressionRole) {
-  const shareInput = container.querySelector("[data-share-expression]");
-  const shared = shareInput?.checked === true;
-  for (const input of container.querySelectorAll("[data-field]")) {
-    if (!isSharedModelField(input.dataset.field)) {
-      continue;
-    }
-    input.disabled = shared;
-    if (shared) {
-      input.value = expressionRole[input.dataset.field] ?? "";
-    }
-  }
-}
-
-function refreshSharedRoleInputs() {
-  const expressionRole = currentExpressionRoleValues();
-  for (const container of element("role-list").querySelectorAll(".role-card-body")) {
-    if (container.querySelector("[data-share-expression]")?.checked === true) {
-      applySharedModelState(container, expressionRole);
-    }
-  }
-}
-
-function currentExpressionRoleValues() {
-  const result = {};
-  for (const input of element("role-list").querySelectorAll(`[data-role="${PRIMARY_MODEL_ROLE}"][data-field]`)) {
-    result[input.dataset.field] = input.value;
-  }
-  return result;
-}
-
-function isSharedModelField(field) {
-  return field === "model" || field === "api_base" || field === "api_key";
-}
-
-function modelRoleUsesExpression(role, expressionRole) {
-  return normalizeModelField(role.model) === normalizeModelField(expressionRole.model)
-    && normalizeModelField(role.api_base) === normalizeModelField(expressionRole.api_base)
-    && String(role.api_key ?? "") === String(expressionRole.api_key ?? "");
-}
-
-function normalizeModelField(value) {
-  return String(value ?? "").trim();
+  element("model-model").value = preset.model || "";
+  element("model-api-base").value = preset.api_base || "";
+  element("model-api-key").value = preset.api_key || "";
+  element("model-reasoning-effort").value = preset.reasoning_effort || "";
+  element("model-max-output-tokens").value = preset.max_output_tokens || 4000;
+  element("model-timeout-seconds").value = preset.timeout_seconds || 90;
+  element("model-web-search-enabled").checked = preset.web_search_enabled === true;
 }
 
 function syncModel() {
@@ -558,43 +424,23 @@ function syncModel() {
   preset.prompt_window = preset.prompt_window || {};
   preset.prompt_window.recent_turn_limit = intValue("model-recent-turn-limit", 30);
   preset.prompt_window.recent_turn_minutes = intValue("model-recent-turn-minutes", 30);
-  const expressionRole = preset.roles[PRIMARY_MODEL_ROLE] || {};
-  const sharedRoleNames = new Set();
-  for (const input of element("role-list").querySelectorAll("[data-share-expression]")) {
-    if (input.checked) {
-      sharedRoleNames.add(input.dataset.role);
-    }
+  preset.model = textValue("model-model");
+  preset.api_key = textValue("model-api-key");
+  preset.max_output_tokens = intValue("model-max-output-tokens", 4000);
+  preset.timeout_seconds = intValue("model-timeout-seconds", 90);
+  preset.web_search_enabled = boolValue("model-web-search-enabled");
+  const apiBase = textValue("model-api-base").trim();
+  if (apiBase) {
+    preset.api_base = apiBase;
+  } else {
+    delete preset.api_base;
   }
-  for (const input of element("role-list").querySelectorAll("[data-field]")) {
-    const role = preset.roles[input.dataset.role];
-    if (!role) {
-      continue;
-    }
-    const field = input.dataset.field;
-    if (sharedRoleNames.has(input.dataset.role) && isSharedModelField(field)) {
-      role[field] = expressionRole[field] ?? "";
-      continue;
-    }
-    if (input.type === "checkbox") {
-      role[field] = input.checked;
-    } else if (input.type === "number") {
-      role[field] = intValueFromInput(input, role[field]);
-    } else if (field === "api_base" || field === "reasoning_effort") {
-      const value = input.value.trim();
-      if (value) {
-        role[field] = value;
-      } else {
-        delete role[field];
-      }
-    } else {
-      role[field] = input.value;
-    }
+  const reasoningEffort = textValue("model-reasoning-effort").trim();
+  if (reasoningEffort) {
+    preset.reasoning_effort = reasoningEffort;
+  } else {
+    delete preset.reasoning_effort;
   }
-}
-
-function intValueFromInput(input, fallback = 1) {
-  const value = Number.parseInt(input.value, 10);
-  return Number.isFinite(value) ? value : fallback;
 }
 
 function renderMemory() {
@@ -661,24 +507,7 @@ function pasteLlmApiKeyToMemory() {
 function preferredLlmApiKey() {
   syncModel();
   const preset = arrayById(state.editor.model_presets, "model_preset_id", state.selectedModelPresetId);
-  const roles = preset?.roles || {};
-  const roleNames = [
-    PRIMARY_MODEL_ROLE,
-    "decision_generation",
-    "input_interpretation",
-    "memory_interpretation",
-    "memory_reflection_summary",
-    "event_evidence_generation",
-    "recall_pack_selection",
-    "pending_intent_selection",
-  ];
-  for (const roleName of roleNames) {
-    const apiKey = roles[roleName]?.api_key;
-    if (typeof apiKey === "string" && apiKey.trim()) {
-      return apiKey.trim();
-    }
-  }
-  return "";
+  return typeof preset?.api_key === "string" ? preset.api_key.trim() : "";
 }
 
 function renderCapabilities() {

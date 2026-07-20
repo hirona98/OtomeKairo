@@ -223,15 +223,13 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         )
 
         # RecallPack 選別
-        recall_pack_selection_role = state["model_presets"][state["selected_model_preset_id"]]["roles"][
-            "recall_pack_selection"
-        ]
+        selected_model_preset = state["model_presets"][state["selected_model_preset_id"]]
         selection_result = self._select_recall_pack_sections(
             augmented_query_text=augmented_query_text,
             recall_hint=recall_hint,
             candidate_sections=candidate_sections,
             conflicts=conflicts,
-            role_definition=recall_pack_selection_role,
+            model_config=selected_model_preset,
             persona_context=build_persona_context(
                 state["personas"][state["selected_persona_id"]],
                 role="recall_pack_selection",
@@ -271,13 +269,12 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             recall_pack_selection=recall_pack_selection,
             memory_link_context=memory_link_context,
         )
-        event_evidence_role = state["model_presets"][state["selected_model_preset_id"]]["roles"]["event_evidence_generation"]
         event_evidence_result = self._build_event_evidence(
             memory_set_id=memory_set_id,
             primary_recall_focus=primary_recall_focus,
             recall_hint=recall_hint,
             sections=sections,
-            role_definition=event_evidence_role,
+            model_config=selected_model_preset,
             persona_context=build_persona_context(
                 state["personas"][state["selected_persona_id"]],
                 role="event_evidence_generation",

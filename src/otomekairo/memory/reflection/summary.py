@@ -51,17 +51,13 @@ class MemoryReflectionSummaryMixin:
             "memory_link_ids": [],
         }
 
-    def _reflection_summary_role_definition(self, *, state: dict[str, Any]) -> dict[str, Any]:
-        # state snapshot から role を読む。current 設定は参照しない。
+    def _reflection_summary_model_config(self, *, state: dict[str, Any]) -> dict[str, Any]:
+        # 会話時点の state snapshot から生成モデル設定を読む。
         selected_model_preset_id = state["selected_model_preset_id"]
         selected_model_preset = state["model_presets"][selected_model_preset_id]
-        roles = selected_model_preset.get("roles")
-        if not isinstance(roles, dict):
-            raise LLMError("roles が不正なため、reflection summary role を取得できません。")
-        role_definition = roles.get("memory_reflection_summary")
-        if not isinstance(role_definition, dict):
-            raise LLMError("選択中の model preset に reflection summary role がありません。")
-        return role_definition
+        if not isinstance(selected_model_preset, dict):
+            raise LLMError("選択中の model preset snapshot が不正です。")
+        return selected_model_preset
 
     def _selected_persona_definition(self, *, state: dict[str, Any]) -> dict[str, Any]:
         selected_persona_id = state.get("selected_persona_id")
@@ -144,7 +140,7 @@ class MemoryReflectionSummaryMixin:
         episodes: list[dict[str, Any]],
         active_units: list[dict[str, Any]],
         embedding_definition: dict[str, Any],
-        reflection_summary_role: dict[str, Any],
+        reflection_summary_model_config: dict[str, Any],
         selected_persona: dict[str, Any],
         scope_support_index: dict[tuple[str, str], dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -215,7 +211,7 @@ class MemoryReflectionSummaryMixin:
 
             try:
                 summary_payload = self.llm.generate_memory_reflection_summary(
-                    role_definition=reflection_summary_role,
+                    model_config=reflection_summary_model_config,
                     persona_context=persona_context,
                     evidence_pack=evidence_pack,
                 )

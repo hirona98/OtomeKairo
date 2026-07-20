@@ -76,7 +76,7 @@ index が壊れた場合は `visual_observation_record.detailed_summary_text` �
 
 ## LLM 契約
 
-専用 role を増やさず、`model_preset.roles.input_interpretation` を使う。
+専用モデル設定を増やさず、選択中の `model_preset` を使う。論理 role は `input_interpretation` とする。
 
 LLM に渡す source pack は少なくとも次を持つ。
 

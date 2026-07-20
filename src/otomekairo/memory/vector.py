@@ -43,7 +43,7 @@ class MemoryVectorIndexer:
 
         # 埋め込み群
         embeddings = self.llm.generate_embeddings(
-            role_definition=embedding_definition,
+            model_config=embedding_definition,
             texts=[entry["source_text"] for entry in entries],
         )
 

@@ -253,12 +253,10 @@ class ServiceInputWakePipelineMixin:
             recent_turns=recent_turns,
             foreground_world_state=foreground_world_state,
         )
-        role_definition = state["model_presets"][state["selected_model_preset_id"]]["roles"][
-            "pending_intent_selection"
-        ]
+        model_config = state["model_presets"][state["selected_model_preset_id"]]
         persona_context = self._build_selected_persona_context(state=state, role="initiative_entry_check")
         payload = self.llm.generate_initiative_entry_check(
-            role_definition=role_definition,
+            model_config=model_config,
             persona_context=persona_context,
             source_pack=source_pack,
         )

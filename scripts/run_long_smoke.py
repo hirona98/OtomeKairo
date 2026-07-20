@@ -24,6 +24,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from otomekairo.store.config import ConfigStore
+
 
 PNG_DATA_URI = (
     "data:image/png;base64,"
@@ -767,9 +769,8 @@ class LongSmokeRunner:
             for model_preset in editor_state["model_presets"]:
                 if model_preset["model_preset_id"] != self.selected_model_preset_id:
                     continue
-                for role_name, role_definition in model_preset["roles"].items():
-                    role_definition["model"] = f"mock-{role_name}"
-                    role_definition["api_key"] = ""
+                model_preset["model"] = "mock-generation"
+                model_preset["api_key"] = ""
 
             for memory_set in editor_state["memory_sets"]:
                 if memory_set["memory_set_id"] != self.selected_memory_set_id:
@@ -835,14 +836,14 @@ class LongSmokeRunner:
         config_data_dir = self.real_llm_config_data_dir
         if config_data_dir is None:
             config_data_dir = self.repo_root / "var" / "otomekairo"
-        state_path = config_data_dir / "server_state.json"
+        state_path = config_data_dir / "config.db"
         if not state_path.exists():
             raise SmokeError(f"real LLM config state was not found: {state_path}")
 
         try:
-            source_state = json.loads(state_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise SmokeError(f"real LLM config state was invalid JSON: {state_path}") from exc
+            source_state = ConfigStore(config_data_dir).read_state()
+        except (RuntimeError, sqlite3.Error) as exc:
+            raise SmokeError(f"real LLM config state could not be read: {state_path}") from exc
 
         source_model_preset_id = source_state.get("selected_model_preset_id")
         source_memory_set_id = source_state.get("selected_memory_set_id")
@@ -863,18 +864,10 @@ class LongSmokeRunner:
         for model_preset in editor_state["model_presets"]:
             if model_preset.get("model_preset_id") != self.selected_model_preset_id:
                 continue
-            if isinstance(source_model_preset.get("display_name"), str):
-                model_preset["display_name"] = source_model_preset["display_name"]
-            if isinstance(source_model_preset.get("prompt_window"), dict):
-                model_preset["prompt_window"] = deepcopy(source_model_preset["prompt_window"])
-            source_roles = source_model_preset.get("roles")
-            if not isinstance(source_roles, dict):
-                raise SmokeError("real LLM config selected model preset has invalid roles.")
-            for role_name, role_definition in model_preset["roles"].items():
-                source_role = source_roles.get(role_name)
-                if not isinstance(source_role, dict):
-                    raise SmokeError(f"real LLM config selected model preset is missing role: {role_name}")
-                role_definition.update(deepcopy(source_role))
+            target_model_preset_id = model_preset["model_preset_id"]
+            model_preset.clear()
+            model_preset.update(deepcopy(source_model_preset))
+            model_preset["model_preset_id"] = target_model_preset_id
             break
         else:
             raise SmokeError("current editor-state selected model preset was not found.")
@@ -916,30 +909,24 @@ class LongSmokeRunner:
         if not isinstance(selected_memory_set, dict):
             raise SmokeError(f"selected memory set was not found: {selected_memory_set_id}")
 
-        roles = selected_model_preset.get("roles", {})
-        if not isinstance(roles, dict):
-            raise SmokeError(f"selected model preset has invalid roles: {selected_model_preset_id}")
-        for role_name, role_definition in roles.items():
-            if not isinstance(role_definition, dict):
-                raise SmokeError(f"selected model preset role is invalid: {role_name}")
-            self._assert_role_definition_ready(
-                role_definition=role_definition,
-                label=f"model preset role {role_name}",
-            )
+        self._assert_model_config_ready(
+            model_config=selected_model_preset,
+            label="model preset",
+        )
 
         embedding_definition = selected_memory_set.get("embedding")
         if not isinstance(embedding_definition, dict):
             raise SmokeError(f"selected memory set embedding is invalid: {selected_memory_set_id}")
-        self._assert_role_definition_ready(role_definition=embedding_definition, label="memory embedding")
+        self._assert_model_config_ready(model_config=embedding_definition, label="memory embedding")
 
-    def _assert_role_definition_ready(self, *, role_definition: dict[str, Any], label: str) -> None:
-        model = role_definition.get("model")
+    def _assert_model_config_ready(self, *, model_config: dict[str, Any], label: str) -> None:
+        model = model_config.get("model")
         if not isinstance(model, str) or not model.strip():
             raise SmokeError(f"{label} does not have a valid model.")
         normalized_model = model.strip()
         if normalized_model.startswith("mock"):
             return
-        api_key = role_definition.get("api_key")
+        api_key = model_config.get("api_key")
         if not isinstance(api_key, str) or not api_key.strip():
             raise SmokeError(f"{label} requires api_key in current editor-state mode: model={normalized_model}")
 

@@ -68,7 +68,7 @@ event 単位の LLM 圧縮は、選定済み event の順序を index として�
 
 ## 論理 role
 
-モデルプリセットは `event_evidence_generation` という論理 role を持つ。
+この処理の論理 role は `event_evidence_generation` とし、選択中の `model_preset` を使う。
 
 この role の責務は次だけである。
 

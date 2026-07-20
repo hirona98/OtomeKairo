@@ -116,11 +116,11 @@ class ServiceSpontaneousPendingIntentMixin:
             ) from exc
 
         # 選択
-        role_definition = state["model_presets"][state["selected_model_preset_id"]]["roles"]["pending_intent_selection"]
+        model_config = state["model_presets"][state["selected_model_preset_id"]]
         persona_context = self._build_selected_persona_context(state=state, role="pending_intent_selection")
         try:
             payload = self.llm.generate_pending_intent_selection(
-                role_definition=role_definition,
+                model_config=model_config,
                 persona_context=persona_context,
                 source_pack=source_pack,
             )

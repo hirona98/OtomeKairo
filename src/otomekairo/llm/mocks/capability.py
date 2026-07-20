@@ -67,12 +67,12 @@ MOCK_CAPABILITY_REQUEST_RULES = (
 class LLMMockCapabilityMixin:
     def generate_visual_observation_summary(
         self,
-        role_definition: dict,
+        model_config: dict,
         source_pack: dict[str, Any],
         images: list[str],
     ) -> dict[str, Any]:
         # model確認
-        self._assert_mock_model(role_definition)
+        self._assert_mock_model(model_config)
 
         # context
         _ = images

@@ -67,7 +67,7 @@ OtomeKairo では、`RecallPack` 全体を LLM 任せにはしない。
 
 ## 論理 role
 
-モデルプリセットは `recall_pack_selection` という論理 role を持つ。
+この処理の論理 role は `recall_pack_selection` とし、選択中の `model_preset` を使う。
 
 この role の責務は次だけである。
 

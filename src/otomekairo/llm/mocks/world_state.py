@@ -14,11 +14,11 @@ from otomekairo.world_state.models import (
 class LLMMockWorldStateMixin:
     def generate_world_state(
         self,
-        role_definition: dict,
+        model_config: dict,
         source_pack: WorldStateSourcePack,
     ) -> dict[str, Any]:
         # model確認
-        self._assert_mock_model(role_definition)
+        self._assert_mock_model(model_config)
 
         # source pack
         trigger_kind = source_pack.trigger_kind

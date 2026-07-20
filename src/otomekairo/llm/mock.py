@@ -25,12 +25,12 @@ class MockLLMClient(
 ):
     def generate_embeddings(
         self,
-        role_definition: dict,
+        model_config: dict,
         texts: list[str],
         embedding_dimension: int,
     ) -> list[list[float]]:
         # model確認
-        self._assert_mock_model(role_definition)
+        self._assert_mock_model(model_config)
 
         # 結果
         return [
@@ -73,16 +73,16 @@ class MockLLMClient(
         # モック専用の簡易分岐
         return any(term in text for term in terms)
 
-    def generate_activity_state(self, role_definition: dict, source_pack: dict) -> dict:
+    def generate_activity_state(self, model_config: dict, source_pack: dict) -> dict:
         # model確認
-        self._assert_mock_model(role_definition)
+        self._assert_mock_model(model_config)
 
         # モックは契約形状だけを満たす。
         return {"activity_candidates": []}
 
-    def _assert_mock_model(self, role_definition: dict) -> None:
+    def _assert_mock_model(self, model_config: dict) -> None:
         # モデル確認
-        model = role_definition.get("model")
+        model = model_config.get("model")
         if isinstance(model, str) and model.strip().startswith("mock"):
             return
         raise LLMError(f"未対応の mock model です: {model}")

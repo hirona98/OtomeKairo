@@ -44,7 +44,7 @@ class RecallEventEvidenceMixin:
         primary_recall_focus: str,
         recall_hint: dict[str, Any],
         sections: dict[str, list[dict[str, Any]]],
-        role_definition: dict[str, Any],
+        model_config: dict[str, Any],
         persona_context: PersonaContext,
     ) -> dict[str, Any]:
         # 初期状態
@@ -148,7 +148,7 @@ class RecallEventEvidenceMixin:
                         primary_recall_focus=primary_recall_focus,
                         recall_hint=recall_hint,
                         sections=sections,
-                        role_definition=role_definition,
+                        model_config=model_config,
                         persona_context=persona_context,
                         work_item=work_item,
                     )
@@ -183,7 +183,7 @@ class RecallEventEvidenceMixin:
         primary_recall_focus: str,
         recall_hint: dict[str, Any],
         sections: dict[str, list[dict[str, Any]]],
-        role_definition: dict[str, Any],
+        model_config: dict[str, Any],
         persona_context: PersonaContext,
         work_item: dict[str, Any],
     ) -> dict[str, Any]:
@@ -217,7 +217,7 @@ class RecallEventEvidenceMixin:
 
         try:
             payload = self.llm.generate_event_evidence(
-                role_definition=role_definition,
+                model_config=model_config,
                 persona_context=persona_context,
                 source_pack=source_pack,
             )

@@ -12,13 +12,13 @@ class LLMMockDecisionMixin:
     def generate_decision(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: Any,
         context: DecisionContext,
     ) -> dict[str, Any]:
         # model確認
         _ = persona_context
-        self._assert_mock_model(role_definition)
+        self._assert_mock_model(model_config)
         input_text = context.input_text
         recent_turns = context.recent_turns
         time_context = context.time_context
@@ -125,13 +125,13 @@ class LLMMockDecisionMixin:
     def generate_autonomous_step(
         self,
         *,
-        role_definition: dict,
+        model_config: dict,
         persona_context: Any,
         context: AutonomousStepContext,
     ) -> dict[str, Any]:
         # model確認
         _ = persona_context
-        self._assert_mock_model(role_definition)
+        self._assert_mock_model(model_config)
 
         run = context.run
         objective = str(run.get("objective_summary") or "").strip()

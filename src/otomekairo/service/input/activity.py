@@ -58,9 +58,9 @@ class ServiceInputActivityMixin:
             return trace["activity_context"], trace
 
         try:
-            role_definition = state["model_presets"][state["selected_model_preset_id"]]["roles"]["input_interpretation"]
+            model_config = state["model_presets"][state["selected_model_preset_id"]]
             payload = self.llm.generate_activity_state(
-                role_definition=role_definition,
+                model_config=model_config,
                 persona_context=persona_context,
                 source_pack=source_pack,
             )

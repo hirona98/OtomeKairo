@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.capabilities import capability_manifests
-from otomekairo.service.common import REQUIRED_MODEL_ROLE_NAMES, ServiceError
+from otomekairo.service.common import ServiceError
 from otomekairo.service.config.constants import (
     CAMERA_CONNECTOR_KINDS,
     CAMERA_DEFAULT_CLIENT_ID,
@@ -475,6 +475,25 @@ class ServiceConfigValidationMixin:
         self._validate_embedding_definition("memory_set.embedding", definition.get("embedding"))
 
     def _validate_model_preset_definition(self, model_preset_id: str, definition: dict[str, Any]) -> None:
+        allowed_fields = {
+            "model_preset_id",
+            "display_name",
+            "prompt_window",
+            "model",
+            "api_base",
+            "api_key",
+            "reasoning_effort",
+            "max_output_tokens",
+            "timeout_seconds",
+            "web_search_enabled",
+        }
+        unsupported_fields = sorted(set(definition) - allowed_fields)
+        if unsupported_fields:
+            raise ServiceError(
+                400,
+                "unsupported_model_preset_fields",
+                f"model_preset has unsupported fields: {', '.join(unsupported_fields)}.",
+            )
         if definition.get("model_preset_id") != model_preset_id:
             raise ServiceError(400, "model_preset_id_mismatch", "model_preset_id must match the path.")
         display_name = definition.get("display_name")
@@ -482,20 +501,6 @@ class ServiceConfigValidationMixin:
             raise ServiceError(400, "invalid_model_preset_display_name", "display_name is required.")
         prompt_window = definition.get("prompt_window")
         self._validate_prompt_window(prompt_window)
-        roles = definition.get("roles")
-        if not isinstance(roles, dict):
-            raise ServiceError(400, "invalid_model_preset_roles", "roles must be an object.")
-
-        for role_name in REQUIRED_MODEL_ROLE_NAMES:
-            if role_name not in roles:
-                raise ServiceError(400, "missing_model_role", f"{role_name} is required.")
-            role_definition = roles[role_name]
-            self._validate_model_role_definition(role_name, role_definition)
-
-    def _validate_model_role_definition(self, role_name: str, definition: Any) -> None:
-        if not isinstance(definition, dict):
-            raise ServiceError(400, "invalid_model_role", f"{role_name} must be an object.")
-
         model = definition.get("model")
         api_base = definition.get("api_base")
         api_key = definition.get("api_key")
@@ -505,90 +510,76 @@ class ServiceConfigValidationMixin:
         web_search_enabled = definition.get("web_search_enabled")
 
         if not isinstance(model, str) or not model.strip():
-            raise ServiceError(400, "invalid_model_role_model", f"{role_name}.model is required.")
+            raise ServiceError(400, "invalid_model_preset_model", "model_preset.model is required.")
         if api_base is not None and not isinstance(api_base, str):
-            raise ServiceError(400, "invalid_model_role_api_base", f"{role_name}.api_base must be a string.")
+            raise ServiceError(400, "invalid_model_preset_api_base", "model_preset.api_base must be a string.")
         if not isinstance(api_key, str):
-            raise ServiceError(400, "invalid_model_role_api_key", f"{role_name}.api_key must be a string.")
-        if reasoning_effort is not None and not isinstance(reasoning_effort, str):
-            raise ServiceError(400, "invalid_reasoning_effort", f"{role_name}.reasoning_effort must be a string.")
-        if not isinstance(max_output_tokens, int) or max_output_tokens < 1:
+            raise ServiceError(400, "invalid_model_preset_api_key", "model_preset.api_key must be a string.")
+        if reasoning_effort is not None and (
+            not isinstance(reasoning_effort, str) or not reasoning_effort.strip()
+        ):
+            raise ServiceError(400, "invalid_reasoning_effort", "reasoning_effort must be a non-empty string.")
+        if type(max_output_tokens) is not int or max_output_tokens < 1:
             raise ServiceError(
                 400,
                 "invalid_max_output_tokens",
-                f"{role_name}.max_output_tokens must be an integer >= 1.",
+                "max_output_tokens must be an integer >= 1.",
             )
         if (
-            timeout_seconds is not None
-            and (
-                isinstance(timeout_seconds, bool)
-                or not isinstance(timeout_seconds, (int, float))
-                or timeout_seconds <= 0
-            )
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or timeout_seconds <= 0
         ):
             raise ServiceError(
                 400,
                 "invalid_timeout_seconds",
-                f"{role_name}.timeout_seconds must be a positive number when specified.",
+                "timeout_seconds must be a positive number.",
             )
         if not isinstance(web_search_enabled, bool):
             raise ServiceError(
                 400,
                 "invalid_web_search_enabled",
-                f"{role_name}.web_search_enabled must be a boolean.",
+                "web_search_enabled must be a boolean.",
             )
 
     def _normalize_model_preset_definition(self, definition: dict[str, Any]) -> dict[str, Any]:
-        normalized = {
-            **definition,
+        known_fields = {
+            "model_preset_id",
+            "display_name",
+            "prompt_window",
+            "model",
+            "api_base",
+            "api_key",
+            "reasoning_effort",
+            "max_output_tokens",
+            "timeout_seconds",
+            "web_search_enabled",
         }
+        # 未知fieldはvalidatorへ残し、旧roles構造を黙って受理しない。
+        normalized: dict[str, Any] = {
+            key: value for key, value in definition.items() if key not in known_fields
+        }
+        for field_name in ("model_preset_id", "display_name"):
+            value = definition.get(field_name)
+            normalized[field_name] = value.strip() if isinstance(value, str) else value
         display_name = normalized.get("display_name")
         if isinstance(display_name, str):
             normalized["display_name"] = display_name.strip()
         prompt_window = definition.get("prompt_window")
         if isinstance(prompt_window, dict):
             normalized["prompt_window"] = self._normalize_prompt_window(prompt_window)
-
-        roles = definition.get("roles")
-        if not isinstance(roles, dict):
-            return normalized
-
-        normalized_roles: dict[str, Any] = {}
-        for role_name, role_definition in roles.items():
-            if not isinstance(role_definition, dict):
-                normalized_roles[role_name] = role_definition
+        for field_name in ("model", "api_base", "api_key", "reasoning_effort"):
+            if field_name not in definition:
                 continue
-            normalized_role: dict[str, Any] = {}
-            for field_name in ("model", "api_base", "api_key"):
-                if field_name not in role_definition:
+            value = definition.get(field_name)
+            if isinstance(value, str):
+                value = value.strip()
+                if field_name in {"api_base", "reasoning_effort"} and not value:
                     continue
-                value = role_definition.get(field_name)
-                if isinstance(value, str):
-                    trimmed_value = value.strip()
-                    if field_name == "api_base" and not trimmed_value:
-                        continue
-                    normalized_role[field_name] = trimmed_value
-                else:
-                    normalized_role[field_name] = value
-            reasoning_effort = role_definition.get("reasoning_effort")
-            if isinstance(reasoning_effort, str):
-                trimmed_reasoning_effort = reasoning_effort.strip()
-                if trimmed_reasoning_effort:
-                    normalized_role["reasoning_effort"] = trimmed_reasoning_effort
-            max_output_tokens = role_definition.get("max_output_tokens")
-            if isinstance(max_output_tokens, int):
-                normalized_role["max_output_tokens"] = max_output_tokens
-            timeout_seconds = role_definition.get("timeout_seconds")
-            if isinstance(timeout_seconds, bool):
-                pass
-            elif isinstance(timeout_seconds, (int, float)):
-                normalized_role["timeout_seconds"] = timeout_seconds
-            web_search_enabled = role_definition.get("web_search_enabled")
-            if isinstance(web_search_enabled, bool):
-                normalized_role["web_search_enabled"] = web_search_enabled
-            normalized_roles[role_name] = normalized_role
-
-        normalized["roles"] = normalized_roles
+            normalized[field_name] = value
+        for field_name in ("max_output_tokens", "timeout_seconds", "web_search_enabled"):
+            if field_name in definition:
+                normalized[field_name] = definition[field_name]
         return normalized
 
     def _normalize_memory_set_definition(self, definition: dict[str, Any]) -> dict[str, Any]:

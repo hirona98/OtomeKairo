@@ -64,9 +64,8 @@ class ServiceInputVisualMixin:
         if not images:
             return client_context, observation_summary
 
-        # role/source pack
+        # 生成モデル/source pack
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
-        interpretation_role = selected_preset["roles"]["input_interpretation"]
         persona_context = self._build_selected_persona_context(state=state, role="visual_observation")
         source_pack = self._build_visual_observation_source_pack(
             started_at=started_at,
@@ -81,7 +80,7 @@ class ServiceInputVisualMixin:
         # 実行
         try:
             payload = self.llm.generate_visual_observation_summary(
-                role_definition=interpretation_role,
+                model_config=selected_preset,
                 persona_context=persona_context,
                 source_pack=source_pack,
                 images=images,

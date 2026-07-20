@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,6 +7,15 @@ from otomekairo.store.file_store import FileStore
 
 
 class ConfigStoreTests(unittest.TestCase):
+    def test_config_store_rejects_previous_schema_version(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_dir = Path(temp_dir)
+            with sqlite3.connect(root_dir / "config.db") as conn:
+                conn.execute("PRAGMA user_version = 4")
+
+            with self.assertRaisesRegex(RuntimeError, "Unsupported config.db schema version: 4"):
+                FileStore(root_dir)
+
     def test_file_store_uses_config_db_without_server_state_json(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root_dir = Path(temp_dir)

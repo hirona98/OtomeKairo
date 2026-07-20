@@ -86,9 +86,6 @@ class ServiceInputPipelineMixin:
         )
         # モデル選択
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
-        recall_role = selected_preset["roles"]["input_interpretation"]
-        decision_role = selected_preset["roles"]["decision_generation"]
-        speech_role = selected_preset["roles"]["expression_generation"]
         persona = state["personas"][state["selected_persona_id"]]
         persona_context_summary = self._persona_context_trace_summary(
             self._build_selected_persona_context(state=state, role="decision_generation")
@@ -104,7 +101,7 @@ class ServiceInputPipelineMixin:
             augmented_query_text=augmented_query_text,
             visual_observation_context=visual_observation_context,
             activity_context=initial_activity_context,
-            recall_role=recall_role,
+            model_config=selected_preset,
             persona_context=self._build_selected_persona_context(state=state, role="input_interpretation"),
             client_context=current_client_context,
             cycle_label=cycle_label,
@@ -160,7 +157,7 @@ class ServiceInputPipelineMixin:
             recall_pack=recall_pack,
             visual_observation_context=visual_observation_context,
             reference_context=reference_context,
-            decision_role=decision_role,
+            model_config=selected_preset,
             persona_context=self._build_selected_persona_context(state=state, role="decision_generation"),
             cycle_label=cycle_label,
         )
@@ -187,7 +184,7 @@ class ServiceInputPipelineMixin:
             recall_pack=recall_pack,
             visual_observation_context=visual_observation_context,
             reference_context=reference_context,
-            speech_role=speech_role,
+            model_config=selected_preset,
             persona_context=self._build_selected_persona_context(
                 state=state,
                 role="expression_generation",
@@ -299,7 +296,7 @@ class ServiceInputPipelineMixin:
         augmented_query_text: str,
         visual_observation_context: dict[str, Any] | None,
         activity_context: dict[str, Any] | None,
-        recall_role: dict[str, Any],
+        model_config: dict[str, Any],
         persona_context: Any,
         client_context: dict[str, Any],
         cycle_label: str,
@@ -318,7 +315,7 @@ class ServiceInputPipelineMixin:
         recall_hint_recent_turns = self._recall_hint_recent_turns(recent_turns)
         debug_log("Pipeline", f"{cycle_label} input_interpretation start recent_turns={len(recall_hint_recent_turns)}", level="DEBUG")
         input_interpretation = self.llm.generate_input_interpretation(
-            role_definition=recall_role,
+            model_config=model_config,
             persona_context=persona_context,
             input_text=input_text,
             current_input=current_input,
@@ -1646,7 +1643,7 @@ class ServiceInputPipelineMixin:
         reference_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
-        decision_role: dict[str, Any],
+        model_config: dict[str, Any],
         persona_context: Any,
         cycle_label: str,
     ) -> dict[str, Any]:
@@ -1678,7 +1675,7 @@ class ServiceInputPipelineMixin:
             reference_context=reference_context,
         )
         decision = self.llm.generate_decision(
-            role_definition=decision_role,
+            model_config=model_config,
             persona_context=persona_context,
             context=decision_context,
         )
@@ -1711,7 +1708,7 @@ class ServiceInputPipelineMixin:
         reference_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
-        speech_role: dict[str, Any],
+        model_config: dict[str, Any],
         persona_context: Any,
         decision: dict[str, Any],
         assistant_message_target_client_id: str | None,
@@ -1842,7 +1839,7 @@ class ServiceInputPipelineMixin:
                 decision=decision,
             )
             speech_payload = self.llm.generate_speech(
-                role_definition=speech_role,
+                model_config=model_config,
                 persona_context=persona_context,
                 context=speech_context,
             )
