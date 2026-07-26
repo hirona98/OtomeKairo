@@ -41,6 +41,7 @@ class ServiceInputWorldStateSourcePackMixin:
         observation_summary: dict[str, Any] | None,
         capability_request_summary: dict[str, Any] | None,
         persona_context: Any,
+        current_person_ref: str | None,
     ) -> tuple[WorldStateTrace, list[dict[str, Any]]]:
         previous_foreground_world_state = (
             self._summarize_foreground_world_states(
@@ -73,6 +74,7 @@ class ServiceInputWorldStateSourcePackMixin:
                 selected_candidate=selected_candidate,
                 observation_summary=observation_summary,
                 persona_context=persona_context,
+                current_person_ref=current_person_ref,
             )
             source_pack_contexts = self._summarize_world_state_source_pack_contexts(source_pack)
             source_pack_state_type_hooks = self._summarize_world_state_state_type_hooks(source_pack)
@@ -285,6 +287,7 @@ class ServiceInputWorldStateSourcePackMixin:
         selected_candidate: dict[str, Any] | None,
         observation_summary: dict[str, Any] | None,
         persona_context: Any,
+        current_person_ref: str | None,
     ) -> WorldStateSourcePack:
         payload = WorldStateSourcePack(
             trigger_kind=trigger_kind,
@@ -293,6 +296,7 @@ class ServiceInputWorldStateSourcePackMixin:
             source_ref=source_ref,
             time_context=llm_local_time_text(started_at).replace("\n", " / "),
             client_context=self._build_world_state_client_context(client_context),
+            current_person_ref=current_person_ref,
             persona_context=persona_context.to_prompt_payload(),
         )
         visual_context = self._build_world_state_visual_context(
@@ -911,7 +915,14 @@ class ServiceInputWorldStateSourcePackMixin:
             evidence_summary = self._world_state_source_evidence_summary(context)
             if evidence_summary is None:
                 continue
-            scope_type, scope_key = WORLD_STATE_SCOPE_BY_TYPE[state_type]
+            # 対人状態は現在の人物との関係へ結び付ける。
+            if state_type == "social_context":
+                if source_pack.current_person_ref is None:
+                    continue
+                scope_type = "relationship"
+                scope_key = f"self|{source_pack.current_person_ref}"
+            else:
+                scope_type, scope_key = WORLD_STATE_SCOPE_BY_TYPE[state_type]
             candidates.append(
                 WorldStateSourceCandidate(
                     candidate_ref=f"state_source:{state_type}",

@@ -59,9 +59,12 @@ class StoreCycleMixin:
                 kind,
                 role,
                 text,
+                interaction_ref,
+                speaker_ref,
+                participant_refs_json,
                 created_at,
                 payload_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record["event_id"],
@@ -70,6 +73,9 @@ class StoreCycleMixin:
                 record["kind"],
                 record.get("role"),
                 record.get("text"),
+                record.get("interaction_ref"),
+                record.get("speaker_ref"),
+                self._to_json(record.get("participant_refs", [])),
                 record["created_at"],
                 self._to_json(record),
             ),

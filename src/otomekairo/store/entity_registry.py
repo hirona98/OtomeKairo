@@ -15,6 +15,47 @@ ENTITY_REGISTRY_SUPPORT_LIMIT = 24
 
 
 class StoreEntityRegistryMixin:
+    def register_interaction_participants(
+        self,
+        *,
+        memory_set_id: str,
+        participants: list[dict[str, Any]],
+        observed_at: str,
+        evidence_event_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        # APIから受けた person_ref は外部で確定済みの識別子としてそのまま登録する。
+        updated_records: list[dict[str, Any]] = []
+        with self._memory_db() as conn:
+            for participant in participants:
+                person_ref = participant.get("person_ref")
+                if not isinstance(person_ref, str) or not person_ref.startswith("person:"):
+                    continue
+                display_name = participant.get("display_name")
+                observation = {
+                    "memory_set_id": memory_set_id,
+                    "entity_ref": person_ref,
+                    "entity_type": "person",
+                    "display_name": (
+                        display_name.strip()
+                        if isinstance(display_name, str) and display_name.strip()
+                        else None
+                    ),
+                    "observed_at": observed_at,
+                    "confidence": 1.0,
+                    "salience": 0.5,
+                    "evidence_event_ids": evidence_event_ids,
+                    "supporting_memory_unit_ids": [],
+                    "source_kinds": ["interaction_api"],
+                }
+                updated_records.append(
+                    self._upsert_entity_registry_observation(
+                        conn,
+                        observation,
+                        resolve_alias=False,
+                    )
+                )
+        return updated_records
+
     def update_entity_registry_from_turn(
         self,
         *,
@@ -232,11 +273,17 @@ class StoreEntityRegistryMixin:
         self,
         conn: sqlite3.Connection,
         observation: dict[str, Any],
+        *,
+        resolve_alias: bool = True,
     ) -> dict[str, Any]:
         # canonical 解決
         memory_set_id = observation["memory_set_id"]
         observed_ref = observation["entity_ref"]
-        canonical_ref = self._resolve_entity_ref(conn, memory_set_id=memory_set_id, entity_ref=observed_ref)
+        canonical_ref = (
+            self._resolve_entity_ref(conn, memory_set_id=memory_set_id, entity_ref=observed_ref)
+            if resolve_alias
+            else observed_ref.strip()
+        )
         existing = self._load_entity_registry_record(
             conn,
             memory_set_id=memory_set_id,
@@ -274,7 +321,11 @@ class StoreEntityRegistryMixin:
             "entity_ref": canonical_ref,
             "memory_set_id": memory_set_id,
             "entity_type": self._entity_type_from_ref(canonical_ref),
-            "display_name": existing.get("display_name") or self._display_name_from_entity_ref(canonical_ref),
+            "display_name": (
+                observation.get("display_name")
+                or existing.get("display_name")
+                or self._display_name_from_entity_ref(canonical_ref)
+            ),
             "aliases": aliases,
             "first_seen_at": min(str(existing.get("first_seen_at") or observation["observed_at"]), observation["observed_at"]),
             "last_seen_at": max(str(existing.get("last_seen_at") or observation["observed_at"]), observation["observed_at"]),

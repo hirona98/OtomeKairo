@@ -12,7 +12,7 @@ class ServiceInputLoggingMixin:
         # 要約
         summary = {
             "self_model": len(recall_pack["self_model"]),
-            "user_model": len(recall_pack["user_model"]),
+            "person_model": len(recall_pack["person_model"]),
             "relationship_model": len(recall_pack["relationship_model"]),
             "active_topics": len(recall_pack["active_topics"]),
             "active_commitments": len(recall_pack["active_commitments"]),

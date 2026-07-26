@@ -11,9 +11,11 @@ class WorkspaceContextTests(unittest.TestCase):
 
         payload = service._build_workspace_context(
             current_input=CurrentInput(
-                sender="system",
+                sender_kind="system",
+                sender_ref=None,
                 source_kind="wake",
-                response_target="none",
+                response_target_refs=(),
+                interaction_context=None,
                 text="自律判断機会",
             ),
             recall_pack={},
@@ -77,9 +79,11 @@ class WorkspaceContextTests(unittest.TestCase):
 
         payload = service._build_workspace_context(
             current_input=CurrentInput(
-                sender="system",
+                sender_kind="system",
+                sender_ref=None,
                 source_kind="background_thinking",
-                response_target="none",
+                response_target_refs=(),
+                interaction_context=None,
                 text="定期思考。",
             ),
             recall_pack={},
@@ -88,7 +92,7 @@ class WorkspaceContextTests(unittest.TestCase):
             activity_context={
                 "current_activity": {
                     "label": "アプリケーション起動検討",
-                    "actor": "user",
+                    "actor": "person",
                     "target": "desktop",
                     "transition": "start",
                     "started_age_label": "直前",
@@ -98,7 +102,7 @@ class WorkspaceContextTests(unittest.TestCase):
                 },
                 "previous_activity": {
                     "label": "離席中",
-                    "actor": "user",
+                    "actor": "person",
                     "target": "workspace",
                     "started_age_label": "19時間前",
                     "duration_label": "約19時間",

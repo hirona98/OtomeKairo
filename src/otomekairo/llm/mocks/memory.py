@@ -23,16 +23,22 @@ class LLMMockMemoryMixin:
     ) -> dict[str, Any]:
         # model確認
         self._assert_mock_model(model_config)
-        _ = memory_context
         _ = persona_context
+        person_ref = self._mock_memory_context_person_ref(memory_context)
 
         # Episode要約
         normalized = input_text.strip()
         episode = {
             "episode_type": self._mock_episode_type(recall_hint["primary_recall_focus"]),
             "episode_series_id": None,
-            "primary_scope_type": self._mock_primary_scope_type(recall_hint["primary_recall_focus"]),
-            "primary_scope_key": self._mock_primary_scope_key(recall_hint["primary_recall_focus"]),
+            "primary_scope_type": self._mock_primary_scope_type(
+                recall_hint["primary_recall_focus"],
+                person_ref=person_ref,
+            ),
+            "primary_scope_key": self._mock_primary_scope_key(
+                recall_hint["primary_recall_focus"],
+                person_ref=person_ref,
+            ),
             "summary_text": normalized or "空の入力だった。",
             "outcome_text": speech_text or decision["reason_summary"],
             "open_loops": self._mock_open_loops(normalized, recall_hint["primary_recall_focus"]),
@@ -40,10 +46,10 @@ class LLMMockMemoryMixin:
         }
 
         # 候補memory unit群
-        candidate_memory_units = self._mock_candidate_memory_units(normalized)
+        candidate_memory_units = self._mock_candidate_memory_units(normalized, person_ref=person_ref)
 
         # episode affect生成
-        episode_affects = self._mock_episode_affects(normalized)
+        episode_affects = self._mock_episode_affects(normalized, person_ref=person_ref)
 
         # payload作成
         payload = {
@@ -86,11 +92,7 @@ class LLMMockMemoryMixin:
             else:
                 summary_text = f"最近は {topic_label} に関する話題が繰り返し現れている。"
         elif scope_type == "relationship":
-            relation_label = (
-                "あなたとのやり取り"
-                if scope_key == "self|user"
-                else f"{self._mock_reflection_scope_label(scope_key)} の関係文脈"
-            )
+            relation_label = f"{self._mock_reflection_scope_label(scope_key)} の関係文脈"
             if int(open_loop_count) > 0:
                 summary_text = f"最近の{relation_label}では、{persona_lead}{theme}がありつつ、続きを確かめる流れが続いている。"
             elif summary_status == "confirmed":
@@ -131,7 +133,7 @@ class LLMMockMemoryMixin:
 
     def _mock_episode_type(self, primary_recall_focus: str) -> str:
         # マッピング
-        if primary_recall_focus in {"user", "state"}:
+        if primary_recall_focus in {"person", "state"}:
             return "consultation"
         if primary_recall_focus == "commitment":
             return "commitment_followup"
@@ -141,27 +143,36 @@ class LLMMockMemoryMixin:
             return "relationship_check"
         return "conversation"
 
-    def _mock_primary_scope_type(self, primary_recall_focus: str) -> str:
+    def _mock_primary_scope_type(self, primary_recall_focus: str, *, person_ref: str | None) -> str:
         # マッピング
+        if person_ref is None:
+            return "self"
         if primary_recall_focus in {"commitment", "relationship"}:
             return "relationship"
-        return "user"
+        return "entity"
 
-    def _mock_primary_scope_key(self, primary_recall_focus: str) -> str:
+    def _mock_primary_scope_key(self, primary_recall_focus: str, *, person_ref: str | None) -> str:
         # マッピング
+        if person_ref is None:
+            return "self"
         if primary_recall_focus in {"commitment", "relationship"}:
-            return "self|user"
-        return "user"
+            return f"self|{person_ref}"
+        return person_ref
 
     def _mock_open_loops(self, normalized: str, primary_recall_focus: str) -> list[str]:
         # ループルール
-        if primary_recall_focus in {"user", "commitment", "episodic"} and normalized:
+        if primary_recall_focus in {"person", "commitment", "episodic"} and normalized:
             return [normalized[:80]]
         return []
 
-    def _mock_candidate_memory_units(self, normalized: str) -> list[dict[str, Any]]:
+    def _mock_candidate_memory_units(
+        self,
+        normalized: str,
+        *,
+        person_ref: str | None,
+    ) -> list[dict[str, Any]]:
         # 空
-        if not normalized:
+        if not normalized or person_ref is None:
             return []
 
         # 構築群
@@ -169,7 +180,11 @@ class LLMMockMemoryMixin:
         correction_signal = self._mock_has_correction_signal(normalized)
 
         # 事実
-        fact_candidate = self._mock_fact_candidate(normalized, correction_signal=correction_signal)
+        fact_candidate = self._mock_fact_candidate(
+            normalized,
+            correction_signal=correction_signal,
+            person_ref=person_ref,
+        )
         if fact_candidate is not None:
             candidates.append(fact_candidate)
 
@@ -181,9 +196,9 @@ class LLMMockMemoryMixin:
             candidates.append(
                 {
                     "memory_type": "preference",
-                    "scope_type": "user",
-                    "scope_key": "user",
-                    "subject_ref": "user",
+                    "scope_type": "entity",
+                    "scope_key": person_ref,
+                    "subject_ref": person_ref,
                     "predicate": "likes",
                     "object_ref_or_value": self._mock_preference_object(normalized),
                     "summary_text": self._mock_preference_summary(normalized),
@@ -222,7 +237,7 @@ class LLMMockMemoryMixin:
                 {
                     "memory_type": "commitment",
                     "scope_type": "relationship",
-                    "scope_key": "self|user",
+                    "scope_key": f"self|{person_ref}",
                     "subject_ref": "self",
                     "predicate": "talk_again",
                     "object_ref_or_value": "topic:conversation",
@@ -244,9 +259,9 @@ class LLMMockMemoryMixin:
             candidates.append(
                 {
                     "memory_type": "interpretation",
-                    "scope_type": "user",
-                    "scope_key": "user",
-                    "subject_ref": "user",
+                    "scope_type": "entity",
+                    "scope_key": person_ref,
+                    "subject_ref": person_ref,
                     "predicate": "seems",
                     "object_ref_or_value": "state:tired",
                     "summary_text": "あなたは最近疲れや睡眠の問題を抱えていそうだ。",
@@ -293,7 +308,13 @@ class LLMMockMemoryMixin:
             return "medium"
         return "low"
 
-    def _mock_fact_candidate(self, normalized: str, *, correction_signal: bool) -> dict[str, Any] | None:
+    def _mock_fact_candidate(
+        self,
+        normalized: str,
+        *,
+        correction_signal: bool,
+        person_ref: str,
+    ) -> dict[str, Any] | None:
         # 日次リズム
         if "朝型" in normalized or "夜型" in normalized:
             object_ref = "rhythm:morning" if "朝型" in normalized else "rhythm:night"
@@ -303,9 +324,9 @@ class LLMMockMemoryMixin:
                 reason = "生活リズムに関する明示訂正があり、既存理解の更新候補になるため。"
             return {
                 "memory_type": "fact",
-                "scope_type": "user",
-                "scope_key": "user",
-                "subject_ref": "user",
+                "scope_type": "entity",
+                "scope_key": person_ref,
+                "subject_ref": person_ref,
                 "predicate": "daily_rhythm",
                 "object_ref_or_value": object_ref,
                 "summary_text": summary_text,
@@ -332,9 +353,9 @@ class LLMMockMemoryMixin:
                 reason = "働き方に関する明示訂正があり、既存理解の更新候補になるため。"
             return {
                 "memory_type": "fact",
-                "scope_type": "user",
-                "scope_key": "user",
-                "subject_ref": "user",
+                "scope_type": "entity",
+                "scope_key": person_ref,
+                "subject_ref": person_ref,
                 "predicate": "work_style",
                 "object_ref_or_value": object_ref,
                 "summary_text": summary_text,
@@ -382,7 +403,12 @@ class LLMMockMemoryMixin:
             return "negative"
         return "positive"
 
-    def _mock_episode_affects(self, normalized: str) -> list[dict[str, Any]]:
+    def _mock_episode_affects(
+        self,
+        normalized: str,
+        *,
+        person_ref: str | None,
+    ) -> list[dict[str, Any]]:
         # 構築群
         updates: list[dict[str, Any]] = []
         if any(token in normalized for token in ("疲れ", "しんど", "つらい", "不安")):
@@ -397,17 +423,18 @@ class LLMMockMemoryMixin:
                     "summary_text": "相手のしんどさに反応して少し気が張った。",
                 }
             )
-            updates.append(
-                {
-                    "target_scope_type": "relationship",
-                    "target_scope_key": "self|user",
-                    "affect_label": "concern",
-                    "vad": {"v": -0.2, "a": 0.34, "d": -0.08},
-                    "intensity": 0.62,
-                    "confidence": 0.78,
-                    "summary_text": "相手の負荷を気にかける関係上の反応が出た。",
-                }
-            )
+            if person_ref is not None:
+                updates.append(
+                    {
+                        "target_scope_type": "relationship",
+                        "target_scope_key": f"self|{person_ref}",
+                        "affect_label": "concern",
+                        "vad": {"v": -0.2, "a": 0.34, "d": -0.08},
+                        "intensity": 0.62,
+                        "confidence": 0.78,
+                        "summary_text": "相手の負荷を気にかける関係上の反応が出た。",
+                    }
+                )
         if any(token in normalized for token in ("嬉しい", "楽しい", "安心")):
             updates.append(
                 {
@@ -420,18 +447,27 @@ class LLMMockMemoryMixin:
                     "summary_text": "明るいやり取りに少し気持ちがほぐれた。",
                 }
             )
-            updates.append(
-                {
-                    "target_scope_type": "relationship",
-                    "target_scope_key": "self|user",
-                    "affect_label": "warmth",
-                    "vad": {"v": 0.42, "a": 0.16, "d": 0.18},
-                    "intensity": 0.58,
-                    "confidence": 0.74,
-                    "summary_text": "安心したやり取りから関係上の親しみが出た。",
-                }
-            )
+            if person_ref is not None:
+                updates.append(
+                    {
+                        "target_scope_type": "relationship",
+                        "target_scope_key": f"self|{person_ref}",
+                        "affect_label": "warmth",
+                        "vad": {"v": 0.42, "a": 0.16, "d": 0.18},
+                        "intensity": 0.58,
+                        "confidence": 0.74,
+                        "summary_text": "安心したやり取りから関係上の親しみが出た。",
+                    }
+                )
         return updates
+
+    def _mock_memory_context_person_ref(self, memory_context: dict[str, Any] | None) -> str | None:
+        # 本番と同様にAPIで渡された話者参照だけを人物スコープへ使う。
+        current_input = memory_context.get("current_input") if isinstance(memory_context, dict) else None
+        sender_ref = current_input.get("sender_ref") if isinstance(current_input, dict) else None
+        if isinstance(sender_ref, str) and sender_ref.startswith("person:"):
+            return sender_ref
+        return None
 
     def _mock_reflection_theme(
         self,
@@ -531,6 +567,4 @@ class LLMMockMemoryMixin:
         normalized = scope_key.strip()
         if normalized.startswith("topic:"):
             return normalized.split(":", 1)[1]
-        if normalized == "self|user":
-            return "あなた"
         return normalized

@@ -110,7 +110,7 @@ LLM に渡す source pack の wire shape は
 | `state_type` | `scope_type` | `scope_key` |
 |------|------|------|
 | `visual_context` | `topic` | `topic:current_work` |
-| `social_context` | `relationship` | `self|user` |
+| `social_context` | `relationship` | `self|<current person_ref>` |
 | `body` | `self` | `self` |
 | `schedule` | `self` | `self` |
 | `external_service` | `world` | `world` |

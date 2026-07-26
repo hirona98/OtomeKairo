@@ -177,6 +177,8 @@ NON_SEMANTIC_QUALIFIER_KEYS = {
     "scope_duration",
     "summary_scope",
     "source_memory_types",
+    "source_interaction_refs",
+    "source_participant_refs",
 }
 
 

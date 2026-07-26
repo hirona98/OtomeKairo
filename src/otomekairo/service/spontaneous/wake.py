@@ -5,6 +5,7 @@ from datetime import timedelta
 from typing import Any
 
 from otomekairo.llm.client import LLMError
+from otomekairo.interaction import InteractionContext
 from otomekairo.recall.builder import RecallPackSelectionError
 from otomekairo.service.common import (
     BACKGROUND_THINKING_POLL_SECONDS,
@@ -22,6 +23,7 @@ class ServiceSpontaneousWakeMixin:
         cycle_id: str,
         trigger_kind: str,
         client_context: dict[str, Any],
+        interaction_context: InteractionContext | None,
         pipeline: dict[str, Any],
     ) -> None:
         if trigger_kind not in {"wake", "background_thinking"}:
@@ -29,6 +31,9 @@ class ServiceSpontaneousWakeMixin:
         speech_payload = pipeline.get("speech_payload")
         if not isinstance(speech_payload, dict):
             debug_log("Wake", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_speech", level="DEBUG")
+            return
+        if interaction_context is None:
+            debug_log("Wake", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_interaction", level="DEBUG")
             return
         target_client_id = self._wake_assistant_message_target_client_id(client_context)
         if target_client_id is None:
@@ -42,6 +47,8 @@ class ServiceSpontaneousWakeMixin:
                 "cycle_id": cycle_id,
                 "source_kind": trigger_kind,
                 "trigger_kind": trigger_kind,
+                "interaction_ref": interaction_context.interaction_ref,
+                "recipient_person_refs": list(interaction_context.participant_refs),
                 "system_text": f"[{trigger_kind}]",
                 "message": speech_payload["speech_text"],
             },
@@ -60,13 +67,57 @@ class ServiceSpontaneousWakeMixin:
         client_id = self._client_context_text(client_context.get("client_id"), limit=128)
         if client_id is not None and self._event_stream_registry.client_accepts_event(client_id, "assistant_message"):
             return client_id
-        return self._event_stream_registry.find_single_client_with_event_subscription("assistant_message")
+        return None
 
     def _execute_wake_cycle(
         self,
         *,
         state: dict[str, Any],
         client_context: dict[str, Any],
+        interaction_context: InteractionContext | None = None,
+        trigger_kind: str,
+        reference_payload: Any = None,
+    ) -> dict[str, Any]:
+        is_background = trigger_kind == "background_thinking"
+        entered = (
+            self._cycle_coordinator.try_enter_background()
+            if is_background
+            else False
+        )
+        if is_background and not entered:
+            debug_log("Wake", "background thinking skipped foreground_cycle_active", level="DEBUG")
+            return {
+                "cycle_id": None,
+                "interaction_ref": None,
+                "recipient_person_refs": [],
+                "result_kind": "skipped",
+                "speech": None,
+                "capability_request": None,
+                "autonomous_run": None,
+                "reason_code": "foreground_cycle_active",
+            }
+        if not is_background:
+            self._cycle_coordinator.enter_foreground()
+        try:
+            return self._execute_wake_cycle_inner(
+                state=state,
+                client_context=client_context,
+                interaction_context=interaction_context,
+                trigger_kind=trigger_kind,
+                reference_payload=reference_payload,
+            )
+        finally:
+            if is_background:
+                self._cycle_coordinator.leave_background()
+            else:
+                self._cycle_coordinator.leave_foreground()
+
+    def _execute_wake_cycle_inner(
+        self,
+        *,
+        state: dict[str, Any],
+        client_context: dict[str, Any],
+        interaction_context: InteractionContext | None = None,
         trigger_kind: str,
         reference_payload: Any = None,
     ) -> dict[str, Any]:
@@ -75,7 +126,7 @@ class ServiceSpontaneousWakeMixin:
             input_event_kind = "background_thinking" if trigger_kind == "background_thinking" else "wake"
             cycle_id = self._new_cycle_id()
             started_at = self._now_iso()
-            recent_turns = self._load_recent_turns(state)
+            recent_turns = self._load_recent_turns(state, interaction_context)
             runtime_summary = self._build_runtime_summary(state)
             pending_intent_selection = self._empty_pending_intent_selection_trace()
             observation_summary: dict[str, Any] | None = None
@@ -124,6 +175,7 @@ class ServiceSpontaneousWakeMixin:
                         runtime_summary=runtime_summary,
                         input_text=input_text,
                         client_context=client_context,
+                        interaction_context=interaction_context,
                         pipeline=pipeline,
                         trigger_kind=trigger_kind,
                         input_event_kind=input_event_kind,
@@ -149,6 +201,7 @@ class ServiceSpontaneousWakeMixin:
                             runtime_summary=runtime_summary,
                             input_text=input_text,
                             client_context=client_context,
+                            interaction_context=interaction_context,
                             pipeline=pipeline,
                             trigger_kind=trigger_kind,
                             input_event_kind=input_event_kind,
@@ -162,6 +215,7 @@ class ServiceSpontaneousWakeMixin:
                     state=state,
                     trigger_kind=trigger_kind,
                     client_context=client_context,
+                    interaction_context=interaction_context,
                     recent_turns=recent_turns,
                     current_time=started_at,
                 )
@@ -181,6 +235,7 @@ class ServiceSpontaneousWakeMixin:
                     started_at=started_at,
                     trigger_kind=trigger_kind,
                     client_context=client_context,
+                    interaction_context=interaction_context,
                     recent_turns=recent_turns,
                     selected_candidate=selected_candidate,
                     pending_intent_selection=pending_intent_selection,
@@ -197,6 +252,7 @@ class ServiceSpontaneousWakeMixin:
                     runtime_summary=runtime_summary,
                     input_text=input_text,
                     client_context=client_context,
+                    interaction_context=interaction_context,
                     pipeline=pipeline,
                     trigger_kind=trigger_kind,
                     input_event_kind=input_event_kind,
@@ -222,6 +278,7 @@ class ServiceSpontaneousWakeMixin:
                     cycle_id=cycle_id,
                     trigger_kind=trigger_kind,
                     client_context=client_context,
+                    interaction_context=interaction_context,
                     pipeline=pipeline,
                 )
                 debug_log(
@@ -245,6 +302,7 @@ class ServiceSpontaneousWakeMixin:
                     runtime_summary=runtime_summary,
                     input_text=input_text,
                     client_context=client_context,
+                    interaction_context=interaction_context,
                     failure_reason=str(exc),
                     trigger_kind=trigger_kind,
                     input_event_kind=input_event_kind,
@@ -272,6 +330,7 @@ class ServiceSpontaneousWakeMixin:
                     runtime_summary=runtime_summary,
                     input_text=input_text,
                     client_context=client_context,
+                    interaction_context=interaction_context,
                     failure_reason=str(exc),
                     trigger_kind=trigger_kind,
                     input_event_kind=input_event_kind,
@@ -303,6 +362,7 @@ class ServiceSpontaneousWakeMixin:
                     runtime_summary=runtime_summary,
                     input_text=input_text,
                     client_context=client_context,
+                    interaction_context=interaction_context,
                     failure_reason=str(exc),
                     trigger_kind=trigger_kind,
                     input_event_kind=input_event_kind,

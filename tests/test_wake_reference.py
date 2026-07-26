@@ -239,6 +239,7 @@ class WakeReferenceTests(unittest.TestCase):
             started_at="2026-07-05T12:00:00+09:00",
             trigger_kind="wake",
             client_context={},
+            interaction_context=None,
             recent_turns=[],
             selected_candidate={"candidate_id": "candidate:test", "dedupe_key": "dedupe:test"},
             reference_context={"summary": {"uri": "/tmp/reference.txt"}},

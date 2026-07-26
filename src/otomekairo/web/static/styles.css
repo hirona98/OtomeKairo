@@ -196,7 +196,7 @@ p {
   max-width: min(78ch, 86%);
 }
 
-.message.user {
+.message.person {
   align-self: flex-end;
 }
 
@@ -214,7 +214,7 @@ p {
   line-height: 1.5;
 }
 
-.message.user .bubble {
+.message.person .bubble {
   border-bottom-right-radius: 0;
   background: var(--accent);
   color: #ffffff;
@@ -237,7 +237,7 @@ p {
   font-size: 11px;
 }
 
-.message.user .meta {
+.message.person .meta {
   text-align: right;
 }
 
@@ -256,6 +256,12 @@ p {
   padding: 10px 12px;
   border-top: 1px solid var(--line);
   background: #ffffff;
+}
+
+.conversation-identity {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(120px, 0.6fr) minmax(220px, 1.2fr);
+  gap: var(--space-3);
 }
 
 input[readonly] {

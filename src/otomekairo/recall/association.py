@@ -256,7 +256,7 @@ class RecallAssociationMixin:
             weight += 0.08
         if primary_recall_focus in {"commitment", "relationship"} and query_kind == "entity":
             weight += 0.12
-        if primary_recall_focus in {"user", "state", "preference", "topic"} and query_kind == "topic":
+        if primary_recall_focus in {"person", "state", "preference", "topic"} and query_kind == "topic":
             weight += 0.12
 
         # 副次補正
@@ -264,7 +264,7 @@ class RecallAssociationMixin:
             weight += 0.04
         if "relationship" in secondary_recall_focuses and query_kind == "entity":
             weight += 0.05
-        if {"user", "state", "preference", "topic"} & secondary_recall_focuses and query_kind == "topic":
+        if {"person", "state", "preference", "topic"} & secondary_recall_focuses and query_kind == "topic":
             weight += 0.04
 
         # 時刻補正
@@ -356,7 +356,7 @@ class RecallAssociationMixin:
 
         # クエリ種別補正
         item_scope_type = self._association_item_scope_type(item)
-        if query_kind == "entity" and item_scope_type in {"user", "relationship"}:
+        if query_kind == "entity" and item_scope_type in {"entity", "relationship"}:
             score += 0.05
         if query_kind == "topic" and item_scope_type == "topic":
             score += 0.05
@@ -374,7 +374,7 @@ class RecallAssociationMixin:
             score += 0.12
         if primary_recall_focus == "relationship" and item.get("scope_type") == "relationship":
             score += 0.1
-        if primary_recall_focus in {"user", "state"} and item.get("scope_type") in {"user", "topic"}:
+        if primary_recall_focus in {"person", "state"} and item.get("scope_type") in {"entity", "topic"}:
             score += 0.08
         if primary_recall_focus == "preference" and item.get("memory_type") == "preference":
             score += 0.08
@@ -386,7 +386,7 @@ class RecallAssociationMixin:
             score += 0.04
         if "relationship" in secondary_recall_focuses and item_scope_type == "relationship":
             score += 0.04
-        if {"user", "state"} & secondary_recall_focuses and item_scope_type in {"user", "topic"}:
+        if {"person", "state"} & secondary_recall_focuses and item_scope_type in {"entity", "topic"}:
             score += 0.03
         if "preference" in secondary_recall_focuses and item.get("memory_type") == "preference":
             score += 0.03
@@ -420,8 +420,8 @@ class RecallAssociationMixin:
         scope_type = item["scope_type"]
         if scope_type == "self":
             return "self_model"
-        if scope_type == "user":
-            return "user_model"
+        if scope_type == "entity":
+            return "person_model"
         if scope_type == "relationship":
             return "relationship_model"
         if scope_type == "topic":

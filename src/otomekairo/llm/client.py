@@ -22,6 +22,7 @@ from otomekairo.llm.contracts import (
     validate_answer_contract_contract,
     validate_autonomous_step_contract,
     validate_decision_contract,
+    validate_disclosure_review_contract,
     validate_event_evidence_contract,
     validate_initiative_entry_check_contract,
     validate_memory_correction_reconciliation_contract,
@@ -44,6 +45,8 @@ from otomekairo.llm.prompts import (
     build_autonomous_step_repair_prompt,
     build_decision_messages,
     build_decision_repair_prompt,
+    build_disclosure_review_messages,
+    build_disclosure_review_repair_prompt,
     build_event_evidence_messages,
     build_event_evidence_repair_prompt,
     build_initiative_entry_check_messages,
@@ -110,6 +113,7 @@ class LLMClient:
                     recent_turns,
                     current_time,
                     persona_context=persona_context,
+                    current_input=current_input,
                 )
                 answer_contract = self.mock_client.generate_answer_contract(
                     model_config,
@@ -206,6 +210,7 @@ class LLMClient:
                     recent_turns,
                     current_time,
                     persona_context=persona_context,
+                    current_input=current_input,
                 )
                 debug_log(
                     "LLM",
@@ -525,14 +530,14 @@ class LLMClient:
         if payload.get("kind") != "noop":
             return
         current_input = context.current_input
-        if current_input.sender != "user" or current_input.response_target != "user":
+        if current_input.sender_kind != "person" or not current_input.response_target_refs:
             return
         text = current_input.text.strip()
         if not text or self._user_message_explicitly_allows_noop(text):
             return
         raise LLMError(
-            "current_input.sender=user かつ response_target=user の非空 text はユーザー発話です。"
-            "ユーザー発話への noop は不正です。短い挨拶や断片でも kind=speech を返してください。"
+            "current_input.sender_kind=person かつ response_target_refs が非空の text は人物発話です。"
+            "人物発話への noop は不正です。短い挨拶や断片でも kind=speech を返してください。"
         )
 
     def _user_message_explicitly_allows_noop(self, text: str) -> bool:
@@ -849,6 +854,30 @@ class LLMClient:
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
             raise
+
+    def generate_disclosure_review(
+        self,
+        *,
+        model_config: dict,
+        review_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        operation = "disclosure_review"
+        if self._is_mock_model_config(model_config):
+            payload = {
+                "outcome": "allow",
+                "speech_text": review_context["candidate_speech"],
+                "reason_code": "mock_allow",
+            }
+            validate_disclosure_review_contract(payload)
+            return payload
+        return self._generate_structured_payload(
+            model_config=model_config,
+            messages=build_disclosure_review_messages(review_context=review_context),
+            validator=validate_disclosure_review_contract,
+            repair_prompt_builder=build_disclosure_review_repair_prompt,
+            failure_message="DisclosureReview の生成に失敗しました。",
+            operation=operation,
+        )
 
     def generate_answer_contract(
         self,

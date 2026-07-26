@@ -60,7 +60,7 @@ class LLMMockRecallMixin:
         if self._mock_contains_any(text, ("会話", "やり取り")):
             target_actor = "any"
         elif self._mock_contains_any(text, ("僕", "俺", "私の発言", "ユーザー")):
-            target_actor = "user"
+            target_actor = "person"
         elif self._mock_contains_any(text, ("君", "あなた", "人格", "AI")):
             target_actor = "assistant"
 
@@ -82,17 +82,19 @@ class LLMMockRecallMixin:
         current_time: str,
         *,
         persona_context: Any,
+        current_input: Any,
     ) -> dict[str, Any]:
         # model確認
         self._assert_mock_model(model_config)
         _ = persona_context
+        person_ref = getattr(current_input, "sender_ref", None)
 
         # ヒューリスティックfocus
         normalized = input_text.strip()
         lower_text = normalized.lower()
         _ = current_time
 
-        primary_recall_focus = "user"
+        primary_recall_focus = "person"
         secondary_recall_focuses: list[str] = []
         risk_flags: list[str] = []
         time_reference = "none"
@@ -104,7 +106,7 @@ class LLMMockRecallMixin:
             primary_recall_focus = "commitment"
             time_reference = "future"
         elif any(token in normalized for token in ("相談", "どうしたら", "悩", "困って")):
-            primary_recall_focus = "user"
+            primary_recall_focus = "person"
             time_reference = "recent"
         elif any(token in normalized for token in ("元気", "大丈夫", "調子", "眠れて")):
             primary_recall_focus = "state"
@@ -119,7 +121,7 @@ class LLMMockRecallMixin:
             primary_recall_focus = "fact"
 
         # 副次focus
-        if primary_recall_focus in {"user", "state"} and recent_turns:
+        if primary_recall_focus in {"person", "state"} and recent_turns:
             secondary_recall_focuses.append("episodic")
         if secondary_recall_focuses:
             risk_flags.append("mixed_intent")
@@ -129,13 +131,13 @@ class LLMMockRecallMixin:
             risk_flags.append("time_ambiguous")
 
         # focus scope判定
-        focus_scopes = ["user"]
-        if primary_recall_focus == "relationship":
-            focus_scopes.append("relationship:self|user")
+        focus_scopes = [f"entity:{person_ref}"] if isinstance(person_ref, str) else ["self"]
+        if primary_recall_focus == "relationship" and isinstance(person_ref, str):
+            focus_scopes.append(f"relationship:self|{person_ref}")
         if primary_recall_focus == "preference":
             focus_scopes.append("topic:preference")
-        if primary_recall_focus == "commitment":
-            focus_scopes.append("relationship:self|user")
+        if primary_recall_focus == "commitment" and isinstance(person_ref, str):
+            focus_scopes.append(f"relationship:self|{person_ref}")
 
         # 言及hint群
         mentioned_entities = self._mock_mentioned_entities(normalized)
@@ -218,7 +220,7 @@ class LLMMockRecallMixin:
         self._assert_mock_model(model_config)
 
         # source pack
-        primary_recall_focus = str(source_pack.get("primary_recall_focus") or "user")
+        primary_recall_focus = str(source_pack.get("primary_recall_focus") or "person")
         time_reference = str(source_pack.get("time_reference") or "none")
         selection_basis = source_pack.get("selection_basis", {})
         event = source_pack.get("event", {})
@@ -256,7 +258,7 @@ class LLMMockRecallMixin:
             decision_or_result = f"{event_text} と返した。"
 
         tone_or_note = None
-        if primary_recall_focus in {"user", "state"}:
+        if primary_recall_focus in {"person", "state"}:
             tone_or_note = "様子を確かめながら進める空気だった。"
         elif kind == "decision" and result_kind == "pending_intent":
             tone_or_note = "その場では返さず、後で触れる含みを残した。"
@@ -452,7 +454,7 @@ class LLMMockRecallMixin:
         ]
 
         # 主順序
-        primary_recall_focus = str(recall_hint.get("primary_recall_focus") or "user")
+        primary_recall_focus = str(recall_hint.get("primary_recall_focus") or "person")
         ordered = self._mock_recall_pack_primary_section_order(primary_recall_focus)
 
         # 副次補正
@@ -478,22 +480,22 @@ class LLMMockRecallMixin:
                 "active_commitments",
                 "relationship_model",
                 "episodic_evidence",
-                "user_model",
+                "person_model",
                 "active_topics",
                 "self_model",
             ]
         if primary_recall_focus == "relationship":
             return [
                 "relationship_model",
-                "user_model",
+                "person_model",
                 "episodic_evidence",
                 "active_commitments",
                 "active_topics",
                 "self_model",
             ]
-        if primary_recall_focus == "user":
+        if primary_recall_focus == "person":
             return [
-                "user_model",
+                "person_model",
                 "relationship_model",
                 "active_topics",
                 "episodic_evidence",
@@ -504,14 +506,14 @@ class LLMMockRecallMixin:
             return [
                 "episodic_evidence",
                 "active_topics",
-                "user_model",
+                "person_model",
                 "relationship_model",
                 "active_commitments",
                 "self_model",
             ]
         if primary_recall_focus == "state":
             return [
-                "user_model",
+                "person_model",
                 "active_topics",
                 "relationship_model",
                 "episodic_evidence",
@@ -519,7 +521,7 @@ class LLMMockRecallMixin:
                 "self_model",
             ]
         return [
-            "user_model",
+            "person_model",
             "relationship_model",
             "active_topics",
             "active_commitments",
@@ -555,7 +557,7 @@ class LLMMockRecallMixin:
                     score += 0.02
 
         # 文脈補正
-        primary_recall_focus = str(recall_hint.get("primary_recall_focus") or "user")
+        primary_recall_focus = str(recall_hint.get("primary_recall_focus") or "person")
         time_reference = str(recall_hint.get("time_reference") or "none")
         source_kind = str(candidate.get("source_kind") or "")
         scope_type = str(candidate.get("scope_type") or candidate.get("primary_scope_type") or "")
@@ -570,7 +572,7 @@ class LLMMockRecallMixin:
             score += 0.12
         if primary_recall_focus == "relationship" and scope_type == "relationship":
             score += 0.08
-        if primary_recall_focus in {"user", "state"} and scope_type in {"user", "topic"}:
+        if primary_recall_focus in {"person", "state"} and scope_type in {"entity", "topic"}:
             score += 0.06
         if time_reference == "past" and source_kind == "episode":
             score += 0.05
@@ -729,7 +731,7 @@ class LLMMockRecallMixin:
             return "前の出来事"
         if section_name == "relationship_model":
             return "関係の流れ"
-        if section_name == "user_model":
+        if section_name == "person_model":
             return "あなたの近況"
         if section_name == "active_topics":
             return "話題の流れ"

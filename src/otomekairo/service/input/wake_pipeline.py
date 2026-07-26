@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.llm.contracts import INITIATIVE_ENTRY_ENTER_BASIS_VALUES
+from otomekairo.interaction import InteractionContext
 from otomekairo.service.common import debug_log
 from otomekairo.service.input.constants import WORLD_STATE_FOREGROUND_LIMIT
 
@@ -15,6 +16,7 @@ class ServiceInputWakePipelineMixin:
         started_at: str,
         trigger_kind: str,
         client_context: dict[str, Any],
+        interaction_context: InteractionContext | None,
         recent_turns: list[dict[str, Any]],
         selected_candidate: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None = None,
@@ -51,11 +53,17 @@ class ServiceInputWakePipelineMixin:
 
         # 定期観測
         if trigger_kind == "background_thinking":
+            actor_ref = (
+                interaction_context.participant_refs[0]
+                if interaction_context is not None and interaction_context.participant_refs
+                else None
+            )
             pre_observation_activity_context = self._summarize_activity_context(
                 self.store.get_current_activity_state(
                     memory_set_id=state["selected_memory_set_id"],
+                    actor_ref=actor_ref,
                     current_time=started_at,
-                ),
+                ) if actor_ref is not None else None,
                 current_time=started_at,
             )
             client_context = self._run_wake_policy_observations(
@@ -76,7 +84,11 @@ class ServiceInputWakePipelineMixin:
             )
         if trigger_kind == "background_thinking" and (
             self._user_response_cycle_active()
-            or self._recent_turns_added_since(state=state, started_at=started_at)
+            or self._recent_turns_added_since(
+                state=state,
+                started_at=started_at,
+                interaction_context=interaction_context,
+            )
         ):
             self._set_last_wake_at(started_at)
             reason_summary = "定期思考の観測中にユーザー向け会話が進んだため、自発発話は行わない。"
@@ -177,6 +189,7 @@ class ServiceInputWakePipelineMixin:
             cycle_id=cycle_id,
             trigger_kind=trigger_kind,
             client_context=client_context,
+            interaction_context=interaction_context,
             selected_candidate=selected_candidate,
             pending_intent_selection=pending_intent_selection,
             observation_summary=observation_summary,
@@ -357,16 +370,26 @@ class ServiceInputWakePipelineMixin:
                 "meaningful_activity_transition_is_enter_candidate": True,
             },
         }
+        actor_ref = self._initiative_entry_actor_ref(recent_turns)
         activity_context = self._summarize_activity_context(
             self.store.get_current_activity_state(
                 memory_set_id=state["selected_memory_set_id"],
+                actor_ref=actor_ref,
                 current_time=current_time,
-            ),
+            ) if actor_ref is not None else None,
             current_time=current_time,
         )
         if isinstance(activity_context, dict):
             source_pack["activity_context"] = activity_context
         return source_pack
+
+    def _initiative_entry_actor_ref(self, recent_turns: list[dict[str, Any]]) -> str | None:
+        # 同じinteractionから読んだ直近ターンの人物だけを活動状態の対象にする。
+        for turn in reversed(recent_turns):
+            speaker_ref = turn.get("speaker_ref")
+            if isinstance(speaker_ref, str) and speaker_ref.startswith("person:"):
+                return speaker_ref
+        return None
 
     def _initiative_entry_check_recent_turns(
         self,

@@ -2,6 +2,7 @@ import unittest
 from copy import deepcopy
 
 from otomekairo.defaults import DEFAULT_PERSONA_ID, build_default_state
+from otomekairo.interaction import InteractionContext, ParticipantContext
 from otomekairo.llm.contexts import CurrentInput, SpeechContext, build_persona_context
 from otomekairo.llm.prompts import build_activity_state_messages, build_speech_messages
 from otomekairo.service.common import ServiceError
@@ -29,47 +30,53 @@ class DummyService(ServiceConfigMixin):
 
 
 class PersonaReferenceStyleTests(unittest.TestCase):
-    def test_default_persona_has_user_natural_reference(self) -> None:
+    def test_default_persona_has_interlocutor_default_reference(self) -> None:
         state = build_default_state()
         persona = state["personas"][DEFAULT_PERSONA_ID]
 
-        self.assertEqual(persona["reference_style"]["user_natural_reference"], "マスター")
+        self.assertEqual(persona["reference_style"]["interlocutor_default_reference"], "あなた")
 
     def test_persona_context_prompt_payload_separates_schema_user_and_natural_reference(self) -> None:
         persona = deepcopy(build_default_state()["personas"][DEFAULT_PERSONA_ID])
-        persona["reference_style"]["user_natural_reference"] = "マスター"
+        persona["reference_style"]["interlocutor_default_reference"] = "マスター"
 
         context = build_persona_context(persona, role="decision_generation")
         payload = context.to_prompt_payload()
         summary = context.to_summary_payload()
 
-        self.assertEqual(payload["reference_style"]["schema_user_reference"], "user")
-        self.assertEqual(payload["reference_style"]["user_natural_reference"], "マスター")
-        self.assertEqual(summary["reference_style"]["user_natural_reference"], "マスター")
+        self.assertEqual(payload["reference_style"]["schema_person_reference"], "person:*")
+        self.assertEqual(payload["reference_style"]["interlocutor_default_reference"], "マスター")
+        self.assertEqual(summary["reference_style"]["interlocutor_default_reference"], "マスター")
 
     def test_activity_state_messages_include_reference_style_boundary(self) -> None:
         persona = deepcopy(build_default_state()["personas"][DEFAULT_PERSONA_ID])
-        persona["reference_style"]["user_natural_reference"] = "マスター"
+        persona["reference_style"]["interlocutor_default_reference"] = "マスター"
         context = build_persona_context(persona, role="activity_state")
 
         messages = build_activity_state_messages(
             persona_context=context,
-            source_pack={"current_input": {"sender": "system", "text": "background thinking"}},
+            source_pack={"current_input": {"sender_kind": "system", "text": "background thinking"}},
         )
 
         self.assertIn("persona_context.reference_style", messages[0]["content"])
         self.assertIn("schema key、enum", messages[0]["content"])
-        self.assertIn('"schema_user_reference":"user"', messages[1]["content"])
-        self.assertIn('"user_natural_reference":"マスター"', messages[1]["content"])
+        self.assertIn('"schema_person_reference":"person:*"', messages[1]["content"])
+        self.assertIn('"interlocutor_default_reference":"マスター"', messages[1]["content"])
 
-    def test_speech_stance_reason_uses_user_natural_reference(self) -> None:
+    def test_speech_stance_reason_uses_interlocutor_default_reference(self) -> None:
         persona = deepcopy(build_default_state()["personas"][DEFAULT_PERSONA_ID])
-        persona["reference_style"]["user_natural_reference"] = "マスター"
+        persona["reference_style"]["interlocutor_default_reference"] = "マスター"
         persona_context = build_persona_context(persona, role="expression_generation", include_expression=True)
         current_input = CurrentInput(
-            sender="user",
+            sender_kind="person",
+            sender_ref="person:test",
             source_kind="user_message",
-            response_target="user",
+            response_target_refs=("person:test",),
+            interaction_context=InteractionContext(
+                interaction_ref="interaction:test",
+                speaker_ref="person:test",
+                participants=(ParticipantContext(person_ref="person:test"),),
+            ),
             text="おはよう",
         )
         context = SpeechContext(
@@ -95,16 +102,16 @@ class PersonaReferenceStyleTests(unittest.TestCase):
 
         messages = build_speech_messages(persona_context=persona_context, context=context)
 
-        self.assertIn('"reason_summary":"マスター発話への直接応答。"', messages[1]["content"])
+        self.assertIn('"reason_summary":"マスターの発話への直接応答。"', messages[1]["content"])
 
-    def test_replace_persona_normalizes_user_natural_reference(self) -> None:
+    def test_replace_persona_normalizes_interlocutor_default_reference(self) -> None:
         service = DummyService()
         definition = deepcopy(service.store.state["personas"][DEFAULT_PERSONA_ID])
-        definition["reference_style"]["user_natural_reference"] = " マスター "
+        definition["reference_style"]["interlocutor_default_reference"] = " マスター "
 
         response = service.replace_persona("token", DEFAULT_PERSONA_ID, definition)
 
-        self.assertEqual(response["persona"]["reference_style"]["user_natural_reference"], "マスター")
+        self.assertEqual(response["persona"]["reference_style"]["interlocutor_default_reference"], "マスター")
 
     def test_replace_persona_requires_reference_style(self) -> None:
         service = DummyService()

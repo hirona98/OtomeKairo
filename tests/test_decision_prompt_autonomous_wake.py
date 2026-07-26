@@ -27,7 +27,7 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
             {
                 "display_name": "テスト",
                 "initiative_baseline": "medium",
-                "reference_style": {"user_natural_reference": "マスター"},
+                "reference_style": {"interlocutor_default_reference": "マスター"},
                 "persona_prompt": "落ち着いて判断する。",
             },
             role="decision_generation",
@@ -76,9 +76,11 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
         context = DecisionContext(
             input_text="定期思考。",
             current_input=CurrentInput(
-                sender="system",
+                sender_kind="system",
+                sender_ref=None,
                 source_kind="background_thinking",
-                response_target="none",
+                response_target_refs=(),
+                interaction_context=None,
                 text="定期思考。",
             ),
             trigger_kind="background_thinking",
@@ -130,7 +132,7 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
             "判断理由にしない",
             "短い状況認識として閉じる speech",
             "支援提案とは別の軽い外向き行動",
-            "response_target=none の短い独り言",
+            "response_target_refs が空の短い独り言",
             "会話継続や相手の反応を前提にしない",
             "観測差分、活動継続、画面変化は speech を義務づけません",
             "現在の個の短い見方として一言にまとまる場合は speech と比較",
@@ -296,7 +298,7 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
             {
                 "display_name": "テスト",
                 "initiative_baseline": "medium",
-                "reference_style": {"user_natural_reference": "マスター"},
+                "reference_style": {"interlocutor_default_reference": "マスター"},
                 "persona_prompt": "落ち着いて判断する。",
             },
             role="initiative_entry_check",
@@ -337,13 +339,13 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
         persona = {
             "display_name": "テスト",
             "initiative_baseline": "medium",
-            "reference_style": {"user_natural_reference": "マスター"},
+            "reference_style": {"interlocutor_default_reference": "マスター"},
             "persona_prompt": "落ち着いて判断する。",
         }
         activity_context = build_persona_context(persona, role="activity_state")
         activity_system_prompt = build_activity_state_messages(
             persona_context=activity_context,
-            source_pack={"current_input": {"sender": "system", "text": "background thinking"}},
+            source_pack={"current_input": {"sender_kind": "system", "text": "background thinking"}},
         )[0]["content"]
         visual_context = build_persona_context(persona, role="visual_observation")
         visual_system_prompt = build_visual_observation_messages(
@@ -376,16 +378,18 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
             {
                 "display_name": "テスト",
                 "initiative_baseline": "medium",
-                "reference_style": {"user_natural_reference": "マスター"},
+                "reference_style": {"interlocutor_default_reference": "マスター"},
                 "persona_prompt": "落ち着いて判断する。",
             },
             role="expression_generation",
             include_expression=True,
         )
         current_input = CurrentInput(
-            sender="system",
+            sender_kind="system",
+                sender_ref=None,
             source_kind="background_thinking",
-            response_target="none",
+            response_target_refs=(),
+                interaction_context=None,
             text="定期思考。",
         )
         context = SpeechContext(

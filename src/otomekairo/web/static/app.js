@@ -81,6 +81,23 @@ function idSuffix() {
   return crypto.randomUUID ? crypto.randomUUID().replaceAll("-", "") : String(Date.now());
 }
 
+function loadConversationIdentity() {
+  const generatedId = idSuffix();
+  const personRef = localStorage.getItem("otomekairo.person_ref") || `person:web:${generatedId}`;
+  const interactionRef = localStorage.getItem("otomekairo.interaction_ref")
+    || `interaction:web:direct:${personRef.slice("person:".length)}`;
+  element("conversation-person-ref").value = personRef;
+  element("conversation-display-name").value = localStorage.getItem("otomekairo.display_name") || "";
+  element("conversation-interaction-ref").value = interactionRef;
+  saveConversationIdentity();
+}
+
+function saveConversationIdentity() {
+  localStorage.setItem("otomekairo.person_ref", element("conversation-person-ref").value.trim());
+  localStorage.setItem("otomekairo.display_name", element("conversation-display-name").value.trim());
+  localStorage.setItem("otomekairo.interaction_ref", element("conversation-interaction-ref").value.trim());
+}
+
 function arrayById(items, idKey, id) {
   return (items || []).find((item) => item[idKey] === id) || null;
 }
@@ -218,7 +235,15 @@ async function sendMessage(event) {
     return;
   }
   const images = state.attachment ? [state.attachment.data] : [];
-  addMessage("user", text, images);
+  const personRef = element("conversation-person-ref").value.trim();
+  const displayName = element("conversation-display-name").value.trim();
+  const interactionRef = element("conversation-interaction-ref").value.trim();
+  if (!personRef.startsWith("person:") || personRef.length <= "person:".length || !interactionRef) {
+    showNotice("人物参照は person:<key>、会話参照は空でない値を指定してください。", true);
+    return;
+  }
+  saveConversationIdentity();
+  addMessage("person", text, images);
   input.value = "";
   clearAttachment();
   state.sending = true;
@@ -230,6 +255,14 @@ async function sendMessage(event) {
       body: JSON.stringify({
         text,
         images,
+        interaction_context: {
+          interaction_ref: interactionRef,
+          speaker_ref: personRef,
+          participants: [{
+            person_ref: personRef,
+            ...(displayName ? { display_name: displayName } : {}),
+          }],
+        },
         client_context: {
           source: "OtomeKairoWebUI",
           client_id: "web-ui",
@@ -379,7 +412,7 @@ function renderPersona() {
     return;
   }
   element("persona-display-name").value = persona.display_name || "";
-  element("persona-user-reference").value = persona.reference_style?.user_natural_reference || "";
+  element("persona-interlocutor-reference").value = persona.reference_style?.interlocutor_default_reference || "";
   element("persona-prompt").value = persona.persona_prompt || "";
   element("persona-expression-addon").value = persona.expression_addon || "";
 }
@@ -391,7 +424,7 @@ function syncPersona() {
   }
   persona.display_name = textValue("persona-display-name");
   persona.reference_style = persona.reference_style || {};
-  persona.reference_style.user_natural_reference = textValue("persona-user-reference");
+  persona.reference_style.interlocutor_default_reference = textValue("persona-interlocutor-reference");
   persona.persona_prompt = textValue("persona-prompt");
   persona.expression_addon = textValue("persona-expression-addon");
 }
@@ -862,6 +895,13 @@ function bindEvents() {
   });
   element("image-input").addEventListener("change", (event) => attachFile(event.target.files[0]));
   element("remove-attachment").addEventListener("click", clearAttachment);
+  for (const id of [
+    "conversation-person-ref",
+    "conversation-display-name",
+    "conversation-interaction-ref",
+  ]) {
+    element(id).addEventListener("change", saveConversationIdentity);
+  }
 
   element("open-settings").addEventListener("click", openSettings);
   element("close-settings").addEventListener("click", closeSettings);
@@ -925,5 +965,6 @@ function bindEvents() {
 }
 
 bindEvents();
+loadConversationIdentity();
 loadIdentity();
 loadStatus({ silent: true });

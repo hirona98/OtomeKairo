@@ -711,6 +711,25 @@ class ServiceCapabilityMixin:
         }
         if isinstance(source_current_input, dict):
             record["source_current_input"] = deepcopy(source_current_input)
+            sender_ref = source_current_input.get("sender_ref")
+            if isinstance(sender_ref, str) and sender_ref.startswith("person:"):
+                record["requested_by_person_ref"] = sender_ref
+            interaction_context = source_current_input.get("interaction_context")
+            if isinstance(interaction_context, dict):
+                interaction_ref = interaction_context.get("interaction_ref")
+                if isinstance(interaction_ref, str) and interaction_ref:
+                    record["origin_interaction_ref"] = interaction_ref
+                participants = interaction_context.get("participants")
+                if isinstance(participants, list):
+                    record["participant_refs"] = [
+                        participant["person_ref"]
+                        for participant in participants
+                        if (
+                            isinstance(participant, dict)
+                            and isinstance(participant.get("person_ref"), str)
+                            and participant["person_ref"].startswith("person:")
+                        )
+                    ]
         normalized_assistant_message_target_client_id = self._normalize_capability_client_id(
             assistant_message_target_client_id
         )
@@ -805,6 +824,10 @@ class ServiceCapabilityMixin:
         source_current_input = request_record.get("source_current_input")
         if isinstance(source_current_input, dict):
             summary["source_current_input"] = deepcopy(source_current_input)
+        for key in ("requested_by_person_ref", "origin_interaction_ref", "participant_refs"):
+            value = request_record.get(key)
+            if value is not None:
+                summary[key] = deepcopy(value)
         autonomous_run_id = request_record.get("autonomous_run_id")
         if isinstance(autonomous_run_id, str) and autonomous_run_id.strip():
             summary["autonomous_run_id"] = autonomous_run_id.strip()

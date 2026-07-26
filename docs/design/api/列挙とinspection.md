@@ -125,7 +125,7 @@ response:
     },
     "current_state": {
       "foreground_world_states": [],
-      "activity_context": null,
+      "activity_contexts": [],
       "drive_states": [],
       "ongoing_action": null,
       "autonomous_runs": [],
@@ -159,7 +159,8 @@ response:
 ```
 
 `current_state.foreground_world_states` は現在有効な `world_state` の前景 snapshot を返す。
-`activity_context`、`drive_states`、`autonomous_runs`、`ongoing_action`、`mood_state`、`affect_states` は、現在の個を構成する内部状態の確認用 snapshot である。
+`activity_contexts` は人物参照ごとの現在活動を配列で返す。
+`drive_states`、`autonomous_runs`、`ongoing_action`、`mood_state`、`affect_states` は、現在の個を構成する内部状態の確認用 snapshot である。
 `current_state.entity_registry` は、選択中 `memory_set` の固有対象正規化を確認する compact snapshot である。
 `current_state.entity_registry` は `entity_ref / entity_type / display_name / aliases / first_seen_at / last_seen_at / confidence / salience / evidence_event_count / supporting_memory_unit_count` を返す。
 `current_state.entity_registry` は読み取り専用であり、対象の性格、好み、属性、関係本文を含めない。

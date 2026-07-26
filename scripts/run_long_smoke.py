@@ -3207,7 +3207,7 @@ class LongSmokeRunner:
         device_state_summary = f"{marker}: 端末接続は安定しており、作業を続けられる。"
         self._seed_initiative_probe_drive(
             drive_id=f"drive:{case_id}",
-            drive_kind="user_attention",
+            drive_kind="person_attention",
             summary_text=f"{marker}: 端末の接続状態を確認してから短く判断したい。",
             focus_scope_key=marker,
         )
@@ -3500,7 +3500,7 @@ class LongSmokeRunner:
         return self._run_real_llm_initiative_probe_fresh_status_speech(
             case_id="device-fresh-speech",
             marker="RealLLMInitiativeDeviceSpeechMarker",
-            drive_kind="user_attention",
+            drive_kind="person_attention",
             drive_summary="端末の接続状態に合わせて短く判断したい。",
             world_state_type="device",
             world_summary="端末接続は安定しており、電源も利用できる。",

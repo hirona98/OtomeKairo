@@ -3,10 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any
 
+from otomekairo.interaction import InteractionContext
+
 
 PERSONA_PROMPT_EXCERPT_LIMIT = 240
-PERSONA_REFERENCE_STYLE_USER_NATURAL_REFERENCE = "user_natural_reference"
-PERSONA_SCHEMA_USER_REFERENCE = "user"
+PERSONA_REFERENCE_STYLE_INTERLOCUTOR_DEFAULT_REFERENCE = "interlocutor_default_reference"
+PERSONA_SCHEMA_PERSON_REFERENCE = "person:*"
 
 
 PERSONA_CONTEXT_USE_POLICIES = {
@@ -43,8 +45,10 @@ class PersonaContext:
         payload: dict[str, Any] = {
             "initiative_baseline": self.initiative_baseline,
             "reference_style": {
-                "schema_user_reference": PERSONA_SCHEMA_USER_REFERENCE,
-                "user_natural_reference": self.reference_style[PERSONA_REFERENCE_STYLE_USER_NATURAL_REFERENCE],
+                "schema_person_reference": PERSONA_SCHEMA_PERSON_REFERENCE,
+                "interlocutor_default_reference": self.reference_style[
+                    PERSONA_REFERENCE_STYLE_INTERLOCUTOR_DEFAULT_REFERENCE
+                ],
             },
             "persona_prompt_text": self.persona_prompt_text,
             "use_policy": self.use_policy,
@@ -57,7 +61,9 @@ class PersonaContext:
         payload: dict[str, Any] = {
             "initiative_baseline": self.initiative_baseline,
             "reference_style": {
-                "user_natural_reference": self.reference_style[PERSONA_REFERENCE_STYLE_USER_NATURAL_REFERENCE],
+                "interlocutor_default_reference": self.reference_style[
+                    PERSONA_REFERENCE_STYLE_INTERLOCUTOR_DEFAULT_REFERENCE
+                ],
             },
             "persona_prompt_excerpt": self._prompt_excerpt(),
         }
@@ -120,28 +126,50 @@ def _persona_text(value: Any) -> str | None:
 def _persona_reference_style(value: Any) -> dict[str, str]:
     if not isinstance(value, dict):
         raise ValueError("persona.reference_style must be an object.")
-    user_natural_reference = _persona_text(value.get(PERSONA_REFERENCE_STYLE_USER_NATURAL_REFERENCE))
-    if user_natural_reference is None:
-        raise ValueError("persona.reference_style.user_natural_reference must be a non-empty string.")
+    interlocutor_default_reference = _persona_text(
+        value.get(PERSONA_REFERENCE_STYLE_INTERLOCUTOR_DEFAULT_REFERENCE)
+    )
+    if interlocutor_default_reference is None:
+        raise ValueError(
+            "persona.reference_style.interlocutor_default_reference must be a non-empty string."
+        )
     return {
-        PERSONA_REFERENCE_STYLE_USER_NATURAL_REFERENCE: user_natural_reference,
+        PERSONA_REFERENCE_STYLE_INTERLOCUTOR_DEFAULT_REFERENCE: interlocutor_default_reference,
     }
 
 
 @dataclass(frozen=True, slots=True)
 class CurrentInput:
-    sender: str
+    sender_kind: str
+    sender_ref: str | None
     source_kind: str
-    response_target: str
+    response_target_refs: tuple[str, ...]
+    interaction_context: InteractionContext | None
     text: str
 
+    @property
+    def interaction_ref(self) -> str | None:
+        if self.interaction_context is None:
+            return None
+        return self.interaction_context.interaction_ref
+
+    @property
+    def participant_refs(self) -> tuple[str, ...]:
+        if self.interaction_context is None:
+            return ()
+        return self.interaction_context.participant_refs
+
     def to_prompt_payload(self) -> dict[str, Any]:
-        return {
-            "sender": self.sender,
+        payload: dict[str, Any] = {
+            "sender_kind": self.sender_kind,
+            "sender_ref": self.sender_ref,
             "source_kind": self.source_kind,
-            "response_target": self.response_target,
+            "response_target_refs": list(self.response_target_refs),
             "text": self.text,
         }
+        if self.interaction_context is not None:
+            payload["interaction_context"] = self.interaction_context.to_prompt_payload()
+        return payload
 
 
 @dataclass(frozen=True, slots=True)

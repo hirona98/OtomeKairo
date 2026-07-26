@@ -114,7 +114,7 @@ connector と watcher を有効にする前に、ブラウザ UI、CocoroConsole
 設定定義の意味は `docs/` を正とする。
 API key は設定値として扱い、コード、ログ、サンプルへ書かない。
 
-現行形式と異なる `config.db` は起動時に拒否する。旧設定DBは別名で保管し、新しい `config.db` を初期化して設定し直す。`memory.db` は保持する。
+現行形式と異なる `config.db` と `memory.db` は起動時に拒否する。旧DBは別名で保管し、新しいDBを初期化する。設定は新しい `config.db` へ設定し直す。
 
 ## 検証
 

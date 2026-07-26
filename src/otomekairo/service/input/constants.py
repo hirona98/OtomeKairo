@@ -19,7 +19,6 @@ WORLD_STATE_SCOPE_BY_TYPE = {
     "body": ("self", "self"),
     "device": ("world", "world"),
     "schedule": ("self", "self"),
-    "social_context": ("relationship", "self|user"),
     "environment": ("world", "world"),
     "location": ("world", "world"),
 }

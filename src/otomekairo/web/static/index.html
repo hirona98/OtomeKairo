@@ -23,6 +23,11 @@
       <section class="chat-panel" aria-label="チャット">
         <div class="messages" id="messages" aria-live="polite"></div>
         <form class="composer" id="composer">
+          <div class="conversation-identity">
+            <label>人物参照<input id="conversation-person-ref" spellcheck="false"></label>
+            <label>表示名<input id="conversation-display-name"></label>
+            <label>会話参照<input id="conversation-interaction-ref" spellcheck="false"></label>
+          </div>
           <div class="attachment-preview" id="attachment-preview" hidden>
             <img id="attachment-image" alt="添付画像プレビュー">
             <button type="button" class="plain-button" id="remove-attachment">削除</button>
@@ -74,7 +79,7 @@
         </div>
         <div class="form-grid">
           <label>プリセット名<input id="persona-display-name"></label>
-          <label>ユーザー呼称<input id="persona-user-reference"></label>
+          <label>相手の既定呼称<input id="persona-interlocutor-reference"></label>
         </div>
         <label class="wide-label">人格本文<textarea id="persona-prompt" class="persona-prompt-field"
             rows="20"></textarea></label>

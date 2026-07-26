@@ -244,6 +244,7 @@ class ServiceInputWakeObservationMixin:
             client_context=client_context,
             capability_response=capability_response,
         )
+        interaction_context = self._capability_result_interaction_context(capability_request_summary)
         try:
             client_context, observation_summary, input_text = self._prepare_capability_result_context(
                 state=state,
@@ -268,6 +269,11 @@ class ServiceInputWakeObservationMixin:
                 observation_summary=observation_summary,
                 capability_request_summary=capability_request_summary,
                 persona_context=self._build_selected_persona_context(state=state, role="world_state"),
+                current_person_ref=(
+                    interaction_context.participant_refs[0]
+                    if interaction_context is not None and interaction_context.participant_refs
+                    else None
+                ),
             )
             visual_observation_context = self._build_visual_observation_decision_context(
                 trigger_kind="capability_result",
@@ -280,6 +286,7 @@ class ServiceInputWakeObservationMixin:
                 current_input=self._build_current_input(
                     input_text=input_text,
                     trigger_kind="capability_result",
+                    interaction_context=interaction_context,
                     capability_request_summary=capability_request_summary,
                 ).to_prompt_payload(),
                 recent_turns=[],

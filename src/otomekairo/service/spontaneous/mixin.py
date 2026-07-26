@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.capabilities import capability_manifests
+from otomekairo.interaction import normalize_interaction_context
 from otomekairo.service.common import ServiceError, debug_log
 from otomekairo.service.spontaneous.capability_result import ServiceSpontaneousCapabilityResultMixin
 from otomekairo.service.spontaneous.pending_intent import ServiceSpontaneousPendingIntentMixin
@@ -25,12 +26,18 @@ class ServiceSpontaneousMixin(
             raise ServiceError(400, "invalid_client_context", "The client_context field must be an object.")
 
         reference_payload = payload.get("reference")
+        interaction_context = normalize_interaction_context(
+            payload.get("interaction_context"),
+            required=False,
+            require_speaker=False,
+        )
 
         # 実行
         debug_log("Wake", f"manual trigger context_keys={self._debug_context_keys(client_context)}", level="DEBUG")
         return self._execute_wake_cycle(
             state=state,
             client_context=client_context,
+            interaction_context=interaction_context,
             trigger_kind="wake",
             reference_payload=reference_payload,
         )

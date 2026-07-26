@@ -113,6 +113,19 @@ request:
 {
   "text": "こんにちは",
   "images": ["data:image/png;base64,..."],
+  "autonomous_run_action": {
+    "kind": "cancel_all"
+  },
+  "interaction_context": {
+    "interaction_ref": "interaction:discord:channel-123",
+    "speaker_ref": "person:external-123",
+    "participants": [
+      {
+        "person_ref": "person:external-123",
+        "display_name": "田中"
+      }
+    ]
+  },
   "client_context": {
     "source": "CocoroConsole",
     "client_id": "console-...",
@@ -124,6 +137,14 @@ request:
 ```
 
 - `text` は必須の文字列
+- `autonomous_run_action` は任意とし、全自律実行を明示的に停止する場合だけ `{"kind":"cancel_all"}` を渡す
+- server は入力文から自律実行の停止意図を推定しない
+- `interaction_context` は必須の object
+- `interaction_context.interaction_ref` は空でない安定参照
+- `interaction_context.speaker_ref` は `person:` で始まり、`participants` に含まれる値
+- `interaction_context.participants` は初期実装では1件だけを受理する
+- `participants[].person_ref` は `person:` で始まる安定参照
+- `participants[].display_name` は任意の表示用文字列であり、人物同一性に使用しない
 - `images` は任意の画像 Data URI 配列とする。値がないときは省略する
 - `images` は最大 1 件とする
 - `client_context` は object とする。値がないときは省略する
@@ -133,8 +154,10 @@ request:
 - 会話の `images` は `conversation_attachment` として扱い、`vision.capture` の capability result とは結び付けない
 - 会話の `images` だけから `world_state.visual_context` を更新しない
 - server は上記 summary をそのまま永続化せず、必要な場合だけ `world_state` source pack の補助文脈へ使う
-- server は会話入力を `current_input.sender=user`、`source_kind=user_message`、`response_target=user`、`text=<ユーザー原文>` として shared pipeline に渡す
-- server は非空のユーザー原文に対する `decision.kind=noop` を契約違反として repair する。明示的な発話不要表現がある場合だけ `noop` を許可する
+- server は会話入力を `current_input.sender_kind=person`、`sender_ref=<speaker_ref>`、`source_kind=user_message`、`response_target_refs=<participant person_ref群>` として shared pipeline に渡す
+- server は人物識別結果を信頼し、認証主体との対応確認となりすまし検出を実行しない
+- 会話履歴は `interaction_ref` が一致する event だけから構成する
+- server は非空のユーザー原文に対する `decision.kind=noop` を契約違反として repair する。明示的な発話不要表現または `disclosure_review.outcome=withhold` の場合だけ `noop` を許可する
 
 response:
 
@@ -143,6 +166,8 @@ response:
   "ok": true,
   "data": {
     "cycle_id": "cycle:...",
+    "interaction_ref": "interaction:discord:channel-123",
+    "recipient_person_refs": ["person:external-123"],
     "result_kind": "speech",
     "speech": {
       "text": "やわらかく穏やかに受け取ったよ。こんにちは"
@@ -234,6 +259,15 @@ response:
 | `400` | `invalid_text` | `text` が文字列ではない |
 | `400` | `invalid_images` | `images` が配列でない、2 件以上、Data URI でない、または要素が不正 |
 | `400` | `invalid_client_context` | `client_context` が object ではない |
+| `400` | `invalid_interaction_context` | `interaction_context` が object でない、または未対応fieldを含む |
+| `400` | `invalid_autonomous_run_action` | `autonomous_run_action` が契約外 |
+| `400` | `invalid_interaction_ref` | `interaction_ref` が空または文字列でない |
+| `400` | `invalid_speaker_ref` | `speaker_ref` が無い、または `person:` 形式でない |
+| `400` | `invalid_interaction_participants` | `participants` または人物参照が不正 |
+| `400` | `interaction_speaker_not_participant` | `speaker_ref` が `participants` に含まれない |
+| `400` | `unsupported_group_interaction` | `participants` が1件ではない |
+
+人物と相互作用の意味境界は [../foundation/人物と相互作用.md](../foundation/人物と相互作用.md) を正とする。
 
 ## 自律面
 
@@ -246,6 +280,15 @@ request:
 
 ```json
 {
+  "interaction_context": {
+    "interaction_ref": "interaction:discord:channel-123",
+    "participants": [
+      {
+        "person_ref": "person:external-123",
+        "display_name": "田中"
+      }
+    ]
+  },
   "client_context": {
     "source": "CocoroConsole",
     "client_id": "console-...",
@@ -263,6 +306,9 @@ request:
 ```
 
 - `client_context` は object とする。値がないときは省略する
+- `interaction_context` は任意とし、wake の論理的な対象人物と会話が確定している場合に渡す
+- wake の `interaction_context.speaker_ref` は省略する。指定する場合は `participants` に含める
+- `interaction_context` を渡した wake の応答と非同期処理は、その `interaction_ref / participant person_ref群` を引き継ぐ
 - `reference` は object とする。値がないときは省略する
 - `reference.uri` は必須文字列であり、ローカルパス、`file://` URL、`http://` URL、`https://` URL を受け付ける。最大長は 2048 文字である
 - `reference.label` は参照先の短い名前である。値がないときは `reference.uri` を使う。最大長は 512 文字である
@@ -282,6 +328,8 @@ response:
   "ok": true,
   "data": {
     "cycle_id": "cycle:...",
+    "interaction_ref": "interaction:discord:channel-123",
+    "recipient_person_refs": ["person:external-123"],
     "result_kind": "noop",
     "speech": null
   }
@@ -310,15 +358,15 @@ API起床は少なくとも次の挙動を持つ。
 - `reference` のテキストが 64 KiB を超える場合、server は `413 wake_reference_too_large` を返す
 - `reference.uri` を読み取れない場合、server は `502 wake_reference_unavailable` を返す
 - `reference` の内容が画像または UTF-8 テキストとして扱えない場合、server は `415 unsupported_wake_reference_content` を返す
-- server は wake 入力を `current_input.sender=system`、`source_kind=wake`、`response_target=none` として shared pipeline に渡す
-- server 内の定期思考スケジューラは `current_input.sender=system`、`source_kind=background_thinking`、`response_target=none` として shared pipeline に渡す
+- server は wake 入力を `current_input.sender_kind=system`、`source_kind=wake` として shared pipeline に渡し、`interaction_context` がある場合は参加人物参照を `response_target_refs` に使う
+- server 内の定期思考スケジューラは `current_input.sender_kind=system`、`source_kind=background_thinking`、空の `response_target_refs` として shared pipeline に渡す
 - server 内の定期思考スケジューラだけが `wake_policy.mode`、`wake_policy.interval_seconds`、`wake_policy.observations` を使う
 - 定期思考で `mode=interval` かつ `wake_policy.observations` がある場合、enabled observation を順番に取得し、成功結果をその回の判断へ進む前景シグナルとして扱い、visual capture は `visual_observation` の構造化出力で `change_state` を受け取り、視覚記録と `world_state` を整理してから wake 判断を 1 回だけ行う
 - 思考前観測 が vision source 未接続の一時失敗だけで終わった場合、server は interval を消費せず短い再試行待ちにする
 - 思考前観測 の同期 capability request は内部観測として扱い、`ongoing_action` を作らない
-- capability request は dispatch 時点の `current_input` を request record の `source_current_input` に保存し、capability result の `response_target` は `source_current_input.response_target` を引き継ぐ
-- `source_current_input.response_target=none` の capability result は内部観測結果として扱い、実効判断を `noop` に正規化し、assistant message を送信しない
-- `source_current_input.response_target=user` の capability request は request record に外向き応答先 client を内部保存し、follow-up capability request へ引き継ぐ
+- capability request は dispatch 時点の `current_input` を request record の `source_current_input` に保存し、capability result の `response_target_refs` は `source_current_input.response_target_refs` を引き継ぐ
+- `source_current_input.response_target_refs=空配列` の capability result は内部観測結果として扱い、実効判断を `noop` に正規化し、assistant message を送信しない
+- `source_current_input.response_target_refs=<current person_ref>` の capability request は request record に外向き応答先 client を内部保存し、follow-up capability request へ引き継ぐ
 - capability result follow-up の assistant message は、capability result を返した client ではなく request record の外向き応答先 client へ送る
 - `wake / background_thinking` の判断で `camera.ptz` を dispatch した場合も同じ `source_current_input` を保存し、result follow-up から同じ camera source の `vision.capture` を内部観測として発行できる
 - visual observation は wake 判断へ渡し、`change_state=first_seen / changed` は wake 判断の `visual_observation` 前景候補として扱う。発話可否は観測差分だけで決めず、`speech / noop / pending_intent` の意味判断で比較する
@@ -337,6 +385,12 @@ server 内の定期思考スケジューラも、同じ wake 1 サイクルを�
 | HTTP | `error.code` | 意味 |
 |------|--------------|------|
 | `400` | `invalid_client_context` | `client_context` が object ではない |
+| `400` | `invalid_interaction_context` | `interaction_context` が object でない、または未対応fieldを含む |
+| `400` | `invalid_interaction_ref` | `interaction_ref` が空または文字列でない |
+| `400` | `invalid_speaker_ref` | 指定した `speaker_ref` が `person:` 形式でない |
+| `400` | `invalid_interaction_participants` | `participants` または人物参照が不正 |
+| `400` | `interaction_speaker_not_participant` | 指定した `speaker_ref` が `participants` に含まれない |
+| `400` | `unsupported_group_interaction` | `participants` が1件ではない |
 | `400` | `invalid_wake_reference` | `reference` の形式が不正 |
 | `413` | `wake_reference_too_large` | `reference` の取得結果が大きすぎる |
 | `415` | `unsupported_wake_reference_content` | `reference` の内容が画像または UTF-8 テキストとして扱えない |

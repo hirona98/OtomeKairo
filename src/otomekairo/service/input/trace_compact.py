@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.capabilities import capability_manifests
+from otomekairo.interaction import InteractionContext
 from otomekairo.llm.contexts import InitiativeContext
 
 
@@ -12,6 +13,7 @@ class ServiceInputTraceCompactMixin:
         *,
         trigger_kind: str,
         input_text: str,
+        interaction_context: InteractionContext | None,
         observation_summary: dict[str, Any] | None,
         capability_request_summary: dict[str, Any] | None,
         followup_capability_request_summary: dict[str, Any] | None,
@@ -35,6 +37,7 @@ class ServiceInputTraceCompactMixin:
             "current_input_summary": self._build_current_input(
                 input_text=input_text,
                 trigger_kind=trigger_kind,
+                interaction_context=interaction_context,
                 capability_request_summary=capability_request_summary,
             ).to_prompt_payload(),
             "entry_summary": self._build_trigger_compact_entry_summary(

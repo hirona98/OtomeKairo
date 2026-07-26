@@ -648,7 +648,7 @@ class MemoryActionResolver:
         # relationship key 形状
         refs = [part.strip() for part in value.split("|") if part.strip()]
         return bool(refs) and all(
-            ref in {"self", "user"} or self._has_named_entity_ref_prefix(ref)
+            ref == "self" or self._has_named_entity_ref_prefix(ref)
             for ref in refs
         )
 
@@ -768,13 +768,13 @@ class MemoryActionResolver:
             if self._has_named_entity_ref_prefix(text):
                 return text
             raise ValueError("scope=entity の subject_hint は person:/place:/tool: 形式である必要があります。")
-        if text in {"self", "user", "world"}:
+        if text in {"self", "world"}:
             return text
         if "|" in text:
             return self._normalize_relationship_key(text)
         if self._looks_like_ref(text):
             return text
-        if scope_type in {"self", "user", "world"}:
+        if scope_type in {"self", "world"}:
             return scope_type
         if scope_type == "topic":
             return f"topic:{self._slug_hint(text)}"
@@ -804,7 +804,7 @@ class MemoryActionResolver:
         subject_ref: str,
         object_ref_or_value: str | None,
     ) -> str:
-        if scope_type in {"self", "user", "world"}:
+        if scope_type in {"self", "world"}:
             return scope_type
         if scope_type == "relationship":
             return self._normalize_relationship_key(subject_ref)
@@ -827,7 +827,7 @@ class MemoryActionResolver:
             if part.strip()
         ]
         if not refs:
-            refs = ["self", "user"]
+            raise ValueError("relationship scope には2件以上の正規refが必要です。")
         refs = sorted(set(refs))
         if "self" in refs:
             refs = ["self"] + [ref for ref in refs if ref != "self"]
@@ -835,11 +835,11 @@ class MemoryActionResolver:
 
     def _normalize_relationship_ref(self, value: str) -> str:
         text = value.strip()
-        if text in {"self", "user"} or self._has_named_entity_ref_prefix(text):
+        if text == "self" or self._has_named_entity_ref_prefix(text):
             return text
         if text.startswith("entity:"):
             raise ValueError("entity:<key> は relationship ref として使えません。person:/place:/tool: を使ってください。")
-        raise ValueError("relationship ref は self/user/person:/place:/tool: のいずれかである必要があります。")
+        raise ValueError("relationship ref は self/person:/place:/tool: のいずれかである必要があります。")
 
     def _has_named_entity_ref_prefix(self, value: str) -> bool:
         # entity の正本参照は person/place/tool の型付き参照だけにする。

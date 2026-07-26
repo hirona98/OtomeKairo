@@ -323,27 +323,6 @@ class EventStreamRegistry:
         # 空
         return False
 
-    def find_single_client_with_event_subscription(self, event_type: str) -> str | None:
-        # event を受け取れる接続中 client 群
-        normalized_event_type = event_type.strip()
-        if not normalized_event_type:
-            return None
-        with self._lock:
-            client_ids = sorted(
-                {
-                    client_id.strip()
-                    for session in self._sessions.values()
-                    if isinstance((client_id := session.get("client_id")), str)
-                    and client_id.strip()
-                    and normalized_event_type in session.get("event_subscriptions", [])
-                }
-            )
-
-        # 1 台だけのときだけ採用する
-        if len(client_ids) != 1:
-            return None
-        return client_ids[0]
-
     def find_single_client_with_capability(self, capability: str) -> str | None:
         # capability を持つ接続中 client 群
         with self._lock:

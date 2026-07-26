@@ -31,6 +31,7 @@ def _source_pack() -> WorldStateSourcePack:
         source_ref="request:test",
         time_context="2026年7月20日 月曜日 12時00分（日本時間）",
         client_context=WorldStateClientContext(source="test"),
+        current_person_ref="person:external-123",
         visual_context=WorldStateVisualContext(
             summary_text="作業画面が前景にある。",
             visual_summary_text="エディタで文書を開いている。",
@@ -91,7 +92,11 @@ class WorldStateContractTests(unittest.TestCase):
                 "body": ("state_source:body", "self", "self"),
                 "device": ("state_source:device", "world", "world"),
                 "schedule": ("state_source:schedule", "self", "self"),
-                "social_context": ("state_source:social_context", "relationship", "self|user"),
+                "social_context": (
+                    "state_source:social_context",
+                    "relationship",
+                    "self|person:external-123",
+                ),
                 "environment": ("state_source:environment", "world", "world"),
                 "location": ("state_source:location", "world", "world"),
             },

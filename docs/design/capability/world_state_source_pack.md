@@ -67,7 +67,7 @@ source pack 例:
       "candidate_ref": "state_source:social_context",
       "state_type": "social_context",
       "scope_type": "relationship",
-      "scope_key": "self|user",
+      "scope_key": "self|person:external-123",
       "evidence_summary": "Slack 上のやり取りが近い判断文脈として前景にある。"
     },
     {

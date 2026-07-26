@@ -343,6 +343,7 @@ class WorldStateSourcePack:
     source_ref: str
     time_context: str
     client_context: WorldStateClientContext
+    current_person_ref: str | None = None
     state_sources: tuple[WorldStateSourceCandidate, ...] = field(default_factory=tuple)
     visual_context: WorldStateVisualContext | None = None
     external_service_context: WorldStateExternalServiceContext | None = None
@@ -391,6 +392,8 @@ class WorldStateSourcePack:
             "client_context": self.client_context.to_prompt_payload(),
             "state_sources": [candidate.to_prompt_payload() for candidate in self.state_sources],
         }
+        if isinstance(self.current_person_ref, str) and self.current_person_ref:
+            payload["current_person_ref"] = self.current_person_ref
         for key in (
             "visual_context",
             "external_service_context",

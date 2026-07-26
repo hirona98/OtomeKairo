@@ -410,8 +410,8 @@ class MemoryReflectionDriveMixin:
             return None
         if scope_type == "relationship":
             return "relationship_attunement"
-        if scope_type == "user":
-            return "user_attention"
+        if scope_type == "entity":
+            return "person_attention"
         if scope_type == "self":
             return "self_regulation"
         if scope_type == "topic":
@@ -583,7 +583,7 @@ class MemoryReflectionDriveMixin:
                 return clamp_score(mood_signal * max(0.45, confidence))
             return 0.0
 
-        if focus_scope_type not in {"relationship", "user"}:
+        if focus_scope_type not in {"relationship", "entity"}:
             return 0.0
         affect_signal = 0.0
         for record in affect_states:
@@ -630,7 +630,7 @@ class MemoryReflectionDriveMixin:
             alignment += 0.04
         if "summary" in supporting_memory_types and drive_kind in {
             "relationship_attunement",
-            "user_attention",
+            "person_attention",
             "self_regulation",
             "topic_continuation",
         }:

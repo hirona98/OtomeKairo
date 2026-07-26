@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 ACTIVE_MEMORY_STATUSES = ("inferred", "confirmed")
-REFLECTIVE_SCOPE_TYPES = ("self", "user", "relationship", "topic")
+REFLECTIVE_SCOPE_TYPES = ("self", "entity", "relationship", "topic")
 REFLECTION_TRIGGER_CYCLE_INTERVAL = 8
 REFLECTION_TRIGGER_HOURS = 24
 REFLECTION_HIGH_SALIENCE_THRESHOLD = 0.8
@@ -34,14 +34,14 @@ DRIVE_KIND_EXPIRY_HOURS = {
     "follow_through": 72,
     "resume_when_ready": 48,
     "relationship_attunement": 60,
-    "user_attention": 48,
+    "person_attention": 48,
     "self_regulation": 36,
     "topic_continuation": 36,
 }
 DRIVE_SCOPE_SALIENCE_BOOSTS = {
     "relationship": 0.08,
     "self": 0.06,
-    "user": 0.05,
+    "entity": 0.05,
     "topic": 0.03,
 }
 DRIVE_FRESHNESS_SALIENCE_ADJUSTMENTS = {
@@ -68,7 +68,7 @@ DRIVE_PERSONA_ALIGNMENT_BY_BASELINE = {
         "follow_through": 0.68,
         "resume_when_ready": 0.58,
         "relationship_attunement": 0.44,
-        "user_attention": 0.46,
+        "person_attention": 0.46,
         "self_regulation": 0.72,
         "topic_continuation": 0.38,
     },
@@ -76,7 +76,7 @@ DRIVE_PERSONA_ALIGNMENT_BY_BASELINE = {
         "follow_through": 0.64,
         "resume_when_ready": 0.56,
         "relationship_attunement": 0.58,
-        "user_attention": 0.56,
+        "person_attention": 0.56,
         "self_regulation": 0.62,
         "topic_continuation": 0.52,
     },
@@ -84,7 +84,7 @@ DRIVE_PERSONA_ALIGNMENT_BY_BASELINE = {
         "follow_through": 0.66,
         "resume_when_ready": 0.5,
         "relationship_attunement": 0.74,
-        "user_attention": 0.7,
+        "person_attention": 0.7,
         "self_regulation": 0.58,
         "topic_continuation": 0.66,
     },

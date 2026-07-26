@@ -61,9 +61,11 @@ class TextTruncationTests(unittest.TestCase):
 
         payload = service._build_workspace_context(
             current_input=CurrentInput(
-                sender="user",
+                sender_kind="person",
+                sender_ref="person:test",
                 source_kind="user_message",
-                response_target="user",
+                response_target_refs=("person:test",),
+                interaction_context=None,
                 text=text,
             ),
             recall_pack={
@@ -99,9 +101,11 @@ class TextTruncationTests(unittest.TestCase):
 
         payload = service._build_workspace_context(
             current_input=CurrentInput(
-                sender="system",
+                sender_kind="system",
+                sender_ref=None,
                 source_kind="background_thinking",
-                response_target="none",
+                response_target_refs=(),
+                interaction_context=None,
                 text="定期思考。",
             ),
             recall_pack={},
@@ -110,13 +114,13 @@ class TextTruncationTests(unittest.TestCase):
             activity_context={
                 "current_activity": {
                     "label": "現在活動",
-                    "actor": "user",
+                    "actor": "person",
                     "transition": "switch",
                     "reason_summary": text,
                 },
                 "previous_activity": {
                     "label": "直前活動",
-                    "actor": "user",
+                    "actor": "person",
                     "duration_label": "約19時間",
                     "reason_summary": text,
                 },
@@ -147,7 +151,7 @@ class TextTruncationTests(unittest.TestCase):
         events = [
             {
                 "kind": "speech",
-                "role": "user",
+                "role": "person",
                 "reason_summary": f"理由{i}-" + ("c" * 220),
                 "text": f"本文{i}-" + ("d" * 260) + "末尾",
             }
@@ -169,7 +173,7 @@ class TextTruncationTests(unittest.TestCase):
         payload = mixin._event_evidence_source_event(
             {
                 "kind": "speech",
-                "role": "user",
+                "role": "person",
                 "created_at": "2026-06-20T12:00:00+09:00",
                 "text": text,
                 "reason_summary": reason,
