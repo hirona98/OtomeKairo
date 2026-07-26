@@ -31,15 +31,13 @@ class StoreEntityRegistryMixin:
                 if not isinstance(person_ref, str) or not person_ref.startswith("person:"):
                     continue
                 display_name = participant.get("display_name")
+                if not isinstance(display_name, str) or not display_name.strip():
+                    raise ValueError("interaction participant display_name must be a non-empty string.")
                 observation = {
                     "memory_set_id": memory_set_id,
                     "entity_ref": person_ref,
                     "entity_type": "person",
-                    "display_name": (
-                        display_name.strip()
-                        if isinstance(display_name, str) and display_name.strip()
-                        else None
-                    ),
+                    "display_name": display_name.strip(),
                     "observed_at": observed_at,
                     "confidence": 1.0,
                     "salience": 0.5,
@@ -128,6 +126,27 @@ class StoreEntityRegistryMixin:
                 (memory_set_id, max(1, int(limit))),
             ).fetchall()
         return [json.loads(row["payload_json"]) for row in rows]
+
+    def get_entity_registry_records(
+        self,
+        *,
+        memory_set_id: str,
+        entity_refs: list[str],
+    ) -> list[dict[str, Any]]:
+        # 構造化文脈で選択済みの entity だけを入力順で返す。
+        normalized_refs = self._normalized_entity_ref_list(entity_refs)
+        if not normalized_refs:
+            return []
+        with self._memory_db() as conn:
+            records = [
+                self._load_entity_registry_record(
+                    conn,
+                    memory_set_id=memory_set_id,
+                    entity_ref=entity_ref,
+                )
+                for entity_ref in normalized_refs
+            ]
+        return [record for record in records if isinstance(record, dict)]
 
     def _entity_registry_observations(
         self,

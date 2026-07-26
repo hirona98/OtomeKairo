@@ -915,7 +915,7 @@ class ServiceInputWorldStateSourcePackMixin:
             evidence_summary = self._world_state_source_evidence_summary(context)
             if evidence_summary is None:
                 continue
-            # 対人状態は現在の人物との関係へ結び付ける。
+            # 対人状態は current_person_ref が示す人物との関係へ結び付ける。
             if state_type == "social_context":
                 if source_pack.current_person_ref is None:
                     continue

@@ -1033,6 +1033,11 @@ class ServiceAutonomousRunMixin:
                 current_time=current_time,
             ),
             last_result_context=last_result_context if isinstance(last_result_context, dict) else None,
+            people_context=self._build_people_context(
+                state=state,
+                current_input=current_input,
+                structured_sources=[run, last_result_context],
+            ),
         )
 
     def _autonomous_run_activity_context(
@@ -1115,6 +1120,7 @@ class ServiceAutonomousRunMixin:
             initiative_context=None,
             visual_observation_context=None,
             self_state_context=None,
+            people_context=step_context.people_context or [],
             relationship_context=None,
             prediction_error_context=None,
             workspace_context=None,

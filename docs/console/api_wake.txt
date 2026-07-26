@@ -39,6 +39,7 @@ Authorization: Bearer <TOKEN>
 client_context は任意の object である。
 source、active_app、window_title、locale は起床入力の整形に使われる。
 interaction_context は任意であり、対象人物と会話が確定している場合に指定する。
+interaction_context を指定する場合、participants[].display_name は必須の非空表示名とし、人物同一性には使用しない。
 wake の speaker_ref は省略する。
 reference は省略できる。
 reference.uri はローカルパス、file:// URL、http:// URL、https:// URL を受け付ける。
@@ -72,6 +73,7 @@ result_kind は speech、capability_request、noop、internal_failure のいず�
 
 400 invalid_interaction_context: interaction_context の形式が不正である。
 400 invalid_interaction_participants: participants または人物参照が不正である。
+400 invalid_person_display_name: participants[].display_name が無い、空、または文字列ではない。
 400 unsupported_group_interaction: participants が1件ではない。
 400 invalid_wake_reference: reference の形式が不正である。
 413 wake_reference_too_large: reference の取得結果が大きすぎる。

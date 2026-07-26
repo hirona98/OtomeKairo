@@ -25,7 +25,7 @@
         <form class="composer" id="composer">
           <div class="conversation-identity">
             <label>人物参照<input id="conversation-person-ref" spellcheck="false"></label>
-            <label>表示名<input id="conversation-display-name"></label>
+            <label>表示名<input id="conversation-display-name" required></label>
             <label>会話参照<input id="conversation-interaction-ref" spellcheck="false"></label>
           </div>
           <div class="attachment-preview" id="attachment-preview" hidden>
@@ -79,7 +79,7 @@
         </div>
         <div class="form-grid">
           <label>プリセット名<input id="persona-display-name"></label>
-          <label>相手の既定呼称<input id="persona-interlocutor-reference"></label>
+          <label>発話時の二人称呼称（任意）<input id="persona-interlocutor-address-term"></label>
         </div>
         <label class="wide-label">人格本文<textarea id="persona-prompt" class="persona-prompt-field"
             rows="20"></textarea></label>

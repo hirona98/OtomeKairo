@@ -238,8 +238,13 @@ async function sendMessage(event) {
   const personRef = element("conversation-person-ref").value.trim();
   const displayName = element("conversation-display-name").value.trim();
   const interactionRef = element("conversation-interaction-ref").value.trim();
-  if (!personRef.startsWith("person:") || personRef.length <= "person:".length || !interactionRef) {
-    showNotice("人物参照は person:<key>、会話参照は空でない値を指定してください。", true);
+  if (
+    !personRef.startsWith("person:")
+    || personRef.length <= "person:".length
+    || !displayName
+    || !interactionRef
+  ) {
+    showNotice("人物参照は person:<key>、表示名と会話参照は空でない値を指定してください。", true);
     return;
   }
   saveConversationIdentity();
@@ -260,7 +265,7 @@ async function sendMessage(event) {
           speaker_ref: personRef,
           participants: [{
             person_ref: personRef,
-            ...(displayName ? { display_name: displayName } : {}),
+            display_name: displayName,
           }],
         },
         client_context: {
@@ -412,7 +417,7 @@ function renderPersona() {
     return;
   }
   element("persona-display-name").value = persona.display_name || "";
-  element("persona-interlocutor-reference").value = persona.reference_style?.interlocutor_default_reference || "";
+  element("persona-interlocutor-address-term").value = persona.reference_style?.interlocutor_address_term || "";
   element("persona-prompt").value = persona.persona_prompt || "";
   element("persona-expression-addon").value = persona.expression_addon || "";
 }
@@ -424,7 +429,7 @@ function syncPersona() {
   }
   persona.display_name = textValue("persona-display-name");
   persona.reference_style = persona.reference_style || {};
-  persona.reference_style.interlocutor_default_reference = textValue("persona-interlocutor-reference");
+  persona.reference_style.interlocutor_address_term = textValue("persona-interlocutor-address-term") || null;
   persona.persona_prompt = textValue("persona-prompt");
   persona.expression_addon = textValue("persona-expression-addon");
 }

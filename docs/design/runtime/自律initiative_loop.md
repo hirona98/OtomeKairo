@@ -74,7 +74,7 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 
 `initiative_context` は inspection へ要約を残す。
 `initiative_context` そのものを永続的な状態正本にしない。
-`persona_context_summary` は `initiative_baseline`、`reference_style`、`persona_prompt_excerpt` を持つ。
+`persona_context_summary` は `initiative_baseline` と `persona_prompt_excerpt` を持つ。
 `initiative_context` は `initiative_baseline` を単独の人格判断値として扱わず、`persona_context_summary.initiative_baseline` と前景文脈を合わせて扱う。
 `initiative_entry_summary` は `entry_kind / entry_basis / reason_summary` を含む。
 `entry_basis` は `activity_mode_transition / strong_interest / same_activity_detail_change / observation_only` のいずれかである。
@@ -101,7 +101,7 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 `activity_context.previous_activity` は直前活動の参照情報として扱う。
 `activity_context.current_activity.transition` は直前活動に対する `start / continue / switch / end / none` の推定として扱う。
 `activity_context.current_activity / previous_activity` の `started_age_label / duration_label / ended_age_label` は、活動がいつ始まりどの程度続いたかを生活文脈で比較するための判断材料である。
-`activity_context.current_activity.actor` は活動主体を表す。`actor=person` は現在の人物側の活動、`actor=self` は AI 本体の活動である。
+`activity_context.current_activity.actor` は活動主体を表す。`actor=person` は `actor_ref` の人物側の活動、`actor=self` は AI 本体の活動である。
 activity の `label / target` は自然文として LLM へ渡す。
 タイミング判断と結果選択は、activity を含む `initiative_context` 全体で行う。
 
@@ -234,7 +234,7 @@ visual capture の変化は `first_seen / changed / stable / same_as_recent_spee
 薄い視覚前景だけで成立する新規性は、`noop` または `pending_intent` と同じ盤面で比較する。
 活動遷移に触れる発話は、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして表現する。
 `source_owner=self` の camera 視覚観測は OtomeKairo 自身の視覚根拠として扱う。
-`source_owner=user_environment` の視覚観測、`world_state.visual_context`、`activity_context.actor=person` は現在の人物側の状況として扱う。
+`source_owner=user_environment` の視覚観測、`world_state.visual_context`、`activity_context.actor=person` は対応する `person_ref` の人物側の状況として扱う。
 この文脈から speech する場合、`speech_stance=comment_on_user_context` として、ユーザー側の状況へのコメントとして表現する。
 `current_input.sender_kind=system` かつ `current_input.response_target_refs=空配列` の `wake / background_thinking` では、decision は観測、候補、現在文脈を比較して `speech / noop / pending_intent / capability_request` を選ぶ。
 `wake / background_thinking` の `noop` 理由は、観測、候補、進行中応答、重複発話境界のいずれかに根拠づける。

@@ -51,7 +51,7 @@ class InputInterpretationContractTests(unittest.TestCase):
             {
                 "display_name": "テスト",
                 "initiative_baseline": "medium",
-                "reference_style": {"interlocutor_default_reference": "マスター"},
+                "reference_style": {"interlocutor_address_term": "マスター"},
                 "persona_prompt": "入力を落ち着いて解釈する。",
             },
             role="input_interpretation",

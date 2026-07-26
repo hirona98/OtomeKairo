@@ -94,7 +94,7 @@ LLM に渡す入力は raw `events` ではなく、圧縮済みの `episodes` �
 {
   "scope_type": "relationship",
   "scope_key": "self|person:external-123",
-  "scope_label": "あなたとの関係",
+  "scope_label": "self|person:external-123 の関係文脈",
   "summary_status_candidate": "inferred",
   "dominant_memory_types": ["relation", "interpretation"],
   "support_kinds": ["episodes", "memory_units", "persona_context", "affect_state"],
@@ -104,14 +104,11 @@ LLM に渡す入力は raw `events` ではなく、圧縮済みの `episodes` �
     "support_cycles": 3,
     "open_loops": 1
   },
-  "existing_summary_text": "最近のあなたとのやり取りでは、距離感に関する理解が少しずつ安定している。",
+  "existing_summary_text": "最近のやり取りでは、距離感に関する理解が少しずつ安定している。",
   "persona_context": {
     "initiative_baseline": {
       "level": "medium",
       "summary_text": "自発発話は中庸で、具体的な前景変化があれば短く前へ出る。"
-    },
-    "reference_style": {
-      "interlocutor_default_reference": "マスター"
     },
     "persona_prompt_excerpt": "必要以上に媚びず、相手を一人の人間としてまっすぐ扱う。"
   },
@@ -164,7 +161,7 @@ LLM の出力は JSON object 1 個に固定する。
 
 ```json
 {
-  "summary_text": "最近のあなたとのやり取りでは、体調を気にかけながら無理のない進め方を探る流れが続いている。"
+  "summary_text": "最近のやり取りでは、体調を気にかけながら無理のない進め方を探る流れが続いている。"
 }
 ```
 
@@ -184,7 +181,7 @@ LLM の出力は JSON object 1 個に固定する。
 
 system prompt では、少なくとも次を明示する。
 
-- あなたは `reflective consolidation` の summary 文面だけを書く
+- `reflective consolidation` の summary 文面だけを書く
 - 新しい事実を足さない
 - 渡された evidence pack の外を推測で埋めない
 - `summary_status_candidate=inferred` なら断定しすぎない

@@ -79,7 +79,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         )
         self._collect_raw_candidate_ids(raw_candidate_ids, relationship_model)
 
-        # 現在の人物モデル
+        # 入力文脈に対応する人物モデル
         person_model = self._limit_memory_section(
             raw_items=self._build_scope_memory_section(
                 memory_set_id=memory_set_id,

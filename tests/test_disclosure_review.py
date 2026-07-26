@@ -135,7 +135,7 @@ class DisclosureReviewTests(unittest.TestCase):
             interaction_context=InteractionContext(
                 interaction_ref=f"interaction:{person_ref}",
                 speaker_ref=person_ref,
-                participants=(ParticipantContext(person_ref=person_ref),),
+                participants=(ParticipantContext(person_ref=person_ref, display_name="田中"),),
             ),
             text="質問",
         )

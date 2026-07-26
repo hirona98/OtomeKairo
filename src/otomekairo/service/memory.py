@@ -344,6 +344,7 @@ class ServiceMemoryMixin:
                     input_event_kind=input_event_kind,
                     input_event_role=input_event_role,
                     current_input=pipeline.get("current_input"),
+                    people_context=pipeline.get("people_context"),
                     pending_intent_summary=pending_intent_summary,
                     pending_intent_selection=pending_intent_selection,
                     observation_summary=observation_summary,
@@ -441,6 +442,7 @@ class ServiceMemoryMixin:
         input_event_kind: str,
         input_event_role: str,
         current_input: dict[str, Any] | None,
+        people_context: list[dict[str, str]] | None,
         pending_intent_summary: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None,
         observation_summary: dict[str, Any] | None,
@@ -455,6 +457,8 @@ class ServiceMemoryMixin:
         }
         if isinstance(current_input, dict):
             payload["current_input"] = current_input
+        if isinstance(people_context, list) and people_context:
+            payload["people_context"] = people_context
         if isinstance(pending_intent_summary, dict):
             payload["pending_intent_summary"] = pending_intent_summary
         compact_pending_selection = self._compact_pending_intent_selection_summary(pending_intent_selection)

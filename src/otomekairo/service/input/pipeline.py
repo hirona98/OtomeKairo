@@ -28,6 +28,27 @@ WORKSPACE_MEMORY_SECTIONS = (
 )
 WORKSPACE_MEMORY_ITEMS_PER_SECTION = 2
 DEFAULT_MODE_CANDIDATE_LIMIT = 8
+PERSON_REFERENCE_FIELDS = {
+    "person_ref",
+    "sender_ref",
+    "speaker_ref",
+    "requested_by_person_ref",
+    "target_person_ref",
+    "current_person_ref",
+}
+PERSON_REFERENCE_LIST_FIELDS = {
+    "participant_refs",
+    "response_target_refs",
+    "recipient_person_refs",
+    "target_person_refs",
+}
+PERSON_SCOPE_FIELDS = {
+    "scope_key",
+    "primary_scope_key",
+    "target_scope_key",
+    "subject_hint",
+    "focus_scope_key",
+}
 
 
 class ServiceInputPipelineMixin:
@@ -153,6 +174,7 @@ class ServiceInputPipelineMixin:
             initiative_context=pipeline_contexts["initiative_context"],
             capability_result_context=pipeline_contexts["capability_result_context"],
             self_state_context=pipeline_contexts["self_state_context"],
+            people_context=pipeline_contexts["people_context"],
             relationship_context=pipeline_contexts["relationship_context"],
             prediction_error_context=pipeline_contexts["prediction_error_context"],
             default_mode_context=pipeline_contexts["default_mode_context"],
@@ -181,6 +203,7 @@ class ServiceInputPipelineMixin:
             ongoing_action_summary=pipeline_contexts["ongoing_action_summary"],
             initiative_context=pipeline_contexts["initiative_context"],
             self_state_context=pipeline_contexts["self_state_context"],
+            people_context=pipeline_contexts["people_context"],
             relationship_context=pipeline_contexts["relationship_context"],
             prediction_error_context=pipeline_contexts["prediction_error_context"],
             workspace_context=pipeline_contexts["workspace_context"],
@@ -221,6 +244,7 @@ class ServiceInputPipelineMixin:
             "initiative_context": pipeline_contexts["initiative_context"],
             "capability_result_context": pipeline_contexts["capability_result_context"],
             "self_state_context": pipeline_contexts["self_state_context"],
+            "people_context": pipeline_contexts["people_context"],
             "relationship_context": pipeline_contexts["relationship_context"],
             "prediction_error_context": pipeline_contexts["prediction_error_context"],
             "default_mode_context": pipeline_contexts["default_mode_context"],
@@ -621,8 +645,22 @@ class ServiceInputPipelineMixin:
             capability_result_context=capability_result_context,
             visual_observation_context=visual_observation_context,
         )
-        relationship_context = self._build_relationship_context(
+        people_context = self._build_people_context(
             state=state,
+            current_input=current_input,
+            structured_sources=[
+                recall_pack,
+                selected_candidate,
+                pending_intent_selection,
+                affect_context,
+                foreground_world_state,
+                activity_context,
+                ongoing_action_summary,
+                autonomous_run_summaries,
+                capability_result_context,
+            ],
+        )
+        relationship_context = self._build_relationship_context(
             recall_pack=recall_pack,
             affect_context=affect_context,
         )
@@ -677,6 +715,7 @@ class ServiceInputPipelineMixin:
             "initiative_context": initiative_context,
             "capability_result_context": capability_result_context,
             "self_state_context": self_state_context,
+            "people_context": people_context,
             "relationship_context": relationship_context,
             "prediction_error_context": prediction_error_context,
             "default_mode_context": default_mode_context,
@@ -770,14 +809,12 @@ class ServiceInputPipelineMixin:
     def _build_relationship_context(
         self,
         *,
-        state: dict[str, Any],
         recall_pack: dict[str, Any],
         affect_context: dict[str, Any],
     ) -> dict[str, Any] | None:
         relationship_items = self._relationship_context_items(
             recall_pack=recall_pack,
         )
-        entity_registry_items = self._relationship_entity_registry_items(state=state)
         affect_items = [
             item
             for item in affect_context.get("affect_states", [])
@@ -789,38 +826,97 @@ class ServiceInputPipelineMixin:
         }
         if relationship_items:
             payload["relationship_items"] = relationship_items
-        if entity_registry_items:
-            payload["entity_registry_items"] = entity_registry_items
         if affect_items:
             payload["affect_items"] = affect_items
         return payload if len(payload) > 1 else None
 
-    def _relationship_entity_registry_items(self, *, state: dict[str, Any]) -> list[dict[str, Any]]:
+    def _build_people_context(
+        self,
+        *,
+        state: dict[str, Any],
+        current_input: CurrentInput,
+        structured_sources: list[Any],
+    ) -> list[dict[str, str]]:
+        # 人物候補は閉じた schema field からだけ集め、自然文からは推定しない。
+        ordered_refs: list[str] = []
+        display_names: dict[str, str] = {}
+        if current_input.interaction_context is not None:
+            for participant in current_input.interaction_context.participants:
+                ordered_refs.append(participant.person_ref)
+                display_names[participant.person_ref] = participant.display_name
+        for source in structured_sources:
+            ordered_refs.extend(self._structured_person_refs(source))
+        person_refs = list(dict.fromkeys(ordered_refs))
+        if not person_refs:
+            return []
+
         memory_set_id = state.get("selected_memory_set_id")
         if not isinstance(memory_set_id, str) or not memory_set_id.strip():
             return []
-        records = self.store.list_entity_registry_records(
+        records = self.store.get_entity_registry_records(
             memory_set_id=memory_set_id,
-            limit=4,
+            entity_refs=person_refs,
         )
-        items: list[dict[str, Any]] = []
         for record in records:
-            if not isinstance(record, dict):
+            entity_ref = record.get("entity_ref")
+            display_name = record.get("display_name")
+            if (
+                isinstance(entity_ref, str)
+                and entity_ref.startswith("person:")
+                and isinstance(display_name, str)
+                and display_name.strip()
+            ):
+                display_names.setdefault(entity_ref, display_name.strip())
+
+        items: list[dict[str, str]] = []
+        for person_ref in person_refs:
+            display_name = display_names.get(person_ref)
+            if display_name is None:
                 continue
-            entity_ref = self._workspace_text(record.get("entity_ref"))
-            if entity_ref is None:
-                continue
-            item: dict[str, Any] = {
-                "item_ref": entity_ref,
-                "source": "entity_registry",
-                "entity_ref": entity_ref,
-            }
-            for key in ("display_name", "entity_type", "salience", "last_seen_at"):
-                value = record.get(key)
-                if value is not None:
-                    item[key] = value
-            items.append(item)
+            items.append(
+                {
+                    "person_ref": person_ref,
+                    "display_name": display_name,
+                }
+            )
         return items
+
+    def _structured_person_refs(self, value: Any) -> list[str]:
+        # ID と scope key の閉じた形式だけを再帰的に走査する。
+        refs: list[str] = []
+        if isinstance(value, list):
+            for item in value:
+                refs.extend(self._structured_person_refs(item))
+            return refs
+        if not isinstance(value, dict):
+            return refs
+        for key, item in value.items():
+            if key in PERSON_REFERENCE_FIELDS:
+                if isinstance(item, str) and item.startswith("person:") and item != "person:":
+                    refs.append(item)
+                continue
+            if key in PERSON_REFERENCE_LIST_FIELDS:
+                if isinstance(item, list):
+                    refs.extend(
+                        ref
+                        for ref in item
+                        if isinstance(ref, str) and ref.startswith("person:") and ref != "person:"
+                    )
+                continue
+            if key in PERSON_SCOPE_FIELDS:
+                refs.extend(self._person_refs_from_scope_value(item))
+                continue
+            refs.extend(self._structured_person_refs(item))
+        return refs
+
+    def _person_refs_from_scope_value(self, value: Any) -> list[str]:
+        if not isinstance(value, str):
+            return []
+        if value.startswith("person:") and value != "person:":
+            return [value]
+        if value.startswith("self|person:") and value != "self|person:":
+            return [value.removeprefix("self|")]
+        return []
 
     def _relationship_context_items(self, *, recall_pack: dict[str, Any]) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
@@ -1210,23 +1306,6 @@ class ServiceInputPipelineMixin:
                         item=item,
                         summary_keys=("summary_text",),
                         metadata_keys=("source",),
-                    )
-            entity_registry_items = relationship_context.get("entity_registry_items")
-            if isinstance(entity_registry_items, list):
-                for index, item in enumerate(entity_registry_items[:4]):
-                    if not isinstance(item, dict):
-                        continue
-                    item_ref = self._workspace_item_ref(item, ("item_ref", "entity_ref"), fallback=str(index))
-                    self._append_workspace_context_item(
-                        candidates=candidates,
-                        used_refs=used_refs,
-                        source_counts=source_counts,
-                        factor_ref=f"relationship_entity:{item_ref}",
-                        kind="relationship",
-                        source="relationship_context.entity_registry_items",
-                        item=item,
-                        summary_keys=("display_name", "entity_ref"),
-                        metadata_keys=("source", "entity_type", "salience", "last_seen_at"),
                     )
             affect_items = relationship_context.get("affect_items")
             if isinstance(affect_items, list):
@@ -1702,6 +1781,7 @@ class ServiceInputPipelineMixin:
         initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
         self_state_context: dict[str, Any] | None,
+        people_context: list[dict[str, str]],
         relationship_context: dict[str, Any] | None,
         prediction_error_context: dict[str, Any] | None,
         default_mode_context: dict[str, Any] | None,
@@ -1733,6 +1813,7 @@ class ServiceInputPipelineMixin:
             capability_result_context=capability_result_context,
             visual_observation_context=visual_observation_context,
             self_state_context=self_state_context,
+            people_context=people_context,
             relationship_context=relationship_context,
             prediction_error_context=prediction_error_context,
             default_mode_context=default_mode_context,
@@ -1768,6 +1849,7 @@ class ServiceInputPipelineMixin:
         ongoing_action_summary: dict[str, Any] | None,
         initiative_context: InitiativeContext | None,
         self_state_context: dict[str, Any] | None,
+        people_context: list[dict[str, str]],
         relationship_context: dict[str, Any] | None,
         prediction_error_context: dict[str, Any] | None,
         workspace_context: dict[str, Any] | None,
@@ -1897,6 +1979,7 @@ class ServiceInputPipelineMixin:
                 initiative_context=initiative_context,
                 visual_observation_context=visual_observation_context,
                 self_state_context=self_state_context,
+                people_context=people_context,
                 relationship_context=relationship_context,
                 prediction_error_context=prediction_error_context,
                 workspace_context=workspace_context,
@@ -2071,6 +2154,7 @@ class ServiceInputPipelineMixin:
         capability_result_context: dict[str, Any] | None,
         visual_observation_context: dict[str, Any] | None,
         self_state_context: dict[str, Any] | None,
+        people_context: list[dict[str, str]],
         relationship_context: dict[str, Any] | None,
         prediction_error_context: dict[str, Any] | None,
         default_mode_context: dict[str, Any] | None,
@@ -2096,6 +2180,7 @@ class ServiceInputPipelineMixin:
             capability_result_context=capability_result_context,
             visual_observation_context=visual_observation_context,
             self_state_context=self_state_context,
+            people_context=people_context,
             relationship_context=relationship_context,
             prediction_error_context=prediction_error_context,
             default_mode_context=default_mode_context,
@@ -2120,6 +2205,7 @@ class ServiceInputPipelineMixin:
         initiative_context: InitiativeContext | None,
         visual_observation_context: dict[str, Any] | None,
         self_state_context: dict[str, Any] | None,
+        people_context: list[dict[str, str]],
         relationship_context: dict[str, Any] | None,
         prediction_error_context: dict[str, Any] | None,
         workspace_context: dict[str, Any] | None,
@@ -2141,6 +2227,7 @@ class ServiceInputPipelineMixin:
             initiative_context=initiative_context,
             visual_observation_context=visual_observation_context,
             self_state_context=self_state_context,
+            people_context=people_context,
             relationship_context=relationship_context,
             prediction_error_context=prediction_error_context,
             workspace_context=workspace_context,

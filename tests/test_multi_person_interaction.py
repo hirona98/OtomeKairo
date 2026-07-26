@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from otomekairo.interaction import normalize_interaction_context
+from otomekairo.llm.contexts import CurrentInput
 from otomekairo.llm.client import LLMError
 from otomekairo.service.common import ServiceError
 from otomekairo.service.app import OtomeKairoService
@@ -43,8 +44,8 @@ class MultiPersonInteractionTests(unittest.TestCase):
                     "interaction_ref": "interaction:group:test",
                     "speaker_ref": "person:a",
                     "participants": [
-                        {"person_ref": "person:a"},
-                        {"person_ref": "person:b"},
+                        {"person_ref": "person:a", "display_name": "A"},
+                        {"person_ref": "person:b", "display_name": "B"},
                     ],
                 },
                 required=True,
@@ -52,6 +53,20 @@ class MultiPersonInteractionTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.error_code, "unsupported_group_interaction")
+
+    def test_display_name_is_required_for_every_interaction_participant(self) -> None:
+        with self.assertRaises(ServiceError) as raised:
+            normalize_interaction_context(
+                {
+                    "interaction_ref": "interaction:missing-name",
+                    "speaker_ref": "person:missing-name",
+                    "participants": [{"person_ref": "person:missing-name"}],
+                },
+                required=True,
+                require_speaker=True,
+            )
+
+        self.assertEqual(raised.exception.error_code, "invalid_person_display_name")
 
     def test_recent_turns_are_isolated_by_interaction_reference(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -150,6 +165,53 @@ class MultiPersonInteractionTests(unittest.TestCase):
         self.assertEqual(first["activity_id"], "activity:a")
         self.assertEqual(second["activity_id"], "activity:b")
 
+    def test_people_context_contains_only_structurally_relevant_people(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            memory_set_id = state["selected_memory_set_id"]
+            service.store.register_interaction_participants(
+                memory_set_id=memory_set_id,
+                participants=[
+                    {"person_ref": "person:a", "display_name": "同名"},
+                    {"person_ref": "person:b", "display_name": "同名"},
+                    {"person_ref": "person:unrelated", "display_name": "無関係"},
+                ],
+                observed_at="2026-07-26T10:00:00+09:00",
+                evidence_event_ids=[],
+            )
+            current_input = CurrentInput(
+                sender_kind="system",
+                sender_ref=None,
+                source_kind="background_thinking",
+                response_target_refs=(),
+                interaction_context=None,
+                text="background thinking",
+            )
+
+            people_context = service._build_people_context(
+                state=state,
+                current_input=current_input,
+                structured_sources=[
+                    {
+                        "person_model": [
+                            {"scope_type": "entity", "scope_key": "person:a"},
+                        ],
+                        "relationship_model": [
+                            {"scope_type": "relationship", "scope_key": "self|person:b"},
+                        ],
+                    }
+                ],
+            )
+
+        self.assertEqual(
+            people_context,
+            [
+                {"person_ref": "person:a", "display_name": "同名"},
+                {"person_ref": "person:b", "display_name": "同名"},
+            ],
+        )
+
     def test_autonomous_run_cancel_is_an_explicit_protocol_action(self) -> None:
         service = ServiceInputCycleMixin()
 
@@ -169,7 +231,7 @@ class MultiPersonInteractionTests(unittest.TestCase):
                 {
                     "interaction_ref": "interaction:trace",
                     "speaker_ref": "person:trace",
-                    "participants": [{"person_ref": "person:trace"}],
+                    "participants": [{"person_ref": "person:trace", "display_name": "Trace"}],
                 },
                 required=True,
                 require_speaker=True,

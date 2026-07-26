@@ -27,7 +27,7 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
             {
                 "display_name": "テスト",
                 "initiative_baseline": "medium",
-                "reference_style": {"interlocutor_default_reference": "マスター"},
+                "reference_style": {"interlocutor_address_term": "マスター"},
                 "persona_prompt": "落ち着いて判断する。",
             },
             role="decision_generation",
@@ -298,7 +298,7 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
             {
                 "display_name": "テスト",
                 "initiative_baseline": "medium",
-                "reference_style": {"interlocutor_default_reference": "マスター"},
+                "reference_style": {"interlocutor_address_term": "マスター"},
                 "persona_prompt": "落ち着いて判断する。",
             },
             role="initiative_entry_check",
@@ -339,7 +339,7 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
         persona = {
             "display_name": "テスト",
             "initiative_baseline": "medium",
-            "reference_style": {"interlocutor_default_reference": "マスター"},
+            "reference_style": {"interlocutor_address_term": "マスター"},
             "persona_prompt": "落ち着いて判断する。",
         }
         activity_context = build_persona_context(persona, role="activity_state")
@@ -378,7 +378,7 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
             {
                 "display_name": "テスト",
                 "initiative_baseline": "medium",
-                "reference_style": {"interlocutor_default_reference": "マスター"},
+                "reference_style": {"interlocutor_address_term": "マスター"},
                 "persona_prompt": "落ち着いて判断する。",
             },
             role="expression_generation",

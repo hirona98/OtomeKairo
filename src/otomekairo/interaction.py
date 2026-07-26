@@ -10,13 +10,13 @@ from otomekairo.service.common import ServiceError
 class ParticipantContext:
     # 外部システムが確定した人物参照と表示用情報を保持する。
     person_ref: str
-    display_name: str | None = None
+    display_name: str
 
     def to_prompt_payload(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {"person_ref": self.person_ref}
-        if self.display_name is not None:
-            payload["display_name"] = self.display_name
-        return payload
+        return {
+            "person_ref": self.person_ref,
+            "display_name": self.display_name,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,14 +142,11 @@ def _normalize_participant(value: Any, *, index: int) -> ParticipantContext:
         error_code="invalid_person_ref",
         message=f"interaction_context.participants[{index}].person_ref must use person:<key> form.",
     )
-    display_name_value = value.get("display_name")
-    display_name: str | None = None
-    if display_name_value is not None:
-        display_name = _required_text(
-            display_name_value,
-            error_code="invalid_person_display_name",
-            message=f"interaction_context.participants[{index}].display_name must be a non-empty string.",
-        )
+    display_name = _required_text(
+        value.get("display_name"),
+        error_code="invalid_person_display_name",
+        message=f"interaction_context.participants[{index}].display_name must be a non-empty string.",
+    )
     return ParticipantContext(person_ref=person_ref, display_name=display_name)
 
 

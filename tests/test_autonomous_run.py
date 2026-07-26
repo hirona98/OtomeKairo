@@ -359,7 +359,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 "interaction_context": {
                     "interaction_ref": "interaction:test",
                     "speaker_ref": "person:test",
-                    "participants": [{"person_ref": "person:test"}],
+                    "participants": [{"person_ref": "person:test", "display_name": "テスト人物"}],
                 },
                 "text": "3分後に声をかけて",
             },

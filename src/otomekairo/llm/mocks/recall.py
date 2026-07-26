@@ -732,7 +732,7 @@ class LLMMockRecallMixin:
         if section_name == "relationship_model":
             return "関係の流れ"
         if section_name == "person_model":
-            return "あなたの近況"
+            return "人物の近況"
         if section_name == "active_topics":
             return "話題の流れ"
         if section_name == "self_model":

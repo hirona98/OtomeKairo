@@ -173,7 +173,7 @@ LLM は `status` を出力しない。
 `previous_activity` は直前活動だけを表し、現在進行中の活動として扱わない。
 判断文脈へ出す `activity_context` には `status` を含めない。
 判断文脈へ出す `activity_context.current_activity.actor` は speech の主体境界に使う。
-`actor=person` の活動に触れる発話は、現在の人物側の状況へのコメントとして表現する。
+`actor=person` の活動に触れる発話は、`actor_ref` の人物側の状況へのコメントとして表現する。
 判断文脈へ出す `activity_context.current_activity` には、活動推定 LLM が返した `transition` を含める。
 判断文脈へ出す `activity_context.current_activity / previous_activity` には、時刻そのものではなく `started_age_label / duration_label / ended_age_label` のような生活文脈向けラベルを含める。
 これにより、長く続いた直前活動が `直前` という終了時点だけへ圧縮されないようにする。

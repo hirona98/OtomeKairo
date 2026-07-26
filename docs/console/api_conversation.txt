@@ -36,6 +36,7 @@ Authorization: Bearer <TOKEN>
 images は任意の画像 Data URI 配列である。指定時は最大 1 件にする。
 interaction_context は必須であり、初期実装の participants は1件にする。
 人物識別は connector 側で完了させ、person_ref は person: で始まる安定参照にする。
+participants[].display_name は必須の非空表示名とし、人物同一性には使用しない。
 client_context は任意の object である。
 標準の client_context は source、client_id、active_app、window_title、locale を含める。
 

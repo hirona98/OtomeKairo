@@ -24,7 +24,7 @@ class LLMMockMemoryMixin:
         # model確認
         self._assert_mock_model(model_config)
         _ = persona_context
-        person_ref = self._mock_memory_context_person_ref(memory_context)
+        person_ref, person_display_name = self._mock_memory_context_person(memory_context)
 
         # Episode要約
         normalized = input_text.strip()
@@ -46,7 +46,11 @@ class LLMMockMemoryMixin:
         }
 
         # 候補memory unit群
-        candidate_memory_units = self._mock_candidate_memory_units(normalized, person_ref=person_ref)
+        candidate_memory_units = self._mock_candidate_memory_units(
+            normalized,
+            person_ref=person_ref,
+            person_display_name=person_display_name,
+        )
 
         # episode affect生成
         episode_affects = self._mock_episode_affects(normalized, person_ref=person_ref)
@@ -71,6 +75,7 @@ class LLMMockMemoryMixin:
         # evidence pack
         scope_type = str(evidence_pack.get("scope_type") or "")
         scope_key = str(evidence_pack.get("scope_key") or "")
+        scope_label = str(evidence_pack.get("scope_label") or scope_key).strip()
         counts = evidence_pack.get("evidence_counts", {})
         open_loop_count = counts.get("open_loops", 0) if isinstance(counts, dict) else 0
         summary_status = str(evidence_pack.get("summary_status_candidate") or "inferred")
@@ -105,7 +110,7 @@ class LLMMockMemoryMixin:
             else:
                 summary_text = f"最近の自分側の応答では、{persona_lead}{theme}が続いている。"
         else:
-            summary_text = f"最近のあなたに関するやり取りでは、{theme}の理解が少しずつ積み上がっている。"
+            summary_text = f"最近の{scope_label}に関するやり取りでは、{theme}の理解が少しずつ積み上がっている。"
 
         # payload
         payload = {
@@ -170,9 +175,10 @@ class LLMMockMemoryMixin:
         normalized: str,
         *,
         person_ref: str | None,
+        person_display_name: str | None,
     ) -> list[dict[str, Any]]:
         # 空
-        if not normalized or person_ref is None:
+        if not normalized or person_ref is None or person_display_name is None:
             return []
 
         # 構築群
@@ -184,6 +190,7 @@ class LLMMockMemoryMixin:
             normalized,
             correction_signal=correction_signal,
             person_ref=person_ref,
+            person_display_name=person_display_name,
         )
         if fact_candidate is not None:
             candidates.append(fact_candidate)
@@ -201,7 +208,10 @@ class LLMMockMemoryMixin:
                     "subject_ref": person_ref,
                     "predicate": "likes",
                     "object_ref_or_value": self._mock_preference_object(normalized),
-                    "summary_text": self._mock_preference_summary(normalized),
+                    "summary_text": self._mock_preference_summary(
+                        normalized,
+                        person_display_name=person_display_name,
+                    ),
                     "status": "dormant" if preference_dormant_request else "confirmed",
                     "commitment_state": None,
                     "confidence": 0.86,
@@ -220,19 +230,19 @@ class LLMMockMemoryMixin:
 
         if any(token in normalized for token in ("約束", "今度", "また話", "また今度", "後で")):
             commitment_state = "open"
-            commitment_summary = "あなたと後で続きを話す流れが残っている。"
+            commitment_summary = f"自分と{person_display_name}が後で続きを話す流れが残っている。"
             if any(token in normalized for token in ("完了", "終わり", "済んだ")):
                 commitment_state = "done"
-                commitment_summary = "あなたと後で続きを話す流れは完了している。"
+                commitment_summary = f"自分と{person_display_name}が後で続きを話す流れは完了している。"
             elif any(token in normalized for token in ("キャンセル", "取り消し", "やめる")):
                 commitment_state = "cancelled"
-                commitment_summary = "あなたと後で続きを話す流れは取り消されている。"
+                commitment_summary = f"自分と{person_display_name}が後で続きを話す流れは取り消されている。"
             elif any(token in normalized for token in ("保留", "待って")):
                 commitment_state = "on_hold"
-                commitment_summary = "あなたと後で続きを話す流れは保留されている。"
+                commitment_summary = f"自分と{person_display_name}が後で続きを話す流れは保留されている。"
             elif "確認待ち" in normalized:
                 commitment_state = "waiting_confirmation"
-                commitment_summary = "あなたと後で続きを話す流れは確認待ちで残っている。"
+                commitment_summary = f"自分と{person_display_name}が後で続きを話す流れは確認待ちで残っている。"
             candidates.append(
                 {
                     "memory_type": "commitment",
@@ -264,7 +274,7 @@ class LLMMockMemoryMixin:
                     "subject_ref": person_ref,
                     "predicate": "seems",
                     "object_ref_or_value": "state:tired",
-                    "summary_text": "あなたは最近疲れや睡眠の問題を抱えていそうだ。",
+                    "summary_text": f"{person_display_name}は最近疲れや睡眠の問題を抱えていそうだ。",
                     "status": "inferred",
                     "commitment_state": None,
                     "confidence": 0.62,
@@ -314,11 +324,16 @@ class LLMMockMemoryMixin:
         *,
         correction_signal: bool,
         person_ref: str,
+        person_display_name: str,
     ) -> dict[str, Any] | None:
         # 日次リズム
         if "朝型" in normalized or "夜型" in normalized:
             object_ref = "rhythm:morning" if "朝型" in normalized else "rhythm:night"
-            summary_text = "あなたの生活リズムは朝型寄りだ。" if "朝型" in normalized else "あなたの生活リズムは夜型寄りだ。"
+            summary_text = (
+                f"{person_display_name}の生活リズムは朝型寄りだ。"
+                if "朝型" in normalized
+                else f"{person_display_name}の生活リズムは夜型寄りだ。"
+            )
             reason = "生活リズムに関する明示があり、継続理解として残す価値があるため。"
             if correction_signal:
                 reason = "生活リズムに関する明示訂正があり、既存理解の更新候補になるため。"
@@ -347,7 +362,11 @@ class LLMMockMemoryMixin:
         # 作業スタイル
         if any(token in normalized for token in ("在宅", "リモート", "出社")):
             object_ref = "work:remote" if "在宅" in normalized or "リモート" in normalized else "work:office"
-            summary_text = "あなたの働き方は在宅寄りだ。" if object_ref == "work:remote" else "あなたの働き方は出社寄りだ。"
+            summary_text = (
+                f"{person_display_name}の働き方は在宅寄りだ。"
+                if object_ref == "work:remote"
+                else f"{person_display_name}の働き方は出社寄りだ。"
+            )
             reason = "働き方に関する明示があり、継続理解として残す価値があるため。"
             if correction_signal:
                 reason = "働き方に関する明示訂正があり、既存理解の更新候補になるため。"
@@ -391,11 +410,11 @@ class LLMMockMemoryMixin:
             return "topic:food"
         return "preference:stated"
 
-    def _mock_preference_summary(self, normalized: str) -> str:
+    def _mock_preference_summary(self, normalized: str, *, person_display_name: str) -> str:
         # マッピング
         if "嫌い" in normalized or "苦手" in normalized:
-            return "あなたには苦手な好みがある。"
-        return "あなたにははっきりした好みがある。"
+            return f"{person_display_name}には苦手な好みがある。"
+        return f"{person_display_name}にははっきりした好みがある。"
 
     def _mock_preference_polarity(self, normalized: str) -> str:
         # マッピング
@@ -461,13 +480,28 @@ class LLMMockMemoryMixin:
                 )
         return updates
 
-    def _mock_memory_context_person_ref(self, memory_context: dict[str, Any] | None) -> str | None:
-        # 本番と同様にAPIで渡された話者参照だけを人物スコープへ使う。
+    def _mock_memory_context_person(
+        self,
+        memory_context: dict[str, Any] | None,
+    ) -> tuple[str | None, str | None]:
+        # 本番と同様にAPIで渡された話者参照と表示名を対応づけて使う。
         current_input = memory_context.get("current_input") if isinstance(memory_context, dict) else None
         sender_ref = current_input.get("sender_ref") if isinstance(current_input, dict) else None
-        if isinstance(sender_ref, str) and sender_ref.startswith("person:"):
-            return sender_ref
-        return None
+        if not isinstance(sender_ref, str) or not sender_ref.startswith("person:"):
+            return None, None
+        interaction_context = current_input.get("interaction_context")
+        participants = (
+            interaction_context.get("participants")
+            if isinstance(interaction_context, dict)
+            else None
+        )
+        for participant in participants if isinstance(participants, list) else []:
+            if not isinstance(participant, dict) or participant.get("person_ref") != sender_ref:
+                continue
+            display_name = participant.get("display_name")
+            if isinstance(display_name, str) and display_name.strip():
+                return sender_ref, display_name.strip()
+        return sender_ref, None
 
     def _mock_reflection_theme(
         self,

@@ -233,7 +233,7 @@ LLM の出力は JSON object 1 個に固定する。
 
 system prompt では、少なくとも次を明示する。
 
-- あなたは `RecallPack` の候補選別だけを行う
+- 自律 AI 本体の内部処理 role `recall_pack_selection` として候補選別だけを行う
 - 候補外のものを足さない
 - section 名を発明しない
 - `primary_recall_focus` を主軸にし、`secondary_recall_focuses` は軽い補助に留める

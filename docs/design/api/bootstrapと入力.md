@@ -144,7 +144,7 @@ request:
 - `interaction_context.speaker_ref` は `person:` で始まり、`participants` に含まれる値
 - `interaction_context.participants` は初期実装では1件だけを受理する
 - `participants[].person_ref` は `person:` で始まる安定参照
-- `participants[].display_name` は任意の表示用文字列であり、人物同一性に使用しない
+- `participants[].display_name` は必須の非空表示名であり、人物同一性に使用しない
 - `images` は任意の画像 Data URI 配列とする。値がないときは省略する
 - `images` は最大 1 件とする
 - `client_context` は object とする。値がないときは省略する
@@ -264,6 +264,7 @@ response:
 | `400` | `invalid_interaction_ref` | `interaction_ref` が空または文字列でない |
 | `400` | `invalid_speaker_ref` | `speaker_ref` が無い、または `person:` 形式でない |
 | `400` | `invalid_interaction_participants` | `participants` または人物参照が不正 |
+| `400` | `invalid_person_display_name` | `participants[].display_name` が無い、空、または文字列でない |
 | `400` | `interaction_speaker_not_participant` | `speaker_ref` が `participants` に含まれない |
 | `400` | `unsupported_group_interaction` | `participants` が1件ではない |
 
@@ -307,6 +308,7 @@ request:
 
 - `client_context` は object とする。値がないときは省略する
 - `interaction_context` は任意とし、wake の論理的な対象人物と会話が確定している場合に渡す
+- `interaction_context` を渡す場合、`participants[].display_name` は必須の非空表示名とする
 - wake の `interaction_context.speaker_ref` は省略する。指定する場合は `participants` に含める
 - `interaction_context` を渡した wake の応答と非同期処理は、その `interaction_ref / participant person_ref群` を引き継ぐ
 - `reference` は object とする。値がないときは省略する
@@ -389,6 +391,7 @@ server 内の定期思考スケジューラも、同じ wake 1 サイクルを�
 | `400` | `invalid_interaction_ref` | `interaction_ref` が空または文字列でない |
 | `400` | `invalid_speaker_ref` | 指定した `speaker_ref` が `person:` 形式でない |
 | `400` | `invalid_interaction_participants` | `participants` または人物参照が不正 |
+| `400` | `invalid_person_display_name` | `participants[].display_name` が無い、空、または文字列でない |
 | `400` | `interaction_speaker_not_participant` | 指定した `speaker_ref` が `participants` に含まれない |
 | `400` | `unsupported_group_interaction` | `participants` が1件ではない |
 | `400` | `invalid_wake_reference` | `reference` の形式が不正 |
