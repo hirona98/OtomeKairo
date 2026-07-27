@@ -587,9 +587,17 @@ class ServiceInputTraceBuildMixin:
         input_payload = capability_request.get("input")
         if not isinstance(capability_id, str) or not isinstance(input_payload, dict):
             return None
+        trace_input = input_payload
+        if capability_id == "mcp.call_tool":
+            # MCP arguments は外部 payload なので、trace には実行先の閉じた識別子だけを残す。
+            trace_input = {}
+            for key in ("mcp_server_id", "tool_name"):
+                value = input_payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    trace_input[key] = value.strip()
         return {
             "capability_id": capability_id,
-            "input": input_payload,
+            "input": trace_input,
         }
 
     def _decision_autonomous_run_summary(self, decision: dict[str, Any]) -> dict[str, Any] | None:

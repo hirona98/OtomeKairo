@@ -594,7 +594,7 @@ class ServiceInputPipelineMixin:
             state=state,
             current_time=started_at,
         )
-        capability_decision_view = self._annotate_capability_decision_view_with_fresh_world_state(
+        capability_decision_view = self._annotate_capability_decision_view_with_fresh_visual_context(
             capability_decision_view=capability_decision_view,
             foreground_world_state=foreground_world_state,
             world_state_trace=world_state_trace,
@@ -628,7 +628,6 @@ class ServiceInputPipelineMixin:
             drive_state_summary=drive_state_summary,
             foreground_world_state=foreground_world_state,
             activity_context=activity_context,
-            world_state_trace=world_state_trace,
             ongoing_action_summary=ongoing_action_summary,
             capability_decision_view=capability_decision_view,
             selected_candidate=selected_candidate,
@@ -1203,7 +1202,7 @@ class ServiceInputPipelineMixin:
                 source="capability_decision_view",
                 item=item,
                 summary_keys=("what_it_does", "fresh_world_state_policy"),
-                metadata_keys=("id", "kind", "risk_level", "readiness", "fresh_world_state_available"),
+                metadata_keys=("id", "kind", "risk_level", "readiness"),
             )
         self._append_workspace_context_item(
             candidates=candidates,

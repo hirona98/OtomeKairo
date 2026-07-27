@@ -115,6 +115,8 @@ class WorldStateExternalServiceContext:
     result_summary_text: str | None = None
     status_text: str | None = None
     service: str | None = None
+    mcp_server_id: str | None = None
+    tool_name: str | None = None
     summary_source_hint: str | None = None
     capability_id: str | None = None
 
@@ -129,6 +131,8 @@ class WorldStateExternalServiceContext:
         fields: list[str] = []
         for key, value in (
             ("service", self.service),
+            ("mcp_server_id", self.mcp_server_id),
+            ("tool_name", self.tool_name),
             ("status_text", self.status_text),
             ("external_service_summary", self.external_service_summary),
         ):
@@ -146,6 +150,8 @@ class WorldStateExternalServiceContext:
             ("result_summary_text", self.result_summary_text),
             ("status_text", self.status_text),
             ("service", self.service),
+            ("mcp_server_id", self.mcp_server_id),
+            ("tool_name", self.tool_name),
             ("summary_source_hint", self.summary_source_hint),
             ("capability_id", self.capability_id),
         ):

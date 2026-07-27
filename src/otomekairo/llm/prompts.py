@@ -577,7 +577,7 @@ def build_decision_repair_prompt(validation_error: str) -> str:
         "foreground_selection.primary_factor_ref は WorkspaceContext.workspace_candidates[].factor_ref から 1 件、候補がない場合だけ null です。\n"
         "foreground_selection.supporting_factor_refs は primary 以外の factor_ref を最大 3 件入れてください。\n"
         "foreground_selection.suppressed_factors は factor_ref と reason_summary だけを持つ object の配列で、見送った主な候補を最大 5 件入れてください。\n"
-        "validator_error が fresh_world_state または新鮮な visual_context の再利用境界を示す場合は、既存要約を根拠に kind=noop または kind=speech を返してください。\n"
+        "validator_error が同じ vision_source_id の新鮮な visual_context を示す場合は、その既存要約を根拠に kind=noop または kind=speech を返してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。"
     )
 
@@ -994,7 +994,6 @@ def _build_decision_system_prompt(persona_context: PersonaContext) -> str:
             "この応答だけで完結する単発の発話は speech、単発の能力実行だけなら capability_request、実行責務を持たない短期再評価候補だけなら pending_intent を選んでください。\n"
             "autonomous_run は目的単位です。次の一手そのものは autonomous_step_generation が決めます。\n"
             "ユーザーが現在状態について尋ねた場合も、現在入力と CapabilityDecisionView を合わせて capability 実行の必要性を判断してください。\n"
-            "CapabilityDecisionView の項目に fresh_world_state_available=true がある場合、同じ現在状態を再取得せず、fresh_world_state を根拠に speech / noop / pending_intent を選んでください。\n"
             "vision.capture に fresh_world_state_by_vision_source がある場合、同じ vision_source_id を再取得せず、既存の visual_context を根拠にしてください。\n"
             "camera.ptz は fresh visual_context があっても camera の向きや画角を変える必要がある場合に capability_request として選べます。\n"
             "camera.ptz.input.amount は通常 medium を選び、少しまたは微調整の意図が明示されている場合だけ small を選んでください。\n"
@@ -1846,6 +1845,7 @@ def _build_world_state_system_prompt() -> str:
         "現在状態は source pack の context summary、capability result、client context、observation summary を根拠にしてください。\n"
         "visual_context.visual_summary_text は視覚前景の詳細な補助説明として使い、world_state candidate の summary_text は現在判断に効く短い状態要約にしてください。external_service_context.status_text / service は外部状態の補助情報として使ってください。\n"
         "external_service_context / body_context / device_context / schedule_context に client_summary_text や result_summary_text があるときは、summary_text と整合する補助比較用としてだけ使ってください。\n"
+        "external_service_context.capability_id=mcp.call_tool の result_summary_text は、結果が現在も成立する外部サービスの条件を表す場合だけ external_service 候補にしてください。単発処理の完了を表す結果は実行履歴として扱い、state_candidates には採用しません。\n"
         "schedule_context.schedule_slots があるときは、各 slot の summary_text / slot_key / not_before / expires_at を短期予定の補助根拠として使ってください。\n"
         "body_context.body_state_summary、device_context.device_state_summary、schedule_context.schedule_summary、social_context_context.social_context_summary、environment_context.environment_summary、location_context.location_summary は各 state_type の短い補助要約として使ってください。\n"
         "image_interpreted=false のとき、画像の中身は未知として扱ってください。\n"

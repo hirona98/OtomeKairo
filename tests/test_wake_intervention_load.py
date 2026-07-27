@@ -99,7 +99,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
             trigger_kind="background_thinking",
             drive_summaries=[],
             world_state_summary=[],
-            status_refresh_world_state_summary=[],
             recent_turn_summary=[],
             foreground_signal_summary={
                 "visual_observations": [
@@ -128,7 +127,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
             trigger_kind="background_thinking",
             drive_summaries=[],
             world_state_summary=[],
-            status_refresh_world_state_summary=[],
             recent_turn_summary=[],
             foreground_signal_summary={
                 "visual_observations": [

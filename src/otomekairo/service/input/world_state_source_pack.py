@@ -446,6 +446,14 @@ class ServiceInputWorldStateSourcePackMixin:
         observation_summary: dict[str, Any] | None,
         source_kind: str,
     ) -> WorldStateExternalServiceContext | None:
+        capability_id = (
+            observation_summary.get("capability_id")
+            if isinstance(observation_summary, dict)
+            else None
+        )
+        if capability_id == "mcp.call_tool":
+            return self._build_world_state_mcp_external_service_context(observation_summary)
+
         client_summary_text = self._client_context_text(client_context.get("external_service_summary"), limit=160)
         summary_text = client_summary_text
         result_summary_text = None
@@ -479,6 +487,41 @@ class ServiceInputWorldStateSourcePackMixin:
             service=service,
             summary_source_hint=summary_source_hint,
             capability_id=capability_id_text,
+        )
+
+    def _build_world_state_mcp_external_service_context(
+        self,
+        observation_summary: dict[str, Any],
+    ) -> WorldStateExternalServiceContext | None:
+        # MCP の結果は成功した要約だけを意味判断へ渡し、失敗や raw payload は状態候補にしない。
+        if (
+            observation_summary.get("status") != "completed"
+            or observation_summary.get("is_error") is not False
+            or self._client_context_text(observation_summary.get("error"), limit=240) is not None
+        ):
+            return None
+        result_summary_text = self._client_context_text(
+            observation_summary.get("mcp_result_summary"),
+            limit=300,
+        )
+        mcp_server_id = self._client_context_text(
+            observation_summary.get("mcp_server_id"),
+            limit=120,
+        )
+        tool_name = self._client_context_text(
+            observation_summary.get("tool_name"),
+            limit=120,
+        )
+        if result_summary_text is None or mcp_server_id is None or tool_name is None:
+            return None
+        return WorldStateExternalServiceContext(
+            summary_text=result_summary_text,
+            result_summary_text=result_summary_text,
+            service=f"{mcp_server_id}/{tool_name}",
+            mcp_server_id=mcp_server_id,
+            tool_name=tool_name,
+            summary_source_hint="capability_result.client_context.mcp_result_summary",
+            capability_id="mcp.call_tool",
         )
 
     def _build_world_state_body_context(
@@ -878,8 +921,13 @@ class ServiceInputWorldStateSourcePackMixin:
                 if isinstance(value, str) and value.strip():
                     payload[key] = value
         if isinstance(context, WorldStateExternalServiceContext):
-            if isinstance(context.service, str) and context.service.strip():
-                payload["service"] = context.service
+            for key, value in (
+                ("service", context.service),
+                ("mcp_server_id", context.mcp_server_id),
+                ("tool_name", context.tool_name),
+            ):
+                if isinstance(value, str) and value.strip():
+                    payload[key] = value
         elif isinstance(context, WorldStateScheduleContext):
             if isinstance(context.pending_intent, WorldStatePendingIntent):
                 if (

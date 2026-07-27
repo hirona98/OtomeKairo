@@ -87,6 +87,7 @@ concrete capability は `vision.capture`、`camera.ptz`、`external.status`、`s
 `mcp.call_tool` は接続中 MCP server の許可済み tool catalog から、指定 tool を呼び出す汎用 external-service capability である。
 各 capability の `client_context.body_state_summary / device_state_summary / schedule_summary / environment_summary / location_summary / social_context_summary`、`schedule.status.schedule_slots`、`device.status.device_state_summary`、`body.status.body_state_summary`、`environment.status.environment_summary`、`location.status.location_summary`、`social.status.social_context_summary` は inspection_fields 経由で短い観測要約へ投影する。
 `mcp.call_tool` result は `client_context.mcp_result_summary` を follow-up 判断と inspection に使う。
+`world_state` source pack への投影境界は [world_state_source_pack.md](world_state_source_pack.md) を正本とする。
 server は MCP raw `content` と `structured_content` を永続化せず、件数と有無だけを `client_context` に保存する。
 
 ```json
@@ -336,10 +337,8 @@ decision view は少なくとも次を持つ。
 | `risk_level` | 判断上のリスク |
 | `unavailable_reason` | 実行不可の場合の理由 |
 | `readiness` | family、対応 `world_state` type、入力 key、結果要約 key |
-| `fresh_world_state_available` | 非ユーザー起点で同じ state type の新鮮な foreground `world_state` があるか |
-| `fresh_world_state` | 再取得せず判断根拠に使う短い `world_state` 要約 |
 | `fresh_world_state_by_vision_source` | `vision.capture` 用の `vision_source_id` 単位の新鮮な `visual_context` 要約 |
-| `fresh_world_state_policy` | 新鮮な `world_state` があるときの再取得禁止理由 |
+| `fresh_world_state_policy` | 同じ `vision_source_id` の再取得禁止理由 |
 
 decision view には token、credential、内部 URL、`target_client_id`、transport 詳細、raw schema の秘密値を入れない。
 LLM は decision view に基づいて `capability_id` と capability 固有入力を提案する。
@@ -347,24 +346,24 @@ server は manifest、binding、state、権限で提案を検証する。
 busy、権限不足、動的一時 unavailable は decision view の `available: false` に反映する。
 直近成功、直近失敗は inspection の `CapabilityState` へ残し、明示的な capability 要求まで一律に遮断する理由にはしない。
 `readiness` は manifest の `decision_readiness` から作る。
-`readiness.family` は `visual_observation / camera_control / external_status / schedule_status / device_status / body_status / environment_status / location_status / social_status` のいずれかである。
-`readiness.world_state_type` は fresh `world_state` 再利用、status family の不足判定、result 投影先を揃えるための正本である。
+`readiness.family` は `visual_observation / camera_control / external_status / schedule_status / device_status / body_status / environment_status / location_status / social_status / mcp_tool` のいずれかである。
+`readiness.world_state_type` は status family の不足判定と result 投影先を揃えるための正本である。
 `readiness.input_keys` は LLM が capability 固有入力を組み立てる最小 key を表す。
 `readiness.result_summary_keys` と `readiness.result_item_keys` は result が判断・記憶・inspection へ投影される要約 key を表す。
-非ユーザー起点の判断では、`external.status / schedule.status / device.status / body.status / environment.status / location.status / social.status` が見る state type に、判断前から存在する新鮮な foreground `world_state` がある場合、server は該当 decision view 項目に `fresh_world_state_available=true` を付ける。
+非視覚 capability を実行する必要性は、foreground `world_state` と capability の対象を合わせて LLM が意味判断する。server は state type の一致だけで capability request を遮断しない。
 `vision.capture` は `visual_context` の state type だけでは判断せず、`vision_source_id` が一致する新鮮な foreground `world_state` を `fresh_world_state_by_vision_source` に入れる。
 `wake / background_thinking` では、同じ cycle の `wake_observations` で成功した `vision.capture` も `fresh_world_state_by_vision_source` に入れる。
 この `wake_observations` は起床判断の前に取得済みの観測であり、直後の判断では再取得対象ではなく判断根拠として扱う。
 `source_kind` は保存可否を決めないため、desktop と camera は同じ `fresh_world_state_by_vision_source` の対象にする。
-`capability_result` follow-up では、desktop 以外の result から作った current foreground `world_state` も同じ再利用対象にする。
-`fresh_world_state_available=true` の capability request と、`fresh_world_state_by_vision_source` にある同じ `vision_source_id` の `vision.capture` request は、同じ現在状態の再取得として decision contract validation の repair 対象にする。
+`capability_result` follow-up でも、同じ `vision_source_id` の current foreground `visual_context` を再利用対象にする。
+`fresh_world_state_by_vision_source` にある同じ `vision_source_id` の `vision.capture` request は、同じ現在状態の再取得として decision contract validation の repair 対象にする。
 `camera.ptz` は fresh `visual_context` がある場合でも decision view から外さない。
 fresh `visual_context` は現在見えている内容の根拠であり、視野調整の不要条件そのものではない。
 server は `camera.ptz` の decision view に、対象 camera source ごとの `vision_source_id / source_label / supported_operations / supported_amounts` だけを入れる。
 `camera.ptz` の decision view には target client、host、credential、内部 URL、機器 API 名、角度を入れない。
 `camera.ptz` は `user_message / wake / background_thinking / capability_result` の全起点で available な場合に出す。
 `camera.ptz` result follow-up では、同じ `vision_source_id` の `vision.capture` request だけを許可された follow-up capability request として扱う。
-通常会話では `fresh_world_state_available` と `fresh_world_state_by_vision_source` を付けない。
+通常会話では `fresh_world_state_by_vision_source` を付けない。
 現在入力に対して capability を実行するか、既存文脈から発話するかは `decision_generation` が判断し、server はユーザー発話の意味から特定 capability の実行を強制しない。
 自律判断で強い `drive_state` が特定の status family を要求し、対応 state type が不足または古い場合、server は `initiative_context.candidate_families` の selected autonomous entry に capability 提案として `preferred_result_kind=capability_request` と対応 `preferred_capability_id` を入れる。
 

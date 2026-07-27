@@ -824,7 +824,7 @@ def capability_manifests() -> dict[str, dict[str, Any]]:
     return deepcopy(CAPABILITY_MANIFESTS)
 
 
-# decision view / inspection と fresh world_state 再利用の対応を manifest に集約する。
+# decision view と inspection が使う readiness 定義を manifest に集約する。
 def capability_decision_readiness_from_manifest(manifest: dict[str, Any]) -> dict[str, Any] | None:
     readiness = manifest.get("decision_readiness")
     if not isinstance(readiness, dict):
@@ -837,19 +837,6 @@ def capability_decision_readiness(capability_id: str) -> dict[str, Any] | None:
     if not isinstance(manifest, dict):
         return None
     return capability_decision_readiness_from_manifest(manifest)
-
-
-def capability_world_state_type(capability_id: str) -> str | None:
-    manifest = CAPABILITY_MANIFESTS.get(capability_id)
-    if not isinstance(manifest, dict):
-        return None
-    readiness = manifest.get("decision_readiness")
-    if not isinstance(readiness, dict):
-        return None
-    world_state_type = readiness.get("world_state_type")
-    if not isinstance(world_state_type, str) or not world_state_type.strip():
-        return None
-    return world_state_type.strip()
 
 
 def capability_readiness_input_digest(
@@ -904,27 +891,6 @@ def capability_readiness_result_digest(
             "present_result_item_keys": present_item_keys,
             "missing_result_item_keys": missing_item_keys,
             "result_item_keys_satisfied": not missing_item_keys,
-        }
-    )
-    return digest
-
-
-def capability_readiness_world_state_digest(
-    capability_id: str,
-    foreground_world_state_type: Any,
-) -> dict[str, Any] | None:
-    digest = _capability_readiness_digest_base(capability_id)
-    if digest is None:
-        return None
-    observed_type = foreground_world_state_type.strip() if isinstance(foreground_world_state_type, str) else None
-    digest.update(
-        {
-            "foreground_world_state_type": observed_type,
-            "world_state_type_matched": (
-                isinstance(observed_type, str)
-                and bool(observed_type)
-                and observed_type == digest.get("world_state_type")
-            ),
         }
     )
     return digest

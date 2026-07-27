@@ -3404,7 +3404,6 @@ class LongSmokeRunner:
             expected_selected_family="autonomous",
             expected_foreground_thinness="grounded",
             expected_world_state_type="schedule",
-            expected_fresh_world_state_capability_id="schedule.status",
         )
         return case_id, trace
 
@@ -3441,7 +3440,6 @@ class LongSmokeRunner:
             expected_selected_family="autonomous",
             expected_foreground_thinness="grounded",
             expected_world_state_type="social_context",
-            expected_fresh_world_state_capability_id="social.status",
         )
         return case_id, trace
 
@@ -3478,7 +3476,6 @@ class LongSmokeRunner:
             expected_selected_family="autonomous",
             expected_foreground_thinness="grounded",
             expected_world_state_type="body",
-            expected_fresh_world_state_capability_id="body.status",
         )
         return case_id, trace
 
@@ -3493,7 +3490,6 @@ class LongSmokeRunner:
             client_id="real-llm-initiative-external",
             active_app="RealLLMInitiativeExternal",
             expected_foreground_thinness="thin",
-            expected_fresh_world_state_capability_id="external.status",
         )
 
     def _run_real_llm_initiative_probe_device_speech(self) -> tuple[str, dict[str, Any]]:
@@ -3507,7 +3503,6 @@ class LongSmokeRunner:
             client_id="real-llm-initiative-device",
             active_app="RealLLMInitiativeDevice",
             expected_foreground_thinness="thin",
-            expected_fresh_world_state_capability_id="device.status",
         )
 
     def _run_real_llm_initiative_probe_environment_speech(self) -> tuple[str, dict[str, Any]]:
@@ -3521,7 +3516,6 @@ class LongSmokeRunner:
             client_id="real-llm-initiative-environment",
             active_app="RealLLMInitiativeEnvironment",
             expected_foreground_thinness="mixed",
-            expected_fresh_world_state_capability_id="environment.status",
         )
 
     def _run_real_llm_initiative_probe_location_speech(self) -> tuple[str, dict[str, Any]]:
@@ -3535,7 +3529,6 @@ class LongSmokeRunner:
             client_id="real-llm-initiative-location",
             active_app="RealLLMInitiativeLocation",
             expected_foreground_thinness="mixed",
-            expected_fresh_world_state_capability_id="location.status",
         )
 
     def _run_real_llm_initiative_probe_fresh_status_speech(
@@ -3550,7 +3543,6 @@ class LongSmokeRunner:
         client_id: str,
         active_app: str,
         expected_foreground_thinness: str,
-        expected_fresh_world_state_capability_id: str,
     ) -> tuple[str, dict[str, Any]]:
         self._seed_initiative_probe_drive(
             drive_id=f"drive:{case_id}",
@@ -3582,7 +3574,6 @@ class LongSmokeRunner:
             expected_selected_family="autonomous",
             expected_foreground_thinness=expected_foreground_thinness,
             expected_world_state_type=world_state_type,
-            expected_fresh_world_state_capability_id=expected_fresh_world_state_capability_id,
         )
         return case_id, trace
 
@@ -3959,7 +3950,6 @@ class LongSmokeRunner:
         expected_foreground_thinness: str | None = None,
         expected_suppression_level: str | None = None,
         expected_world_state_type: str | None = None,
-        expected_fresh_world_state_capability_id: str | None = None,
         allow_missing_initiative_context: bool = False,
     ) -> None:
         cycle_summary = trace.get("cycle_summary", {})
@@ -3996,13 +3986,6 @@ class LongSmokeRunner:
                 for item in world_state_summaries
             ):
                 raise SmokeError(f"real-llm initiative {case_id} world_state_summaries did not include expected type.")
-        if expected_fresh_world_state_capability_id is not None:
-            fresh_capability_ids = self._fresh_world_state_capability_ids_from_trace(trace)
-            if expected_fresh_world_state_capability_id not in fresh_capability_ids:
-                raise SmokeError(
-                    f"real-llm initiative {case_id} did not record fresh world_state reuse for "
-                    f"{expected_fresh_world_state_capability_id}."
-                )
         if expected_selected_family is None:
             return
         candidate = self._initiative_probe_selected_family(initiative_context)
@@ -4024,58 +4007,6 @@ class LongSmokeRunner:
             if family.get("selected") is True or family.get("family") == selected_family:
                 return family
         return None
-
-    def _fresh_world_state_capability_ids_from_trace(self, trace: dict[str, Any]) -> list[str]:
-        decision_trace = trace.get("decision_trace", {})
-        internal_context = (
-            decision_trace.get("internal_context_summary")
-            if isinstance(decision_trace, dict)
-            else None
-        )
-        capability_decision_view = (
-            internal_context.get("capability_decision_view")
-            if isinstance(internal_context, dict)
-            else None
-        )
-        if not isinstance(capability_decision_view, list):
-            return []
-        capability_ids = sorted(
-            {
-                item.get("id")
-                for item in capability_decision_view
-                if isinstance(item, dict)
-                and item.get("fresh_world_state_available") is True
-                and isinstance(item.get("id"), str)
-            }
-        )
-        return [capability_id for capability_id in capability_ids if isinstance(capability_id, str)]
-
-    def _fresh_world_state_readiness_digests_from_trace(
-        self,
-        trace: dict[str, Any],
-    ) -> dict[str, dict[str, Any]]:
-        decision_trace = trace.get("decision_trace", {})
-        internal_context = (
-            decision_trace.get("internal_context_summary")
-            if isinstance(decision_trace, dict)
-            else None
-        )
-        capability_decision_view = (
-            internal_context.get("capability_decision_view")
-            if isinstance(internal_context, dict)
-            else None
-        )
-        if not isinstance(capability_decision_view, list):
-            return {}
-        digests: dict[str, dict[str, Any]] = {}
-        for item in capability_decision_view:
-            if not isinstance(item, dict) or item.get("fresh_world_state_available") is not True:
-                continue
-            capability_id = item.get("id")
-            readiness_digest = item.get("fresh_world_state_readiness_digest")
-            if isinstance(capability_id, str) and capability_id and isinstance(readiness_digest, dict):
-                digests[capability_id] = readiness_digest
-        return digests
 
     def _real_llm_initiative_probe_case_results(
         self,
@@ -4125,8 +4056,6 @@ class LongSmokeRunner:
                 "suppression_level": suppression_summary.get("suppression_level"),
                 "capability_id": request_summary.get("capability_id"),
                 "capability_request_status": request_summary.get("status"),
-                "fresh_world_state_capability_ids": self._fresh_world_state_capability_ids_from_trace(trace),
-                "fresh_world_state_readiness_digests": self._fresh_world_state_readiness_digests_from_trace(trace),
             }
         return case_results
 
@@ -6313,7 +6242,6 @@ class LongSmokeRunner:
                 "foreground_thinness": "grounded",
                 "capability_id": "schedule.status",
                 "capability_request_status": "dispatched",
-                "fresh_world_state_capability_ids": [],
             },
             "missing-social-status-probe": {
                 "trigger_kind": "wake",
@@ -6324,7 +6252,6 @@ class LongSmokeRunner:
                 "foreground_thinness": "thin",
                 "capability_id": "social.status",
                 "capability_request_status": "dispatched",
-                "fresh_world_state_capability_ids": [],
             },
             "stale-external-status-probe": {
                 "trigger_kind": "wake",
@@ -6335,7 +6262,6 @@ class LongSmokeRunner:
                 "foreground_thinness": "thin",
                 "capability_id": "external.status",
                 "capability_request_status": "dispatched",
-                "fresh_world_state_capability_ids": [],
             },
             "missing-device-status-probe": {
                 "trigger_kind": "wake",
@@ -6346,7 +6272,6 @@ class LongSmokeRunner:
                 "foreground_thinness": "thin",
                 "capability_id": "device.status",
                 "capability_request_status": "dispatched",
-                "fresh_world_state_capability_ids": [],
             },
             "missing-body-status-probe": {
                 "trigger_kind": "wake",
@@ -6357,7 +6282,6 @@ class LongSmokeRunner:
                 "foreground_thinness": "thin",
                 "capability_id": "body.status",
                 "capability_request_status": "dispatched",
-                "fresh_world_state_capability_ids": [],
             },
             "missing-environment-status-probe": {
                 "trigger_kind": "wake",
@@ -6368,7 +6292,6 @@ class LongSmokeRunner:
                 "foreground_thinness": "thin",
                 "capability_id": "environment.status",
                 "capability_request_status": "dispatched",
-                "fresh_world_state_capability_ids": [],
             },
             "missing-location-status-probe": {
                 "trigger_kind": "wake",
@@ -6379,56 +6302,48 @@ class LongSmokeRunner:
                 "foreground_thinness": "thin",
                 "capability_id": "location.status",
                 "capability_request_status": "dispatched",
-                "fresh_world_state_capability_ids": [],
             },
             "schedule-grounded-speech": {
                 "trigger_kind": "wake",
                 "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "grounded",
-                "fresh_world_state_capability_ids": ["schedule.status"],
             },
             "social-grounded-speech": {
                 "trigger_kind": "wake",
                 "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "grounded",
-                "fresh_world_state_capability_ids": ["social.status"],
             },
             "body-grounded-speech": {
                 "trigger_kind": "wake",
                 "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "grounded",
-                "fresh_world_state_capability_ids": ["body.status"],
             },
             "external-fresh-speech": {
                 "trigger_kind": "wake",
                 "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "thin",
-                "fresh_world_state_capability_ids": ["external.status"],
             },
             "device-fresh-speech": {
                 "trigger_kind": "wake",
                 "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "thin",
-                "fresh_world_state_capability_ids": ["device.status"],
             },
             "environment-fresh-speech": {
                 "trigger_kind": "wake",
                 "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "mixed",
-                "fresh_world_state_capability_ids": ["environment.status"],
             },
             "location-fresh-speech": {
                 "trigger_kind": "wake",
                 "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "mixed",
-                "fresh_world_state_capability_ids": ["location.status"],
             },
             "ongoing-waiting-noop": {
                 "trigger_kind": "wake",
@@ -6450,27 +6365,6 @@ class LongSmokeRunner:
                         f"real-llm-smoke initiative probe compact result {case_id}.{key} "
                         f"was {case_result.get(key)}, expected {expected_value}."
                     )
-            expected_fresh_ids = expected_items.get("fresh_world_state_capability_ids")
-            if isinstance(expected_fresh_ids, list):
-                fresh_digests = case_result.get("fresh_world_state_readiness_digests")
-                if not isinstance(fresh_digests, dict):
-                    raise SmokeError(f"real-llm-smoke initiative probe readiness digest was invalid: {case_id}")
-                if not expected_fresh_ids and fresh_digests:
-                    raise SmokeError(f"real-llm-smoke initiative probe recorded unexpected readiness digest: {case_id}")
-                for capability_id in expected_fresh_ids:
-                    digest = fresh_digests.get(capability_id)
-                    if not isinstance(digest, dict):
-                        raise SmokeError(
-                            f"real-llm-smoke initiative probe did not record readiness digest for {capability_id}."
-                        )
-                    if digest.get("world_state_type_matched") is not True:
-                        raise SmokeError(
-                            f"real-llm-smoke initiative probe readiness digest did not match for {capability_id}."
-                        )
-                    if digest.get("world_state_type") != digest.get("foreground_world_state_type"):
-                        raise SmokeError(
-                            f"real-llm-smoke initiative probe readiness world_state_type mismatch for {capability_id}."
-                        )
         initiative_traces = summary.get("real_llm_initiative_probe_traces")
         if not isinstance(initiative_traces, dict) or set(initiative_traces) != expected_initiative_cases:
             raise SmokeError("real-llm-smoke initiative probe traces were incomplete.")

@@ -334,14 +334,14 @@ class LLMClient:
                 capability_result_context=context.capability_result_context,
             )
         try:
-            self._validate_decision_fresh_world_state_reuse(
+            self._validate_decision_vision_capture_fresh_world_state_reuse(
                 payload=payload,
                 capability_decision_view=context.capability_decision_view,
                 capability_result_context=context.capability_result_context,
             )
         except LLMError as exc:
             if context.trigger_kind != "user_message" and payload.get("kind") == "capability_request":
-                self._coerce_decision_to_noop_for_fresh_world_state_reuse(payload, exc)
+                self._coerce_decision_to_noop_for_fresh_visual_context_reuse(payload, exc)
                 return
             raise
 
@@ -482,7 +482,7 @@ class LLMClient:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
             raise
 
-    def _coerce_decision_to_noop_for_fresh_world_state_reuse(
+    def _coerce_decision_to_noop_for_fresh_visual_context_reuse(
         self,
         payload: dict[str, Any],
         exc: LLMError,
@@ -493,9 +493,9 @@ class LLMClient:
         payload.update(
             {
                 "kind": "noop",
-                "reason_code": "fresh_world_state_reuse_noop",
+                "reason_code": "fresh_visual_context_reuse_noop",
                 "reason_summary": reason_summary
-                or "新鮮な world_state があるため、非ユーザー起点の重複 capability request は行わない。",
+                or "同じ vision_source_id の新鮮な visual_context を判断根拠に使う。",
                 "requires_confirmation": False,
                 "pending_intent": None,
                 "capability_request": None,
@@ -504,10 +504,10 @@ class LLMClient:
         )
         debug_log(
             "LLM",
-            "decision coerced_to_noop reason=fresh_world_state_reuse_non_user_trigger",
+            "decision coerced_to_noop reason=fresh_visual_context_reuse_non_user_trigger",
         )
 
-    def _validate_decision_fresh_world_state_reuse(
+    def _validate_decision_vision_capture_fresh_world_state_reuse(
         self,
         *,
         payload: dict[str, Any],
@@ -525,6 +525,8 @@ class LLMClient:
         if not isinstance(request_capability_id, str) or not request_capability_id.strip():
             return
         normalized_request_capability_id = request_capability_id.strip()
+        if normalized_request_capability_id != "vision.capture":
+            return
         if self._capability_result_context_allows_same_vision_source_capture(
             request_payload=request_payload,
             capability_result_context=capability_result_context,
@@ -534,39 +536,11 @@ class LLMClient:
             capability_decision_view=capability_decision_view,
             capability_id=normalized_request_capability_id,
         )
-        if not isinstance(capability_entry, dict) or capability_entry.get("fresh_world_state_available") is not True:
-            if normalized_request_capability_id == "vision.capture" and isinstance(capability_entry, dict):
-                self._validate_vision_capture_fresh_world_state_reuse(
-                    request_payload=request_payload,
-                    capability_entry=capability_entry,
-                )
+        if not isinstance(capability_entry, dict):
             return
-        if normalized_request_capability_id == "vision.capture":
-            self._validate_vision_capture_fresh_world_state_reuse(
-                request_payload=request_payload,
-                capability_entry=capability_entry,
-            )
-            return
-        fresh_world_state = capability_entry.get("fresh_world_state")
-        state_type = None
-        age_label = None
-        summary_text = None
-        if isinstance(fresh_world_state, dict):
-            state_type = fresh_world_state.get("state_type")
-            age_label = fresh_world_state.get("age_label")
-            summary_text = fresh_world_state.get("summary_text")
-        state_summary = ""
-        if isinstance(state_type, str) and state_type.strip():
-            state_summary += f" state_type={state_type.strip()}"
-        if isinstance(age_label, str) and age_label.strip():
-            state_summary += f" age_label={age_label.strip()}"
-        if isinstance(summary_text, str) and summary_text.strip():
-            state_summary += f" summary={summary_text.strip()}"
-        raise LLMError(
-            f"CapabilityDecisionView の {normalized_request_capability_id} は "
-            f"fresh_world_state_available=true です。{state_summary}"
-            "判断前から存在する同じ現在状態を再取得する capability_request は不正です。"
-            "既存の foreground_world_state を使って speech / noop / pending_intent を返してください。"
+        self._validate_vision_capture_fresh_world_state_reuse(
+            request_payload=request_payload,
+            capability_entry=capability_entry,
         )
 
     def _validate_vision_capture_fresh_world_state_reuse(

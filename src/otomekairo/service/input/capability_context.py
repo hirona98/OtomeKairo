@@ -2,16 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from otomekairo.capabilities import (
-    capability_manifests,
-    capability_readiness_world_state_digest,
-    capability_world_state_type,
-)
+from otomekairo.capabilities import capability_manifests
 from otomekairo.world_state.models import WorldStateTrace
 
 
 class ServiceInputCapabilityContextMixin:
-    def _annotate_capability_decision_view_with_fresh_world_state(
+    def _annotate_capability_decision_view_with_fresh_visual_context(
         self,
         *,
         capability_decision_view: list[dict[str, Any]] | None,
@@ -33,8 +29,7 @@ class ServiceInputCapabilityContextMixin:
         if not reuse_world_state and not wake_observation_sources:
             return capability_decision_view
         fresh_world_states = self._fresh_foreground_world_state_summaries(reuse_world_state)
-        fresh_state_by_type = self._fresh_foreground_world_state_by_type(fresh_world_states)
-        if not fresh_state_by_type and not wake_observation_sources:
+        if not fresh_world_states and not wake_observation_sources:
             return capability_decision_view
 
         annotated: list[dict[str, Any]] = []
@@ -43,56 +38,27 @@ class ServiceInputCapabilityContextMixin:
             if not isinstance(item, dict):
                 annotated.append(item)
                 continue
-            capability_id = item.get("id")
-            if capability_id == "camera.ptz":
+            if item.get("id") != "vision.capture" or item.get("available") is not True:
                 annotated.append(item)
                 continue
-            state_type = (
-                self._capability_fresh_world_state_type(capability_id)
-                if isinstance(capability_id, str)
-                else None
+            fresh_visual_sources = self._fresh_visual_world_states_for_sources(
+                vision_sources=item.get("vision_sources"),
+                fresh_world_states=fresh_world_states,
             )
-            if capability_id == "vision.capture":
-                if item.get("available") is True:
-                    fresh_visual_sources = self._fresh_visual_world_states_for_sources(
-                        vision_sources=item.get("vision_sources"),
-                        fresh_world_states=fresh_world_states,
-                    )
-                    fresh_visual_sources = self._merge_fresh_visual_sources(
-                        fresh_visual_sources,
-                        wake_observation_sources,
-                    )
-                    if fresh_visual_sources:
-                        annotated.append(
-                            {
-                                **item,
-                                "fresh_world_state_by_vision_source": fresh_visual_sources,
-                                "fresh_world_state_policy": "同じ vision_source_id の新鮮な現在状態を再取得しない。",
-                            }
-                        )
-                        changed = True
-                    else:
-                        annotated.append(item)
-                else:
-                    annotated.append(item)
-                continue
-            fresh_state = fresh_state_by_type.get(state_type) if state_type is not None else None
-            if item.get("available") is not True or fresh_state is None:
+            fresh_visual_sources = self._merge_fresh_visual_sources(
+                fresh_visual_sources,
+                wake_observation_sources,
+            )
+            if not fresh_visual_sources:
                 annotated.append(item)
                 continue
-            readiness_digest = capability_readiness_world_state_digest(
-                capability_id,
-                fresh_state.get("state_type"),
+            annotated.append(
+                {
+                    **item,
+                    "fresh_world_state_by_vision_source": fresh_visual_sources,
+                    "fresh_world_state_policy": "同じ vision_source_id の新鮮な現在状態を再取得しない。",
+                }
             )
-            annotated_item = {
-                **item,
-                "fresh_world_state_available": True,
-                "fresh_world_state": fresh_state,
-                "fresh_world_state_policy": "同じ state type の新鮮な現在状態を再取得しない。",
-            }
-            if isinstance(readiness_digest, dict):
-                annotated_item["fresh_world_state_readiness_digest"] = readiness_digest
-            annotated.append(annotated_item)
             changed = True
         return annotated if changed else capability_decision_view
 
@@ -234,22 +200,6 @@ class ServiceInputCapabilityContextMixin:
             fresh_states.append(compact_summary)
         return fresh_states
 
-    def _fresh_foreground_world_state_by_type(
-        self,
-        fresh_world_states: list[dict[str, Any]],
-    ) -> dict[str, dict[str, Any]]:
-        fresh_state_by_type: dict[str, dict[str, Any]] = {}
-        for compact_summary in fresh_world_states:
-            state_type = compact_summary.get("state_type")
-            if not isinstance(state_type, str) or not state_type.strip():
-                continue
-            existing = fresh_state_by_type.get(state_type.strip())
-            if existing is None or (
-                self._world_state_reuse_rank(compact_summary) > self._world_state_reuse_rank(existing)
-            ):
-                fresh_state_by_type[state_type.strip()] = compact_summary
-        return fresh_state_by_type
-
     def _fresh_visual_world_states_for_sources(
         self,
         *,
@@ -272,10 +222,8 @@ class ServiceInputCapabilityContextMixin:
             source_id = self._client_context_text(source.get("vision_source_id"), limit=96)
             if source_id is None:
                 continue
-            source_key = self._world_state_vision_source_key({"vision_source_id": source_id})
-            if source_key is None:
-                continue
-            state = visual_states_by_key.get(f"visual_context:{source_key}")
+            # vision_source_id は registry の閉じた識別子なので、統合 key と直接照合する。
+            state = visual_states_by_key.get(f"visual_context:{source_id}")
             if not isinstance(state, dict):
                 continue
             payload = {
@@ -301,21 +249,6 @@ class ServiceInputCapabilityContextMixin:
         if not minute_text.isdigit():
             return False
         return int(minute_text) <= 5
-
-    def _world_state_reuse_rank(self, summary: dict[str, Any]) -> float:
-        salience = summary.get("salience")
-        confidence = summary.get("confidence")
-        score = 0.0
-        if isinstance(salience, (int, float)):
-            score += float(salience)
-        if isinstance(confidence, (int, float)):
-            score += float(confidence)
-        if summary.get("age_label") == "たった今":
-            score += 0.2
-        return score
-
-    def _capability_fresh_world_state_type(self, capability_id: str) -> str | None:
-        return capability_world_state_type(capability_id)
 
     def _build_capability_result_decision_context(
         self,

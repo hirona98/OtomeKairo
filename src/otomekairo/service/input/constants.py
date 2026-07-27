@@ -50,6 +50,11 @@ WORLD_STATE_TTL_SECONDS_BY_TYPE = {
     },
     "external_service": {
         "capability_result.status_text": {"short": 1800, "medium": 7200, "long": 21600},
+        "capability_result.client_context.mcp_result_summary": {
+            "short": 1200,
+            "medium": 3600,
+            "long": 10800,
+        },
         "client_context.external_service_summary": {"short": 1200, "medium": 3600, "long": 10800},
         "capability_result.client_context.external_service_summary": {"short": 1200, "medium": 3600, "long": 10800},
         "status_text": {"short": 1800, "medium": 7200, "long": 21600},

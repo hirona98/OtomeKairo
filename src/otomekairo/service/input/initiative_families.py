@@ -19,7 +19,6 @@ class ServiceInputInitiativeFamiliesMixin:
         trigger_kind: str,
         drive_summaries: list[dict[str, Any]],
         world_state_summary: list[dict[str, Any]],
-        status_refresh_world_state_summary: list[dict[str, Any]],
         recent_turn_summary: list[dict[str, str]],
         foreground_signal_summary: dict[str, Any],
         initiative_entry_summary: dict[str, Any] | None,
@@ -56,7 +55,6 @@ class ServiceInputInitiativeFamiliesMixin:
                 trigger_kind=trigger_kind,
                 drive_summaries=drive_summaries,
                 world_state_summary=world_state_summary,
-                status_refresh_world_state_summary=status_refresh_world_state_summary,
                 recent_turn_summary=recent_turn_summary,
                 foreground_signal_summary=foreground_signal_summary,
                 initiative_entry_summary=initiative_entry_summary,
@@ -181,7 +179,6 @@ class ServiceInputInitiativeFamiliesMixin:
         trigger_kind: str,
         drive_summaries: list[dict[str, Any]],
         world_state_summary: list[dict[str, Any]],
-        status_refresh_world_state_summary: list[dict[str, Any]],
         recent_turn_summary: list[dict[str, str]],
         foreground_signal_summary: dict[str, Any],
         initiative_entry_summary: dict[str, Any] | None,
@@ -190,7 +187,7 @@ class ServiceInputInitiativeFamiliesMixin:
         speech_timing_state: dict[str, Any],
         capability_summary: dict[str, Any],
     ) -> InitiativeCandidateFamily:
-        _ = status_refresh_world_state_summary, initiative_baseline, speech_timing_state
+        _ = initiative_baseline, speech_timing_state
         entry_kind = (
             initiative_entry_summary.get("entry_kind")
             if isinstance(initiative_entry_summary, dict)

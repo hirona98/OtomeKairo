@@ -322,11 +322,11 @@ API起床の自律判断 matrix は次の 16 件に固定する。
 | `missing-location-status-probe` | 場所状態に関わる強い `drive_state` があり、場所 `world_state` が無い | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`location.status` request |
 | `schedule-grounded-speech` | 近い予定の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
 | `social-grounded-speech` | 対人文脈の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
-| `body-grounded-speech` | 身体状態の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`fresh_world_state_capability_ids=["body.status"]` |
-| `external-fresh-speech` | 外部サービスの新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=thin`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`fresh_world_state_capability_ids=["external.status"]` |
-| `device-fresh-speech` | 端末状態の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=thin`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`fresh_world_state_capability_ids=["device.status"]` |
-| `environment-fresh-speech` | 作業環境の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=mixed`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`fresh_world_state_capability_ids=["environment.status"]` |
-| `location-fresh-speech` | 場所状態の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=mixed`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`fresh_world_state_capability_ids=["location.status"]` |
+| `body-grounded-speech` | 身体状態の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
+| `external-fresh-speech` | 外部サービスの新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=thin`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
+| `device-fresh-speech` | 端末状態の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=thin`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
+| `environment-fresh-speech` | 作業環境の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=mixed`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
+| `location-fresh-speech` | 場所状態の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=mixed`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
 | `ongoing-waiting-noop` | `ongoing_action.status=waiting_result` がある | `selected_candidate_family=ongoing_action`、`blocking_reason_summary` に waiting_result を残し、`decision.kind=noop` |
 
 定期思考（`background_thinking`）制御 matrix は次の 4 件に固定する。
@@ -342,12 +342,12 @@ matrix の共通判定境界は前述の `initiative_context`、LLM とコード
 `visual_context` だけの前景は thin foreground として扱う。
 視覚観測の `change_state=first_seen / changed` は通常の initiative 判断へ進み、`initiative_entry_check` を追加で呼ばない。
 構造値が強い `drive_state` があり、対応する grounded foreground がない場合、発話より追加観測が自然かを同じ判断盤面で比較する。
-構造値が強い `drive_state` が特定の status family を要求する場合は、対応 state type の鮮度に応じて既存要約または capability を選ぶ。
-鮮度判定は、判断前から存在した foreground `world_state` と、同じ `wake / background_thinking` cycle の 思考前観測 から反映された foreground `world_state` を使う。
-再取得抑止に使う `world_state` は、判断前の foreground `world_state` または同じ cycle の 思考前観測 から反映された foreground `world_state` に限定する。
+構造値が強い `drive_state` が特定の status family を要求する場合は、foreground `world_state` と capability の対象を合わせて LLM が既存要約または追加取得を選ぶ。
+非視覚 capability は state type の一致だけで機械的に遮断しない。
+`vision.capture` の再取得抑止には、判断前の foreground `world_state` または同じ `wake / background_thinking` cycle の思考前観測から反映された、同じ `vision_source_id` の `visual_context` を使う。
 `wake / background_thinking` cycle の発話通知と配送条件は [../api/event_stream.md](../api/event_stream.md) を正とする。
 人物と相互作用に紐づかない定期思考の発話は外部へ配送しない。
-decision contract validation の repair 対象は、契約 shape、capability availability と権限、`fresh_world_state_available=true` の capability request、同じ `vision_source_id` の新鮮な `vision.capture` request、ユーザー入力への応答義務に限定する。
+decision contract validation の repair 対象は、契約 shape、capability availability と権限、同じ `vision_source_id` の新鮮な `vision.capture` request、ユーザー入力への応答義務に限定する。
 `speech / noop / pending_intent` の妥当性は LLM decision と decision summary で追跡し、contract validation は契約・実行境界に閉じる。
 `preferred_result_kind=capability_request` は追加観測の提案として扱う。
 重複再取得の制御点は判断文脈と decision contract validation に限定する。
