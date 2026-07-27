@@ -64,12 +64,37 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn("<title>CocoroAI</title>", html)
         self.assertIn("チャット", html)
         self.assertIn("人格設定", html)
-        self.assertIn("システム", html)
+        self.assertIn("定期思考", html)
+        self.assertIn("表現", html)
+        self.assertIn("入力", html)
+        self.assertIn("個", html)
+        self.assertIn("自律動作", html)
+        self.assertIn("観測と監視", html)
+        self.assertIn("外部連携", html)
+        self.assertIn('<optgroup label="表現">', html)
+        self.assertIn('<optgroup label="観測と監視">', html)
         self.assertIn("判断機会ポリシー", html)
         self.assertIn('id="model-max-output-tokens"', html)
         self.assertIn('id="model-timeout-seconds"', html)
         self.assertNotIn('id="role-list"', html)
         self.assertIn('data-tab="watcher"', html)
+        self.assertIn('data-tab="avatar"', html)
+        self.assertIn('data-tab="conversation"', html)
+        self.assertIn('data-tab="camera"', html)
+        self.assertIn('data-tab="mcp"', html)
+        self.assertIn('id="tts-engine"', html)
+        self.assertIn('id="stt-api-key"', html)
+        self.assertIn('id="microphone-input-threshold"', html)
+        self.assertIn('id="speaker-recognition-threshold"', html)
+        self.assertIn(
+            "識別した話者の呼び名は participants[].display_name として送ります。",
+            html,
+        )
+        self.assertIn("5秒録音して登録", html)
+        self.assertIn(
+            "話者登録は音声処理をOtomeKairoへ移設する段階で利用可能になります。",
+            html,
+        )
         self.assertIn("登録済みカメラ", html)
         self.assertIn("差分比閾値（変化した画素の割合 0～1）", html)
         self.assertIn("画素差分閾値（1画素を変化扱いする明暗差 1～255）", html)
@@ -88,7 +113,12 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn("text/javascript", js_headers["Content-Type"])
         self.assertIn(b"/ui/api/status", js_body)
         self.assertIn(b"/ui/api/conversation", js_body)
+        self.assertIn(b"/ui/api/config/avatar-speech/editor-state", js_body)
         self.assertIn(b"const images = state.attachment ? [state.attachment.data] : [];", js_body)
+        self.assertIn(
+            b"state.avatarSpeech.selected_avatar_id = state.selectedAvatarId;",
+            js_body,
+        )
         self.assertIn(b"state.editor.current.selected_persona_id = state.selectedPersonaId;", js_body)
         self.assertIn(b"state.editor.current.selected_memory_set_id = state.selectedMemorySetId;", js_body)
         self.assertIn(b"state.editor.current.selected_model_preset_id = state.selectedModelPresetId;", js_body)
@@ -107,6 +137,8 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertEqual(css_status, 200)
         self.assertIn("text/css", css_headers["Content-Type"])
         self.assertIn(b".topbar", css_body)
+        self.assertIn(b".settings-navigation-category:first-child", css_body)
+        self.assertIn(b"font-weight: 800", css_body)
         self.assertIn(b"#4873cf", css_body)
 
     def test_web_ui_api_uses_server_token_without_browser_token(self) -> None:
@@ -136,16 +168,61 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(payload["ok"])
 
+    def test_avatar_speech_public_api_masks_keys_saved_by_editor_api(self) -> None:
+        editor_status, _, editor_body = self.request(
+            "GET",
+            "/ui/api/config/avatar-speech/editor-state",
+        )
+        editor_payload = json.loads(editor_body.decode("utf-8"))["data"]
+        editor_payload["avatars"][0]["stt"]["api_key"] = "stt-secret"
+        editor_payload["avatars"][0]["tts"]["aivis_cloud_config"][
+            "api_key"
+        ] = "tts-secret"
+        put_status, _, _ = self.request(
+            "PUT",
+            "/ui/api/config/avatar-speech/editor-state",
+            body=json.dumps(editor_payload),
+            headers={"Content-Type": "application/json"},
+        )
+        token = self.service.store.read_state()["console_access_token"]
+
+        status, _, body = self.request(
+            "GET",
+            "/api/config/avatar-speech",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        payload = json.loads(body.decode("utf-8"))["data"]
+        selected_avatar = payload["selected_avatar"]
+
+        self.assertEqual(editor_status, 200)
+        self.assertEqual(put_status, 200)
+        self.assertEqual(status, 200)
+        self.assertNotIn("api_key", selected_avatar["stt"])
+        self.assertTrue(selected_avatar["stt"]["api_key_present"])
+        self.assertNotIn(
+            "api_key",
+            selected_avatar["tts"]["aivis_cloud_config"],
+        )
+        self.assertTrue(
+            selected_avatar["tts"]["aivis_cloud_config"]["api_key_present"]
+        )
+
     def test_web_ui_sequential_settings_save_keeps_editor_changes_after_capability_saves(self) -> None:
         editor_status, _, editor_body = self.request("GET", "/ui/api/config/editor-state")
+        avatar_status, _, avatar_body = self.request(
+            "GET",
+            "/ui/api/config/avatar-speech/editor-state",
+        )
         camera_status, _, camera_body = self.request("GET", "/ui/api/config/camera-sources/editor-state")
         mcp_status, _, mcp_body = self.request("GET", "/ui/api/config/mcp-servers/editor-state")
         editor_payload = json.loads(editor_body.decode("utf-8"))["data"]
+        avatar_payload = json.loads(avatar_body.decode("utf-8"))["data"]
         camera_payload = json.loads(camera_body.decode("utf-8"))["data"]
         mcp_payload = json.loads(mcp_body.decode("utf-8"))["data"]
         expected_display_name = "model preset save regression"
 
         self.assertEqual(editor_status, 200)
+        self.assertEqual(avatar_status, 200)
         self.assertEqual(camera_status, 200)
         self.assertEqual(mcp_status, 200)
 
@@ -160,6 +237,12 @@ class WebUiStaticTests(unittest.TestCase):
             "PUT",
             "/ui/api/config/editor-state",
             body=json.dumps(editor_payload),
+            headers={"Content-Type": "application/json"},
+        )
+        self.request(
+            "PUT",
+            "/ui/api/config/avatar-speech/editor-state",
+            body=json.dumps(avatar_payload),
             headers={"Content-Type": "application/json"},
         )
         self.request(

@@ -2,8 +2,10 @@ const state = {
   identity: null,
   clientId: "",
   editor: null,
+  avatarSpeech: null,
   camera: null,
   mcp: null,
+  selectedAvatarId: "",
   selectedPersonaId: "",
   selectedModelPresetId: "",
   selectedMemorySetId: "",
@@ -63,6 +65,18 @@ const RESULT_KIND_LABELS = {
   noop: "変化なし",
   skipped: "見送り",
   failed: "失敗",
+};
+
+const SETTINGS_PAGES = {
+  avatar: ["アバター", "アバターごとの音声合成と音声認識を設定します。"],
+  conversation: ["会話入力", "マイク入力と話者識別を設定します。"],
+  persona: ["人格設定", "個の判断と表現の基底を設定します。"],
+  model: ["モデル", "生成モデルと会話取り込み範囲を設定します。"],
+  memory: ["記憶", "記憶集合と埋め込みモデルを設定します。"],
+  system: ["定期思考", "OtomeKairo内部の定期思考を設定します。"],
+  camera: ["カメラ", "観測に利用するカメラを設定します。"],
+  watcher: ["Watcher", "カメラ変化の監視方法を設定します。"],
+  mcp: ["ツール（MCP）", "接続するMCP serverと利用可能なtoolを設定します。"],
 };
 
 function element(id) {
@@ -844,14 +858,17 @@ function closeSettings() {
 
 async function loadSettingsDrafts() {
   try {
-    const [editor, camera, mcp] = await Promise.all([
+    const [editor, avatarSpeech, camera, mcp] = await Promise.all([
       apiRequest("/ui/api/config/editor-state"),
+      apiRequest("/ui/api/config/avatar-speech/editor-state"),
       apiRequest("/ui/api/config/camera-sources/editor-state"),
       apiRequest("/ui/api/config/mcp-servers/editor-state"),
     ]);
     state.editor = clone(editor);
+    state.avatarSpeech = clone(avatarSpeech);
     state.camera = clone(camera);
     state.mcp = clone(mcp);
+    state.selectedAvatarId = state.avatarSpeech.selected_avatar_id;
     state.selectedPersonaId = state.editor.current.selected_persona_id;
     state.selectedModelPresetId = state.editor.current.selected_model_preset_id;
     state.selectedMemorySetId = state.editor.current.selected_memory_set_id;
@@ -870,6 +887,10 @@ async function saveSettings({ closeAfterSave = false } = {}) {
       method: "PUT",
       body: JSON.stringify(state.editor),
     });
+    const avatarSpeech = await apiRequest("/ui/api/config/avatar-speech/editor-state", {
+      method: "PUT",
+      body: JSON.stringify(state.avatarSpeech),
+    });
     const camera = await apiRequest("/ui/api/config/camera-sources/editor-state", {
       method: "PUT",
       body: JSON.stringify(state.camera),
@@ -879,6 +900,7 @@ async function saveSettings({ closeAfterSave = false } = {}) {
       body: JSON.stringify(state.mcp),
     });
     state.editor = clone(editor);
+    state.avatarSpeech = clone(avatarSpeech);
     state.camera = clone(camera);
     state.mcp = clone(mcp);
     renderSettings();
@@ -894,14 +916,180 @@ async function saveSettings({ closeAfterSave = false } = {}) {
 }
 
 function renderSettings() {
-  if (!state.editor || !state.camera || !state.mcp) {
+  if (!state.editor || !state.avatarSpeech || !state.camera || !state.mcp) {
     return;
   }
+  renderAvatar();
+  renderMicrophoneSettings();
   renderCurrent();
   renderPersona();
   renderModel();
   renderMemory();
   renderCapabilities();
+}
+
+function renderAvatar() {
+  state.selectedAvatarId = selectedOrFirst(
+    state.avatarSpeech.avatars,
+    "avatar_id",
+    state.selectedAvatarId,
+  );
+  state.avatarSpeech.selected_avatar_id = state.selectedAvatarId;
+  setSelectOptions(
+    element("avatar-select"),
+    state.avatarSpeech.avatars,
+    "avatar_id",
+    state.selectedAvatarId,
+  );
+  const avatar = arrayById(state.avatarSpeech.avatars, "avatar_id", state.selectedAvatarId);
+  if (!avatar) {
+    return;
+  }
+  const stt = avatar.stt;
+  const tts = avatar.tts;
+  const voicevox = tts.voicevox_config;
+  const sbv2 = tts.style_bert_vits2_config;
+  const aivis = tts.aivis_cloud_config;
+  element("avatar-display-name").value = avatar.display_name;
+  element("stt-enabled").checked = stt.enabled;
+  element("stt-engine").value = stt.engine;
+  element("stt-wake-word").value = stt.wake_word;
+  element("stt-profile-id").value = stt.profile_id;
+  element("stt-api-key").value = stt.api_key;
+  element("tts-enabled").checked = tts.enabled;
+  element("tts-engine").value = tts.engine;
+  element("voicevox-endpoint-url").value = voicevox.endpoint_url;
+  element("voicevox-speaker-id").value = voicevox.speaker_id;
+  element("voicevox-speed-scale").value = voicevox.speed_scale;
+  element("voicevox-pitch-scale").value = voicevox.pitch_scale;
+  element("voicevox-intonation-scale").value = voicevox.intonation_scale;
+  element("voicevox-volume-scale").value = voicevox.volume_scale;
+  element("voicevox-pre-phoneme-length").value = voicevox.pre_phoneme_length;
+  element("voicevox-post-phoneme-length").value = voicevox.post_phoneme_length;
+  element("voicevox-output-sampling-rate").value = String(voicevox.output_sampling_rate);
+  element("voicevox-output-stereo").checked = voicevox.output_stereo;
+  element("sbv2-endpoint-url").value = sbv2.endpoint_url;
+  element("sbv2-model-name").value = sbv2.model_name;
+  element("sbv2-model-id").value = sbv2.model_id;
+  element("sbv2-speaker-name").value = sbv2.speaker_name;
+  element("sbv2-speaker-id").value = sbv2.speaker_id;
+  element("sbv2-style").value = sbv2.style;
+  element("sbv2-style-weight").value = sbv2.style_weight;
+  element("sbv2-language").value = sbv2.language;
+  element("sbv2-sdp-ratio").value = sbv2.sdp_ratio;
+  element("sbv2-noise").value = sbv2.noise;
+  element("sbv2-noise-w").value = sbv2.noise_w;
+  element("sbv2-length").value = sbv2.length;
+  element("sbv2-auto-split").checked = sbv2.auto_split;
+  element("sbv2-split-interval").value = sbv2.split_interval;
+  element("aivis-api-key").value = aivis.api_key;
+  element("aivis-model-uuid").value = aivis.model_uuid;
+  element("aivis-speaker-uuid").value = aivis.speaker_uuid;
+  element("aivis-style-id").value = aivis.style_id;
+  element("aivis-speaking-rate").value = aivis.speaking_rate;
+  element("aivis-emotional-intensity").value = aivis.emotional_intensity;
+  element("aivis-tempo-dynamics").value = aivis.tempo_dynamics;
+  element("aivis-volume").value = aivis.volume;
+  renderTtsPanel(tts.engine);
+}
+
+function syncAvatar() {
+  const avatar = arrayById(state.avatarSpeech.avatars, "avatar_id", state.selectedAvatarId);
+  if (!avatar) {
+    return;
+  }
+  avatar.display_name = textValue("avatar-display-name");
+  avatar.stt.enabled = boolValue("stt-enabled");
+  avatar.stt.engine = textValue("stt-engine");
+  avatar.stt.wake_word = textValue("stt-wake-word");
+  avatar.stt.profile_id = textValue("stt-profile-id");
+  avatar.stt.api_key = textValue("stt-api-key");
+  avatar.tts.enabled = boolValue("tts-enabled");
+  avatar.tts.engine = textValue("tts-engine");
+  avatar.tts.voicevox_config = {
+    endpoint_url: textValue("voicevox-endpoint-url"),
+    speaker_id: intValue("voicevox-speaker-id", 0),
+    speed_scale: numberValue("voicevox-speed-scale", 1),
+    pitch_scale: numberValue("voicevox-pitch-scale", 0),
+    intonation_scale: numberValue("voicevox-intonation-scale", 1),
+    volume_scale: numberValue("voicevox-volume-scale", 1),
+    pre_phoneme_length: numberValue("voicevox-pre-phoneme-length", 0.1),
+    post_phoneme_length: numberValue("voicevox-post-phoneme-length", 0.1),
+    output_sampling_rate: intValue("voicevox-output-sampling-rate", 24000),
+    output_stereo: boolValue("voicevox-output-stereo"),
+  };
+  avatar.tts.style_bert_vits2_config = {
+    endpoint_url: textValue("sbv2-endpoint-url"),
+    model_name: textValue("sbv2-model-name"),
+    model_id: intValue("sbv2-model-id", 0),
+    speaker_name: textValue("sbv2-speaker-name"),
+    speaker_id: intValue("sbv2-speaker-id", 0),
+    style: textValue("sbv2-style"),
+    style_weight: numberValue("sbv2-style-weight", 1),
+    sdp_ratio: numberValue("sbv2-sdp-ratio", 0.2),
+    noise: numberValue("sbv2-noise", 0.6),
+    noise_w: numberValue("sbv2-noise-w", 0.8),
+    length: numberValue("sbv2-length", 1),
+    language: textValue("sbv2-language"),
+    auto_split: boolValue("sbv2-auto-split"),
+    split_interval: numberValue("sbv2-split-interval", 0.5),
+  };
+  avatar.tts.aivis_cloud_config = {
+    api_key: textValue("aivis-api-key"),
+    model_uuid: textValue("aivis-model-uuid"),
+    speaker_uuid: textValue("aivis-speaker-uuid"),
+    style_id: intValue("aivis-style-id", 0),
+    speaking_rate: numberValue("aivis-speaking-rate", 1),
+    emotional_intensity: numberValue("aivis-emotional-intensity", 1),
+    tempo_dynamics: numberValue("aivis-tempo-dynamics", 1),
+    volume: numberValue("aivis-volume", 1),
+  };
+  state.avatarSpeech.selected_avatar_id = state.selectedAvatarId;
+}
+
+function renderTtsPanel(engine) {
+  document.querySelectorAll("[data-tts-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.ttsPanel !== engine;
+  });
+}
+
+function renderMicrophoneSettings() {
+  const microphone = state.avatarSpeech.microphone_settings;
+  element("microphone-input-threshold").value = microphone.input_threshold_db;
+  element("speaker-recognition-threshold").value = microphone.speaker_recognition_threshold;
+  updateMicrophoneSettingLabels();
+}
+
+function syncMicrophoneSettings() {
+  state.avatarSpeech.microphone_settings = {
+    input_threshold_db: numberValue("microphone-input-threshold", -20),
+    speaker_recognition_threshold: numberValue("speaker-recognition-threshold", 0.4),
+  };
+}
+
+function updateMicrophoneSettingLabels() {
+  element("microphone-input-threshold-value").textContent =
+    `${numberValue("microphone-input-threshold", -20).toFixed(0)} dB`;
+  element("speaker-recognition-threshold-value").textContent =
+    numberValue("speaker-recognition-threshold", 0.4).toFixed(2);
+}
+
+async function copySpeechApiKey(inputId, label) {
+  try {
+    await navigator.clipboard.writeText(textValue(inputId));
+    showNotice(`${label}をコピーしました。`);
+  } catch (error) {
+    showNotice(`クリップボードへコピーできません: ${error.message}`, true);
+  }
+}
+
+async function pasteSpeechApiKey(inputId, label) {
+  try {
+    element(inputId).value = await navigator.clipboard.readText();
+    showNotice(`${label}を貼り付けました。`);
+  } catch (error) {
+    showNotice(`クリップボードから読み込めません: ${error.message}`, true);
+  }
 }
 
 function renderCurrent() {
@@ -1217,6 +1405,8 @@ function syncMcp() {
 }
 
 function syncAllForms() {
+  syncAvatar();
+  syncMicrophoneSettings();
   syncCurrent();
   syncPersona();
   syncModel();
@@ -1224,6 +1414,41 @@ function syncAllForms() {
   syncCamera();
   syncWatcher();
   syncMcp();
+}
+
+function addAvatar() {
+  syncAllForms();
+  const source = arrayById(state.avatarSpeech.avatars, "avatar_id", state.selectedAvatarId)
+    || state.avatarSpeech.avatars[0];
+  const avatar = clone(source);
+  avatar.avatar_id = `avatar:${idSuffix()}`;
+  avatar.display_name = "新規アバター";
+  state.avatarSpeech.avatars.push(avatar);
+  state.selectedAvatarId = avatar.avatar_id;
+  state.avatarSpeech.selected_avatar_id = avatar.avatar_id;
+  renderAvatar();
+}
+
+function duplicateAvatar() {
+  syncAllForms();
+  const avatar = clone(arrayById(state.avatarSpeech.avatars, "avatar_id", state.selectedAvatarId));
+  avatar.avatar_id = `avatar:${idSuffix()}`;
+  avatar.display_name = `${avatar.display_name || "アバター"}_copy`;
+  state.avatarSpeech.avatars.push(avatar);
+  state.selectedAvatarId = avatar.avatar_id;
+  state.avatarSpeech.selected_avatar_id = avatar.avatar_id;
+  renderAvatar();
+}
+
+function deleteAvatar() {
+  if (state.avatarSpeech.avatars.length <= 1) {
+    showNotice("最後のアバターは削除できません。", true);
+    return;
+  }
+  removeById(state.avatarSpeech.avatars, "avatar_id", state.selectedAvatarId);
+  state.selectedAvatarId = state.avatarSpeech.avatars[0].avatar_id;
+  state.avatarSpeech.selected_avatar_id = state.selectedAvatarId;
+  renderAvatar();
 }
 
 function addPersona() {
@@ -1386,12 +1611,16 @@ function deleteMcp() {
 }
 
 function switchTab(tab) {
-  document.querySelectorAll(".tab-button").forEach((button) => {
+  document.querySelectorAll(".settings-nav-button").forEach((button) => {
     button.classList.toggle("active", button.dataset.tab === tab);
   });
   document.querySelectorAll(".tab-page").forEach((page) => {
     page.classList.toggle("active", page.dataset.page === tab);
   });
+  const page = SETTINGS_PAGES[tab] || SETTINGS_PAGES.avatar;
+  element("settings-page-title").textContent = page[0];
+  element("settings-page-description").textContent = page[1];
+  element("settings-page-select").value = tab;
 }
 
 function bindEvents() {
@@ -1440,10 +1669,24 @@ function bindEvents() {
   element("cancel-settings").addEventListener("click", closeSettings);
   element("apply-settings").addEventListener("click", () => saveSettings({ closeAfterSave: false }));
   element("ok-settings").addEventListener("click", () => saveSettings({ closeAfterSave: true }));
-  document.querySelectorAll(".tab-button").forEach((button) => {
+  document.querySelectorAll(".settings-nav-button").forEach((button) => {
     button.addEventListener("click", () => switchTab(button.dataset.tab));
   });
+  element("settings-page-select").addEventListener("change", () => {
+    switchTab(element("settings-page-select").value);
+  });
 
+  element("avatar-select").addEventListener("change", () => {
+    syncAvatar();
+    state.selectedAvatarId = element("avatar-select").value;
+    state.avatarSpeech.selected_avatar_id = state.selectedAvatarId;
+    renderAvatar();
+  });
+  element("tts-engine").addEventListener("change", () => {
+    renderTtsPanel(element("tts-engine").value);
+  });
+  element("microphone-input-threshold").addEventListener("input", updateMicrophoneSettingLabels);
+  element("speaker-recognition-threshold").addEventListener("input", updateMicrophoneSettingLabels);
   element("persona-select").addEventListener("change", () => {
     syncPersona();
     state.selectedPersonaId = element("persona-select").value;
@@ -1477,6 +1720,13 @@ function bindEvents() {
     renderMcp();
   });
 
+  document.querySelector("[data-action='add-avatar']").addEventListener("click", addAvatar);
+  document.querySelector("[data-action='duplicate-avatar']").addEventListener("click", duplicateAvatar);
+  document.querySelector("[data-action='delete-avatar']").addEventListener("click", deleteAvatar);
+  element("copy-stt-api-key").addEventListener("click", () => copySpeechApiKey("stt-api-key", "STT APIキー"));
+  element("paste-stt-api-key").addEventListener("click", () => pasteSpeechApiKey("stt-api-key", "STT APIキー"));
+  element("copy-aivis-api-key").addEventListener("click", () => copySpeechApiKey("aivis-api-key", "Aivis Cloud APIキー"));
+  element("paste-aivis-api-key").addEventListener("click", () => pasteSpeechApiKey("aivis-api-key", "Aivis Cloud APIキー"));
   document.querySelector("[data-action='add-persona']").addEventListener("click", addPersona);
   document.querySelector("[data-action='duplicate-persona']").addEventListener("click", duplicatePersona);
   document.querySelector("[data-action='delete-persona']").addEventListener("click", deletePersona);

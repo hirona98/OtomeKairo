@@ -107,176 +107,361 @@
   <div class="settings-backdrop" id="settings-backdrop" hidden></div>
   <aside class="settings-panel" id="settings-panel" aria-label="設定" aria-hidden="true">
     <div class="settings-header">
-      <div>
-        <h2>設定</h2>
-      </div>
+      <h2>設定</h2>
       <button type="button" class="icon-button" id="close-settings" title="閉じる">×</button>
     </div>
 
-    <div class="settings-tabs" role="tablist">
-      <button type="button" class="tab-button active" data-tab="persona">人格設定</button>
-      <button type="button" class="tab-button" data-tab="model">モデル</button>
-      <button type="button" class="tab-button" data-tab="memory">記憶</button>
-      <button type="button" class="tab-button" data-tab="system">システム</button>
-      <button type="button" class="tab-button" data-tab="capability">能力</button>
-      <button type="button" class="tab-button" data-tab="watcher">Watcher</button>
-    </div>
+    <label class="settings-mobile-navigation">設定ページ
+      <select id="settings-page-select">
+        <optgroup label="表現">
+          <option value="avatar">アバター</option>
+        </optgroup>
+        <optgroup label="入力">
+          <option value="conversation">会話入力</option>
+        </optgroup>
+        <optgroup label="個">
+          <option value="persona">人格設定</option>
+          <option value="model">モデル</option>
+          <option value="memory">記憶</option>
+        </optgroup>
+        <optgroup label="自律動作">
+          <option value="system">定期思考</option>
+        </optgroup>
+        <optgroup label="観測と監視">
+          <option value="camera">カメラ</option>
+          <option value="watcher">Watcher</option>
+        </optgroup>
+        <optgroup label="外部連携">
+          <option value="mcp">ツール（MCP）</option>
+        </optgroup>
+      </select>
+    </label>
 
-    <div class="settings-body">
-      <section class="tab-page active" data-page="persona">
-        <div class="selector-row">
-          <select id="persona-select"></select>
-          <button type="button" data-action="add-persona">追加</button>
-          <button type="button" data-action="duplicate-persona">複製</button>
-          <button type="button" data-action="delete-persona">削除</button>
-        </div>
-        <div class="form-grid">
-          <label>プリセット名<input id="persona-display-name"></label>
-        </div>
-        <label class="wide-label">人格本文<textarea id="persona-prompt" class="persona-prompt-field"
-            rows="20"></textarea></label>
-        <label class="wide-label">表現補助<textarea id="persona-expression-addon" rows="8"></textarea></label>
-      </section>
+    <div class="settings-layout">
+      <nav class="settings-navigation" aria-label="設定カテゴリ">
+        <div class="settings-navigation-category">表現</div>
+        <button type="button" class="settings-nav-button active" data-tab="avatar">アバター</button>
+        <div class="settings-navigation-category">入力</div>
+        <button type="button" class="settings-nav-button" data-tab="conversation">会話入力</button>
+        <div class="settings-navigation-category">個</div>
+        <button type="button" class="settings-nav-button" data-tab="persona">人格設定</button>
+        <button type="button" class="settings-nav-button" data-tab="model">モデル</button>
+        <button type="button" class="settings-nav-button" data-tab="memory">記憶</button>
+        <div class="settings-navigation-category">自律動作</div>
+        <button type="button" class="settings-nav-button" data-tab="system">定期思考</button>
+        <div class="settings-navigation-category">観測と監視</div>
+        <button type="button" class="settings-nav-button" data-tab="camera">カメラ</button>
+        <button type="button" class="settings-nav-button" data-tab="watcher">Watcher</button>
+        <div class="settings-navigation-category">外部連携</div>
+        <button type="button" class="settings-nav-button" data-tab="mcp">ツール（MCP）</button>
+      </nav>
 
-      <section class="tab-page" data-page="model">
-        <div class="selector-row">
-          <select id="model-select"></select>
-          <button type="button" data-action="add-model">追加</button>
-          <button type="button" data-action="duplicate-model">複製</button>
-          <button type="button" data-action="delete-model">削除</button>
-        </div>
-        <div class="model-preset-name-row">
-          <label>プリセット名<input id="model-display-name"></label>
-        </div>
-        <div class="memory-settings-card">
-          <label>モデル<input id="model-model"></label>
-          <label>エンドポイントURL<input id="model-api-base"></label>
-          <label>推論の深さ<input id="model-reasoning-effort"></label>
-          <label>最大出力トークン<input id="model-max-output-tokens" type="number" min="1"></label>
-          <label>タイムアウト（秒）<input id="model-timeout-seconds" type="number" min="1"></label>
-          <label class="checkbox-field">Web検索を有効にする<input id="model-web-search-enabled" type="checkbox"></label>
-          <label>APIキー<input id="model-api-key" type="password" autocomplete="new-password"></label>
-        </div>
-        <fieldset class="settings-group">
-          <legend>直近会話の取り込み範囲（記憶は別途入ります）</legend>
-          <div class="settings-group-grid">
-            <label>件数<input id="model-recent-turn-limit" type="number" min="1"></label>
-            <label>時間（分）<input id="model-recent-turn-minutes" type="number" min="1"></label>
-          </div>
-        </fieldset>
-      </section>
-
-      <section class="tab-page" data-page="memory">
-        <div class="selector-row">
-          <select id="memory-select"></select>
-          <button type="button" data-action="add-memory">追加</button>
-          <button type="button" data-action="duplicate-memory">設定複製</button>
-          <button type="button" data-action="delete-memory">削除</button>
-        </div>
-        <div class="memory-settings-card">
-          <label>プリセット名<input id="memory-display-name"></label>
-          <label>モデル<input id="memory-embedding-model"></label>
-          <label>エンドポイントURL<input id="memory-api-base"></label>
-          <label>次元数<input id="memory-dimension" type="number" min="1"></label>
-          <label class="api-key-field">APIキー
-            <span class="inline-control-row">
-              <input id="memory-api-key" type="password" autocomplete="new-password">
-              <button type="button" class="plain-button" id="copy-memory-api-key">コピー</button>
-              <button type="button" class="plain-button" id="paste-memory-api-key">上書き貼り付け</button>
-              <button type="button" class="plain-button" id="paste-llm-api-key-to-memory">LLMモデルのAPIキーを貼り付け</button>
-            </span>
-          </label>
-        </div>
-      </section>
-
-      <section class="tab-page" data-page="system">
-        <fieldset class="settings-group">
-          <legend>判断機会ポリシー</legend>
-          <div class="settings-group-grid system-policy-grid">
-            <label class="checkbox-field system-policy-checkbox">定期思考を有効にする<input id="current-wake-enabled"
-                type="checkbox"></label>
-            <label>定期思考間隔<input id="current-wake-interval" type="number" min="1"></label>
-            <label>発話頻度（1 控えめ / 5 標準 / 10 多め）<input id="current-thinking-level" type="number" min="1" max="10"></label>
-          </div>
-        </fieldset>
-      </section>
-
-      <section class="tab-page" data-page="capability">
-        <div class="capability-columns">
-          <fieldset class="settings-group capability-group">
-            <legend>視覚</legend>
-            <div class="field-caption">登録済みカメラ</div>
+      <div class="settings-content">
+        <header class="settings-page-header">
+          <h3 id="settings-page-title">アバター</h3>
+          <p id="settings-page-description">アバターごとの音声合成と音声認識を設定します。</p>
+        </header>
+        <div class="settings-body">
+          <section class="tab-page active" data-page="avatar">
             <div class="selector-row">
-              <select id="camera-select"></select>
-              <button type="button" data-action="add-camera">追加</button>
-              <button type="button" data-action="delete-camera">削除</button>
+              <select id="avatar-select"></select>
+              <button type="button" data-action="add-avatar">追加</button>
+              <button type="button" data-action="duplicate-avatar">複製</button>
+              <button type="button" data-action="delete-avatar">削除</button>
             </div>
-            <div class="form-grid mcp-form-grid">
-              <label class="checkbox-field">有効<input id="camera-enabled" type="checkbox"></label>
-              <label>表示名（LLMが理解しやすい名前）<input id="camera-display-name"></label>
-              <label>ホスト/IP<input id="camera-host"></label>
-              <label>ユーザー名<input id="camera-username"></label>
-              <label>パスワード<input id="camera-password" type="password" autocomplete="new-password"></label>
-              <label>接続種別<input id="camera-connector-kind" readonly></label>
-              <label>接続クライアント<input id="camera-client-id" readonly></label>
-              <label>視覚ソースID<input id="camera-vision-source-id" readonly></label>
-            </div>
-          </fieldset>
+            <label class="preset-name-field">プリセット名<input id="avatar-display-name"></label>
 
-          <fieldset class="settings-group capability-group">
-            <legend>MCP</legend>
-            <div class="field-caption">登録済みMCP server</div>
+            <fieldset class="settings-group">
+              <legend>音声合成</legend>
+              <div class="settings-group-grid">
+                <label class="checkbox-field wide-control">TTSを使用する<input id="tts-enabled" type="checkbox"></label>
+                <label>エンジン
+                  <select id="tts-engine">
+                    <option value="voicevox">VOICEVOX/SHAREVOX/AivisSpeech</option>
+                    <option value="style-bert-vits2">Style-Bert-VITS2</option>
+                    <option value="aivis-cloud">Aivis Cloud API</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="speech-engine-panel" data-tts-panel="voicevox">
+                <div class="form-grid">
+                  <label>Endpoint URL<input id="voicevox-endpoint-url"></label>
+                  <label>Speaker ID<input id="voicevox-speaker-id" type="number" min="0"></label>
+                </div>
+                <details class="advanced-settings">
+                  <summary>VOICEVOX詳細設定</summary>
+                  <div class="form-grid">
+                    <label>話速<input id="voicevox-speed-scale" type="number" min="0.5" max="2" step="0.1"></label>
+                    <label>音高<input id="voicevox-pitch-scale" type="number" min="-0.15" max="0.15" step="0.01"></label>
+                    <label>抑揚<input id="voicevox-intonation-scale" type="number" min="0" max="2" step="0.1"></label>
+                    <label>音量<input id="voicevox-volume-scale" type="number" min="0" max="2" step="0.1"></label>
+                    <label>前無音<input id="voicevox-pre-phoneme-length" type="number" min="0" max="1.5" step="0.05"></label>
+                    <label>後無音<input id="voicevox-post-phoneme-length" type="number" min="0" max="1.5" step="0.05"></label>
+                    <label>サンプリング
+                      <select id="voicevox-output-sampling-rate">
+                        <option value="16000">16000 Hz</option>
+                        <option value="22050">22050 Hz</option>
+                        <option value="24000">24000 Hz</option>
+                        <option value="44100">44100 Hz</option>
+                        <option value="48000">48000 Hz</option>
+                      </select>
+                    </label>
+                    <label class="checkbox-field">ステレオ出力を有効にする<input id="voicevox-output-stereo" type="checkbox"></label>
+                  </div>
+                </details>
+              </div>
+
+              <div class="speech-engine-panel" data-tts-panel="style-bert-vits2" hidden>
+                <div class="form-grid">
+                  <label>Endpoint URL<input id="sbv2-endpoint-url"></label>
+                  <label>Model Name<input id="sbv2-model-name"></label>
+                  <label>Model ID<input id="sbv2-model-id" type="number" min="0"></label>
+                  <label>Speaker Name<input id="sbv2-speaker-name"></label>
+                  <label>Speaker ID<input id="sbv2-speaker-id" type="number" min="0"></label>
+                </div>
+                <details class="advanced-settings">
+                  <summary>Style-Bert-VITS2 詳細設定</summary>
+                  <div class="form-grid">
+                    <label>Style<input id="sbv2-style"></label>
+                    <label>Style Weight<input id="sbv2-style-weight" type="number" step="0.1"></label>
+                    <label>Language<input id="sbv2-language"></label>
+                    <label>SDP Ratio<input id="sbv2-sdp-ratio" type="number" step="0.1"></label>
+                    <label>Noise<input id="sbv2-noise" type="number" step="0.1"></label>
+                    <label>Noise W<input id="sbv2-noise-w" type="number" step="0.1"></label>
+                    <label>Length<input id="sbv2-length" type="number" step="0.1"></label>
+                    <label class="checkbox-field">Auto Split<input id="sbv2-auto-split" type="checkbox"></label>
+                    <label>Split Interval<input id="sbv2-split-interval" type="number" step="0.1"></label>
+                  </div>
+                </details>
+              </div>
+
+              <div class="speech-engine-panel" data-tts-panel="aivis-cloud" hidden>
+                <div class="form-grid">
+                  <label class="api-key-field">API Key
+                    <span class="inline-control-row">
+                      <input id="aivis-api-key" type="password" autocomplete="new-password">
+                      <button type="button" class="plain-button" id="copy-aivis-api-key">コピー</button>
+                      <button type="button" class="plain-button" id="paste-aivis-api-key">上書き貼り付け</button>
+                    </span>
+                  </label>
+                  <label>Model UUID<input id="aivis-model-uuid"></label>
+                  <label>Speaker UUID<input id="aivis-speaker-uuid"></label>
+                  <label>Style ID<input id="aivis-style-id" type="number" min="0"></label>
+                </div>
+                <details class="advanced-settings">
+                  <summary>Aivis Cloud API詳細設定</summary>
+                  <div class="form-grid">
+                    <label>話速<input id="aivis-speaking-rate" type="number" min="0.5" max="2" step="0.1"></label>
+                    <label>感情強度<input id="aivis-emotional-intensity" type="number" min="0" max="2" step="0.1"></label>
+                    <label>テンポ変化<input id="aivis-tempo-dynamics" type="number" min="0" max="2" step="0.1"></label>
+                    <label>音量<input id="aivis-volume" type="number" min="0" max="2" step="0.1"></label>
+                  </div>
+                </details>
+              </div>
+            </fieldset>
+
+            <fieldset class="settings-group">
+              <legend>音声認識（現状AmiVoiceのみ）</legend>
+              <div class="form-grid">
+                <label class="checkbox-field wide-control">STTを使用する<input id="stt-enabled" type="checkbox"></label>
+                <label>エンジン
+                  <select id="stt-engine">
+                    <option value="amivoice">AmiVoice</option>
+                  </select>
+                </label>
+                <label>音声起動ワード<input id="stt-wake-word"></label>
+                <label>Profile ID<input id="stt-profile-id"></label>
+                <label class="api-key-field wide-label">API Key
+                  <span class="inline-control-row">
+                    <input id="stt-api-key" type="password" autocomplete="new-password">
+                    <button type="button" class="plain-button" id="copy-stt-api-key">コピー</button>
+                    <button type="button" class="plain-button" id="paste-stt-api-key">上書き貼り付け</button>
+                  </span>
+                </label>
+              </div>
+              <p class="field-hint">音声起動ワードは音声入力を開始する語です。複数指定はカンマで区切ります。</p>
+            </fieldset>
+          </section>
+
+          <section class="tab-page" data-page="conversation">
+            <fieldset class="settings-group">
+              <legend>マイク・話者識別</legend>
+              <p class="field-hint">マイクと話者識別を設定します。識別した話者の呼び名は participants[].display_name として送ります。</p>
+              <div class="range-field">
+                <label for="microphone-input-threshold">入力しきい値</label>
+                <input id="microphone-input-threshold" type="range" min="-50" max="0" step="1">
+                <output id="microphone-input-threshold-value"></output>
+              </div>
+              <div class="range-field">
+                <label for="speaker-recognition-threshold">識別感度</label>
+                <input id="speaker-recognition-threshold" type="range" min="0.1" max="0.9" step="0.05">
+                <output id="speaker-recognition-threshold-value"></output>
+              </div>
+              <div class="speaker-enrollment" aria-disabled="true">
+                <div class="field-caption">登録済み話者</div>
+                <div class="disabled-speaker-list">登録済み話者はいません</div>
+                <div class="speaker-registration-row">
+                  <label>話者の呼び名<input disabled></label>
+                  <button type="button" disabled>5秒録音して登録</button>
+                </div>
+                <p class="field-hint">話者登録は音声処理をOtomeKairoへ移設する段階で利用可能になります。</p>
+              </div>
+            </fieldset>
+          </section>
+
+          <section class="tab-page" data-page="persona">
             <div class="selector-row">
-              <select id="mcp-select"></select>
-              <button type="button" data-action="add-mcp">追加</button>
-              <button type="button" data-action="delete-mcp">削除</button>
+              <select id="persona-select"></select>
+              <button type="button" data-action="add-persona">追加</button>
+              <button type="button" data-action="duplicate-persona">複製</button>
+              <button type="button" data-action="delete-persona">削除</button>
             </div>
-            <div class="form-grid">
-              <label class="checkbox-field">有効<input id="mcp-enabled" type="checkbox"></label>
-              <label>MCP server ID<input id="mcp-server-id"></label>
-              <label>command<input id="mcp-command"></label>
-              <label class="wide-label">args<textarea id="mcp-args" rows="3" spellcheck="false"></textarea>
-                <span class="field-hint">command に渡す引数。1 行を 1 引数として保存します。</span>
-              </label>
-              <label class="wide-label">実行を許可するtool名<textarea id="mcp-enabled-tools" rows="4"
-                  spellcheck="false"></textarea>
-                <span class="field-hint">1 行を 1 tool 名として保存します。空欄ではすべてのtoolを拒否します。</span>
-              </label>
-              <label>cwd<input id="mcp-cwd"></label>
-              <label>接続クライアント<input id="mcp-client-id"></label>
-              <label>transport<input id="mcp-transport" readonly></label>
-              <label>接続種別<input id="mcp-connector-kind"></label>
-              <label class="wide-label">env<textarea id="mcp-env" rows="4" spellcheck="false"></textarea>
-                <span class="field-hint">KEY=VALUE を 1 行ずつ入力します。</span>
-              </label>
-            </div>
-          </fieldset>
-        </div>
-      </section>
+            <label class="preset-name-field">プリセット名<input id="persona-display-name"></label>
+            <label class="wide-label">人格本文<textarea id="persona-prompt" class="persona-prompt-field"
+                rows="20"></textarea></label>
+            <label class="wide-label">表現補助<textarea id="persona-expression-addon" rows="8"></textarea></label>
+          </section>
 
-      <section class="tab-page" data-page="watcher">
-        <fieldset class="settings-group capability-group">
-          <legend>カメラ</legend>
-          <div class="field-caption">登録済みカメラ</div>
-          <div class="selector-row">
-            <select id="watcher-select"></select>
-          </div>
-          <div class="form-grid mcp-form-grid">
-            <label class="checkbox-field">有効<input id="watcher-enabled" type="checkbox"></label>
-            <label>表示名<input id="watcher-display-name" readonly></label>
-            <label>視覚ソースID<input id="watcher-vision-source-id" readonly></label>
-            <label>watcher ID<input id="watcher-id" readonly></label>
-            <label>種別<input id="watcher-kind" readonly></label>
-            <label>監視頻度（秒）<input id="watcher-poll-interval" type="number" min="0.2" step="0.1"></label>
-            <label>wake最小間隔（秒）<input id="watcher-min-wake-interval" type="number" min="1" step="1"></label>
-            <label>差分比閾値（変化した画素の割合 0～1）<input id="watcher-motion-threshold" type="number" min="0.001" max="1"
-                step="0.001"></label>
-            <label>画素差分閾値（1画素を変化扱いする明暗差 1～255）<input id="watcher-pixel-threshold" type="number" min="1"
-                max="255" step="1"></label>
-            <label>縮小幅<input id="watcher-resize-width" type="number" min="64" max="1920" step="1"></label>
-          </div>
-        </fieldset>
-      </section>
+          <section class="tab-page" data-page="model">
+            <div class="selector-row">
+              <select id="model-select"></select>
+              <button type="button" data-action="add-model">追加</button>
+              <button type="button" data-action="duplicate-model">複製</button>
+              <button type="button" data-action="delete-model">削除</button>
+            </div>
+            <label class="preset-name-field">プリセット名<input id="model-display-name"></label>
+            <div class="memory-settings-card">
+              <label>モデル<input id="model-model"></label>
+              <label>エンドポイントURL<input id="model-api-base"></label>
+              <label>推論の深さ<input id="model-reasoning-effort"></label>
+              <label>最大出力トークン<input id="model-max-output-tokens" type="number" min="1"></label>
+              <label>タイムアウト（秒）<input id="model-timeout-seconds" type="number" min="1"></label>
+              <label class="checkbox-field">Web検索を有効にする<input id="model-web-search-enabled" type="checkbox"></label>
+              <label>APIキー<input id="model-api-key" type="password" autocomplete="new-password"></label>
+            </div>
+            <fieldset class="settings-group">
+              <legend>直近会話の取り込み範囲（記憶は別途入ります）</legend>
+              <div class="settings-group-grid">
+                <label>件数<input id="model-recent-turn-limit" type="number" min="1"></label>
+                <label>時間（分）<input id="model-recent-turn-minutes" type="number" min="1"></label>
+              </div>
+            </fieldset>
+          </section>
+
+          <section class="tab-page" data-page="memory">
+            <div class="selector-row">
+              <select id="memory-select"></select>
+              <button type="button" data-action="add-memory">追加</button>
+              <button type="button" data-action="duplicate-memory">設定複製</button>
+              <button type="button" data-action="delete-memory">削除</button>
+            </div>
+            <div class="memory-settings-card">
+              <label>プリセット名<input id="memory-display-name"></label>
+              <label>モデル<input id="memory-embedding-model"></label>
+              <label>エンドポイントURL<input id="memory-api-base"></label>
+              <label>次元数<input id="memory-dimension" type="number" min="1"></label>
+              <label class="api-key-field">APIキー
+                <span class="inline-control-row">
+                  <input id="memory-api-key" type="password" autocomplete="new-password">
+                  <button type="button" class="plain-button" id="copy-memory-api-key">コピー</button>
+                  <button type="button" class="plain-button" id="paste-memory-api-key">上書き貼り付け</button>
+                  <button type="button" class="plain-button" id="paste-llm-api-key-to-memory">LLMモデルのAPIキーを貼り付け</button>
+                </span>
+              </label>
+            </div>
+          </section>
+
+          <section class="tab-page" data-page="system">
+            <fieldset class="settings-group">
+              <legend>判断機会ポリシー</legend>
+              <div class="settings-group-grid system-policy-grid">
+                <label class="checkbox-field system-policy-checkbox">定期思考を有効にする<input id="current-wake-enabled"
+                    type="checkbox"></label>
+                <label>定期思考間隔<input id="current-wake-interval" type="number" min="1"></label>
+                <label>発話頻度（1 控えめ / 5 標準 / 10 多め）<input id="current-thinking-level" type="number" min="1" max="10"></label>
+              </div>
+            </fieldset>
+          </section>
+
+          <section class="tab-page" data-page="camera">
+            <fieldset class="settings-group capability-group">
+              <legend>視覚</legend>
+              <div class="field-caption">登録済みカメラ</div>
+              <div class="selector-row">
+                <select id="camera-select"></select>
+                <button type="button" data-action="add-camera">追加</button>
+                <button type="button" data-action="delete-camera">削除</button>
+              </div>
+              <div class="form-grid mcp-form-grid">
+                <label class="checkbox-field">有効<input id="camera-enabled" type="checkbox"></label>
+                <label>表示名（LLMが理解しやすい名前）<input id="camera-display-name"></label>
+                <label>ホスト/IP<input id="camera-host"></label>
+                <label>ユーザー名<input id="camera-username"></label>
+                <label>パスワード<input id="camera-password" type="password" autocomplete="new-password"></label>
+                <label>接続種別<input id="camera-connector-kind" readonly></label>
+                <label>接続クライアント<input id="camera-client-id" readonly></label>
+                <label>視覚ソースID<input id="camera-vision-source-id" readonly></label>
+              </div>
+            </fieldset>
+          </section>
+
+          <section class="tab-page" data-page="mcp">
+            <fieldset class="settings-group capability-group">
+              <legend>MCP</legend>
+              <div class="field-caption">登録済みMCP server</div>
+              <div class="selector-row">
+                <select id="mcp-select"></select>
+                <button type="button" data-action="add-mcp">追加</button>
+                <button type="button" data-action="delete-mcp">削除</button>
+              </div>
+              <div class="form-grid">
+                <label class="checkbox-field">有効<input id="mcp-enabled" type="checkbox"></label>
+                <label>MCP server ID<input id="mcp-server-id"></label>
+                <label>command<input id="mcp-command"></label>
+                <label class="wide-label">args<textarea id="mcp-args" rows="3" spellcheck="false"></textarea>
+                  <span class="field-hint">command に渡す引数。1 行を 1 引数として保存します。</span>
+                </label>
+                <label class="wide-label">実行を許可するtool名<textarea id="mcp-enabled-tools" rows="4"
+                    spellcheck="false"></textarea>
+                  <span class="field-hint">1 行を 1 tool 名として保存します。空欄ではすべてのtoolを拒否します。</span>
+                </label>
+                <label>cwd<input id="mcp-cwd"></label>
+                <label>接続クライアント<input id="mcp-client-id"></label>
+                <label>transport<input id="mcp-transport" readonly></label>
+                <label>接続種別<input id="mcp-connector-kind"></label>
+                <label class="wide-label">env<textarea id="mcp-env" rows="4" spellcheck="false"></textarea>
+                  <span class="field-hint">KEY=VALUE を 1 行ずつ入力します。</span>
+                </label>
+              </div>
+            </fieldset>
+          </section>
+
+          <section class="tab-page" data-page="watcher">
+            <fieldset class="settings-group capability-group">
+              <legend>カメラ</legend>
+              <div class="field-caption">登録済みカメラ</div>
+              <div class="selector-row">
+                <select id="watcher-select"></select>
+              </div>
+              <div class="form-grid mcp-form-grid">
+                <label class="checkbox-field">有効<input id="watcher-enabled" type="checkbox"></label>
+                <label>表示名<input id="watcher-display-name" readonly></label>
+                <label>視覚ソースID<input id="watcher-vision-source-id" readonly></label>
+                <label>watcher ID<input id="watcher-id" readonly></label>
+                <label>種別<input id="watcher-kind" readonly></label>
+                <label>監視頻度（秒）<input id="watcher-poll-interval" type="number" min="0.2" step="0.1"></label>
+                <label>wake最小間隔（秒）<input id="watcher-min-wake-interval" type="number" min="1" step="1"></label>
+                <label>差分比閾値（変化した画素の割合 0～1）<input id="watcher-motion-threshold" type="number" min="0.001"
+                    max="1" step="0.001"></label>
+                <label>画素差分閾値（1画素を変化扱いする明暗差 1～255）<input id="watcher-pixel-threshold" type="number"
+                    min="1" max="255" step="1"></label>
+                <label>縮小幅<input id="watcher-resize-width" type="number" min="64" max="1920" step="1"></label>
+              </div>
+            </fieldset>
+          </section>
+        </div>
+      </div>
     </div>
 
     <div class="settings-actions">

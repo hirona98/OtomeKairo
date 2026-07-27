@@ -11,8 +11,249 @@ from otomekairo.service.config.constants import (
     PERSONA_INITIATIVE_BASELINES,
 )
 
+TTS_ENGINES = {"voicevox", "style-bert-vits2", "aivis-cloud"}
+VOICEVOX_SAMPLING_RATES = {16000, 22050, 24000, 44100, 48000}
+
 
 class ServiceConfigValidationMixin:
+    def _normalize_avatar_definition(self, definition: dict[str, Any]) -> dict[str, Any]:
+        normalized = {
+            **definition,
+        }
+        for field_name in ("avatar_id", "display_name"):
+            value = normalized.get(field_name)
+            if isinstance(value, str):
+                normalized[field_name] = value.strip()
+        return normalized
+
+    def _validate_avatar_definition(self, avatar_id: str, definition: dict[str, Any]) -> None:
+        if not isinstance(definition, dict):
+            raise ServiceError(400, "invalid_avatar", "avatar must be an object.")
+        if definition.get("avatar_id") != avatar_id or not avatar_id.startswith("avatar:"):
+            raise ServiceError(400, "avatar_id_mismatch", "avatar_id must start with avatar: and match the entry id.")
+        self._validate_exact_fields(
+            definition,
+            {"avatar_id", "display_name", "stt", "tts"},
+            "avatar",
+        )
+        display_name = definition.get("display_name")
+        if not isinstance(display_name, str) or not display_name.strip():
+            raise ServiceError(400, "invalid_avatar_display_name", "avatar.display_name is required.")
+        self._validate_stt_definition(definition.get("stt"))
+        self._validate_tts_definition(definition.get("tts"))
+
+    def _validate_microphone_settings(self, definition: Any) -> None:
+        if not isinstance(definition, dict):
+            raise ServiceError(400, "invalid_microphone_settings", "microphone_settings must be an object.")
+        self._validate_exact_fields(
+            definition,
+            {"input_threshold_db", "speaker_recognition_threshold"},
+            "microphone_settings",
+        )
+        input_threshold = definition.get("input_threshold_db")
+        if type(input_threshold) not in {int, float} or not -50 <= float(input_threshold) <= 0:
+            raise ServiceError(
+                400,
+                "invalid_microphone_settings",
+                "microphone_settings.input_threshold_db must be from -50 to 0.",
+            )
+        speaker_threshold = definition.get("speaker_recognition_threshold")
+        if type(speaker_threshold) not in {int, float} or not 0.1 <= float(speaker_threshold) <= 0.9:
+            raise ServiceError(
+                400,
+                "invalid_microphone_settings",
+                "microphone_settings.speaker_recognition_threshold must be from 0.1 to 0.9.",
+            )
+
+    def _validate_stt_definition(self, definition: Any) -> None:
+        if not isinstance(definition, dict):
+            raise ServiceError(400, "invalid_stt_settings", "avatar.stt must be an object.")
+        self._validate_exact_fields(
+            definition,
+            {"enabled", "engine", "wake_word", "profile_id", "api_key", "language"},
+            "avatar.stt",
+        )
+        if not isinstance(definition.get("enabled"), bool):
+            raise ServiceError(400, "invalid_stt_settings", "avatar.stt.enabled must be a boolean.")
+        if definition.get("engine") != "amivoice":
+            raise ServiceError(400, "unsupported_stt_engine", "avatar.stt.engine must be amivoice.")
+        for field_name in ("wake_word", "profile_id", "api_key", "language"):
+            if not isinstance(definition.get(field_name), str):
+                raise ServiceError(
+                    400,
+                    "invalid_stt_settings",
+                    f"avatar.stt.{field_name} must be a string.",
+                )
+        if not definition["language"].strip():
+            raise ServiceError(400, "invalid_stt_settings", "avatar.stt.language is required.")
+
+    def _validate_tts_definition(self, definition: Any) -> None:
+        if not isinstance(definition, dict):
+            raise ServiceError(400, "invalid_tts_settings", "avatar.tts must be an object.")
+        self._validate_exact_fields(
+            definition,
+            {
+                "enabled",
+                "engine",
+                "voicevox_config",
+                "style_bert_vits2_config",
+                "aivis_cloud_config",
+            },
+            "avatar.tts",
+        )
+        if not isinstance(definition.get("enabled"), bool):
+            raise ServiceError(400, "invalid_tts_settings", "avatar.tts.enabled must be a boolean.")
+        if definition.get("engine") not in TTS_ENGINES:
+            raise ServiceError(400, "unsupported_tts_engine", "avatar.tts.engine is not supported.")
+        self._validate_voicevox_config(definition.get("voicevox_config"))
+        self._validate_style_bert_vits2_config(definition.get("style_bert_vits2_config"))
+        self._validate_aivis_cloud_config(definition.get("aivis_cloud_config"))
+
+    def _validate_voicevox_config(self, definition: Any) -> None:
+        fields = {
+            "endpoint_url",
+            "speaker_id",
+            "speed_scale",
+            "pitch_scale",
+            "intonation_scale",
+            "volume_scale",
+            "pre_phoneme_length",
+            "post_phoneme_length",
+            "output_sampling_rate",
+            "output_stereo",
+        }
+        if not isinstance(definition, dict):
+            raise ServiceError(400, "invalid_voicevox_config", "voicevox_config must be an object.")
+        self._validate_exact_fields(definition, fields, "voicevox_config")
+        self._validate_non_empty_text(definition, "endpoint_url", "voicevox_config")
+        self._validate_integer_range(definition, "speaker_id", "voicevox_config", minimum=0)
+        self._validate_number_range(definition, "speed_scale", "voicevox_config", minimum=0.5, maximum=2.0)
+        self._validate_number_range(definition, "pitch_scale", "voicevox_config", minimum=-0.15, maximum=0.15)
+        self._validate_number_range(definition, "intonation_scale", "voicevox_config", minimum=0.0, maximum=2.0)
+        self._validate_number_range(definition, "volume_scale", "voicevox_config", minimum=0.0, maximum=2.0)
+        self._validate_number_range(definition, "pre_phoneme_length", "voicevox_config", minimum=0.0, maximum=1.5)
+        self._validate_number_range(definition, "post_phoneme_length", "voicevox_config", minimum=0.0, maximum=1.5)
+        if definition.get("output_sampling_rate") not in VOICEVOX_SAMPLING_RATES:
+            raise ServiceError(
+                400,
+                "invalid_voicevox_config",
+                "voicevox_config.output_sampling_rate is not supported.",
+            )
+        if not isinstance(definition.get("output_stereo"), bool):
+            raise ServiceError(400, "invalid_voicevox_config", "voicevox_config.output_stereo must be a boolean.")
+
+    def _validate_style_bert_vits2_config(self, definition: Any) -> None:
+        text_fields = {"endpoint_url", "model_name", "speaker_name", "style", "language"}
+        number_fields = {"style_weight", "sdp_ratio", "noise", "noise_w", "length", "split_interval"}
+        fields = text_fields | number_fields | {"model_id", "speaker_id", "auto_split"}
+        if not isinstance(definition, dict):
+            raise ServiceError(
+                400,
+                "invalid_style_bert_vits2_config",
+                "style_bert_vits2_config must be an object.",
+            )
+        self._validate_exact_fields(definition, fields, "style_bert_vits2_config")
+        for field_name in text_fields:
+            self._validate_non_empty_text(definition, field_name, "style_bert_vits2_config")
+        self._validate_integer_range(definition, "model_id", "style_bert_vits2_config", minimum=0)
+        self._validate_integer_range(definition, "speaker_id", "style_bert_vits2_config", minimum=0)
+        for field_name in number_fields:
+            value = definition.get(field_name)
+            if type(value) not in {int, float}:
+                raise ServiceError(
+                    400,
+                    "invalid_style_bert_vits2_config",
+                    f"style_bert_vits2_config.{field_name} must be a number.",
+                )
+        if not isinstance(definition.get("auto_split"), bool):
+            raise ServiceError(
+                400,
+                "invalid_style_bert_vits2_config",
+                "style_bert_vits2_config.auto_split must be a boolean.",
+            )
+
+    def _validate_aivis_cloud_config(self, definition: Any) -> None:
+        fields = {
+            "api_key",
+            "model_uuid",
+            "speaker_uuid",
+            "style_id",
+            "speaking_rate",
+            "emotional_intensity",
+            "tempo_dynamics",
+            "volume",
+        }
+        if not isinstance(definition, dict):
+            raise ServiceError(400, "invalid_aivis_cloud_config", "aivis_cloud_config must be an object.")
+        self._validate_exact_fields(definition, fields, "aivis_cloud_config")
+        for field_name in ("api_key", "model_uuid", "speaker_uuid"):
+            if not isinstance(definition.get(field_name), str):
+                raise ServiceError(
+                    400,
+                    "invalid_aivis_cloud_config",
+                    f"aivis_cloud_config.{field_name} must be a string.",
+                )
+        self._validate_integer_range(definition, "style_id", "aivis_cloud_config", minimum=0)
+        self._validate_number_range(definition, "speaking_rate", "aivis_cloud_config", minimum=0.5, maximum=2.0)
+        self._validate_number_range(
+            definition,
+            "emotional_intensity",
+            "aivis_cloud_config",
+            minimum=0.0,
+            maximum=2.0,
+        )
+        self._validate_number_range(definition, "tempo_dynamics", "aivis_cloud_config", minimum=0.0, maximum=2.0)
+        self._validate_number_range(definition, "volume", "aivis_cloud_config", minimum=0.0, maximum=2.0)
+
+    def _validate_exact_fields(self, definition: dict[str, Any], fields: set[str], label: str) -> None:
+        missing_fields = sorted(fields - set(definition))
+        unsupported_fields = sorted(set(definition) - fields)
+        if missing_fields or unsupported_fields:
+            details = []
+            if missing_fields:
+                details.append(f"missing: {', '.join(missing_fields)}")
+            if unsupported_fields:
+                details.append(f"unsupported: {', '.join(unsupported_fields)}")
+            raise ServiceError(
+                400,
+                f"invalid_{label.replace('.', '_')}_fields",
+                f"{label} fields are invalid ({'; '.join(details)}).",
+            )
+
+    def _validate_non_empty_text(self, definition: dict[str, Any], key: str, label: str) -> None:
+        value = definition.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise ServiceError(400, f"invalid_{label}", f"{label}.{key} is required.")
+
+    def _validate_integer_range(
+        self,
+        definition: dict[str, Any],
+        key: str,
+        label: str,
+        *,
+        minimum: int,
+    ) -> None:
+        value = definition.get(key)
+        if type(value) is not int or value < minimum:
+            raise ServiceError(400, f"invalid_{label}", f"{label}.{key} must be an integer >= {minimum}.")
+
+    def _validate_number_range(
+        self,
+        definition: dict[str, Any],
+        key: str,
+        label: str,
+        *,
+        minimum: float,
+        maximum: float,
+    ) -> None:
+        value = definition.get(key)
+        if type(value) not in {int, float} or not minimum <= float(value) <= maximum:
+            raise ServiceError(
+                400,
+                f"invalid_{label}",
+                f"{label}.{key} must be from {minimum} to {maximum}.",
+            )
+
     def _validate_thinking_speech_level(self, value: Any) -> None:
         if type(value) is not int or value < 1 or value > 10:
             raise ServiceError(

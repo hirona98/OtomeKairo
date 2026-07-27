@@ -11,7 +11,7 @@ from otomekairo.service.common import debug_log
 
 
 CONFIG_DB_FILE_NAME = "config.db"
-CURRENT_CONFIG_DB_VERSION = 8
+CURRENT_CONFIG_DB_VERSION = 9
 
 
 class ConfigStore:
@@ -40,8 +40,10 @@ class ConfigStore:
                     selected_persona_id,
                     selected_memory_set_id,
                     selected_model_preset_id,
+                    selected_avatar_id,
                     thinking_speech_level,
-                    wake_policy_json
+                    wake_policy_json,
+                    microphone_settings_json
                 FROM current_config
                 WHERE id = 1
                 """
@@ -56,13 +58,16 @@ class ConfigStore:
                 "selected_persona_id": current["selected_persona_id"],
                 "selected_memory_set_id": current["selected_memory_set_id"],
                 "selected_model_preset_id": current["selected_model_preset_id"],
+                "selected_avatar_id": current["selected_avatar_id"],
                 "thinking_speech_level": current[
                     "thinking_speech_level"
                 ],
                 "wake_policy": json.loads(current["wake_policy_json"]),
+                "microphone_settings": json.loads(current["microphone_settings_json"]),
                 "personas": self._read_payload_table(conn, "personas", "persona_id"),
                 "memory_sets": self._read_payload_table(conn, "memory_sets", "memory_set_id"),
                 "model_presets": self._read_payload_table(conn, "model_presets", "model_preset_id"),
+                "avatars": self._read_payload_table(conn, "avatars", "avatar_id"),
                 "camera_sources": self._read_payload_table(conn, "camera_sources", "vision_source_id"),
                 "mcp_servers": self._read_payload_table(conn, "mcp_servers", "mcp_server_id"),
             }
@@ -134,8 +139,10 @@ class ConfigStore:
                 selected_persona_id TEXT NOT NULL,
                 selected_memory_set_id TEXT NOT NULL,
                 selected_model_preset_id TEXT NOT NULL,
+                selected_avatar_id TEXT NOT NULL,
                 thinking_speech_level INTEGER NOT NULL DEFAULT 5,
-                wake_policy_json TEXT NOT NULL
+                wake_policy_json TEXT NOT NULL,
+                microphone_settings_json TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS personas (
@@ -150,6 +157,11 @@ class ConfigStore:
 
             CREATE TABLE IF NOT EXISTS model_presets (
                 model_preset_id TEXT PRIMARY KEY,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS avatars (
+                avatar_id TEXT PRIMARY KEY,
                 payload_json TEXT NOT NULL
             );
 
@@ -190,7 +202,14 @@ class ConfigStore:
     def _write_state(self, conn: sqlite3.Connection, state: dict[str, Any]) -> None:
         conn.execute("DELETE FROM server_identity")
         conn.execute("DELETE FROM current_config")
-        for table_name in ("personas", "memory_sets", "model_presets", "camera_sources", "mcp_servers"):
+        for table_name in (
+            "personas",
+            "memory_sets",
+            "model_presets",
+            "avatars",
+            "camera_sources",
+            "mcp_servers",
+        ):
             conn.execute(f"DELETE FROM {table_name}")
 
         conn.execute(
@@ -214,22 +233,27 @@ class ConfigStore:
                 selected_persona_id,
                 selected_memory_set_id,
                 selected_model_preset_id,
+                selected_avatar_id,
                 thinking_speech_level,
-                wake_policy_json
+                wake_policy_json,
+                microphone_settings_json
             )
-            VALUES (1, ?, ?, ?, ?, ?)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 state["selected_persona_id"],
                 state["selected_memory_set_id"],
                 state["selected_model_preset_id"],
+                state["selected_avatar_id"],
                 state["thinking_speech_level"],
                 self._to_json(state["wake_policy"]),
+                self._to_json(state["microphone_settings"]),
             ),
         )
         self._write_payload_table(conn, "personas", "persona_id", state["personas"])
         self._write_payload_table(conn, "memory_sets", "memory_set_id", state["memory_sets"])
         self._write_payload_table(conn, "model_presets", "model_preset_id", state["model_presets"])
+        self._write_payload_table(conn, "avatars", "avatar_id", state["avatars"])
         self._write_payload_table(conn, "camera_sources", "vision_source_id", state.get("camera_sources", {}))
         self._write_payload_table(conn, "mcp_servers", "mcp_server_id", state.get("mcp_servers", {}))
 

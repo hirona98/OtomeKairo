@@ -138,6 +138,15 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             if method == "GET" and parsed.path == "/api/config/editor-state":
                 self._write_success(HTTPStatus.OK, self.server.service.get_editor_state(token))
                 return
+            if method == "GET" and parsed.path == "/api/config/avatar-speech":
+                self._write_success(HTTPStatus.OK, self.server.service.get_avatar_speech(token))
+                return
+            if method == "GET" and parsed.path == "/api/config/avatar-speech/editor-state":
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.get_avatar_speech_editor_state(token),
+                )
+                return
             if method == "GET" and parsed.path == "/api/config/camera-sources":
                 self._write_success(HTTPStatus.OK, self.server.service.list_camera_sources(token))
                 return
@@ -263,6 +272,13 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 self._write_success(
                     HTTPStatus.OK,
                     self.server.service.replace_editor_state(token, payload),
+                )
+                return
+            if method == "PUT" and parsed.path == "/api/config/avatar-speech/editor-state":
+                payload = self._read_json_body()
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.replace_avatar_speech_editor_state(token, payload),
                 )
                 return
             if method == "PUT" and parsed.path == "/api/config/camera-sources/editor-state":
@@ -608,6 +624,19 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         if method == "PUT" and path == "/ui/api/config/editor-state":
             payload = self._read_json_body()
             self._write_success(HTTPStatus.OK, self.server.service.replace_editor_state(token, payload))
+            return
+        if method == "GET" and path == "/ui/api/config/avatar-speech/editor-state":
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.get_avatar_speech_editor_state(token),
+            )
+            return
+        if method == "PUT" and path == "/ui/api/config/avatar-speech/editor-state":
+            payload = self._read_json_body()
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.replace_avatar_speech_editor_state(token, payload),
+            )
             return
         if method == "GET" and path == "/ui/api/config/camera-sources/editor-state":
             self._write_success(HTTPStatus.OK, self.server.service.get_camera_sources_editor_state(token))

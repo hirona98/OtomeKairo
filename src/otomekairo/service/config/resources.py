@@ -91,6 +91,64 @@ class ServiceConfigResourcesMixin:
         self._append_editor_state_audit_event(state=state, operation="read")
         return self._build_editor_state(state)
 
+    def get_avatar_speech(self, token: str | None) -> dict[str, Any]:
+        # 通常の読み取りでは音声サービスの秘密値を返さない。
+        state = self._require_token(token)
+        selected_avatar = state["avatars"][state["selected_avatar_id"]]
+        return {
+            "selected_avatar_id": state["selected_avatar_id"],
+            "microphone_settings": deepcopy(state["microphone_settings"]),
+            "selected_avatar": self._public_avatar_definition(selected_avatar),
+        }
+
+    def get_avatar_speech_editor_state(self, token: str | None) -> dict[str, Any]:
+        # 設定編集面だけがSTT/TTSの秘密値を含む。
+        state = self._require_token(token)
+        self._append_avatar_speech_editor_state_audit_event(state=state, operation="read")
+        return self._build_avatar_speech_editor_state(state)
+
+    def replace_avatar_speech_editor_state(
+        self,
+        token: str | None,
+        definition: dict[str, Any],
+    ) -> dict[str, Any]:
+        # 音声設定は独立したbundleとして一括検証してから保存する。
+        state = self._require_token(token)
+        supported_fields = {"selected_avatar_id", "microphone_settings", "avatars"}
+        unsupported_fields = sorted(set(definition) - supported_fields)
+        if unsupported_fields:
+            raise ServiceError(
+                400,
+                "unsupported_avatar_speech_editor_state_fields",
+                f"avatar speech editor-state has unsupported fields: {', '.join(unsupported_fields)}.",
+            )
+        avatars = self._entries_by_id(definition.get("avatars"), "avatar_id", "avatars")
+        if not avatars:
+            raise ServiceError(400, "missing_avatars", "avatar speech editor-state requires at least one avatar.")
+        normalized_avatars = {
+            avatar_id: self._normalize_avatar_definition(avatar)
+            for avatar_id, avatar in avatars.items()
+        }
+        for avatar_id, avatar in normalized_avatars.items():
+            self._validate_avatar_definition(avatar_id, avatar)
+
+        selected_avatar_id = definition.get("selected_avatar_id")
+        if selected_avatar_id not in normalized_avatars:
+            raise ServiceError(
+                404,
+                "avatar_not_found",
+                "The selected_avatar_id does not exist in avatars.",
+            )
+        microphone_settings = definition.get("microphone_settings")
+        self._validate_microphone_settings(microphone_settings)
+
+        state["selected_avatar_id"] = selected_avatar_id
+        state["microphone_settings"] = deepcopy(microphone_settings)
+        state["avatars"] = normalized_avatars
+        self.store.write_state(state)
+        self._append_avatar_speech_editor_state_audit_event(state=state, operation="write")
+        return self._build_avatar_speech_editor_state(state)
+
     def get_catalog(self, token: str | None) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
@@ -678,6 +736,19 @@ class ServiceConfigResourcesMixin:
             "model_presets": [deepcopy(value) for value in state["model_presets"].values()],
         }
 
+    def _build_avatar_speech_editor_state(self, state: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "selected_avatar_id": state["selected_avatar_id"],
+            "microphone_settings": deepcopy(state["microphone_settings"]),
+            "avatars": [
+                deepcopy(value)
+                for value in sorted(
+                    state["avatars"].values(),
+                    key=lambda item: str(item.get("avatar_id") or ""),
+                )
+            ],
+        }
+
     def _build_camera_sources_editor_state(self, state: dict[str, Any]) -> dict[str, Any]:
         camera_sources = self._camera_sources_from_state(state)
         return {
@@ -912,6 +983,31 @@ class ServiceConfigResourcesMixin:
             ]
         )
 
+    def _append_avatar_speech_editor_state_audit_event(
+        self,
+        *,
+        state: dict[str, Any],
+        operation: str,
+    ) -> None:
+        # API keyや音声設定本文はauditへ記録しない。
+        self.store.append_events(
+            events=[
+                {
+                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
+                    "cycle_id": "config:avatar-speech-editor-state",
+                    "memory_set_id": state["selected_memory_set_id"],
+                    "kind": f"avatar_speech_editor_state_{operation}",
+                    "role": "system",
+                    "created_at": self._now_iso(),
+                    "selected_persona_id": state["selected_persona_id"],
+                    "selected_memory_set_id": state["selected_memory_set_id"],
+                    "selected_model_preset_id": state["selected_model_preset_id"],
+                    "selected_avatar_id": state["selected_avatar_id"],
+                    "avatar_count": len(state["avatars"]),
+                }
+            ]
+        )
+
     def _append_camera_sources_editor_state_audit_event(self, *, state: dict[str, Any], operation: str) -> None:
         # 秘密値を含む camera source editor-state 本文は audit に残さない。
         self.store.append_events(
@@ -1027,6 +1123,20 @@ class ServiceConfigResourcesMixin:
         embedding = public_definition.get("embedding")
         if isinstance(embedding, dict):
             public_definition["embedding"] = self._public_embedding_definition(embedding)
+        return public_definition
+
+    def _public_avatar_definition(self, definition: dict[str, Any]) -> dict[str, Any]:
+        public_definition = deepcopy(definition)
+        stt = public_definition.get("stt")
+        if isinstance(stt, dict):
+            stt["api_key_present"] = bool(stt.get("api_key"))
+            stt.pop("api_key", None)
+        tts = public_definition.get("tts")
+        if isinstance(tts, dict):
+            aivis_cloud = tts.get("aivis_cloud_config")
+            if isinstance(aivis_cloud, dict):
+                aivis_cloud["api_key_present"] = bool(aivis_cloud.get("api_key"))
+                aivis_cloud.pop("api_key", None)
         return public_definition
 
     def _public_embedding_definition(self, definition: dict[str, Any]) -> dict[str, Any]:

@@ -11,9 +11,9 @@ class ConfigStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root_dir = Path(temp_dir)
             with sqlite3.connect(root_dir / "config.db") as conn:
-                conn.execute("PRAGMA user_version = 6")
+                conn.execute("PRAGMA user_version = 8")
 
-            with self.assertRaisesRegex(RuntimeError, "Unsupported config.db schema version: 6"):
+            with self.assertRaisesRegex(RuntimeError, "Unsupported config.db schema version: 8"):
                 FileStore(root_dir)
 
     def test_file_store_uses_config_db_without_server_state_json(self) -> None:
@@ -52,6 +52,15 @@ class ConfigStoreTests(unittest.TestCase):
                     "env": {"ELYTH_API_KEY": "secret"},
                 }
             }
+            state["selected_avatar_id"] = "avatar:default"
+            state["microphone_settings"] = {
+                "input_threshold_db": -35,
+                "speaker_recognition_threshold": 0.65,
+            }
+            state["avatars"]["avatar:default"]["stt"]["api_key"] = "stt-secret"
+            state["avatars"]["avatar:default"]["tts"]["aivis_cloud_config"][
+                "api_key"
+            ] = "tts-secret"
             store.write_state(state)
 
             reloaded_store = FileStore(root_dir)
@@ -61,8 +70,30 @@ class ConfigStoreTests(unittest.TestCase):
             self.assertTrue((root_dir / "memory.db").exists())
             self.assertFalse((root_dir / "server_state.json").exists())
             self.assertEqual(reloaded_state["console_access_token"], "token")
-            self.assertEqual(reloaded_state["camera_sources"]["vision_source:main"]["connection"]["camera_password"], "password")
+            self.assertEqual(
+                reloaded_state["camera_sources"]["vision_source:main"]["connection"][
+                    "camera_password"
+                ],
+                "password",
+            )
             self.assertEqual(reloaded_state["mcp_servers"]["mcp:elyth"]["env"]["ELYTH_API_KEY"], "secret")
+            self.assertEqual(
+                reloaded_state["microphone_settings"],
+                {
+                    "input_threshold_db": -35,
+                    "speaker_recognition_threshold": 0.65,
+                },
+            )
+            self.assertEqual(
+                reloaded_state["avatars"]["avatar:default"]["stt"]["api_key"],
+                "stt-secret",
+            )
+            self.assertEqual(
+                reloaded_state["avatars"]["avatar:default"]["tts"][
+                    "aivis_cloud_config"
+                ]["api_key"],
+                "tts-secret",
+            )
 
 
 if __name__ == "__main__":
