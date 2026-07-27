@@ -22,6 +22,14 @@ class _WorldStateService(ServiceInputWorldStateMixin):
     def _parse_iso(self, value: str) -> datetime:
         return datetime.fromisoformat(value)
 
+    def _client_context_text(self, value: object, *, limit: int) -> str | None:
+        # 実サービスと同様に、LLM入力となる正本文字列を長さで切らない。
+        _ = limit
+        if not isinstance(value, str):
+            return None
+        stripped = value.strip()
+        return stripped or None
+
 
 def _source_pack() -> WorldStateSourcePack:
     pack = WorldStateSourcePack(
@@ -167,6 +175,90 @@ class WorldStateContractTests(unittest.TestCase):
         self.assertEqual(records[0]["scope_key"], "topic:current_work")
         self.assertEqual(records[0]["integration_key"], "visual_context:vision_source:test")
         self.assertEqual(records[0]["source_owner"], "user_environment")
+
+    def test_mcp_result_builds_external_service_context_with_exact_integration_key(self) -> None:
+        service = _WorldStateService()
+
+        context = service._build_world_state_external_service_context(
+            client_context={},
+            observation_summary={
+                "capability_id": "mcp.call_tool",
+                "status": "completed",
+                "is_error": False,
+                "error": None,
+                "mcp_result_summary": "タイムラインに未読の投稿が2件ある。",
+                "mcp_server_id": "mcp:elyth/main",
+                "tool_name": "timeline/read",
+            },
+            source_kind="capability_result",
+        )
+
+        self.assertIsInstance(context, WorldStateExternalServiceContext)
+        self.assertEqual(context.summary_text, "タイムラインに未読の投稿が2件ある。")
+        self.assertEqual(context.mcp_server_id, "mcp:elyth/main")
+        self.assertEqual(context.tool_name, "timeline/read")
+        self.assertEqual(
+            context.summary_source_hint,
+            "capability_result.client_context.mcp_result_summary",
+        )
+        self.assertEqual(
+            service._world_state_integration_policy(
+                state_type="external_service",
+                scope_type="world",
+                scope_key="world",
+                context=context,
+            ),
+            {
+                "mode": "external_service_service",
+                "key": "external_service:mcp%3Aelyth%2Fmain/timeline%2Fread",
+            },
+        )
+        self.assertEqual(
+            service._build_world_state_state_type_hook(
+                state_type="external_service",
+                context=context,
+            ),
+            {
+                "summary_text": "タイムラインに未読の投稿が2件ある。",
+                "summary_source": "capability_result.client_context.mcp_result_summary",
+                "signal_fields": [
+                    "service",
+                    "mcp_server_id",
+                    "tool_name",
+                ],
+                "capability_id": "mcp.call_tool",
+                "service": "mcp:elyth/main/timeline/read",
+                "mcp_server_id": "mcp:elyth/main",
+                "tool_name": "timeline/read",
+            },
+        )
+
+    def test_failed_or_incomplete_mcp_result_does_not_build_external_service_context(self) -> None:
+        service = _WorldStateService()
+        base_summary = {
+            "capability_id": "mcp.call_tool",
+            "status": "completed",
+            "is_error": False,
+            "error": None,
+            "mcp_result_summary": "現在状態の候補",
+            "mcp_server_id": "mcp:elyth",
+            "tool_name": "get_information",
+        }
+        invalid_summaries = (
+            {**base_summary, "status": "failed", "error": "接続に失敗した。"},
+            {**base_summary, "is_error": True},
+            {**base_summary, "mcp_result_summary": ""},
+            {**base_summary, "tool_name": ""},
+        )
+
+        for observation_summary in invalid_summaries:
+            with self.subTest(observation_summary=observation_summary):
+                context = service._build_world_state_external_service_context(
+                    client_context={},
+                    observation_summary=observation_summary,
+                    source_kind="capability_result",
+                )
+                self.assertIsNone(context)
 
     def test_mock_returns_new_contract(self) -> None:
         pack = _source_pack()
