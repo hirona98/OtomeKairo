@@ -44,6 +44,12 @@ API 仕様は次のように分ける。
 ブラウザ UI は `/ui/api/conversation` を通じて既存の会話入力処理を呼び出す。
 ブラウザ UI は永続化した `person_ref / display_name / interaction_ref` を `interaction_context` として送る。
 ブラウザ UI は `/ui/api/config/...` を通じて既存設定操作を呼び出す。
+ブラウザ UI は運用ダッシュボードを常設し、`/ui/api/inspection/current-state` と `/ui/api/inspection/cycle-summaries` を 5 秒周期で読み取る。
+運用ダッシュボードは現在状態、自律実行、capability availability、最近の cycle timeline を表示する。
+運用ダッシュボードの pause / resume / cancel は `/ui/api/autonomous-runs/{run_id}/{operation}` を通じて既存の autonomous run 操作を呼び出す。
+ブラウザ UI は対話入力と同じ session-scoped `client_id` で `/ui/api/events/stream` へ接続し、`assistant_message` を会話欄へ即時表示する。
+`/ui/api/events/stream` は server が保持する `console_access_token` で認可し、token をブラウザへ返さない。
+`/ui/api/events/stream` は `Origin` と `Host` が一致する同一 origin の接続だけを受理する。
 ブラウザ UI は画面上で `console_access_token` の入力を要求しない。
 `/ui/` と `/ui/api/...` の追加は `/api/...` の path、method、認証、request / response 形式を変更しない。
 
