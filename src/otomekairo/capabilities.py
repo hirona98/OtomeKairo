@@ -744,7 +744,7 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
         "id": "mcp.call_tool",
         "version": "1",
         "kind": "external_service",
-        "decision_description": "接続中の MCP server が公開する tool を呼び出す",
+        "decision_description": "接続中の MCP server で許可された tool を呼び出す",
         "when_to_use": [
             "判断に MCP tool 経由の外部情報取得や外部サービス操作が必要",
             "MCP tool catalog に目的へ合う tool が available として載っている",

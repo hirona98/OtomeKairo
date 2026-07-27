@@ -31,6 +31,10 @@ client -> server:
     {
       "id": "camera.ptz",
       "version": "1"
+    },
+    {
+      "id": "mcp.call_tool",
+      "version": "1"
     }
   ],
   "event_subscriptions": ["assistant_message"],
@@ -81,7 +85,7 @@ client -> server:
 - `caps` はその client が現在受けられる capability binding 候補の一覧である
 - `event_subscriptions` はその client が受信して処理する server-driven event の一覧である
 - `assistant_message` を表示できる client だけが `event_subscriptions` に `assistant_message` を入れる
-- `mcp_servers` は `mcp.call_tool` を実行できる client が接続中 MCP server と tool catalog を通知する一覧である
+- `mcp_servers` は `mcp.call_tool` を実行できる client が接続中 MCP server の許可済み tool catalog を通知する一覧である
 - `vision_sources` はその client が `vision.capture` で観測できる視覚 source の一覧である
 - capability 識別子は `vision.capture` のような canonical 名を使う
 - `version` は server が持つ `CapabilityManifest` の版と照合する
@@ -90,7 +94,9 @@ client -> server:
 - `mcp.call_tool` が accepted された client は、`mcp_servers` を必須かつ 1 件以上にする
 - `mcp_servers[].mcp_server_id` は `mcp:` で始め、接続中 server 全体で一意にする
 - `mcp_servers[].transport` の初期対応値は `stdio` とする
-- `mcp_servers[].tools[]` は MCP `tools/list` の `name / description / inputSchema` を渡す
+- `mcp_servers[].tools[]` は MCP `tools/list` のうち、保存済み MCP server 定義の `enabled_tools` に含まれる tool の `name / description / inputSchema` だけを渡す
+- `mcp_servers[].tools` は許可済み tool が MCP server に存在しない場合に空配列とする
+- server は MCP server の有効状態、割当先 `client_id`、transport、`enabled_tools` が hello と一致する場合だけ catalog を登録する
 - `mcp_servers` には API key、token、内部 URL、command、env を入れない
 - `vision.capture` が accepted された client は、`vision_sources` を必須かつ 1 件以上にする
 - `vision.capture` が accepted されない client では、`vision_sources` は省略または空配列にする

@@ -119,6 +119,7 @@ class ServiceConfigStreamMixin:
         )
         mcp_servers = self._normalize_hello_mcp_servers(
             payload=payload,
+            client_id=client_id.strip(),
             accepted_capabilities=accepted_capabilities,
         )
 
@@ -382,6 +383,7 @@ class ServiceConfigStreamMixin:
         self,
         *,
         payload: dict[str, Any],
+        client_id: str,
         accepted_capabilities: dict[str, str],
     ) -> list[dict[str, Any]]:
         raw_servers = payload.get("mcp_servers")
@@ -404,6 +406,7 @@ class ServiceConfigStreamMixin:
 
         normalized_servers: list[dict[str, Any]] = []
         seen_server_ids: set[str] = set()
+        registered_servers = self._mcp_servers_from_state(self.store.read_state())
         for raw_server in raw_servers:
             if not isinstance(raw_server, dict):
                 raise ServiceError(400, "invalid_mcp_servers", "hello.mcp_servers must contain objects.")
@@ -432,7 +435,40 @@ class ServiceConfigStreamMixin:
                     "invalid_mcp_servers",
                     "hello.mcp_servers[].transport is unsupported.",
                 )
+            registered_server = registered_servers.get(server_id)
+            if not isinstance(registered_server, dict) or registered_server.get("enabled") is not True:
+                raise ServiceError(
+                    400,
+                    "invalid_mcp_servers",
+                    "hello.mcp_servers[] is not an enabled MCP server definition.",
+                )
+            if registered_server.get("client_id") != client_id:
+                raise ServiceError(
+                    400,
+                    "invalid_mcp_servers",
+                    "hello.mcp_servers[] is assigned to another client_id.",
+                )
+            if registered_server.get("transport", "stdio") != transport:
+                raise ServiceError(
+                    400,
+                    "invalid_mcp_servers",
+                    "hello.mcp_servers[].transport does not match the MCP server definition.",
+                )
             tools = self._normalize_hello_mcp_tools(raw_server.get("tools"))
+            enabled_tool_names = registered_server.get("enabled_tools")
+            if not isinstance(enabled_tool_names, list):
+                enabled_tool_names = []
+            unexpected_tool_names = sorted(
+                tool["name"]
+                for tool in tools
+                if tool["name"] not in enabled_tool_names
+            )
+            if unexpected_tool_names:
+                raise ServiceError(
+                    400,
+                    "invalid_mcp_servers",
+                    "hello.mcp_servers[].tools contains a tool that is not enabled.",
+                )
             normalized_servers.append(
                 {
                     "mcp_server_id": server_id,
@@ -443,11 +479,11 @@ class ServiceConfigStreamMixin:
         return normalized_servers
 
     def _normalize_hello_mcp_tools(self, value: Any) -> list[dict[str, Any]]:
-        if not isinstance(value, list) or not value:
+        if not isinstance(value, list):
             raise ServiceError(
                 400,
                 "invalid_mcp_servers",
-                "hello.mcp_servers[].tools must be a non-empty array.",
+                "hello.mcp_servers[].tools must be an array.",
             )
         normalized_tools: list[dict[str, Any]] = []
         seen_tool_names: set[str] = set()
@@ -810,6 +846,8 @@ class ServiceConfigStreamMixin:
         return result
 
     def _inspection_mcp_servers(self, mcp_servers: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        # 接続後の設定変更も decision view と inspection へ即時反映する。
+        registered_servers = self._mcp_servers_from_state(self.store.read_state())
         normalized: list[dict[str, Any]] = []
         for server in mcp_servers or []:
             if not isinstance(server, dict):
@@ -818,13 +856,28 @@ class ServiceConfigStreamMixin:
             transport = server.get("transport")
             if not isinstance(server_id, str) or not server_id.strip():
                 continue
-            tools = self._inspection_mcp_tools(server.get("tools"))
+            normalized_server_id = server_id.strip()
+            registered_server = registered_servers.get(normalized_server_id)
+            enabled_tool_names = (
+                registered_server.get("enabled_tools")
+                if isinstance(registered_server, dict)
+                and registered_server.get("enabled") is True
+                and registered_server.get("client_id") == server.get("client_id")
+                else []
+            )
+            if not isinstance(enabled_tool_names, list):
+                enabled_tool_names = []
+            tools = [
+                tool
+                for tool in self._inspection_mcp_tools(server.get("tools"))
+                if tool["name"] in enabled_tool_names
+            ]
             normalized.append(
                 {
-                    "mcp_server_id": server_id.strip(),
+                    "mcp_server_id": normalized_server_id,
                     "transport": transport.strip() if isinstance(transport, str) and transport.strip() else "stdio",
                     "available": server.get("available") is True and bool(tools),
-                    "unavailable_reason": server.get("unavailable_reason") if not tools else None,
+                    "unavailable_reason": "no_mcp_tool" if not tools else None,
                     "tools": tools,
                 }
             )

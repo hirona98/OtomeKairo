@@ -44,7 +44,13 @@ class McpClientConnector:
     def refresh_tools(self) -> None:
         tools_by_server: dict[str, list[dict[str, Any]]] = {}
         for server in self.config.mcp_servers:
-            tools_by_server[server.mcp_server_id] = asyncio.run(list_tools(server))
+            # hello へ載せる catalog 自体を許可済み tool に限定する。
+            enabled_tool_names = set(server.enabled_tools)
+            tools_by_server[server.mcp_server_id] = [
+                tool
+                for tool in asyncio.run(list_tools(server))
+                if tool.get("name") in enabled_tool_names
+            ]
         self._tools_by_server = tools_by_server
 
     def print_hello(self) -> None:
@@ -105,6 +111,19 @@ class McpClientConnector:
                 structured_content=None,
                 summary="MCP server is not configured.",
                 error="mcp_server_not_configured",
+            )
+            return
+        if tool_name not in server.enabled_tools:
+            self._post_result(
+                request_id=request_id,
+                mcp_server_id=mcp_server_id,
+                tool_name=tool_name,
+                status="failed",
+                is_error=True,
+                content=[],
+                structured_content=None,
+                summary="MCP tool is not enabled.",
+                error="mcp_tool_not_enabled",
             )
             return
         try:

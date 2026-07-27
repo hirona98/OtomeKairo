@@ -680,6 +680,7 @@ function renderMcp() {
   element("mcp-transport").value = mcp?.transport || "stdio";
   element("mcp-command").value = mcp?.command || "";
   element("mcp-args").value = (mcp?.args || []).join("\n");
+  element("mcp-enabled-tools").value = (mcp?.enabled_tools || []).join("\n");
   element("mcp-cwd").value = mcp?.cwd || "";
   element("mcp-env").value = formatEnv(mcp?.env || {});
 }
@@ -696,6 +697,7 @@ function syncMcp() {
   mcp.transport = textValue("mcp-transport");
   mcp.command = textValue("mcp-command");
   mcp.args = parseLines(textValue("mcp-args"));
+  mcp.enabled_tools = parseLines(textValue("mcp-enabled-tools"));
   const cwd = textValue("mcp-cwd").trim();
   mcp.cwd = cwd || null;
   mcp.env = parseEnv(textValue("mcp-env"));
@@ -858,6 +860,7 @@ function addMcp() {
     command: "npx",
     args: ["-y", "elyth-mcp-server@latest"],
     cwd: null,
+    enabled_tools: [],
     env: {},
   });
   state.selectedMcpId = id;

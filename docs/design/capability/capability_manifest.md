@@ -84,7 +84,7 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
 `vision.capture` の manifest は次の形を基準にする。
 concrete capability は `vision.capture`、`camera.ptz`、`external.status`、`schedule.status`、`device.status`、`body.status`、`environment.status`、`location.status`、`social.status`、`mcp.call_tool` である。
 `external.status` は短い外部状態要約、`schedule.status` は短い予定要約と deterministic な schedule slot、`device.status` は短い端末状態要約、`body.status` は短い身体状態要約、`environment.status` は短い周囲環境要約、`location.status` は短い場所状態要約、`social.status` は短い対人文脈要約を result として返す。
-`mcp.call_tool` は接続中 MCP server が公開する tool catalog から、指定 tool を呼び出す汎用 external-service capability である。
+`mcp.call_tool` は接続中 MCP server の許可済み tool catalog から、指定 tool を呼び出す汎用 external-service capability である。
 各 capability の `client_context.body_state_summary / device_state_summary / schedule_summary / environment_summary / location_summary / social_context_summary`、`schedule.status.schedule_slots`、`device.status.device_state_summary`、`body.status.body_state_summary`、`environment.status.environment_summary`、`location.status.location_summary`、`social.status.social_context_summary` は inspection_fields 経由で短い観測要約へ投影する。
 `mcp.call_tool` result は `client_context.mcp_result_summary` を follow-up 判断と inspection に使う。
 server は MCP raw `content` と `structured_content` を永続化せず、件数と有無だけを `client_context` に保存する。
@@ -406,7 +406,8 @@ capability 実行可否は `required_permissions` と認証済み client また�
 
 `mcp.call_tool` は MCP server の種類を capability id に入れない。
 ELYTH のような個別サービスは `hello.mcp_servers[].mcp_server_id` と tool catalog で識別する。
-server は `mcp_server_id` と `tool_name` から dispatch 先 client を一意に決める。
+server は保存済み MCP server 定義の `enabled_tools` を実行権限の正本とする。
+server は許可済み `mcp_server_id` と `tool_name` から dispatch 先 client を一意に決める。
 tool が持つ `inputSchema` は connector hello で server へ渡し、server は `arguments` を dispatch 前に検証する。
 
 新しい capability を追加するときは、同じ変更内で次を定義する。

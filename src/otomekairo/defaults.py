@@ -123,6 +123,7 @@ def build_default_elyth_mcp_server() -> dict:
         "command": "npx",
         "args": ["-y", "elyth-mcp-server@latest"],
         "cwd": None,
+        "enabled_tools": [],
         "env": {
             "ELYTH_API_BASE": "https://elythworld.com",
             "ELYTH_API_KEY": "",

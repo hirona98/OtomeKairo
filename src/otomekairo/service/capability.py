@@ -492,6 +492,12 @@ class ServiceCapabilityMixin:
             raise ValueError("mcp.call_tool arguments must be an object.")
         normalized_server_id = mcp_server_id.strip()
         normalized_tool_name = tool_name.strip()
+        if not self._mcp_tool_is_enabled(normalized_server_id, normalized_tool_name):
+            raise CapabilityUnavailableError(
+                f"Capability target is not enabled: mcp.call_tool {normalized_server_id}/{normalized_tool_name}",
+                reason_code="mcp_tool_not_enabled",
+                unavailable_reason="no_mcp_tool",
+            )
         target = self._event_stream_registry.get_mcp_tool_target(
             mcp_server_id=normalized_server_id,
             tool_name=normalized_tool_name,
