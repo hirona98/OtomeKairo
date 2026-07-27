@@ -19,6 +19,15 @@ class WebSocketProtocolError(Exception):
     pass
 
 
+# hello 登録失敗の公開 error code を表示文から独立させる。
+class EventStreamRegistrationError(ValueError):
+    def __init__(self, message: str, *, error_code: str) -> None:
+        if error_code not in {"invalid_vision_sources", "invalid_mcp_servers"}:
+            raise ValueError(f"Unknown event stream registration error_code: {error_code}")
+        super().__init__(message)
+        self.error_code = error_code
+
+
 # ハンドシェイク
 def build_websocket_accept(key: str) -> str:
     # 要約
@@ -252,7 +261,10 @@ class EventStreamRegistry:
                 }
             )
             if duplicate_source_ids:
-                raise ValueError(f"duplicate_vision_source_id: {', '.join(duplicate_source_ids)}")
+                raise EventStreamRegistrationError(
+                    f"duplicate_vision_source_id: {', '.join(duplicate_source_ids)}",
+                    error_code="invalid_vision_sources",
+                )
             existing_mcp_server_ids: set[str] = set()
             for existing_session in self._sessions.values():
                 if existing_session.get("session_id") == session_id:
@@ -271,7 +283,10 @@ class EventStreamRegistry:
                 }
             )
             if duplicate_mcp_server_ids:
-                raise ValueError(f"duplicate_mcp_server_id: {', '.join(duplicate_mcp_server_ids)}")
+                raise EventStreamRegistrationError(
+                    f"duplicate_mcp_server_id: {', '.join(duplicate_mcp_server_ids)}",
+                    error_code="invalid_mcp_servers",
+                )
 
             # 更新
             session["client_id"] = client_id

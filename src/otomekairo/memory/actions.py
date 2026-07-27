@@ -783,11 +783,11 @@ class MemoryActionResolver:
         return self._slug_hint(text)
 
     def _normalize_object_hint(self, value: Any) -> str | None:
-        text = str(value).strip()
-        if text.lower() in {"none", "null", "nothing", "n/a"} or text in {"なし", "不要", "未指定"}:
+        if value is None:
             return None
-        if not text:
-            return None
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("object_hint は非空文字列または null である必要があります。")
+        text = value.strip()
         if text.startswith("entity:"):
             raise ValueError("entity:<key> は memory ref として使えません。person:/place:/tool: を使ってください。")
         if self._looks_like_ref(text):

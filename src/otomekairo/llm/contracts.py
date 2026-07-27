@@ -918,10 +918,11 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
             raise LLMError("MemoryInterpretation candidate_memory_unit.subject_hint が不正です。")
         if not isinstance(candidate["predicate_hint"], str) or not candidate["predicate_hint"].strip():
             raise LLMError("MemoryInterpretation candidate_memory_unit.predicate_hint が不正です。")
-        if not isinstance(candidate["object_hint"], str) or not candidate["object_hint"].strip():
+        object_hint = candidate["object_hint"]
+        if object_hint is not None and (not isinstance(object_hint, str) or not object_hint.strip()):
             raise LLMError("MemoryInterpretation candidate_memory_unit.object_hint が不正です。")
-        if candidate["subject_hint"].strip().startswith("entity:") or candidate["object_hint"].strip().startswith(
-            "entity:"
+        if candidate["subject_hint"].strip().startswith("entity:") or (
+            isinstance(object_hint, str) and object_hint.strip().startswith("entity:")
         ):
             raise LLMError(
                 "MemoryInterpretation candidate_memory_unit では entity:<key> を使えません。"

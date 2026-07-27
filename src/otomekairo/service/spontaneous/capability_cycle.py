@@ -5,6 +5,7 @@ from typing import Any
 
 from otomekairo.llm.client import LLMError
 from otomekairo.recall.builder import RecallPackSelectionError
+from otomekairo.service.capability import CapabilityResultValidationError
 from otomekairo.service.common import ServiceError, debug_log
 
 
@@ -29,19 +30,13 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 result_payload=result_payload,
                 current_time=accepted_at,
             )
-        except ValueError as exc:
+        except CapabilityResultValidationError as exc:
             self._mark_capability_runtime_failure(
                 capability_id=capability_id,
                 current_time=accepted_at,
                 failure_summary=str(exc),
             )
-            if "client_id" in str(exc):
-                raise ServiceError(
-                    409,
-                    "capability_result_client_id_mismatch",
-                    "client_id does not match the pending capability target.",
-                ) from exc
-            raise ServiceError(400, "invalid_capability_result", str(exc)) from exc
+            raise ServiceError(exc.status_code, exc.error_code, str(exc)) from exc
         if response is None:
             debug_log(
                 log_channel,

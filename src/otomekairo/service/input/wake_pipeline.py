@@ -517,8 +517,7 @@ class ServiceInputWakePipelineMixin:
                 continue
             if item.get("status") == "succeeded":
                 return False
-            reason_summary = item.get("reason_summary")
-            if isinstance(reason_summary, str) and "対象 vision source が接続されていない" in reason_summary:
+            if item.get("failure_code") == "source_unavailable":
                 retryable_failure = True
         return retryable_failure
 

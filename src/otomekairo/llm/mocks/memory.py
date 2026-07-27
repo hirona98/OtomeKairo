@@ -304,7 +304,7 @@ class LLMMockMemoryMixin:
             "scope": candidate["scope_type"],
             "subject_hint": subject_hint,
             "predicate_hint": candidate["predicate"],
-            "object_hint": candidate.get("object_ref_or_value") or "なし",
+            "object_hint": candidate.get("object_ref_or_value"),
             "qualifiers_hint": qualifiers,
             "summary_text": candidate["summary_text"],
             "evidence_text": candidate["reason"],

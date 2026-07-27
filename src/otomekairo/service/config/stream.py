@@ -6,9 +6,10 @@ from otomekairo.capabilities import (
     capability_decision_readiness_from_manifest,
     capability_manifests,
 )
-from otomekairo.event_stream import ServerWebSocket
+from otomekairo.event_stream import EventStreamRegistrationError, ServerWebSocket
 from otomekairo.service.common import ServiceError, debug_log
 from otomekairo.service.config.constants import (
+    CAPABILITY_UNAVAILABLE_REASONS,
     EVENT_STREAM_CAPABILITY_PERMISSIONS,
     VISION_SOURCE_KINDS,
 )
@@ -132,9 +133,8 @@ class ServiceConfigStreamMixin:
                 vision_sources=vision_sources,
                 mcp_servers=mcp_servers,
             )
-        except ValueError as exc:
-            error_code = "invalid_mcp_servers" if "mcp_server" in str(exc) else "invalid_vision_sources"
-            raise ServiceError(400, error_code, str(exc)) from exc
+        except EventStreamRegistrationError as exc:
+            raise ServiceError(400, exc.error_code, str(exc)) from exc
         debug_log(
             "EventStream",
             (
@@ -763,6 +763,8 @@ class ServiceConfigStreamMixin:
                 unavailable_reason = "parallel_blocked"
             elif capability_id == "mcp.call_tool" and not has_mcp_tool:
                 unavailable_reason = "no_mcp_tool"
+        if unavailable_reason is not None and unavailable_reason not in CAPABILITY_UNAVAILABLE_REASONS:
+            raise ValueError(f"Unknown capability unavailable_reason: {unavailable_reason}")
 
         result = {
             "capability_id": capability_id,

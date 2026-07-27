@@ -8,6 +8,23 @@ EVENT_STREAM_CAPABILITY_PERMISSIONS = (
     "control_camera_ptz",
     "use_mcp_tools",
 )
+# capability runtime と inspection が共有する機械判定値。
+CAPABILITY_UNAVAILABLE_REASONS = frozenset(
+    {
+        "no_binding",
+        "permission_denied",
+        "paused",
+        "busy",
+        "unavailable",
+        "dispatch_failed",
+        "request_timeout",
+        "parallel_blocked",
+        "camera_source_disabled",
+        "no_vision_source",
+        "no_supported_control",
+        "no_mcp_tool",
+    }
+)
 PERSONA_INITIATIVE_BASELINES = {"low", "medium", "high"}
 VISION_SOURCE_KINDS = {"desktop", "camera", "virtual"}
 CAMERA_CONNECTOR_KINDS = {"tapo_c220"}

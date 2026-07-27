@@ -344,15 +344,6 @@ class LLMClient:
                 self._coerce_decision_to_noop_for_fresh_world_state_reuse(payload, exc)
                 return
             raise
-        self._validate_decision_visual_observation_context(
-            payload=payload,
-            trigger_kind=context.trigger_kind,
-            visual_observation_context=context.visual_observation_context,
-        )
-        self._validate_decision_user_message_response(
-            payload=payload,
-            context=context,
-        )
 
     def _validate_decision_foreground_selection_refs(
         self,
@@ -491,70 +482,6 @@ class LLMClient:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
             raise
 
-    def _validate_decision_visual_observation_context(
-        self,
-        *,
-        payload: dict[str, Any],
-        trigger_kind: str,
-        visual_observation_context: dict[str, Any] | None,
-    ) -> None:
-        if trigger_kind != "user_message" or payload.get("kind") != "noop":
-            return
-        if not isinstance(visual_observation_context, dict):
-            return
-        if visual_observation_context.get("source") != "conversation_attachment":
-            return
-        if visual_observation_context.get("image_interpreted") is not True:
-            return
-        summary_text = visual_observation_context.get("visual_summary_text")
-        if not isinstance(summary_text, str) or not summary_text.strip():
-            return
-        reason_text = " ".join(
-            str(payload.get(key) or "")
-            for key in ("reason_code", "reason_summary")
-        )
-        missing_terms = ("画像データ", "視覚情報", "欠落", "添付画像", "不足")
-        if any(term in reason_text for term in missing_terms):
-            raise LLMError(
-                "会話添付画像は VisualObservationContext.visual_summary_text として解釈済みです。"
-                "raw image が decision prompt に無いことを理由に noop を返してはいけません。"
-                "visual_summary_text の範囲で kind=speech を返してください。"
-            )
-
-    def _validate_decision_user_message_response(
-        self,
-        *,
-        payload: dict[str, Any],
-        context: DecisionContext,
-    ) -> None:
-        if payload.get("kind") != "noop":
-            return
-        current_input = context.current_input
-        if current_input.sender_kind != "person" or not current_input.response_target_refs:
-            return
-        text = current_input.text.strip()
-        if not text or self._user_message_explicitly_allows_noop(text):
-            return
-        raise LLMError(
-            "current_input.sender_kind=person かつ response_target_refs が非空の text は人物発話です。"
-            "人物発話への noop は不正です。短い挨拶や断片でも kind=speech を返してください。"
-        )
-
-    def _user_message_explicitly_allows_noop(self, text: str) -> bool:
-        normalized = text.strip().lower()
-        if not normalized:
-            return True
-        return any(
-            marker in normalized
-            for marker in (
-                "発話不要",
-                "返事不要",
-                "反応不要",
-                "no speech",
-                "do not speech",
-            )
-        )
-
     def _coerce_decision_to_noop_for_fresh_world_state_reuse(
         self,
         payload: dict[str, Any],
@@ -634,7 +561,7 @@ class LLMClient:
         if isinstance(age_label, str) and age_label.strip():
             state_summary += f" age_label={age_label.strip()}"
         if isinstance(summary_text, str) and summary_text.strip():
-            state_summary += f" summary={summary_text.strip()[:80]}"
+            state_summary += f" summary={summary_text.strip()}"
         raise LLMError(
             f"CapabilityDecisionView の {normalized_request_capability_id} は "
             f"fresh_world_state_available=true です。{state_summary}"
@@ -669,11 +596,11 @@ class LLMClient:
             if isinstance(age_label, str) and age_label.strip():
                 state_summary += f" age_label={age_label.strip()}"
             if isinstance(summary_text, str) and summary_text.strip():
-                state_summary += f" summary={summary_text.strip()[:80]}"
+                state_summary += f" summary={summary_text.strip()}"
             raise LLMError(
                 "CapabilityDecisionView の vision.capture には "
                 f"vision_source_id={requested_source_id.strip()} の新鮮な visual_context があります。{state_summary}"
-                "明示的なユーザー依頼なしで同じ vision_source_id を再取得する capability_request は不正です。"
+                "判断入力に含まれる同じ vision_source_id の現在状態を再取得する capability_request は不正です。"
                 "既存の foreground_world_state を使って speech / noop / pending_intent を返してください。"
             )
 

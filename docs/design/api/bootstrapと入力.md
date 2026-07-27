@@ -157,7 +157,7 @@ request:
 - server は会話入力を `current_input.sender_kind=person`、`sender_ref=<speaker_ref>`、`source_kind=user_message`、`response_target_refs=<participant person_ref群>` として shared pipeline に渡す
 - server は人物識別結果を信頼し、認証主体との対応確認となりすまし検出を実行しない
 - 会話履歴は `interaction_ref` が一致する event だけから構成する
-- server は非空のユーザー原文に対する `decision.kind=noop` を契約違反として repair する。明示的な発話不要表現または `disclosure_review.outcome=withhold` の場合だけ `noop` を許可する
+- 人物発話に対する `speech / noop` の意味判断と validator 境界は [../llm/プロンプト文脈分離方針.md](../llm/プロンプト文脈分離方針.md) を正とする
 
 response:
 
@@ -364,7 +364,7 @@ API起床は少なくとも次の挙動を持つ。
 - server 内の定期思考スケジューラは `current_input.sender_kind=system`、`source_kind=background_thinking`、空の `response_target_refs` として shared pipeline に渡す
 - server 内の定期思考スケジューラだけが `wake_policy.mode`、`wake_policy.interval_seconds`、`wake_policy.observations` を使う
 - 定期思考で `mode=interval` かつ `wake_policy.observations` がある場合、enabled observation を順番に取得し、成功結果をその回の判断へ進む前景シグナルとして扱い、visual capture は `visual_observation` の構造化出力で `change_state` を受け取り、視覚記録と `world_state` を整理してから wake 判断を 1 回だけ行う
-- 思考前観測 が vision source 未接続の一時失敗だけで終わった場合、server は interval を消費せず短い再試行待ちにする
+- 思考前観測が `failure_code=source_unavailable` の失敗だけで終わった場合、server は interval を消費せず短い再試行待ちにする。失敗コードの正本は [../capability/視覚機能.md](../capability/視覚機能.md) とする
 - 思考前観測 の同期 capability request は内部観測として扱い、`ongoing_action` を作らない
 - capability request は dispatch 時点の `current_input` を request record の `source_current_input` に保存し、capability result の `response_target_refs` は `source_current_input.response_target_refs` を引き継ぐ
 - `source_current_input.response_target_refs=空配列` の capability result は内部観測結果として扱い、実効判断を `noop` に正規化し、assistant message を送信しない

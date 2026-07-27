@@ -358,6 +358,9 @@ response:
 | `request_timeout` | 直近の result timeout により一時的に実行不可である |
 | `parallel_blocked` | 並列実行制限により実行不可である |
 | `camera_source_disabled` | 採用済み camera source が無効である |
+| `no_vision_source` | 対象となる視覚 source がない |
+| `no_supported_control` | 対象 camera source に対応制御がない |
+| `no_mcp_tool` | 対象 MCP tool がない |
 
 `readiness` は manifest 由来の family 前提条件であり、`family / world_state_type / input_keys / result_summary_keys / result_item_keys` を持つ。
 `readiness` は token、credential、内部 URL、transport 詳細を含まない。
