@@ -12,7 +12,7 @@ from otomekairo.recall.association import ACTIVE_MEMORY_STATUSES
 
 SECTION_LIMITS = {
     "self_model": 2,
-    "user_model": 4,
+    "person_model": 4,
     "relationship_model": 3,
     "active_topics": 2,
     "active_commitments": 3,

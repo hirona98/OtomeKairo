@@ -9,6 +9,7 @@ from typing import Any
 
 from otomekairo.capabilities import capability_manifests, capability_readiness_input_digest
 from otomekairo.service.common import debug_log
+from otomekairo.service.config.constants import CAPABILITY_UNAVAILABLE_REASONS
 
 
 class CapabilityDispatchError(ValueError):
@@ -22,6 +23,43 @@ class CapabilityDispatchError(ValueError):
         super().__init__(message)
         self.capability_request_summary = capability_request_summary
         self.ongoing_action_transition_summary = ongoing_action_transition_summary
+
+
+# 対象選択失敗の表示文と runtime の機械判定値を分離する。
+class CapabilityUnavailableError(ValueError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason_code: str,
+        unavailable_reason: str,
+    ) -> None:
+        if unavailable_reason not in CAPABILITY_UNAVAILABLE_REASONS:
+            raise ValueError(f"Unknown capability unavailable_reason: {unavailable_reason}")
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.unavailable_reason = unavailable_reason
+
+
+# result endpoint の HTTP 応答を例外文から独立させる。
+class CapabilityResultValidationError(ValueError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int = 400,
+        error_code: str = "invalid_capability_result",
+    ) -> None:
+        if (status_code, error_code) not in {
+            (400, "invalid_capability_result"),
+            (409, "capability_result_client_id_mismatch"),
+        }:
+            raise ValueError(
+                f"Unknown capability result validation response: status={status_code} error_code={error_code}"
+            )
+        super().__init__(message)
+        self.status_code = status_code
+        self.error_code = error_code
 
 
 class ServiceCapabilityMixin:
@@ -133,13 +171,12 @@ class ServiceCapabilityMixin:
                 capability_id=capability_id,
                 input_payload=input_payload,
             )
-        except ValueError as exc:
-            unavailable_reason = "no_binding" if "no_binding" in str(exc) else "unavailable"
+        except CapabilityUnavailableError as exc:
             self._mark_capability_runtime_failure(
                 capability_id=capability_id,
                 current_time=current_time,
                 failure_summary=str(exc),
-                unavailable_reason=unavailable_reason,
+                unavailable_reason=exc.unavailable_reason,
                 unavailable_seconds=int(state_policy.get("unavailable_seconds_on_dispatch_failure") or 0),
             )
             raise
@@ -324,12 +361,15 @@ class ServiceCapabilityMixin:
         # result endpoint から来た payload を manifest の result schema で検証する。
         manifest = capability_manifests().get(capability_id)
         if manifest is None:
-            raise ValueError(f"Unknown capability: {capability_id}")
-        self._validate_capability_payload(
-            payload=result_payload,
-            schema=manifest.get("result_schema"),
-            label=f"{capability_id} result",
-        )
+            raise CapabilityResultValidationError(f"Unknown capability: {capability_id}")
+        try:
+            self._validate_capability_payload(
+                payload=result_payload,
+                schema=manifest.get("result_schema"),
+                label=f"{capability_id} result",
+            )
+        except ValueError as exc:
+            raise CapabilityResultValidationError(str(exc)) from exc
         self._prune_pending_capability_requests(current_time=current_time)
 
         # request_id と配送先 client を照合する。
@@ -343,14 +383,21 @@ class ServiceCapabilityMixin:
                 return None
             target_client_id = request_record.get("target_client_id")
             if target_client_id != client_id:
-                raise ValueError("capability client_id does not match the pending target.")
+                raise CapabilityResultValidationError(
+                    "client_id does not match the pending capability target.",
+                    status_code=409,
+                    error_code="capability_result_client_id_mismatch",
+                )
             if request_record.get("capability_id") != capability_id:
-                raise ValueError("capability_id does not match the pending request.")
-            self._validate_capability_result_source(
-                capability_id=capability_id,
-                request_record=request_record,
-                result_payload=result_payload,
-            )
+                raise CapabilityResultValidationError("capability_id does not match the pending request.")
+            try:
+                self._validate_capability_result_source(
+                    capability_id=capability_id,
+                    request_record=request_record,
+                    result_payload=result_payload,
+                )
+            except ValueError as exc:
+                raise CapabilityResultValidationError(str(exc)) from exc
 
             self._clear_capability_runtime_busy(
                 capability_id=capability_id,
@@ -391,19 +438,35 @@ class ServiceCapabilityMixin:
             }
         vision_source_id = input_payload.get("vision_source_id")
         if not isinstance(vision_source_id, str) or not vision_source_id.strip():
-            raise ValueError("Capability is unavailable: vision.capture no_binding vision_source_id")
+            raise CapabilityUnavailableError(
+                "Capability target is invalid: vision.capture vision_source_id",
+                reason_code="missing_target_identifier",
+                unavailable_reason="unavailable",
+            )
         vision_source = self._event_stream_registry.get_vision_source(vision_source_id.strip())
         if not isinstance(vision_source, dict):
-            raise ValueError(f"Capability is unavailable: vision.capture no_binding {vision_source_id.strip()}")
+            raise CapabilityUnavailableError(
+                f"Capability target is unavailable: vision.capture {vision_source_id.strip()}",
+                reason_code="target_not_found",
+                unavailable_reason="no_vision_source",
+            )
         if (
             vision_source.get("kind") == "camera"
             and vision_source.get("source_owner") == "self"
             and not self._camera_source_is_enabled(vision_source_id.strip())
         ):
-            raise ValueError(f"Capability is unavailable: vision.capture camera_source_disabled {vision_source_id.strip()}")
+            raise CapabilityUnavailableError(
+                f"Capability target is unavailable: vision.capture {vision_source_id.strip()}",
+                reason_code="camera_source_disabled",
+                unavailable_reason="camera_source_disabled",
+            )
         client_id = vision_source.get("client_id")
         if not isinstance(client_id, str) or not client_id.strip():
-            raise ValueError(f"Capability is unavailable: vision.capture no_binding {vision_source_id.strip()}")
+            raise CapabilityUnavailableError(
+                f"Capability target has no client binding: vision.capture {vision_source_id.strip()}",
+                reason_code="client_unbound",
+                unavailable_reason="no_binding",
+            )
         return {
             "target_client_id": client_id.strip(),
             "vision_source": vision_source,
@@ -414,22 +477,44 @@ class ServiceCapabilityMixin:
         tool_name = input_payload.get("tool_name")
         arguments = input_payload.get("arguments")
         if not isinstance(mcp_server_id, str) or not mcp_server_id.strip():
-            raise ValueError("Capability is unavailable: mcp.call_tool no_binding mcp_server_id")
+            raise CapabilityUnavailableError(
+                "Capability target is invalid: mcp.call_tool mcp_server_id",
+                reason_code="missing_target_identifier",
+                unavailable_reason="unavailable",
+            )
         if not isinstance(tool_name, str) or not tool_name.strip():
-            raise ValueError("Capability is unavailable: mcp.call_tool no_binding tool_name")
+            raise CapabilityUnavailableError(
+                "Capability target is invalid: mcp.call_tool tool_name",
+                reason_code="missing_target_identifier",
+                unavailable_reason="unavailable",
+            )
         if not isinstance(arguments, dict):
             raise ValueError("mcp.call_tool arguments must be an object.")
         normalized_server_id = mcp_server_id.strip()
         normalized_tool_name = tool_name.strip()
+        if not self._mcp_tool_is_enabled(normalized_server_id, normalized_tool_name):
+            raise CapabilityUnavailableError(
+                f"Capability target is not enabled: mcp.call_tool {normalized_server_id}/{normalized_tool_name}",
+                reason_code="mcp_tool_not_enabled",
+                unavailable_reason="no_mcp_tool",
+            )
         target = self._event_stream_registry.get_mcp_tool_target(
             mcp_server_id=normalized_server_id,
             tool_name=normalized_tool_name,
         )
         if not isinstance(target, dict):
-            raise ValueError(f"Capability is unavailable: mcp.call_tool no_binding {normalized_server_id}/{normalized_tool_name}")
+            raise CapabilityUnavailableError(
+                f"Capability target is unavailable: mcp.call_tool {normalized_server_id}/{normalized_tool_name}",
+                reason_code="target_not_found",
+                unavailable_reason="no_mcp_tool",
+            )
         tool = target.get("tool")
         if not isinstance(tool, dict):
-            raise ValueError(f"Capability is unavailable: mcp.call_tool no_tool {normalized_server_id}/{normalized_tool_name}")
+            raise CapabilityUnavailableError(
+                f"Capability target has no tool: mcp.call_tool {normalized_server_id}/{normalized_tool_name}",
+                reason_code="tool_not_found",
+                unavailable_reason="no_mcp_tool",
+            )
         input_schema = tool.get("inputSchema")
         if isinstance(input_schema, dict):
             self._validate_capability_schema_value(
@@ -439,7 +524,11 @@ class ServiceCapabilityMixin:
             )
         client_id = target.get("client_id")
         if not isinstance(client_id, str) or not client_id.strip():
-            raise ValueError(f"Capability is unavailable: mcp.call_tool no_binding {normalized_server_id}/{normalized_tool_name}")
+            raise CapabilityUnavailableError(
+                f"Capability target has no client binding: mcp.call_tool {normalized_server_id}/{normalized_tool_name}",
+                reason_code="client_unbound",
+                unavailable_reason="no_binding",
+            )
         return {
             "target_client_id": client_id.strip(),
             "vision_source": None,
@@ -450,33 +539,73 @@ class ServiceCapabilityMixin:
     def _select_camera_ptz_target(self, *, input_payload: dict[str, Any]) -> dict[str, Any]:
         vision_source_id = input_payload.get("vision_source_id")
         if not isinstance(vision_source_id, str) or not vision_source_id.strip():
-            raise ValueError("Capability is unavailable: camera.ptz no_binding vision_source_id")
+            raise CapabilityUnavailableError(
+                "Capability target is invalid: camera.ptz vision_source_id",
+                reason_code="missing_target_identifier",
+                unavailable_reason="unavailable",
+            )
         normalized_source_id = vision_source_id.strip()
         vision_source = self._event_stream_registry.get_vision_source(normalized_source_id)
         if not isinstance(vision_source, dict):
-            raise ValueError(f"Capability is unavailable: camera.ptz no_binding {normalized_source_id}")
+            raise CapabilityUnavailableError(
+                f"Capability target is unavailable: camera.ptz {normalized_source_id}",
+                reason_code="target_not_found",
+                unavailable_reason="no_vision_source",
+            )
         client_id = vision_source.get("client_id")
         if not isinstance(client_id, str) or not client_id.strip():
-            raise ValueError(f"Capability is unavailable: camera.ptz no_binding {normalized_source_id}")
+            raise CapabilityUnavailableError(
+                f"Capability target has no client binding: camera.ptz {normalized_source_id}",
+                reason_code="client_unbound",
+                unavailable_reason="no_binding",
+            )
         if not self._event_stream_registry.has_capability(client_id.strip(), "camera.ptz"):
-            raise ValueError(f"Capability is unavailable: camera.ptz no_binding {normalized_source_id}")
+            raise CapabilityUnavailableError(
+                f"Capability target has no client binding: camera.ptz {normalized_source_id}",
+                reason_code="client_unbound",
+                unavailable_reason="no_binding",
+            )
         if vision_source.get("kind") != "camera":
-            raise ValueError(f"Capability is unavailable: camera.ptz source_not_camera {normalized_source_id}")
+            raise CapabilityUnavailableError(
+                f"Capability target is not a camera source: camera.ptz {normalized_source_id}",
+                reason_code="source_not_camera",
+                unavailable_reason="unavailable",
+            )
         if vision_source.get("source_owner") != "self":
-            raise ValueError(f"Capability is unavailable: camera.ptz source_not_self {normalized_source_id}")
+            raise CapabilityUnavailableError(
+                f"Capability target is not self-owned: camera.ptz {normalized_source_id}",
+                reason_code="source_not_self",
+                unavailable_reason="unavailable",
+            )
         if not self._camera_source_is_enabled(normalized_source_id):
-            raise ValueError(f"Capability is unavailable: camera.ptz camera_source_disabled {normalized_source_id}")
+            raise CapabilityUnavailableError(
+                f"Capability target is disabled: camera.ptz {normalized_source_id}",
+                reason_code="camera_source_disabled",
+                unavailable_reason="camera_source_disabled",
+            )
         control = self._camera_ptz_source_control(vision_source)
         if control is None:
-            raise ValueError(f"Capability is unavailable: camera.ptz no_supported_control {normalized_source_id}")
+            raise CapabilityUnavailableError(
+                f"Capability target has no supported control: camera.ptz {normalized_source_id}",
+                reason_code="control_not_found",
+                unavailable_reason="no_supported_control",
+            )
         operation = input_payload.get("operation")
         amount = input_payload.get("amount")
         operations = control.get("operations", [])
         amounts = control.get("amounts", [])
         if not isinstance(operation, str) or operation not in operations:
-            raise ValueError(f"Capability is unavailable: camera.ptz unsupported_operation {normalized_source_id}")
+            raise CapabilityUnavailableError(
+                f"Capability target does not support operation: camera.ptz {normalized_source_id}",
+                reason_code="unsupported_operation",
+                unavailable_reason="unavailable",
+            )
         if not isinstance(amount, str) or amount not in amounts:
-            raise ValueError(f"Capability is unavailable: camera.ptz unsupported_amount {normalized_source_id}")
+            raise CapabilityUnavailableError(
+                f"Capability target does not support amount: camera.ptz {normalized_source_id}",
+                reason_code="unsupported_amount",
+                unavailable_reason="unavailable",
+            )
         return {
             "target_client_id": client_id.strip(),
             "vision_source": vision_source,
@@ -513,8 +642,16 @@ class ServiceCapabilityMixin:
         if len(client_ids) == 1:
             return client_ids[0]
         if not client_ids:
-            raise ValueError(f"Capability is unavailable: {capability_id} no_binding")
-        raise ValueError(f"Capability target is ambiguous: {capability_id}")
+            raise CapabilityUnavailableError(
+                f"Capability target has no client binding: {capability_id}",
+                reason_code="client_unbound",
+                unavailable_reason="no_binding",
+            )
+        raise CapabilityUnavailableError(
+            f"Capability target is ambiguous: {capability_id}",
+            reason_code="ambiguous_target",
+            unavailable_reason="unavailable",
+        )
 
     def _begin_capability_ongoing_action(
         self,
@@ -711,6 +848,25 @@ class ServiceCapabilityMixin:
         }
         if isinstance(source_current_input, dict):
             record["source_current_input"] = deepcopy(source_current_input)
+            sender_ref = source_current_input.get("sender_ref")
+            if isinstance(sender_ref, str) and sender_ref.startswith("person:"):
+                record["requested_by_person_ref"] = sender_ref
+            interaction_context = source_current_input.get("interaction_context")
+            if isinstance(interaction_context, dict):
+                interaction_ref = interaction_context.get("interaction_ref")
+                if isinstance(interaction_ref, str) and interaction_ref:
+                    record["origin_interaction_ref"] = interaction_ref
+                participants = interaction_context.get("participants")
+                if isinstance(participants, list):
+                    record["participant_refs"] = [
+                        participant["person_ref"]
+                        for participant in participants
+                        if (
+                            isinstance(participant, dict)
+                            and isinstance(participant.get("person_ref"), str)
+                            and participant["person_ref"].startswith("person:")
+                        )
+                    ]
         normalized_assistant_message_target_client_id = self._normalize_capability_client_id(
             assistant_message_target_client_id
         )
@@ -805,6 +961,10 @@ class ServiceCapabilityMixin:
         source_current_input = request_record.get("source_current_input")
         if isinstance(source_current_input, dict):
             summary["source_current_input"] = deepcopy(source_current_input)
+        for key in ("requested_by_person_ref", "origin_interaction_ref", "participant_refs"):
+            value = request_record.get(key)
+            if value is not None:
+                summary[key] = deepcopy(value)
         autonomous_run_id = request_record.get("autonomous_run_id")
         if isinstance(autonomous_run_id, str) and autonomous_run_id.strip():
             summary["autonomous_run_id"] = autonomous_run_id.strip()
@@ -984,11 +1144,23 @@ class ServiceCapabilityMixin:
             return
         reason_code, detail = dispatch_block
         if reason_code == "paused":
-            raise ValueError(f"Capability is paused: {capability_id}")
+            raise CapabilityUnavailableError(
+                f"Capability is paused: {capability_id}",
+                reason_code="paused",
+                unavailable_reason="paused",
+            )
         if reason_code == "temporarily_unavailable":
-            raise ValueError(f"Capability is temporarily unavailable: {capability_id} {detail}")
+            raise CapabilityUnavailableError(
+                f"Capability is temporarily unavailable: {capability_id} {detail}",
+                reason_code="temporarily_unavailable",
+                unavailable_reason=detail or "unavailable",
+            )
         if reason_code == "busy":
-            raise ValueError(f"Capability is busy: {capability_id}")
+            raise CapabilityUnavailableError(
+                f"Capability is busy: {capability_id}",
+                reason_code="busy",
+                unavailable_reason="busy",
+            )
 
     def _capability_runtime_dispatch_block(
         self,
@@ -1050,6 +1222,8 @@ class ServiceCapabilityMixin:
         unavailable_reason: str | None = None,
         unavailable_seconds: int = 0,
     ) -> None:
+        if unavailable_reason is not None and unavailable_reason not in CAPABILITY_UNAVAILABLE_REASONS:
+            raise ValueError(f"Unknown capability unavailable_reason: {unavailable_reason}")
         with self._runtime_state_lock:
             entry = self._capability_runtime_state_entry(capability_id)
             entry["last_failure_at"] = current_time

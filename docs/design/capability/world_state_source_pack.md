@@ -22,6 +22,7 @@ raw payload 保存、長い OCR、配送先 client の露出は入れない。
 - `client_context.location_summary`
 - `client_context.external_service_summary`
 - `external.status` result から得た `service / status_text`
+- 成功した `mcp.call_tool` result から得た `client_context.mcp_result_summary / mcp_server_id / tool_name`
 - `schedule.status` result から得た `schedule_summary / schedule_slots`
 - `device.status` result から得た `device_state_summary`
 - `body.status` result から得た `body_state_summary`
@@ -39,7 +40,7 @@ raw payload 保存、長い OCR、配送先 client の露出は入れない。
 
 `visual_summary_text` は詳細な視覚説明であり、現在状態として永続化する値ではない。
 `world_state` 候補の `summary_text` は 1 文程度の短い現在状態要約に留める。
-raw response body、client 固有 ID、資格情報、内部 URL、base64 本文は入れない。
+raw response body、MCP の `content / structured_content / arguments`、client 固有 ID、資格情報、内部 URL、base64 本文は入れない。
 
 ## source pack shape
 
@@ -67,7 +68,7 @@ source pack 例:
       "candidate_ref": "state_source:social_context",
       "state_type": "social_context",
       "scope_type": "relationship",
-      "scope_key": "self|user",
+      "scope_key": "self|person:external-123",
       "evidence_summary": "Slack 上のやり取りが近い判断文脈として前景にある。"
     },
     {
@@ -193,6 +194,9 @@ LLM は `state_sources` に存在しない候補を生成しない。
 `social_context_context / environment_context / location_context` は、`client_context` から取った summary をそのまま dedicated context へ写す。
 `social.status` result は、`social_context_context.summary_text / social_context_summary` へ投影する。
 `external.status` のような capability result は、`external_service_context.summary_text` に加えて `service / status_text` を載せる。
+`mcp.call_tool` result は、`status=completed`、`is_error=false`、`error` が空、`client_context.mcp_result_summary` が非空のときだけ `external_service_context` を作る。
+この context は `summary_text / result_summary_text` に `mcp_result_summary`、`service` に `<mcp_server_id>/<tool_name>`、`mcp_server_id / tool_name` に各識別子、`summary_source_hint` に `capability_result.client_context.mcp_result_summary`、`capability_id` に `mcp.call_tool` を載せる。
+LLM は結果要約が現在も成立する外部サービスの条件を表す場合に `external_service` 候補へ採用し、単発処理の完了を表す場合は候補を返さない。
 `schedule.status` result は、`schedule_context.summary_text / schedule_summary / schedule_slots` へ投影する。
 `device.status` result は、`device_context.summary_text / device_state_summary` へ投影する。
 `body.status` result は、`body_context.summary_text / body_state_summary` へ投影する。
@@ -213,6 +217,7 @@ real schedule source が複数あるときは、`schedule_context.schedule_slots
 - `client_context.social_context_summary / environment_summary / location_summary` を対応する dedicated context へ投影する
 - `social.status` result の `social_context_summary` を `social_context_context` へ投影する
 - `external.status` result の `service / status_text` を `external_service_context` へ投影する
+- 成功した `mcp.call_tool` result の `mcp_result_summary` と server/tool 複合識別を `external_service_context` へ投影する
 - `schedule.status` result の `schedule_summary / schedule_slots` を `schedule_context` へ投影する
 - `device.status` result の `device_state_summary` を `device_context` へ投影する
 - `body.status` result の `body_state_summary` を `body_context` へ投影する
@@ -226,7 +231,7 @@ real schedule source が複数あるときは、`schedule_context.schedule_slots
 - LLM が返した `candidate_ref / summary_text / hint` を validator で検証する
 - `candidate_ref` からコード確定済みの `state_type / scope_type / scope_key` を解決する
 - TTL は `summary_source` と state_type ごとの規則で決める
-- `external_service` の統合単位は `service` を使う
+- `external_service` の統合単位は `service` を使い、MCP は大文字小文字を保持した `mcp_server_id / tool_name` の組単位で別状態にする
 - `schedule` の TTL は pending-intent の `expires_at` を上限に使う
 - 件数上限、統合、失効、永続化はコード側が決める
 
@@ -236,4 +241,4 @@ real schedule source が複数あるときは、`schedule_context.schedule_slots
 - 身体や機器の raw telemetry 保存
 - pending-intent queue 全件を source pack に載せること
 - `world_state` に capability manifest や binding を直接複写すること
-- raw response body、raw telemetry、長い OCR、複数段の外部 payload をそのまま LLM に渡すこと
+- raw response body、MCP arguments、raw telemetry、長い OCR、複数段の外部 payload をそのまま LLM に渡すこと

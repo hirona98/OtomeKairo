@@ -32,7 +32,10 @@ SUPPRESSED_HTTP_LOG_EXACT_PATHS = {
     "/api/autonomous-runs",
     "/api/capability/result",
 }
-SUPPRESSED_HTTP_LOG_PATH_PREFIXES = ("/api/inspection",)
+SUPPRESSED_HTTP_LOG_PATH_PREFIXES = (
+    "/api/inspection",
+    "/ui/api/inspection",
+)
 WEB_STATIC_PACKAGE = "otomekairo.web.static"
 WEB_STATIC_FILES = {
     "/ui/": ("index.html", "text/html; charset=utf-8", "no-store"),
@@ -188,26 +191,8 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                     raise ServiceError(404, "route_not_found", "The requested route does not exist.")
                 run_id = unquote(path_parts[3])
                 operation = path_parts[4]
-                self._read_json_body()
-                if operation == "pause":
-                    self._write_success(
-                        HTTPStatus.OK,
-                        self.server.service.pause_autonomous_run_api(token, run_id),
-                    )
-                    return
-                if operation == "resume":
-                    self._write_success(
-                        HTTPStatus.OK,
-                        self.server.service.resume_autonomous_run_api(token, run_id),
-                    )
-                    return
-                if operation == "cancel":
-                    self._write_success(
-                        HTTPStatus.OK,
-                        self.server.service.cancel_autonomous_run_api(token, run_id),
-                    )
-                    return
-                raise ServiceError(404, "route_not_found", "The requested route does not exist.")
+                self._handle_autonomous_run_operation(token, run_id, operation)
+                return
 
             # 入力ルート
             if method == "POST" and parsed.path == "/api/conversation":
@@ -588,11 +573,30 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
     def _handle_web_ui_api(self, method: str, path: str) -> None:
         token = self._web_ui_console_token()
 
+        # ブラウザへ token を渡さず、同一 server 内で event stream を認可する。
+        if method == "GET" and path == "/ui/api/events/stream":
+            self._require_web_ui_websocket_origin()
+            self._handle_events_stream(token)
+            return
         if method == "GET" and path == "/ui/api/bootstrap/server-identity":
             self._write_success(HTTPStatus.OK, self.server.service.read_server_identity())
             return
         if method == "GET" and path == "/ui/api/status":
             self._write_success(HTTPStatus.OK, self.server.service.get_status(token))
+            return
+        if method == "GET" and path == "/ui/api/inspection/current-state":
+            self._write_success(HTTPStatus.OK, self.server.service.get_current_state_inspection(token))
+            return
+        if method == "GET" and path == "/ui/api/inspection/cycle-summaries":
+            self._write_success(HTTPStatus.OK, self.server.service.list_cycle_summaries(token, limit=20))
+            return
+        if method == "POST" and path.startswith("/ui/api/autonomous-runs/"):
+            path_parts = path.split("/")
+            if len(path_parts) != 6:
+                raise ServiceError(404, "route_not_found", "The requested route does not exist.")
+            run_id = unquote(path_parts[4])
+            operation = path_parts[5]
+            self._handle_autonomous_run_operation(token, run_id, operation)
             return
         if method == "POST" and path == "/ui/api/conversation":
             payload = self._read_json_body()
@@ -622,16 +626,44 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
 
         raise ServiceError(404, "route_not_found", "The requested route does not exist.")
 
-    def _web_ui_console_token(self) -> str:
-        state = self.server.service.store.read_state()
-        token = state.get("console_access_token")
-        if isinstance(token, str) and token:
-            return token
+    def _require_web_ui_websocket_origin(self) -> None:
+        # UI 用 stream の server-held token を別 origin から利用させない。
+        origin = self.headers.get("Origin")
+        host = self.headers.get("Host")
+        parsed_origin = urlparse(origin) if isinstance(origin, str) else None
+        if (
+            parsed_origin is None
+            or parsed_origin.scheme not in {"http", "https"}
+            or not isinstance(host, str)
+            or parsed_origin.netloc != host
+        ):
+            raise ServiceError(403, "invalid_web_ui_origin", "The Web UI event stream requires a same-origin request.")
 
-        state["console_access_token"] = self.server.service._new_console_token()
-        self.server.service.store.write_state(state)
-        debug_log("Auth", "web_ui console token initialized")
-        return state["console_access_token"]
+    def _handle_autonomous_run_operation(self, token: str | None, run_id: str, operation: str) -> None:
+        # 通常 API とブラウザ UI で同じ autonomous run 操作境界を使う。
+        self._read_json_body()
+        if operation == "pause":
+            result = self.server.service.pause_autonomous_run_api(token, run_id)
+        elif operation == "resume":
+            result = self.server.service.resume_autonomous_run_api(token, run_id)
+        elif operation == "cancel":
+            result = self.server.service.cancel_autonomous_run_api(token, run_id)
+        else:
+            raise ServiceError(404, "route_not_found", "The requested route does not exist.")
+        self._write_success(HTTPStatus.OK, result)
+
+    def _web_ui_console_token(self) -> str:
+        # 初回画面が複数の UI API を並行取得しても token 発行を一度に固定する。
+        with self.server.service._runtime_state_lock:
+            state = self.server.service.store.read_state()
+            token = state.get("console_access_token")
+            if isinstance(token, str) and token:
+                return token
+
+            state["console_access_token"] = self.server.service._new_console_token()
+            self.server.service.store.write_state(state)
+            debug_log("Auth", "web_ui console token initialized")
+            return state["console_access_token"]
 
     # レスポンス補助
     def _write_success(self, status: int, data: dict) -> None:

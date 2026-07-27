@@ -22,6 +22,7 @@ from otomekairo.llm.contracts import (
     validate_answer_contract_contract,
     validate_autonomous_step_contract,
     validate_decision_contract,
+    validate_disclosure_review_contract,
     validate_event_evidence_contract,
     validate_initiative_entry_check_contract,
     validate_memory_correction_reconciliation_contract,
@@ -44,6 +45,8 @@ from otomekairo.llm.prompts import (
     build_autonomous_step_repair_prompt,
     build_decision_messages,
     build_decision_repair_prompt,
+    build_disclosure_review_messages,
+    build_disclosure_review_repair_prompt,
     build_event_evidence_messages,
     build_event_evidence_repair_prompt,
     build_initiative_entry_check_messages,
@@ -110,6 +113,7 @@ class LLMClient:
                     recent_turns,
                     current_time,
                     persona_context=persona_context,
+                    current_input=current_input,
                 )
                 answer_contract = self.mock_client.generate_answer_contract(
                     model_config,
@@ -206,6 +210,7 @@ class LLMClient:
                     recent_turns,
                     current_time,
                     persona_context=persona_context,
+                    current_input=current_input,
                 )
                 debug_log(
                     "LLM",
@@ -329,25 +334,16 @@ class LLMClient:
                 capability_result_context=context.capability_result_context,
             )
         try:
-            self._validate_decision_fresh_world_state_reuse(
+            self._validate_decision_vision_capture_fresh_world_state_reuse(
                 payload=payload,
                 capability_decision_view=context.capability_decision_view,
                 capability_result_context=context.capability_result_context,
             )
         except LLMError as exc:
             if context.trigger_kind != "user_message" and payload.get("kind") == "capability_request":
-                self._coerce_decision_to_noop_for_fresh_world_state_reuse(payload, exc)
+                self._coerce_decision_to_noop_for_fresh_visual_context_reuse(payload, exc)
                 return
             raise
-        self._validate_decision_visual_observation_context(
-            payload=payload,
-            trigger_kind=context.trigger_kind,
-            visual_observation_context=context.visual_observation_context,
-        )
-        self._validate_decision_user_message_response(
-            payload=payload,
-            context=context,
-        )
 
     def _validate_decision_foreground_selection_refs(
         self,
@@ -486,71 +482,7 @@ class LLMClient:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
             raise
 
-    def _validate_decision_visual_observation_context(
-        self,
-        *,
-        payload: dict[str, Any],
-        trigger_kind: str,
-        visual_observation_context: dict[str, Any] | None,
-    ) -> None:
-        if trigger_kind != "user_message" or payload.get("kind") != "noop":
-            return
-        if not isinstance(visual_observation_context, dict):
-            return
-        if visual_observation_context.get("source") != "conversation_attachment":
-            return
-        if visual_observation_context.get("image_interpreted") is not True:
-            return
-        summary_text = visual_observation_context.get("visual_summary_text")
-        if not isinstance(summary_text, str) or not summary_text.strip():
-            return
-        reason_text = " ".join(
-            str(payload.get(key) or "")
-            for key in ("reason_code", "reason_summary")
-        )
-        missing_terms = ("画像データ", "視覚情報", "欠落", "添付画像", "不足")
-        if any(term in reason_text for term in missing_terms):
-            raise LLMError(
-                "会話添付画像は VisualObservationContext.visual_summary_text として解釈済みです。"
-                "raw image が decision prompt に無いことを理由に noop を返してはいけません。"
-                "visual_summary_text の範囲で kind=speech を返してください。"
-            )
-
-    def _validate_decision_user_message_response(
-        self,
-        *,
-        payload: dict[str, Any],
-        context: DecisionContext,
-    ) -> None:
-        if payload.get("kind") != "noop":
-            return
-        current_input = context.current_input
-        if current_input.sender != "user" or current_input.response_target != "user":
-            return
-        text = current_input.text.strip()
-        if not text or self._user_message_explicitly_allows_noop(text):
-            return
-        raise LLMError(
-            "current_input.sender=user かつ response_target=user の非空 text はユーザー発話です。"
-            "ユーザー発話への noop は不正です。短い挨拶や断片でも kind=speech を返してください。"
-        )
-
-    def _user_message_explicitly_allows_noop(self, text: str) -> bool:
-        normalized = text.strip().lower()
-        if not normalized:
-            return True
-        return any(
-            marker in normalized
-            for marker in (
-                "発話不要",
-                "返事不要",
-                "反応不要",
-                "no speech",
-                "do not speech",
-            )
-        )
-
-    def _coerce_decision_to_noop_for_fresh_world_state_reuse(
+    def _coerce_decision_to_noop_for_fresh_visual_context_reuse(
         self,
         payload: dict[str, Any],
         exc: LLMError,
@@ -561,9 +493,9 @@ class LLMClient:
         payload.update(
             {
                 "kind": "noop",
-                "reason_code": "fresh_world_state_reuse_noop",
+                "reason_code": "fresh_visual_context_reuse_noop",
                 "reason_summary": reason_summary
-                or "新鮮な world_state があるため、非ユーザー起点の重複 capability request は行わない。",
+                or "同じ vision_source_id の新鮮な visual_context を判断根拠に使う。",
                 "requires_confirmation": False,
                 "pending_intent": None,
                 "capability_request": None,
@@ -572,10 +504,10 @@ class LLMClient:
         )
         debug_log(
             "LLM",
-            "decision coerced_to_noop reason=fresh_world_state_reuse_non_user_trigger",
+            "decision coerced_to_noop reason=fresh_visual_context_reuse_non_user_trigger",
         )
 
-    def _validate_decision_fresh_world_state_reuse(
+    def _validate_decision_vision_capture_fresh_world_state_reuse(
         self,
         *,
         payload: dict[str, Any],
@@ -593,6 +525,8 @@ class LLMClient:
         if not isinstance(request_capability_id, str) or not request_capability_id.strip():
             return
         normalized_request_capability_id = request_capability_id.strip()
+        if normalized_request_capability_id != "vision.capture":
+            return
         if self._capability_result_context_allows_same_vision_source_capture(
             request_payload=request_payload,
             capability_result_context=capability_result_context,
@@ -602,39 +536,11 @@ class LLMClient:
             capability_decision_view=capability_decision_view,
             capability_id=normalized_request_capability_id,
         )
-        if not isinstance(capability_entry, dict) or capability_entry.get("fresh_world_state_available") is not True:
-            if normalized_request_capability_id == "vision.capture" and isinstance(capability_entry, dict):
-                self._validate_vision_capture_fresh_world_state_reuse(
-                    request_payload=request_payload,
-                    capability_entry=capability_entry,
-                )
+        if not isinstance(capability_entry, dict):
             return
-        if normalized_request_capability_id == "vision.capture":
-            self._validate_vision_capture_fresh_world_state_reuse(
-                request_payload=request_payload,
-                capability_entry=capability_entry,
-            )
-            return
-        fresh_world_state = capability_entry.get("fresh_world_state")
-        state_type = None
-        age_label = None
-        summary_text = None
-        if isinstance(fresh_world_state, dict):
-            state_type = fresh_world_state.get("state_type")
-            age_label = fresh_world_state.get("age_label")
-            summary_text = fresh_world_state.get("summary_text")
-        state_summary = ""
-        if isinstance(state_type, str) and state_type.strip():
-            state_summary += f" state_type={state_type.strip()}"
-        if isinstance(age_label, str) and age_label.strip():
-            state_summary += f" age_label={age_label.strip()}"
-        if isinstance(summary_text, str) and summary_text.strip():
-            state_summary += f" summary={summary_text.strip()[:80]}"
-        raise LLMError(
-            f"CapabilityDecisionView の {normalized_request_capability_id} は "
-            f"fresh_world_state_available=true です。{state_summary}"
-            "判断前から存在する同じ現在状態を再取得する capability_request は不正です。"
-            "既存の foreground_world_state を使って speech / noop / pending_intent を返してください。"
+        self._validate_vision_capture_fresh_world_state_reuse(
+            request_payload=request_payload,
+            capability_entry=capability_entry,
         )
 
     def _validate_vision_capture_fresh_world_state_reuse(
@@ -664,11 +570,11 @@ class LLMClient:
             if isinstance(age_label, str) and age_label.strip():
                 state_summary += f" age_label={age_label.strip()}"
             if isinstance(summary_text, str) and summary_text.strip():
-                state_summary += f" summary={summary_text.strip()[:80]}"
+                state_summary += f" summary={summary_text.strip()}"
             raise LLMError(
                 "CapabilityDecisionView の vision.capture には "
                 f"vision_source_id={requested_source_id.strip()} の新鮮な visual_context があります。{state_summary}"
-                "明示的なユーザー依頼なしで同じ vision_source_id を再取得する capability_request は不正です。"
+                "判断入力に含まれる同じ vision_source_id の現在状態を再取得する capability_request は不正です。"
                 "既存の foreground_world_state を使って speech / noop / pending_intent を返してください。"
             )
 
@@ -849,6 +755,30 @@ class LLMClient:
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
             raise
+
+    def generate_disclosure_review(
+        self,
+        *,
+        model_config: dict,
+        review_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        operation = "disclosure_review"
+        if self._is_mock_model_config(model_config):
+            payload = {
+                "outcome": "allow",
+                "speech_text": review_context["candidate_speech"],
+                "reason_code": "mock_allow",
+            }
+            validate_disclosure_review_contract(payload)
+            return payload
+        return self._generate_structured_payload(
+            model_config=model_config,
+            messages=build_disclosure_review_messages(review_context=review_context),
+            validator=validate_disclosure_review_contract,
+            repair_prompt_builder=build_disclosure_review_repair_prompt,
+            failure_message="DisclosureReview の生成に失敗しました。",
+            operation=operation,
+        )
 
     def generate_answer_contract(
         self,

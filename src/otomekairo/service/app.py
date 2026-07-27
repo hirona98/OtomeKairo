@@ -14,6 +14,7 @@ from otomekairo.recall.builder import RecallBuilder
 from otomekairo.service.autonomous_run import ServiceAutonomousRunMixin
 from otomekairo.service.capability import ServiceCapabilityMixin
 from otomekairo.service.common import ServiceError, configure_debug_log_stream_sink, debug_log
+from otomekairo.service.cycle_coordinator import CycleCoordinator
 from otomekairo.service.config.mixin import ServiceConfigMixin
 from otomekairo.service.docs import ServiceDocsMixin
 from otomekairo.service.memory import ServiceMemoryMixin
@@ -45,6 +46,7 @@ class OtomeKairoService(
         self.evidence = EvidenceResolver(store=self.store)
         self.memory = MemoryConsolidator(store=self.store, llm=self.llm)
         self._runtime_state_lock = threading.RLock()
+        self._cycle_coordinator = CycleCoordinator()
         self._wake_execution_lock = threading.Lock()
         self._pending_intent_candidates: list[dict[str, Any]] = []
         self._wake_runtime_state: dict[str, Any] = {

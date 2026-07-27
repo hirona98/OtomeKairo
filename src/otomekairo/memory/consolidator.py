@@ -81,6 +81,7 @@ class MemoryConsolidator:
             ),
             current_time=finished_at,
         )
+        provenance = self._turn_provenance(events=events, memory_context=memory_context)
 
         # Episode要約
         event_ids = [event["event_id"] for event in events]
@@ -90,11 +91,18 @@ class MemoryConsolidator:
             finished_at=finished_at,
             event_ids=event_ids,
             payload=interpretation["episode"],
+            provenance=provenance,
         )
 
         # 記憶アクション群
         memory_actions: list[dict[str, Any]] = []
-        for candidate in interpretation["candidate_memory_units"]:
+        for candidate_payload in interpretation["candidate_memory_units"]:
+            candidate = deepcopy(candidate_payload)
+            if provenance:
+                candidate["qualifiers_hint"] = {
+                    **candidate.get("qualifiers_hint", {}),
+                    **provenance,
+                }
             memory_actions.extend(
                 self.action_resolver.resolve_memory_actions(
                     memory_set_id=selected_memory_set_id,
@@ -628,6 +636,9 @@ class MemoryConsolidator:
             "reason_code",
             "reason_summary",
             "pending_intent_summary",
+            "interaction_ref",
+            "speaker_ref",
+            "participant_refs",
         ):
             value = event.get(key)
             if value is None:
@@ -645,6 +656,57 @@ class MemoryConsolidator:
             payload["text_summary"] = text.strip()
         return payload
 
+    def _turn_provenance(
+        self,
+        *,
+        events: list[dict[str, Any]],
+        memory_context: dict[str, Any] | None,
+    ) -> dict[str, list[str]]:
+        # 開示判定で追跡できるよう、会話と人物の出所を構造化して保持する。
+        interaction_refs: list[str] = []
+        participant_refs: list[str] = []
+        for event in events:
+            interaction_ref = event.get("interaction_ref")
+            if isinstance(interaction_ref, str) and interaction_ref and interaction_ref not in interaction_refs:
+                interaction_refs.append(interaction_ref)
+            raw_participant_refs = event.get("participant_refs")
+            for person_ref in raw_participant_refs if isinstance(raw_participant_refs, list) else []:
+                if (
+                    isinstance(person_ref, str)
+                    and person_ref.startswith("person:")
+                    and person_ref not in participant_refs
+                ):
+                    participant_refs.append(person_ref)
+        current_input = memory_context.get("current_input") if isinstance(memory_context, dict) else None
+        if isinstance(current_input, dict):
+            interaction_context = current_input.get("interaction_context")
+            interaction_ref = (
+                interaction_context.get("interaction_ref")
+                if isinstance(interaction_context, dict)
+                else None
+            )
+            if isinstance(interaction_ref, str) and interaction_ref and interaction_ref not in interaction_refs:
+                interaction_refs.append(interaction_ref)
+            raw_participant_refs = (
+                interaction_context.get("participants")
+                if isinstance(interaction_context, dict)
+                else None
+            )
+            for participant in raw_participant_refs if isinstance(raw_participant_refs, list) else []:
+                person_ref = participant.get("person_ref") if isinstance(participant, dict) else None
+                if (
+                    isinstance(person_ref, str)
+                    and person_ref.startswith("person:")
+                    and person_ref not in participant_refs
+                ):
+                    participant_refs.append(person_ref)
+        provenance: dict[str, list[str]] = {}
+        if interaction_refs:
+            provenance["source_interaction_refs"] = interaction_refs
+        if participant_refs:
+            provenance["source_participant_refs"] = participant_refs
+        return provenance
+
     def _build_episode(
         self,
         *,
@@ -653,6 +715,7 @@ class MemoryConsolidator:
         finished_at: str,
         event_ids: list[str],
         payload: dict[str, Any],
+        provenance: dict[str, list[str]],
     ) -> dict[str, Any]:
         # 正規化
         open_loops = normalized_text_list(payload.get("open_loops", []), limit=4)
@@ -663,7 +726,7 @@ class MemoryConsolidator:
         )
 
         # 記録
-        return {
+        record = {
             "episode_id": f"episode:{uuid.uuid4().hex}",
             "cycle_id": cycle_id,
             "memory_set_id": memory_set_id,
@@ -678,6 +741,8 @@ class MemoryConsolidator:
             "formed_at": finished_at,
             "linked_event_ids": event_ids,
         }
+        record.update(provenance)
+        return record
 
     def _resolve_episode_series_id(
         self,

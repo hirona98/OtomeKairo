@@ -4,6 +4,7 @@ import uuid
 from typing import Any
 
 from otomekairo.llm.contexts import InitiativeContext
+from otomekairo.interaction import InteractionContext
 from otomekairo.world_state.models import WorldStateTrace
 
 
@@ -113,6 +114,7 @@ class ServiceInputTraceBuildMixin:
         memory_set_id: str,
         input_event_kind: str,
         input_event_role: str,
+        interaction_context: InteractionContext | None,
         input_text: str,
         started_at: str,
         finished_at: str,
@@ -125,6 +127,9 @@ class ServiceInputTraceBuildMixin:
         failure_event_payload: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         # 入力イベント
+        interaction_ref = interaction_context.interaction_ref if interaction_context is not None else None
+        participant_refs = list(interaction_context.participant_refs) if interaction_context is not None else []
+        input_speaker_ref = interaction_context.speaker_ref if interaction_context is not None else None
         events = [
             {
                 "event_id": f"event:{uuid.uuid4().hex}",
@@ -133,6 +138,9 @@ class ServiceInputTraceBuildMixin:
                 "kind": input_event_kind,
                 "role": input_event_role,
                 "text": input_text,
+                "interaction_ref": interaction_ref,
+                "speaker_ref": input_speaker_ref,
+                "participant_refs": participant_refs,
                 "created_at": started_at,
             }
         ]
@@ -151,6 +159,9 @@ class ServiceInputTraceBuildMixin:
                     "memory_set_id": memory_set_id,
                     "kind": failure_event_kind,
                     "role": "system",
+                    "interaction_ref": interaction_ref,
+                    "speaker_ref": None,
+                    "participant_refs": participant_refs,
                     "created_at": finished_at,
                     **payload,
                 }
@@ -167,6 +178,9 @@ class ServiceInputTraceBuildMixin:
                 "memory_set_id": memory_set_id,
                 "kind": "decision",
                 "role": "system",
+                "interaction_ref": interaction_ref,
+                "speaker_ref": None,
+                "participant_refs": participant_refs,
                 "result_kind": decision["kind"],
                 "external_result_kind": result_kind,
                 "reason_code": decision["reason_code"],
@@ -186,6 +200,9 @@ class ServiceInputTraceBuildMixin:
                     "kind": "speech",
                     "role": "assistant",
                     "text": speech_payload["speech_text"],
+                    "interaction_ref": interaction_ref,
+                    "speaker_ref": "self",
+                    "participant_refs": participant_refs,
                     "created_at": finished_at,
                 }
             )
@@ -300,6 +317,7 @@ class ServiceInputTraceBuildMixin:
         cycle_id: str,
         cycle_summary: dict[str, Any],
         input_text: str,
+        interaction_context: InteractionContext | None,
         augmented_query_text: str | None,
         client_context: dict[str, Any],
         runtime_summary: dict[str, Any],
@@ -321,6 +339,7 @@ class ServiceInputTraceBuildMixin:
             "current_input": self._build_current_input(
                 input_text=input_text,
                 trigger_kind=cycle_summary["trigger_kind"],
+                interaction_context=interaction_context,
                 capability_request_summary=capability_request_summary,
             ).to_prompt_payload(),
             "input_summary": self._clamp(input_text),
@@ -568,9 +587,17 @@ class ServiceInputTraceBuildMixin:
         input_payload = capability_request.get("input")
         if not isinstance(capability_id, str) or not isinstance(input_payload, dict):
             return None
+        trace_input = input_payload
+        if capability_id == "mcp.call_tool":
+            # MCP arguments は外部 payload なので、trace には実行先の閉じた識別子だけを残す。
+            trace_input = {}
+            for key in ("mcp_server_id", "tool_name"):
+                value = input_payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    trace_input[key] = value.strip()
         return {
             "capability_id": capability_id,
-            "input": input_payload,
+            "input": trace_input,
         }
 
     def _decision_autonomous_run_summary(self, decision: dict[str, Any]) -> dict[str, Any] | None:
@@ -645,6 +672,7 @@ class ServiceInputTraceBuildMixin:
         *,
         trigger_kind: str,
         input_text: str,
+        interaction_context: InteractionContext | None,
         started_at: str,
         finished_at: str,
         decision: dict[str, Any],
@@ -666,6 +694,10 @@ class ServiceInputTraceBuildMixin:
             "internal_failure_summary": None,
             "duration_ms": self._duration_ms(started_at, finished_at),
         }
+        if isinstance(speech_payload, dict) and isinstance(speech_payload.get("disclosure_review"), dict):
+            trace["disclosure_review"] = speech_payload["disclosure_review"]
+        elif isinstance(decision.get("disclosure_review"), dict):
+            trace["disclosure_review"] = decision["disclosure_review"]
         if isinstance(capability_request_summary, dict):
             trace["capability_request_summary"] = capability_request_summary
         if isinstance(ongoing_action_transition_summary, dict):
@@ -673,6 +705,7 @@ class ServiceInputTraceBuildMixin:
         trace["trigger_compact_summary"] = self._build_trigger_compact_summary(
             trigger_kind=trigger_kind,
             input_text=input_text,
+            interaction_context=interaction_context,
             observation_summary=observation_summary,
             capability_request_summary=capability_request_summary,
             followup_capability_request_summary=followup_capability_request_summary,
@@ -713,6 +746,7 @@ class ServiceInputTraceBuildMixin:
         *,
         trigger_kind: str,
         input_text: str,
+        interaction_context: InteractionContext | None,
         started_at: str,
         finished_at: str,
         failure_reason: str,
@@ -738,6 +772,7 @@ class ServiceInputTraceBuildMixin:
         trace["trigger_compact_summary"] = self._build_trigger_compact_summary(
             trigger_kind=trigger_kind,
             input_text=input_text,
+            interaction_context=interaction_context,
             observation_summary=observation_summary,
             capability_request_summary=capability_request_summary,
             followup_capability_request_summary=followup_capability_request_summary,

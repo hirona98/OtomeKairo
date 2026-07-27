@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.llm.client import LLMError
+from otomekairo.interaction import InteractionContext, normalize_interaction_context
 from otomekairo.recall.builder import RecallPackSelectionError
 from otomekairo.service.common import ServiceError, debug_log
 
@@ -10,17 +11,33 @@ from otomekairo.service.common import ServiceError, debug_log
 class ServiceInputCycleMixin:
     # 入力API
     def handle_conversation(self, token: str | None, payload: dict) -> dict[str, Any]:
+        # 一つの個の判断状態を会話到着順に更新する。
+        self._cycle_coordinator.enter_foreground()
+        try:
+            return self._handle_conversation_cycle(token, payload)
+        finally:
+            self._cycle_coordinator.leave_foreground()
+
+    def _handle_conversation_cycle(self, token: str | None, payload: dict) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
 
         # 検証
         input_text = payload.get("text")
         client_context = payload.get("client_context", {})
+        interaction_context = normalize_interaction_context(
+            payload.get("interaction_context"),
+            required=True,
+            require_speaker=True,
+        )
         input_images = self._normalize_visual_observation_images(payload.get("images"), allow_missing=True)
         if not isinstance(input_text, str):
             raise ServiceError(400, "invalid_text", "The text field must be a string.")
         if not isinstance(client_context, dict):
             raise ServiceError(400, "invalid_client_context", "The client_context field must be an object.")
+        autonomous_run_action = self._normalize_conversation_autonomous_run_action(
+            payload.get("autonomous_run_action")
+        )
 
         current_client_context = dict(client_context)
         observation_summary: dict[str, Any] | None = None
@@ -28,9 +45,9 @@ class ServiceInputCycleMixin:
         # スナップショット
         cycle_id = self._new_cycle_id()
         started_at = self._now_iso()
-        recent_turns = self._load_recent_turns(state)
+        recent_turns = self._load_recent_turns(state, interaction_context)
         runtime_summary = self._build_runtime_summary(state)
-        cancel_autonomous_runs = self._conversation_requests_autonomous_run_cancel(input_text)
+        cancel_autonomous_runs = autonomous_run_action == "cancel_all"
         self._begin_user_response_cycle()
         try:
             if cancel_autonomous_runs:
@@ -89,6 +106,7 @@ class ServiceInputCycleMixin:
                 cycle_id=cycle_id,
                 trigger_kind="user_message",
                 client_context=current_client_context,
+                interaction_context=interaction_context,
                 observation_summary=observation_summary,
             )
 
@@ -100,6 +118,7 @@ class ServiceInputCycleMixin:
                 runtime_summary=runtime_summary,
                 input_text=input_text,
                 client_context=current_client_context,
+                interaction_context=interaction_context,
                 pipeline=pipeline,
                 observation_summary=observation_summary,
             )
@@ -124,6 +143,7 @@ class ServiceInputCycleMixin:
                 runtime_summary=runtime_summary,
                 input_text=input_text,
                 client_context=current_client_context,
+                interaction_context=interaction_context,
                 failure_reason=str(exc),
                 recall_trace=self._build_failure_recall_trace(
                     recall_hint=exc.recall_hint_summary,
@@ -151,6 +171,7 @@ class ServiceInputCycleMixin:
                 runtime_summary=runtime_summary,
                 input_text=input_text,
                 client_context=current_client_context,
+                interaction_context=interaction_context,
                 failure_reason=str(exc),
                 observation_summary=observation_summary,
                 capability_request_summary=capability_request_summary,
@@ -164,6 +185,25 @@ class ServiceInputCycleMixin:
                     current_time=self._now_iso(),
                 )
 
+    def _normalize_conversation_autonomous_run_action(self, value: Any) -> str | None:
+        # 自然文の意味推定ではなく、API 境界の明示コマンドだけを解釈する。
+        if value is None:
+            return None
+        if not isinstance(value, dict) or set(value) != {"kind"}:
+            raise ServiceError(
+                400,
+                "invalid_autonomous_run_action",
+                "autonomous_run_action must contain only the kind field.",
+            )
+        kind = value.get("kind")
+        if kind != "cancel_all":
+            raise ServiceError(
+                400,
+                "invalid_autonomous_run_action",
+                "autonomous_run_action.kind must be cancel_all.",
+            )
+        return kind
+
     def _finalize_cycle_failure(
         self,
         *,
@@ -173,10 +213,11 @@ class ServiceInputCycleMixin:
         runtime_summary: dict[str, Any],
         input_text: str,
         client_context: dict[str, Any],
+        interaction_context: InteractionContext | None,
         failure_reason: str,
-        trigger_kind: str | None = None,
-        input_event_kind: str | None = None,
-        input_event_role: str | None = None,
+        trigger_kind: str = "user_message",
+        input_event_kind: str = "conversation_input",
+        input_event_role: str = "person",
         recall_trace: dict[str, Any] | None = None,
         failure_event_kind: str | None = None,
         failure_event_payload: dict[str, Any] | None = None,
@@ -194,18 +235,16 @@ class ServiceInputCycleMixin:
             "runtime_summary": runtime_summary,
             "input_text": input_text,
             "client_context": client_context,
+            "interaction_context": interaction_context,
             "failure_reason": failure_reason,
             "observation_summary": observation_summary,
             "pending_intent_selection": pending_intent_selection,
             "capability_request_summary": capability_request_summary,
             "ongoing_action_transition_summary": ongoing_action_transition_summary,
+            "trigger_kind": trigger_kind,
+            "input_event_kind": input_event_kind,
+            "input_event_role": input_event_role,
         }
-        if trigger_kind is not None:
-            persist_kwargs["trigger_kind"] = trigger_kind
-        if input_event_kind is not None:
-            persist_kwargs["input_event_kind"] = input_event_kind
-        if input_event_role is not None:
-            persist_kwargs["input_event_role"] = input_event_role
         if recall_trace is not None:
             persist_kwargs["recall_trace"] = recall_trace
         if failure_event_kind is not None:
@@ -217,14 +256,19 @@ class ServiceInputCycleMixin:
             "cycle_id": cycle_id,
             "input_text": input_text,
             "failure_reason": failure_reason,
+            "trigger_kind": trigger_kind,
         }
-        if trigger_kind is not None:
-            emit_kwargs["trigger_kind"] = trigger_kind
         if pending_intent_selection is not None:
             emit_kwargs["pending_intent_selection"] = pending_intent_selection
         self._emit_input_failure_logs(**emit_kwargs)
         return {
             "cycle_id": cycle_id,
+            "interaction_ref": interaction_context.interaction_ref if interaction_context is not None else None,
+            "recipient_person_refs": (
+                list(interaction_context.participant_refs)
+                if interaction_context is not None
+                else []
+            ),
             "result_kind": "internal_failure",
             "speech": None,
             "capability_request": None,

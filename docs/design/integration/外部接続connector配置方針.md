@@ -207,9 +207,10 @@ ELYTH は MCP server 設定例の 1 つとして扱い、OtomeKairo server 本�
 この repository 内の初期実装は `connectors/mcp_client/` に置く。
 
 MCP client connector は起動時に `GET /api/config/connectors/{client_id}/runtime-config` から設定済み MCP server を取得する。
-MCP client connector は取得した MCP server を `initialize` し、`tools/list` の結果を `hello.mcp_servers` へ載せる。
+MCP client connector は取得した MCP server を `initialize` し、`tools/list` の結果から `enabled_tools` に含まれる tool だけを `hello.mcp_servers` へ載せる。
 server は `mcp_server_id / tool_name / inputSchema` を判断 view、inspection、dispatch 検証に使う。
-connector は `mcp.call_tool_request` を受けたときだけ MCP `tools/call` を実行し、`POST /api/capability/result` へ result を返す。
+server は hello 登録時と dispatch 時に保存済み `enabled_tools` を照合する。
+connector は `enabled_tools` に含まれる `mcp.call_tool_request` を受けたときだけ MCP `tools/call` を実行し、`POST /api/capability/result` へ result を返す。
 
 ELYTH の接続は `PUT /api/config/mcp-servers/mcp%3Aelyth` で次の設定を登録する。
 
@@ -219,6 +220,7 @@ ELYTH の接続は `PUT /api/config/mcp-servers/mcp%3Aelyth` で次の設定を�
   "command": "npx",
   "args": ["-y", "elyth-mcp-server@latest"],
   "cwd": null,
+  "enabled_tools": ["get_information", "create_post"],
   "env": {
     "ELYTH_API_BASE": "https://elythworld.com",
     "ELYTH_API_KEY": "..."
@@ -229,6 +231,7 @@ ELYTH の接続は `PUT /api/config/mcp-servers/mcp%3Aelyth` で次の設定を�
 `ELYTH_API_KEY` は設定値として OtomeKairo 本体に保持する。
 MCP server の API key、token、command env、内部 URL の秘密部分を `hello`、result、inspection、通常ログへ入れない。
 MCP server の tool 名、description、input schema は capability manifest の正本ではなく、接続中 MCP server の tool catalog として扱う。
+`enabled_tools` は実行権限の設定値であり、tool catalog の正本ではない。
 
 ## connector の責務
 
@@ -281,7 +284,7 @@ watcher はローカル設定ファイルを持たず、`config.db` から `cons
 watcher の server URL、TLS 検証、再接続間隔、token 明示上書きは環境変数で扱う。
 camera connector の host と camera account は OtomeKairo 本体の `camera_source` 設定定義で扱う。
 watcher の host、camera account、監視閾値、snapshot 保存先は OtomeKairo 本体の `camera_source.watcher` と runtime config で扱う。
-MCP client connector の command、args、cwd、env は OtomeKairo 本体の `mcp_server` 設定定義で扱う。
+MCP client connector の command、args、cwd、`enabled_tools`、env は OtomeKairo 本体の `mcp_server` 設定定義で扱う。
 `config.example.json` には秘密値を入れない。
 実 token、API key、password、内部 URL の秘密部分を repository に保存しない。
 

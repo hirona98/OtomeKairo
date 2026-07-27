@@ -13,16 +13,73 @@
     <header class="topbar">
       <div class="brand-block">
         <h1>CocoroAI</h1>
+        <div id="server-summary">現在の個を読み込み中</div>
       </div>
       <div class="topbar-actions">
+        <button type="button" class="icon-button dashboard-toggle" id="toggle-dashboard" title="運用ダッシュボード"
+          aria-expanded="true">運用</button>
         <button type="button" class="icon-button" id="open-settings" title="設定">⚙</button>
       </div>
     </header>
 
-    <main class="chat-layout">
+    <main class="workspace-layout" id="workspace-layout">
+      <aside class="dashboard-panel" id="dashboard-panel" aria-label="運用ダッシュボード">
+        <div class="dashboard-header">
+          <div>
+            <h2>現在の個</h2>
+            <div id="dashboard-generated-at" class="dashboard-updated">未取得</div>
+          </div>
+          <button type="button" class="plain-button" id="refresh-dashboard">更新</button>
+        </div>
+
+        <div class="dashboard-overview" aria-label="稼働概要">
+          <div class="dashboard-metric">
+            <span class="dashboard-metric-value" id="dashboard-runtime-state">--</span>
+            <span class="dashboard-metric-label">runtime</span>
+          </div>
+          <div class="dashboard-metric">
+            <span class="dashboard-metric-value" id="dashboard-run-count">--</span>
+            <span class="dashboard-metric-label">自律実行</span>
+          </div>
+          <div class="dashboard-metric">
+            <span class="dashboard-metric-value" id="dashboard-capability-count">--</span>
+            <span class="dashboard-metric-label">利用可能能力</span>
+          </div>
+          <div class="dashboard-metric">
+            <span class="dashboard-metric-value" id="dashboard-foreground-count">--</span>
+            <span class="dashboard-metric-label">前景状態</span>
+          </div>
+        </div>
+
+        <details class="dashboard-section" open>
+          <summary>現在状態</summary>
+          <div class="dashboard-list" id="dashboard-current-state"></div>
+        </details>
+
+        <details class="dashboard-section" open>
+          <summary>自律実行</summary>
+          <div class="dashboard-list" id="dashboard-runs"></div>
+        </details>
+
+        <details class="dashboard-section">
+          <summary>能力</summary>
+          <div class="dashboard-list" id="dashboard-capabilities"></div>
+        </details>
+
+        <details class="dashboard-section" open>
+          <summary>最近のサイクル</summary>
+          <div class="dashboard-list cycle-timeline" id="dashboard-cycles"></div>
+        </details>
+      </aside>
+
       <section class="chat-panel" aria-label="チャット">
         <div class="messages" id="messages" aria-live="polite"></div>
         <form class="composer" id="composer">
+          <div class="conversation-identity">
+            <label>人物参照<input id="conversation-person-ref" spellcheck="false"></label>
+            <label>表示名<input id="conversation-display-name" required></label>
+            <label>会話参照<input id="conversation-interaction-ref" spellcheck="false"></label>
+          </div>
           <div class="attachment-preview" id="attachment-preview" hidden>
             <img id="attachment-image" alt="添付画像プレビュー">
             <button type="button" class="plain-button" id="remove-attachment">削除</button>
@@ -43,6 +100,7 @@
 
     <footer class="statusbar">
       <span id="connection-status" class="status">未接続</span>
+      <span id="event-stream-status" class="status">非同期発話: 接続中</span>
     </footer>
   </div>
 
@@ -74,7 +132,7 @@
         </div>
         <div class="form-grid">
           <label>プリセット名<input id="persona-display-name"></label>
-          <label>ユーザー呼称<input id="persona-user-reference"></label>
+          <label>発話時の二人称呼称（任意）<input id="persona-interlocutor-address-term"></label>
         </div>
         <label class="wide-label">人格本文<textarea id="persona-prompt" class="persona-prompt-field"
             rows="20"></textarea></label>
@@ -180,6 +238,10 @@
               <label>command<input id="mcp-command"></label>
               <label class="wide-label">args<textarea id="mcp-args" rows="3" spellcheck="false"></textarea>
                 <span class="field-hint">command に渡す引数。1 行を 1 引数として保存します。</span>
+              </label>
+              <label class="wide-label">実行を許可するtool名<textarea id="mcp-enabled-tools" rows="4"
+                  spellcheck="false"></textarea>
+                <span class="field-hint">1 行を 1 tool 名として保存します。空欄ではすべてのtoolを拒否します。</span>
               </label>
               <label>cwd<input id="mcp-cwd"></label>
               <label>接続クライアント<input id="mcp-client-id"></label>

@@ -170,19 +170,22 @@ class ServiceConfigValidationMixin:
                 "invalid_persona_reference_style",
                 "reference_style must be an object.",
             )
-        unsupported_fields = sorted(set(reference_style.keys()) - {"user_natural_reference"})
+        unsupported_fields = sorted(set(reference_style.keys()) - {"interlocutor_address_term"})
         if unsupported_fields:
             raise ServiceError(
                 400,
                 "unsupported_persona_reference_style_field",
                 f"reference_style.{unsupported_fields[0]} is not supported.",
             )
-        user_natural_reference = reference_style.get("user_natural_reference")
-        if not isinstance(user_natural_reference, str) or not user_natural_reference.strip():
+        interlocutor_address_term = reference_style.get("interlocutor_address_term")
+        if interlocutor_address_term is not None and (
+            not isinstance(interlocutor_address_term, str)
+            or not interlocutor_address_term.strip()
+        ):
             raise ServiceError(
                 400,
-                "invalid_persona_user_natural_reference",
-                "reference_style.user_natural_reference must be a non-empty string.",
+                "invalid_persona_interlocutor_address_term",
+                "reference_style.interlocutor_address_term must be null or a non-empty string.",
             )
 
     def _validate_camera_source_definition(self, vision_source_id: str, definition: dict[str, Any]) -> None:
@@ -460,7 +463,7 @@ class ServiceConfigValidationMixin:
         if isinstance(reference_style, dict):
             normalized["reference_style"] = self._normalize_text_fields(
                 reference_style,
-                ("user_natural_reference",),
+                ("interlocutor_address_term",),
             )
         return normalized
 

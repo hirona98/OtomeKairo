@@ -20,7 +20,7 @@ class LLMContractError(LLMError):
 # 設定
 RECALL_FOCUS_VALUES = {
     "self",
-    "user",
+    "person",
     "relationship",
     "commitment",
     "topic",
@@ -84,7 +84,7 @@ ACTIVITY_TRANSITION_VALUES = {
     "none",
 }
 ACTIVITY_ACTOR_VALUES = {
-    "user",
+    "person",
     "self",
     "unknown",
 }
@@ -120,7 +120,6 @@ MEMORY_CORRECTION_KIND_VALUES = {
 
 SCOPE_TYPE_VALUES = {
     "self",
-    "user",
     "entity",
     "topic",
     "relationship",
@@ -133,7 +132,7 @@ MAX_MEMORY_REFLECTION_SUMMARY_LENGTH = 140
 MAX_VISUAL_OBSERVATION_SUMMARY_LENGTH = 1200
 RECALL_PACK_SECTION_NAMES = (
     "self_model",
-    "user_model",
+    "person_model",
     "relationship_model",
     "active_topics",
     "active_commitments",
@@ -159,8 +158,13 @@ ANSWER_BOUNDARY_VALUES = {
 }
 ANSWER_TARGET_ACTOR_VALUES = {
     "any",
-    "user",
+    "person",
     "assistant",
+}
+DISCLOSURE_REVIEW_OUTCOMES = {
+    "allow",
+    "rewrite",
+    "withhold",
 }
 MAX_ANSWER_CONTRACT_REASON_CODES = 3
 MAX_ANSWER_CONTRACT_QUERY_TERMS = 5
@@ -208,11 +212,11 @@ def _has_named_ref_prefix(value: str) -> bool:
 
 def _has_focus_scope_shape(value: str) -> bool:
     # 固定scope
-    if value in {"self", "user"}:
+    if value == "self":
         return True
 
     # 関係・話題scope
-    for prefix in ("relationship:", "topic:"):
+    for prefix in ("entity:", "relationship:", "topic:"):
         if value.startswith(prefix) and value != prefix:
             return True
     return False
@@ -426,6 +430,27 @@ def validate_answer_contract_contract(payload: dict[str, Any]) -> None:
             raise LLMError("AnswerContract.query_terms に空または文字列以外の値が含まれています。")
 
 
+def validate_disclosure_review_contract(payload: dict[str, Any]) -> None:
+    # 他者由来記憶の開示可否と最終発話だけを返す。
+    _validate_exact_keys(
+        payload,
+        {"outcome", "speech_text", "reason_code"},
+        "DisclosureReview",
+    )
+    outcome = payload["outcome"]
+    if outcome not in DISCLOSURE_REVIEW_OUTCOMES:
+        raise LLMError("DisclosureReview.outcome が不正です。")
+    speech_text = payload["speech_text"]
+    if outcome == "withhold":
+        if speech_text is not None:
+            raise LLMError("DisclosureReview.outcome=withhold の speech_text は null です。")
+    elif not isinstance(speech_text, str) or not speech_text.strip():
+        raise LLMError("DisclosureReview の許可・書き換え結果には speech_text が必要です。")
+    reason_code = payload["reason_code"]
+    if not isinstance(reason_code, str) or not reason_code.strip():
+        raise LLMError("DisclosureReview.reason_code は空にできません。")
+
+
 def validate_activity_state_contract(payload: dict[str, Any]) -> None:
     # 形状
     _validate_exact_keys(payload, {"activity_candidates"}, "ActivityState")
@@ -473,7 +498,7 @@ def validate_activity_state_contract(payload: dict[str, Any]) -> None:
 
 def _is_relationship_ref(value: str) -> bool:
     # 中核参照
-    if value in {"self", "user"}:
+    if value == "self":
         return True
 
     # 名前付き参照
@@ -502,8 +527,6 @@ def _validate_scope_identity(*, scope_type: Any, scope_key: Any, label: str) -> 
     # 固定Scopes
     if scope_type == "self" and normalized_scope_key != "self":
         raise LLMError(f"{label}.scope_type が self のとき、scope_key は 'self' である必要があります。")
-    if scope_type == "user" and normalized_scope_key != "user":
-        raise LLMError(f"{label}.scope_type が user のとき、scope_key は 'user' である必要があります。")
     if scope_type == "world" and normalized_scope_key != "world":
         raise LLMError(f"{label}.scope_type が world のとき、scope_key は 'world' である必要があります。")
 
@@ -569,7 +592,9 @@ def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
     if any(not isinstance(scope, str) or not scope.strip() for scope in payload["focus_scopes"]):
         raise LLMError("RecallHint focus_scopes の各要素は空でない文字列である必要があります。")
     if any(not _has_focus_scope_shape(scope.strip()) for scope in payload["focus_scopes"]):
-        raise LLMError("RecallHint focus_scopes は self/user/relationship:<key>/topic:<key> 形式である必要があります。")
+        raise LLMError(
+            "RecallHint focus_scopes は self/entity:<key>/relationship:<key>/topic:<key> 形式である必要があります。"
+        )
     if not isinstance(payload["mentioned_entities"], list):
         raise LLMError("RecallHint mentioned_entities は配列である必要があります。")
     if any(not isinstance(entity, str) or not entity.strip() for entity in payload["mentioned_entities"]):
@@ -887,16 +912,17 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
         if candidate["scope"] not in SCOPE_TYPE_VALUES:
             raise LLMError(
                 "MemoryInterpretation candidate_memory_unit.scope が不正です。"
-                f" scope={candidate['scope']!r}。self, user, entity, topic, relationship, world のいずれかだけを使ってください。"
+                f" scope={candidate['scope']!r}。self, entity, topic, relationship, world のいずれかだけを使ってください。"
             )
         if not isinstance(candidate["subject_hint"], str) or not candidate["subject_hint"].strip():
             raise LLMError("MemoryInterpretation candidate_memory_unit.subject_hint が不正です。")
         if not isinstance(candidate["predicate_hint"], str) or not candidate["predicate_hint"].strip():
             raise LLMError("MemoryInterpretation candidate_memory_unit.predicate_hint が不正です。")
-        if not isinstance(candidate["object_hint"], str) or not candidate["object_hint"].strip():
+        object_hint = candidate["object_hint"]
+        if object_hint is not None and (not isinstance(object_hint, str) or not object_hint.strip()):
             raise LLMError("MemoryInterpretation candidate_memory_unit.object_hint が不正です。")
-        if candidate["subject_hint"].strip().startswith("entity:") or candidate["object_hint"].strip().startswith(
-            "entity:"
+        if candidate["subject_hint"].strip().startswith("entity:") or (
+            isinstance(object_hint, str) and object_hint.strip().startswith("entity:")
         ):
             raise LLMError(
                 "MemoryInterpretation candidate_memory_unit では entity:<key> を使えません。"

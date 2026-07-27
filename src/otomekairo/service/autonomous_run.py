@@ -8,6 +8,7 @@ from typing import Any
 
 from otomekairo.llm.client import LLMError
 from otomekairo.llm.contexts import AutonomousStepContext, CurrentInput
+from otomekairo.interaction import normalize_interaction_context
 from otomekairo.service.capability import CapabilityDispatchError
 from otomekairo.service.common import ServiceError, debug_log
 
@@ -428,27 +429,23 @@ class ServiceAutonomousRunMixin:
                 for run in due_runs:
                     if stop_event.is_set():
                         return
-                    if self._user_response_cycle_active():
+                    if not self._cycle_coordinator.try_enter_background():
                         debug_log(
                             "AutonomousRun",
-                            f"scheduler skipped user_response_active run={run.get('run_id')}",
+                            f"scheduler skipped foreground_cycle_active run={run.get('run_id')}",
                             level="DEBUG",
                         )
                         continue
-                    with self._wake_execution_lock:
-                        if self._user_response_cycle_active():
-                            debug_log(
-                                "AutonomousRun",
-                                f"scheduler skipped user_response_active run={run.get('run_id')}",
-                                level="DEBUG",
+                    try:
+                        with self._wake_execution_lock:
+                            self._execute_autonomous_run_step(
+                                state=state,
+                                run_id=str(run.get("run_id") or ""),
+                                started_at=self._now_iso(),
+                                emit_speech_event=True,
                             )
-                            continue
-                        self._execute_autonomous_run_step(
-                            state=state,
-                            run_id=str(run.get("run_id") or ""),
-                            started_at=self._now_iso(),
-                            emit_speech_event=True,
-                        )
+                    finally:
+                        self._cycle_coordinator.leave_background()
             except Exception as exc:  # noqa: BLE001
                 debug_log(
                     "AutonomousRun",
@@ -577,6 +574,28 @@ class ServiceAutonomousRunMixin:
                 "reason_summary": coordination["reason_summary"],
             },
         }
+        requested_by_person_ref = source_current_input.get("sender_ref")
+        if (
+            isinstance(requested_by_person_ref, str)
+            and requested_by_person_ref.startswith("person:")
+        ):
+            run["requested_by_person_ref"] = requested_by_person_ref
+        interaction_context = source_current_input.get("interaction_context")
+        if isinstance(interaction_context, dict):
+            origin_interaction_ref = interaction_context.get("interaction_ref")
+            if isinstance(origin_interaction_ref, str) and origin_interaction_ref:
+                run["origin_interaction_ref"] = origin_interaction_ref
+            participants = interaction_context.get("participants")
+            if isinstance(participants, list):
+                run["participant_refs"] = [
+                    participant["person_ref"]
+                    for participant in participants
+                    if (
+                        isinstance(participant, dict)
+                        and isinstance(participant.get("person_ref"), str)
+                        and participant["person_ref"].startswith("person:")
+                    )
+                ]
         if isinstance(source_cycle_id, str) and source_cycle_id.strip():
             run["source_cycle_id"] = source_cycle_id.strip()
         normalized_target = self._normalize_capability_client_id(assistant_message_target_client_id)
@@ -952,15 +971,39 @@ class ServiceAutonomousRunMixin:
         current_input_payload = source_current_input if isinstance(source_current_input, dict) else None
         if current_input_payload is None:
             current_input_payload = {
-                "sender": "system",
+                "sender_kind": "system",
+                "sender_ref": None,
                 "source_kind": "autonomous_run",
-                "response_target": "none",
+                "response_target_refs": [],
                 "text": f"autonomous_run step: {run.get('objective_summary')}",
             }
+        raw_interaction_context = current_input_payload.get("interaction_context")
+        interaction_context = normalize_interaction_context(
+            raw_interaction_context,
+            required=False,
+            require_speaker=False,
+        )
+        raw_response_target_refs = current_input_payload.get("response_target_refs")
+        response_target_refs = (
+            tuple(
+                value.strip()
+                for value in raw_response_target_refs
+                if isinstance(value, str) and value.strip()
+            )
+            if isinstance(raw_response_target_refs, list)
+            else ()
+        )
         current_input = CurrentInput(
-            sender=str(current_input_payload.get("sender") or "system"),
+            sender_kind=str(current_input_payload.get("sender_kind") or "system"),
+            sender_ref=(
+                str(current_input_payload["sender_ref"]).strip()
+                if isinstance(current_input_payload.get("sender_ref"), str)
+                and str(current_input_payload["sender_ref"]).strip()
+                else None
+            ),
             source_kind=str(current_input_payload.get("source_kind") or "autonomous_run"),
-            response_target=str(current_input_payload.get("response_target") or "none"),
+            response_target_refs=response_target_refs,
+            interaction_context=interaction_context,
             text=str(current_input_payload.get("text") or ""),
         )
         foreground_world_state = self._summarize_foreground_world_states(
@@ -974,15 +1017,13 @@ class ServiceAutonomousRunMixin:
         return AutonomousStepContext(
             run=self._autonomous_run_prompt_summary(run),
             current_input=current_input,
-            recent_turns=self._load_recent_turns(state),
+            recent_turns=self._load_recent_turns(state, interaction_context),
             time_context=self._build_time_context(current_time=current_time),
             foreground_world_state=foreground_world_state,
-            activity_context=self._summarize_activity_context(
-                self.store.get_current_activity_state(
-                    memory_set_id=state["selected_memory_set_id"],
-                    current_time=current_time,
-                ),
+            activity_context=self._autonomous_run_activity_context(
+                state=state,
                 current_time=current_time,
+                interaction_context=interaction_context,
             ),
             ongoing_action_summary=self._summarize_ongoing_action(
                 self._current_ongoing_action(state=state, current_time=current_time)
@@ -992,6 +1033,36 @@ class ServiceAutonomousRunMixin:
                 current_time=current_time,
             ),
             last_result_context=last_result_context if isinstance(last_result_context, dict) else None,
+            people_context=self._build_people_context(
+                state=state,
+                current_input=current_input,
+                structured_sources=[run, last_result_context],
+            ),
+        )
+
+    def _autonomous_run_activity_context(
+        self,
+        *,
+        state: dict[str, Any],
+        current_time: str,
+        interaction_context: Any,
+    ) -> dict[str, Any] | None:
+        # run起点の人物が確定している場合だけ、その人物の短期活動を読む。
+        participant_refs = (
+            interaction_context.participant_refs
+            if interaction_context is not None
+            else ()
+        )
+        if not participant_refs:
+            return None
+        activity_state = self.store.get_current_activity_state(
+            memory_set_id=state["selected_memory_set_id"],
+            actor_ref=participant_refs[0],
+            current_time=current_time,
+        )
+        return self._summarize_activity_context(
+            activity_state,
+            current_time=current_time,
         )
 
     def _generate_autonomous_run_speech(
@@ -1049,6 +1120,7 @@ class ServiceAutonomousRunMixin:
             initiative_context=None,
             visual_observation_context=None,
             self_state_context=None,
+            people_context=step_context.people_context or [],
             relationship_context=None,
             prediction_error_context=None,
             workspace_context=None,
@@ -1290,6 +1362,24 @@ class ServiceAutonomousRunMixin:
         debug_log("AutonomousRun", f"result cycle queued request={request_label} run={run_id or '-'}", level="DEBUG")
 
     def _execute_autonomous_capability_result_cycle(
+        self,
+        *,
+        state: dict[str, Any],
+        capability_response: dict[str, Any],
+        started_at: str,
+    ) -> None:
+        # autonomous_run の非同期結果も同じ個の状態更新として会話と直列化する。
+        self._cycle_coordinator.enter_foreground()
+        try:
+            self._execute_autonomous_capability_result_cycle_inner(
+                state=state,
+                capability_response=capability_response,
+                started_at=started_at,
+            )
+        finally:
+            self._cycle_coordinator.leave_foreground()
+
+    def _execute_autonomous_capability_result_cycle_inner(
         self,
         *,
         state: dict[str, Any],
@@ -1541,7 +1631,7 @@ class ServiceAutonomousRunMixin:
                 run=run,
                 current_time=current_time,
                 status="cancelled",
-                reason_summary="ユーザーが停止を明示したため cancel した。",
+                reason_summary="conversation API の autonomous_run_action=cancel_all により cancel した。",
             )
             self.store.upsert_autonomous_run(autonomous_run=updated)
             updated = self._finalize_autonomous_run_commitments(
@@ -1553,26 +1643,6 @@ class ServiceAutonomousRunMixin:
             )
             cancelled.append(str(run.get("run_id") or ""))
         return [run_id for run_id in cancelled if run_id]
-
-    def _conversation_requests_autonomous_run_cancel(self, input_text: str) -> bool:
-        normalized = input_text.strip()
-        if not normalized:
-            return False
-        stop_terms = ("止めて", "やめて", "中止", "キャンセル", "cancel", "stop")
-        stop_command_terms = (
-            "止めて",
-            "止めてください",
-            "やめて",
-            "やめてください",
-            "中止",
-            "キャンセル",
-            "cancel",
-            "stop",
-        )
-        run_terms = ("自律", "run", "実行", "それ", "今の")
-        if normalized in stop_command_terms or normalized.rstrip("。.!！") in stop_command_terms:
-            return True
-        return any(term in normalized for term in stop_terms) and any(term in normalized for term in run_terms)
 
     def _link_autonomous_run_source_commitments(
         self,
@@ -1825,9 +1895,21 @@ class ServiceAutonomousRunMixin:
     ) -> None:
         target_client_id = self._request_run_assistant_message_target_client_id(run)
         if target_client_id is None:
-            target_client_id = self._event_stream_registry.find_single_client_with_event_subscription("assistant_message")
-        if target_client_id is None:
             debug_log("AutonomousRun", f"assistant_message skipped no_client run={run.get('run_id')}", level="DEBUG")
+            return
+        interaction_ref = run.get("origin_interaction_ref")
+        participant_refs = run.get("participant_refs")
+        if (
+            not isinstance(interaction_ref, str)
+            or not interaction_ref
+            or not isinstance(participant_refs, list)
+            or not participant_refs
+        ):
+            debug_log(
+                "AutonomousRun",
+                f"assistant_message skipped no_interaction run={run.get('run_id')}",
+                level="DEBUG",
+            )
             return
         event = {
             "event_id": self._next_stream_event_id(),
@@ -1835,6 +1917,8 @@ class ServiceAutonomousRunMixin:
             "data": {
                 "source_kind": "autonomous_run",
                 "run_id": run.get("run_id"),
+                "interaction_ref": interaction_ref,
+                "recipient_person_refs": participant_refs,
                 "system_text": "[autonomous_run]",
                 "message": speech_payload["speech_text"],
             },

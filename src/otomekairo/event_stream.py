@@ -19,6 +19,15 @@ class WebSocketProtocolError(Exception):
     pass
 
 
+# hello 登録失敗の公開 error code を表示文から独立させる。
+class EventStreamRegistrationError(ValueError):
+    def __init__(self, message: str, *, error_code: str) -> None:
+        if error_code not in {"invalid_vision_sources", "invalid_mcp_servers"}:
+            raise ValueError(f"Unknown event stream registration error_code: {error_code}")
+        super().__init__(message)
+        self.error_code = error_code
+
+
 # ハンドシェイク
 def build_websocket_accept(key: str) -> str:
     # 要約
@@ -252,7 +261,10 @@ class EventStreamRegistry:
                 }
             )
             if duplicate_source_ids:
-                raise ValueError(f"duplicate_vision_source_id: {', '.join(duplicate_source_ids)}")
+                raise EventStreamRegistrationError(
+                    f"duplicate_vision_source_id: {', '.join(duplicate_source_ids)}",
+                    error_code="invalid_vision_sources",
+                )
             existing_mcp_server_ids: set[str] = set()
             for existing_session in self._sessions.values():
                 if existing_session.get("session_id") == session_id:
@@ -271,7 +283,10 @@ class EventStreamRegistry:
                 }
             )
             if duplicate_mcp_server_ids:
-                raise ValueError(f"duplicate_mcp_server_id: {', '.join(duplicate_mcp_server_ids)}")
+                raise EventStreamRegistrationError(
+                    f"duplicate_mcp_server_id: {', '.join(duplicate_mcp_server_ids)}",
+                    error_code="invalid_mcp_servers",
+                )
 
             # 更新
             session["client_id"] = client_id
@@ -322,27 +337,6 @@ class EventStreamRegistry:
 
         # 空
         return False
-
-    def find_single_client_with_event_subscription(self, event_type: str) -> str | None:
-        # event を受け取れる接続中 client 群
-        normalized_event_type = event_type.strip()
-        if not normalized_event_type:
-            return None
-        with self._lock:
-            client_ids = sorted(
-                {
-                    client_id.strip()
-                    for session in self._sessions.values()
-                    if isinstance((client_id := session.get("client_id")), str)
-                    and client_id.strip()
-                    and normalized_event_type in session.get("event_subscriptions", [])
-                }
-            )
-
-        # 1 台だけのときだけ採用する
-        if len(client_ids) != 1:
-            return None
-        return client_ids[0]
 
     def find_single_client_with_capability(self, capability: str) -> str | None:
         # capability を持つ接続中 client 群

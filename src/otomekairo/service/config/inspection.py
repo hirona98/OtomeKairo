@@ -147,13 +147,20 @@ class ServiceConfigInspectionMixin:
                 current_time=current_time,
                 limit=8,
             ),
-            "activity_context": self._summarize_activity_context(
-                self.store.get_current_activity_state(
+            "activity_contexts": [
+                summary
+                for activity_state in self.store.list_current_activity_states(
                     memory_set_id=state["selected_memory_set_id"],
                     current_time=current_time,
-                ),
-                current_time=current_time,
-            ),
+                    limit=12,
+                )
+                if (
+                    summary := self._summarize_activity_context(
+                        activity_state,
+                        current_time=current_time,
+                    )
+                ) is not None
+            ],
             "drive_states": self._list_current_drive_states(
                 state=state,
                 current_time=current_time,
@@ -588,7 +595,7 @@ class ServiceConfigInspectionMixin:
         }
 
     def _world_state_scope_ref(self, *, scope_type: str, scope_key: str) -> str:
-        if scope_type in {"self", "user", "world"}:
+        if scope_type in {"self", "world"}:
             return scope_key
         if scope_type == "topic":
             return scope_key

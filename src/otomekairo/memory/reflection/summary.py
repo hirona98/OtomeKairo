@@ -534,7 +534,7 @@ class MemoryReflectionSummaryMixin:
                 support_kinds.append("mood_state")
 
         affect_context: list[dict[str, Any]] = []
-        if scope_type in {"relationship", "user"}:
+        if scope_type in {"relationship", "entity"}:
             affect_context = self._reflective_affect_context(
                 scope_type=scope_type,
                 scope_key=scope_key,
@@ -824,13 +824,11 @@ class MemoryReflectionSummaryMixin:
     def _reflective_scope_label(self, *, scope_type: str, scope_key: str) -> str:
         if scope_type == "self":
             return "自分自身"
-        if scope_type == "user":
-            return "ユーザー"
+        if scope_type == "entity":
+            return display_scope_key(scope_key)
         if scope_type == "topic":
             return display_scope_key(scope_key)
         if scope_type == "relationship":
-            if scope_key == "self|user":
-                return "あなたとの関係"
             return f"{scope_key} の関係文脈"
         return display_scope_key(scope_key)
 
@@ -940,7 +938,7 @@ class MemoryReflectionSummaryMixin:
         # 基底
         base = {
             "self": 0.46,
-            "user": 0.5,
+            "entity": 0.5,
             "relationship": 0.56,
             "topic": 0.42,
         }.get(scope_type, 0.44)

@@ -93,7 +93,7 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
     "primary_recall_focus": "commitment",
     "secondary_recall_focuses": ["episodic"],
     "time_reference": "past",
-    "focus_scopes": ["relationship:self|user"],
+    "focus_scopes": ["relationship:self|person:external-123"],
     "mentioned_entities": [],
     "mentioned_topics": [],
     "risk_flags": ["mixed_intent"]
@@ -102,7 +102,7 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
     "global_recall_limit": 14,
     "section_limits": {
       "self_model": 2,
-      "user_model": 4,
+      "person_model": 4,
       "relationship_model": 3,
       "active_topics": 2,
       "active_commitments": 3,
@@ -121,7 +121,7 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
           "summary_text": "また体調の話の続きをする流れが残っている。",
           "memory_type": "commitment",
           "scope_type": "relationship",
-          "scope_key": "self|user",
+          "scope_key": "self|person:external-123",
           "commitment_state": "open",
           "salience": 0.88,
           "memory_link_summary": {
@@ -149,7 +149,7 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
           "retrieval_lane": "association",
           "summary_text": "前回の相談の続きとして様子を確認した。",
           "primary_scope_type": "relationship",
-          "primary_scope_key": "self|user",
+          "primary_scope_key": "self|person:external-123",
           "open_loops": ["体調の変化をまた確認する"],
           "salience": 0.82
         }
@@ -162,7 +162,7 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
       "compare_key": {
         "memory_type": "commitment",
         "scope_type": "relationship",
-        "scope_key": "self|user",
+        "scope_key": "self|person:external-123",
         "subject_ref": "self",
         "predicate": "talk_again"
       },
@@ -220,7 +220,7 @@ LLM の出力は JSON object 1 個に固定する。
 - 必須キーは `section_selection` と `conflict_summaries` の 2 つ
 - `section_selection` は配列
 - 各要素は `section_name` と `candidate_refs` を持つ
-- `section_name` は `self_model / user_model / relationship_model / active_topics / active_commitments / episodic_evidence` のいずれかで、重複しない
+- `section_name` は `self_model / person_model / relationship_model / active_topics / active_commitments / episodic_evidence` のいずれかで、重複しない
 - `candidate_refs` は source pack 内に存在する ref だけを使う
 - `candidate_refs` は section をまたいで重複しない
 - candidate は元の所属 section から移動させない
@@ -233,7 +233,7 @@ LLM の出力は JSON object 1 個に固定する。
 
 system prompt では、少なくとも次を明示する。
 
-- あなたは `RecallPack` の候補選別だけを行う
+- 自律 AI 本体の内部処理 role `recall_pack_selection` として候補選別だけを行う
 - 候補外のものを足さない
 - section 名を発明しない
 - `primary_recall_focus` を主軸にし、`secondary_recall_focuses` は軽い補助に留める

@@ -5,8 +5,8 @@ OtomeKairo server 本体へ MCP server 固有依存を入れない。
 
 ## 責務
 
-- 起動時に設定済み MCP server を `initialize` し、`tools/list` の結果を hello の `mcp_servers` へ載せる
-- `mcp.call_tool_request` を受けたとき、対象 MCP server の `tools/call` を実行する
+- 起動時に設定済み MCP server を `initialize` し、`tools/list` のうち `enabled_tools` に含まれる tool だけを hello の `mcp_servers` へ載せる
+- 設定済み `enabled_tools` に含まれる `mcp.call_tool_request` だけを MCP server の `tools/call` で実行する
 - `POST /api/capability/result` へ result を返す
 - MCP API key、token、内部 URL の秘密部分を通常ログや result に出さない
 
@@ -35,6 +35,7 @@ curl -k \
     "command": "npx",
     "args": ["-y", "elyth-mcp-server@latest"],
     "cwd": null,
+    "enabled_tools": ["get_information", "create_post"],
     "env": {
       "ELYTH_API_BASE": "https://elythworld.com",
       "ELYTH_API_KEY": "..."
@@ -80,6 +81,7 @@ curl -k \
     "command": "python3",
     "args": ["-m", "otomekairo_mcp_client_connector.elyth_fake_mcp_server"],
     "cwd": null,
+    "enabled_tools": ["get_information", "create_post"],
     "env": {
       "PYTHONPATH": "connectors/mcp_client/src"
     }
@@ -105,6 +107,7 @@ curl -k \
     "command": "otomekairo-mcp-stdio-trace-proxy",
     "args": ["--", "npx", "-y", "elyth-mcp-server@latest"],
     "cwd": null,
+    "enabled_tools": ["get_information", "create_post"],
     "env": {
       "ELYTH_API_BASE": "http://127.0.0.1:18080",
       "ELYTH_API_KEY": "local-recorder-key"

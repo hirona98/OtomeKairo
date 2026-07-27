@@ -17,11 +17,11 @@ from otomekairo.llm.prompts import (
 
 def _valid_recall_hint() -> dict:
     return {
-        "primary_recall_focus": "user",
+        "primary_recall_focus": "person",
         "secondary_recall_focuses": [],
         "confidence": 0.8,
         "time_reference": "none",
-        "focus_scopes": ["user"],
+        "focus_scopes": ["entity:person:test"],
         "mentioned_entities": [],
         "mentioned_topics": [],
         "risk_flags": [],
@@ -51,7 +51,7 @@ class InputInterpretationContractTests(unittest.TestCase):
             {
                 "display_name": "テスト",
                 "initiative_baseline": "medium",
-                "reference_style": {"user_natural_reference": "マスター"},
+                "reference_style": {"interlocutor_address_term": "マスター"},
                 "persona_prompt": "入力を落ち着いて解釈する。",
             },
             role="input_interpretation",
@@ -59,9 +59,11 @@ class InputInterpretationContractTests(unittest.TestCase):
         messages = build_input_interpretation_messages(
             persona_context=persona_context,
             current_input=CurrentInput(
-                sender="user",
+                sender_kind="person",
+                sender_ref="person:test",
                 source_kind="conversation",
-                response_target="user",
+                response_target_refs=("person:test",),
+                interaction_context=None,
                 text="今日は少し眠い。",
             ),
             recent_turns=[],

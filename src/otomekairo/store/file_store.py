@@ -711,6 +711,7 @@ class SQLiteMemoryStore(
         self,
         *,
         memory_set_id: str,
+        interaction_ref: str,
         since_iso: str,
         limit: int,
     ) -> list[dict[str, Any]]:
@@ -718,16 +719,17 @@ class SQLiteMemoryStore(
         with self._memory_db() as conn:
             rows = conn.execute(
                 """
-                SELECT role, text, created_at
+                SELECT role, text, interaction_ref, speaker_ref, participant_refs_json, created_at
                 FROM events
                 WHERE memory_set_id = ?
+                  AND interaction_ref = ?
                   AND kind IN ('conversation_input', 'speech')
                   AND text IS NOT NULL
                   AND created_at >= ?
                 ORDER BY created_at DESC, rowid DESC
                 LIMIT ?
                 """,
-                (memory_set_id, since_iso, limit),
+                (memory_set_id, interaction_ref, since_iso, limit),
             ).fetchall()
 
         # 結果
@@ -735,6 +737,9 @@ class SQLiteMemoryStore(
             {
                 "role": row["role"],
                 "text": row["text"],
+                "interaction_ref": row["interaction_ref"],
+                "speaker_ref": row["speaker_ref"],
+                "participant_refs": json.loads(row["participant_refs_json"]),
                 "created_at": row["created_at"],
             }
             for row in reversed(rows)
@@ -921,15 +926,15 @@ class SQLiteMemoryStore(
     def _event_kinds_for_actor(self, target_actor: str) -> tuple[str, ...]:
         if target_actor == "assistant":
             return ("speech",)
-        if target_actor == "user":
+        if target_actor == "person":
             return ("conversation_input", "observation")
         return ("conversation_input", "observation", "speech")
 
     def _event_roles_for_actor(self, target_actor: str) -> tuple[str, ...]:
         if target_actor == "assistant":
             return ("assistant",)
-        if target_actor == "user":
-            return ("user",)
+        if target_actor == "person":
+            return ("person",)
         return ()
 
     def count_cycle_summaries_since(

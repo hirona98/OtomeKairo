@@ -18,7 +18,7 @@ class ActivityContextTests(unittest.TestCase):
         context = service._summarize_activity_context(
             {
                 "label": "離席中",
-                "actor": "user",
+                "actor": "person",
                 "target": "workspace",
                 "transition": "continue",
                 "confidence": 0.86,
@@ -42,13 +42,14 @@ class ActivityContextTests(unittest.TestCase):
 
         activity_state, ended_activity_id = service._normalize_activity_candidate(
             memory_set_id="memory:set",
+            actor_ref="person:test",
             started_at="2026-07-07T20:08:16+09:00",
             source_pack={
-                "current_input": {"sender": "system", "source_kind": "background_thinking"},
+                "current_input": {"sender_kind": "system", "source_kind": "background_thinking"},
                 "pre_observation_activity_context": {
                     "current_activity": {
                         "label": "離席中",
-                        "actor": "user",
+                        "actor": "person",
                         "target": "workspace",
                         "transition": "continue",
                         "started_age_label": "19時間前",
@@ -60,13 +61,13 @@ class ActivityContextTests(unittest.TestCase):
             previous_state={
                 "activity_id": "activity:refreshed-by-observation",
                 "label": "観測直後の短い状態",
-                "actor": "user",
+                "actor": "person",
                 "started_at": "2026-07-07T20:08:16+09:00",
                 "updated_at": "2026-07-07T20:08:16+09:00",
             },
             candidate={
                 "label": "アプリケーション起動検討",
-                "actor": "user",
+                "actor": "person",
                 "target": "desktop",
                 "confidence_hint": "high",
                 "salience_hint": "medium",

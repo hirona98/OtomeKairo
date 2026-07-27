@@ -241,13 +241,13 @@ class RelationIndexTests(unittest.TestCase):
             store.delete_memory_set_records(target_memory_set_id)
             self.assertEqual(store.list_relation_index_records(memory_set_id=target_memory_set_id), [])
 
-    def test_schema_version_fifteen_is_rejected_without_migration(self) -> None:
+    def test_schema_version_sixteen_is_rejected_without_migration(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root_dir = Path(temp_dir)
             with sqlite3.connect(root_dir / "memory.db") as conn:
-                conn.execute("PRAGMA user_version = 15")
+                conn.execute("PRAGMA user_version = 16")
 
-            with self.assertRaisesRegex(RuntimeError, "Expected 16"):
+            with self.assertRaisesRegex(RuntimeError, "Expected 17"):
                 FileStore(root_dir)
 
     def test_relation_sync_failure_marks_job_failed_and_appends_audit_event(self) -> None:

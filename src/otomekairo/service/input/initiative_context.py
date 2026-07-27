@@ -5,7 +5,6 @@ from typing import Any
 from otomekairo.llm.contexts import InitiativeContext
 from otomekairo.llm.contracts import INITIATIVE_ENTRY_ENTER_BASIS_VALUES
 from otomekairo.service.common import debug_log
-from otomekairo.world_state.models import WorldStateTrace
 
 
 class ServiceInputInitiativeContextMixin:
@@ -23,7 +22,6 @@ class ServiceInputInitiativeContextMixin:
         drive_state_summary: list[dict[str, Any]] | None,
         foreground_world_state: list[dict[str, Any]] | None,
         activity_context: dict[str, Any] | None,
-        world_state_trace: WorldStateTrace | None,
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         selected_candidate: dict[str, Any] | None,
@@ -34,11 +32,6 @@ class ServiceInputInitiativeContextMixin:
         drive_summaries = self._initiative_drive_summaries(drive_state_summary)
         pending_intent_summaries = self._initiative_pending_intent_summaries(selected_candidate)
         world_state_summary = foreground_world_state or []
-        status_refresh_world_state_summary = self._initiative_status_refresh_world_state_summary(
-            foreground_world_state=foreground_world_state,
-            world_state_trace=world_state_trace,
-            trigger_kind=trigger_kind,
-        )
         initiative_baseline = self._initiative_baseline_summary(persona)
         runtime_state_summary = self._initiative_runtime_state_summary(
             state=state,
@@ -73,7 +66,6 @@ class ServiceInputInitiativeContextMixin:
             trigger_kind=trigger_kind,
             drive_summaries=drive_summaries,
             world_state_summary=world_state_summary,
-            status_refresh_world_state_summary=status_refresh_world_state_summary,
             recent_turn_summary=recent_turn_summary,
             foreground_signal_summary=foreground_signal_summary,
             initiative_entry_summary=initiative_entry_summary,
@@ -135,18 +127,6 @@ class ServiceInputInitiativeContextMixin:
             speech_timing_summary=speech_timing_summary,
             speech_frequency_level=state["thinking_speech_level"],
         )
-
-    def _initiative_status_refresh_world_state_summary(
-        self,
-        *,
-        foreground_world_state: list[dict[str, Any]] | None,
-        world_state_trace: WorldStateTrace | None,
-        trigger_kind: str,
-    ) -> list[dict[str, Any]]:
-        if trigger_kind in {"wake", "background_thinking"}:
-            previous = world_state_trace.previous_foreground_world_state if world_state_trace is not None else None
-            return self._merge_foreground_world_state_for_reuse(foreground_world_state, previous)
-        return foreground_world_state or []
 
     def _initiative_opportunity_summary(
         self,

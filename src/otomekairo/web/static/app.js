@@ -1,5 +1,6 @@
 const state = {
   identity: null,
+  clientId: "",
   editor: null,
   camera: null,
   mcp: null,
@@ -12,6 +13,56 @@ const state = {
   attachment: null,
   settingsOpen: false,
   sending: false,
+  dashboard: {
+    currentState: null,
+    cycleSummaries: [],
+  },
+  dashboardRefreshing: false,
+  dashboardTimer: null,
+  eventSocket: null,
+  eventReconnectTimer: null,
+  unloading: false,
+};
+
+const RUN_STATUS_LABELS = {
+  active: "実行中",
+  waiting_timer: "時刻待ち",
+  waiting_result: "結果待ち",
+  paused: "一時停止",
+  completed: "完了",
+  cancelled: "取消済み",
+};
+
+const CAPABILITY_REASON_LABELS = {
+  no_binding: "未接続",
+  permission_denied: "権限不足",
+  paused: "一時停止",
+  busy: "実行中",
+  unavailable: "利用不可",
+  dispatch_failed: "配送失敗",
+  request_timeout: "応答待ち超過",
+  parallel_blocked: "別の実行を待機",
+  camera_source_disabled: "カメラ無効",
+  no_vision_source: "視覚ソースなし",
+  no_supported_control: "操作対象なし",
+  no_mcp_tool: "許可済みtoolなし",
+};
+
+const TRIGGER_KIND_LABELS = {
+  user_message: "対話入力",
+  wake: "起床",
+  background_thinking: "定期思考",
+  capability_result: "能力結果",
+  autonomous_run: "自律実行",
+};
+
+const RESULT_KIND_LABELS = {
+  speech: "発話",
+  capability_request: "能力要求",
+  autonomous_run: "自律実行",
+  noop: "変化なし",
+  skipped: "見送り",
+  failed: "失敗",
 };
 
 function element(id) {
@@ -81,6 +132,29 @@ function idSuffix() {
   return crypto.randomUUID ? crypto.randomUUID().replaceAll("-", "") : String(Date.now());
 }
 
+function initializeClientId() {
+  const storedClientId = sessionStorage.getItem("otomekairo.client_id");
+  state.clientId = storedClientId || `web-ui:${idSuffix()}`;
+  sessionStorage.setItem("otomekairo.client_id", state.clientId);
+}
+
+function loadConversationIdentity() {
+  const generatedId = idSuffix();
+  const personRef = localStorage.getItem("otomekairo.person_ref") || `person:web:${generatedId}`;
+  const interactionRef = localStorage.getItem("otomekairo.interaction_ref")
+    || `interaction:web:direct:${personRef.slice("person:".length)}`;
+  element("conversation-person-ref").value = personRef;
+  element("conversation-display-name").value = localStorage.getItem("otomekairo.display_name") || "";
+  element("conversation-interaction-ref").value = interactionRef;
+  saveConversationIdentity();
+}
+
+function saveConversationIdentity() {
+  localStorage.setItem("otomekairo.person_ref", element("conversation-person-ref").value.trim());
+  localStorage.setItem("otomekairo.display_name", element("conversation-display-name").value.trim());
+  localStorage.setItem("otomekairo.interaction_ref", element("conversation-interaction-ref").value.trim());
+}
+
 function arrayById(items, idKey, id) {
   return (items || []).find((item) => item[idKey] === id) || null;
 }
@@ -145,6 +219,8 @@ function formatEnv(value) {
 
 async function loadIdentity() {
   try {
+    state.identity = await apiRequest("/ui/api/bootstrap/server-identity");
+    element("server-summary").textContent = state.identity.server_display_name || state.identity.server_id || "OtomeKairo";
     setStatus("接続済み");
   } catch (error) {
     setStatus("接続失敗", "error");
@@ -166,7 +242,461 @@ async function loadStatus({ silent = false } = {}) {
   }
 }
 
-function addMessage(kind, text, images = []) {
+function displayValue(value, fallback = "—") {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return fallback;
+}
+
+function formatDateTime(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    return "—";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("ja-JP", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(parsed);
+}
+
+function formatDuration(startedAt, finishedAt) {
+  const started = new Date(startedAt);
+  const finished = new Date(finishedAt);
+  if (Number.isNaN(started.getTime()) || Number.isNaN(finished.getTime())) {
+    return "";
+  }
+  const milliseconds = Math.max(0, finished.getTime() - started.getTime());
+  return milliseconds < 1000 ? `${milliseconds}ms` : `${(milliseconds / 1000).toFixed(1)}秒`;
+}
+
+function formatScore(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(2) : "—";
+}
+
+function setDashboardMetric(id, value, kind = "") {
+  const metric = element(id);
+  metric.textContent = value;
+  metric.className = `dashboard-metric-value ${kind}`.trim();
+}
+
+// inspection の正本 shape を表示専用の小さなカードへ投影する。
+function showDashboardEmpty(container, text) {
+  const empty = document.createElement("div");
+  empty.className = "dashboard-empty";
+  empty.textContent = text;
+  container.replaceChildren(empty);
+}
+
+function createDashboardItem({
+  title,
+  badge = "",
+  badgeKind = "",
+  body = "",
+  meta = "",
+  itemKind = "",
+}) {
+  const item = document.createElement("article");
+  item.className = `dashboard-item ${itemKind}`.trim();
+
+  const heading = document.createElement("div");
+  heading.className = "dashboard-item-heading";
+  const titleElement = document.createElement("div");
+  titleElement.className = "dashboard-item-title";
+  titleElement.textContent = title;
+  heading.append(titleElement);
+  if (badge) {
+    const badgeElement = document.createElement("span");
+    badgeElement.className = `dashboard-badge ${badgeKind}`.trim();
+    badgeElement.textContent = badge;
+    heading.append(badgeElement);
+  }
+  item.append(heading);
+
+  if (body) {
+    const bodyElement = document.createElement("div");
+    bodyElement.className = "dashboard-item-body";
+    bodyElement.textContent = body;
+    item.append(bodyElement);
+  }
+  if (meta) {
+    const metaElement = document.createElement("div");
+    metaElement.className = "dashboard-item-meta";
+    metaElement.textContent = meta;
+    item.append(metaElement);
+  }
+  return item;
+}
+
+function runBadgeKind(status) {
+  if (status === "completed") {
+    return "ok";
+  }
+  if (status === "cancelled") {
+    return "error";
+  }
+  if (status === "waiting_timer" || status === "waiting_result" || status === "paused") {
+    return "waiting";
+  }
+  return "";
+}
+
+function renderDashboardOverview() {
+  const snapshot = state.dashboard.currentState || {};
+  const runtime = snapshot.runtime_summary || {};
+  const current = snapshot.current_state || {};
+  const capabilities = snapshot.capability_inspection?.capabilities || [];
+  const foregroundWorldStates = current.foreground_world_states || [];
+  const runtimeReady = runtime.connection_state === "ready";
+  const nonTerminalRunCount = (
+    (runtime.active_autonomous_run_count || 0)
+    + (runtime.paused_autonomous_run_count || 0)
+  );
+  const availableCapabilities = capabilities.filter((capability) => capability.available === true);
+
+  setDashboardMetric(
+    "dashboard-runtime-state",
+    runtimeReady ? "稼働中" : displayValue(runtime.connection_state),
+    runtimeReady ? "ok" : "error",
+  );
+  setDashboardMetric("dashboard-run-count", String(nonTerminalRunCount));
+  setDashboardMetric("dashboard-capability-count", `${availableCapabilities.length}/${capabilities.length}`);
+  setDashboardMetric("dashboard-foreground-count", String(foregroundWorldStates.length));
+  element("dashboard-generated-at").textContent = `更新 ${formatDateTime(snapshot.generated_at)}`;
+  if (state.identity) {
+    element("server-summary").textContent = [
+      state.identity.server_display_name || state.identity.server_id,
+      snapshot.settings_snapshot?.selected_persona_id,
+    ].filter(Boolean).join(" · ");
+  }
+}
+
+function renderDashboardCurrentState() {
+  const container = element("dashboard-current-state");
+  const runtime = state.dashboard.currentState?.runtime_summary || {};
+  const current = state.dashboard.currentState?.current_state || {};
+  const items = [
+    createDashboardItem({
+      title: "Runtime",
+      badge: runtime.connection_state === "ready" ? "稼働中" : displayValue(runtime.connection_state),
+      badgeKind: runtime.connection_state === "ready" ? "ok" : "error",
+      body: [
+        `定期思考 ${runtime.background_thinking_scheduler_active ? "稼働" : "停止"}`,
+        `自律実行 ${runtime.autonomous_run_scheduler_active ? "稼働" : "停止"}`,
+      ].join(" · "),
+      meta: `記憶job待ち ${runtime.pending_memory_job_count || 0}`,
+    }),
+  ];
+  const ongoingAction = current.ongoing_action;
+  if (ongoingAction) {
+    items.push(createDashboardItem({
+      title: "継続行動",
+      badge: displayValue(ongoingAction.status),
+      badgeKind: ongoingAction.status === "failed" ? "error" : "waiting",
+      body: displayValue(ongoingAction.goal_summary || ongoingAction.step_summary),
+      meta: [
+        ongoingAction.step_summary,
+        ongoingAction.last_capability_id,
+        formatDateTime(ongoingAction.updated_at),
+      ].filter(Boolean).join(" · "),
+    }));
+  }
+
+  const mood = current.mood_state;
+  const currentVad = mood?.current_vad;
+  if (currentVad) {
+    items.push(createDashboardItem({
+      title: "気分状態",
+      body: `valence ${formatScore(currentVad.v)} · arousal ${formatScore(currentVad.a)} · dominance ${formatScore(currentVad.d)}`,
+      meta: `更新 ${formatDateTime(mood.updated_at)}`,
+    }));
+  }
+
+  for (const activityContext of (current.activity_contexts || []).slice(0, 3)) {
+    const activity = activityContext.current_activity;
+    if (!activity) {
+      continue;
+    }
+    items.push(createDashboardItem({
+      title: `活動 · ${displayValue(activity.actor, "主体")}`,
+      body: displayValue(activity.label || activity.reason_summary),
+      meta: [
+        activity.target ? `対象 ${activity.target}` : "",
+        activity.duration_label,
+        activity.age_label,
+      ].filter(Boolean).join(" · "),
+    }));
+  }
+
+  for (const drive of (current.drive_states || []).slice(0, 3)) {
+    items.push(createDashboardItem({
+      title: `動機 · ${displayValue(drive.drive_kind, "未分類")}`,
+      body: displayValue(drive.summary_text),
+      meta: `salience ${formatScore(drive.salience)} · 更新 ${formatDateTime(drive.updated_at)}`,
+    }));
+  }
+
+  for (const worldState of (current.foreground_world_states || []).slice(0, 5)) {
+    const scope = [worldState.scope_type, worldState.scope_key].filter(Boolean).join(":");
+    items.push(createDashboardItem({
+      title: `前景 · ${displayValue(worldState.state_type, "world_state")}`,
+      body: displayValue(worldState.summary_text),
+      meta: [
+        scope,
+        `salience ${formatScore(worldState.salience)}`,
+        formatDateTime(worldState.updated_at || worldState.observed_at),
+      ].filter(Boolean).join(" · "),
+    }));
+  }
+
+  container.replaceChildren(...items);
+}
+
+function createRunAction(label, action, runId, { danger = false } = {}) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  button.dataset.runAction = action;
+  button.dataset.runId = runId;
+  if (danger) {
+    button.className = "danger-button";
+  }
+  return button;
+}
+
+function renderDashboardRuns() {
+  const container = element("dashboard-runs");
+  const runs = state.dashboard.currentState?.current_state?.autonomous_runs || [];
+  if (!runs.length) {
+    showDashboardEmpty(container, "自律実行はありません。");
+    return;
+  }
+
+  const items = runs.slice(0, 12).map((run) => {
+    const status = displayValue(run.status);
+    const item = createDashboardItem({
+      title: displayValue(run.objective_summary, run.run_id),
+      badge: RUN_STATUS_LABELS[status] || status,
+      badgeKind: runBadgeKind(status),
+      body: displayValue(run.current_step_summary || run.history_summary),
+      meta: [
+        run.next_run_at ? `次回 ${formatDateTime(run.next_run_at)}` : "",
+        `更新 ${formatDateTime(run.updated_at)}`,
+      ].filter(Boolean).join(" · "),
+    });
+    const terminal = ["completed", "cancelled"].includes(status);
+    if (!terminal) {
+      const actions = document.createElement("div");
+      actions.className = "dashboard-item-actions";
+      if (status === "paused") {
+        actions.append(createRunAction("再開", "resume", run.run_id));
+      } else {
+        actions.append(createRunAction("一時停止", "pause", run.run_id));
+      }
+      actions.append(createRunAction("取消", "cancel", run.run_id, { danger: true }));
+      item.append(actions);
+    }
+    return item;
+  });
+  container.replaceChildren(...items);
+}
+
+function renderDashboardCapabilities() {
+  const container = element("dashboard-capabilities");
+  const capabilities = state.dashboard.currentState?.capability_inspection?.capabilities || [];
+  if (!capabilities.length) {
+    showDashboardEmpty(container, "能力情報はありません。");
+    return;
+  }
+
+  const items = capabilities.map((capability) => {
+    const available = capability.available === true;
+    const reason = capability.unavailable_reason;
+    const bindingCount = capability.binding?.eligible_client_count || 0;
+    const sourceCount = capability.vision_sources?.filter((source) => source.available === true).length || 0;
+    const toolCount = capability.mcp_servers
+      ?.reduce((count, server) => count + (server.tools?.length || 0), 0) || 0;
+    return createDashboardItem({
+      title: capability.capability_id,
+      badge: available ? "利用可能" : (CAPABILITY_REASON_LABELS[reason] || displayValue(reason, "利用不可")),
+      badgeKind: available ? "ok" : "error",
+      body: displayValue(capability.kind),
+      meta: [
+        `接続 ${bindingCount}`,
+        sourceCount ? `source ${sourceCount}` : "",
+        toolCount ? `tool ${toolCount}` : "",
+        capability.state?.busy ? "実行中" : "",
+      ].filter(Boolean).join(" · "),
+    });
+  });
+  container.replaceChildren(...items);
+}
+
+function renderDashboardCycles() {
+  const container = element("dashboard-cycles");
+  const cycles = state.dashboard.cycleSummaries || [];
+  if (!cycles.length) {
+    showDashboardEmpty(container, "記録済みサイクルはありません。");
+    return;
+  }
+
+  const items = cycles.map((cycle) => {
+    const trigger = TRIGGER_KIND_LABELS[cycle.trigger_kind] || displayValue(cycle.trigger_kind);
+    const result = RESULT_KIND_LABELS[cycle.result_kind] || displayValue(cycle.result_kind);
+    const failed = cycle.failed === true;
+    const duration = formatDuration(cycle.started_at, cycle.finished_at);
+    return createDashboardItem({
+      title: trigger,
+      badge: failed ? "失敗" : result,
+      badgeKind: failed ? "error" : "ok",
+      body: cycle.cycle_id,
+      meta: [
+        formatDateTime(cycle.started_at),
+        duration,
+      ].filter(Boolean).join(" · "),
+      itemKind: failed ? "failed" : "",
+    });
+  });
+  container.replaceChildren(...items);
+}
+
+function renderDashboard() {
+  renderDashboardOverview();
+  renderDashboardCurrentState();
+  renderDashboardRuns();
+  renderDashboardCapabilities();
+  renderDashboardCycles();
+}
+
+async function refreshDashboard({ silent = false } = {}) {
+  if (state.dashboardRefreshing) {
+    return;
+  }
+  state.dashboardRefreshing = true;
+  element("refresh-dashboard").disabled = true;
+  try {
+    const [currentState, cycles] = await Promise.all([
+      apiRequest("/ui/api/inspection/current-state"),
+      apiRequest("/ui/api/inspection/cycle-summaries"),
+    ]);
+    state.dashboard.currentState = currentState;
+    state.dashboard.cycleSummaries = cycles.cycle_summaries || [];
+    renderDashboard();
+    if (!silent) {
+      showNotice("運用ダッシュボードを更新しました。");
+    }
+  } catch (error) {
+    element("dashboard-generated-at").textContent = "更新失敗";
+    if (!silent) {
+      showNotice(error.message, true);
+    }
+  } finally {
+    state.dashboardRefreshing = false;
+    element("refresh-dashboard").disabled = false;
+  }
+}
+
+async function controlAutonomousRun(action, runId, button) {
+  if (action === "cancel" && !window.confirm("この自律実行を取り消しますか？")) {
+    return;
+  }
+  button.disabled = true;
+  try {
+    await apiRequest(`/ui/api/autonomous-runs/${encodeURIComponent(runId)}/${action}`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    await refreshDashboard({ silent: true });
+    const message = {
+      pause: "自律実行を一時停止しました。",
+      resume: "自律実行を再開しました。",
+      cancel: "自律実行を取り消しました。",
+    }[action];
+    showNotice(message);
+  } catch (error) {
+    showNotice(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function toggleDashboard() {
+  const workspace = element("workspace-layout");
+  const hidden = workspace.classList.toggle("dashboard-hidden");
+  element("toggle-dashboard").setAttribute("aria-expanded", String(!hidden));
+}
+
+function setEventStreamStatus(text, kind = "") {
+  const status = element("event-stream-status");
+  status.textContent = text;
+  status.className = `status ${kind}`.trim();
+}
+
+function assistantSourceLabel(sourceKind) {
+  return {
+    capability_result: "能力結果",
+    wake: "起床",
+    background_thinking: "定期思考",
+    autonomous_run: "自律実行",
+  }[sourceKind] || "非同期";
+}
+
+// 対話入力と同じ client_id で購読し、非同期発話の物理配送先を一致させる。
+function connectAssistantEventStream() {
+  if (state.unloading || state.eventSocket) {
+    return;
+  }
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const socket = new WebSocket(`${protocol}//${window.location.host}/ui/api/events/stream`);
+  state.eventSocket = socket;
+  setEventStreamStatus("非同期発話: 接続中", "processing");
+
+  socket.addEventListener("open", () => {
+    socket.send(JSON.stringify({
+      type: "hello",
+      client_id: state.clientId,
+      caps: [],
+      event_subscriptions: ["assistant_message"],
+    }));
+    setEventStreamStatus("非同期発話: 接続済み");
+  });
+  socket.addEventListener("message", (event) => {
+    let payload;
+    try {
+      payload = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (payload?.type !== "assistant_message" || typeof payload.data?.message !== "string") {
+      return;
+    }
+    addMessage("assistant", payload.data.message, [], assistantSourceLabel(payload.data.source_kind));
+    refreshDashboard({ silent: true });
+  });
+  socket.addEventListener("error", () => socket.close());
+  socket.addEventListener("close", () => {
+    if (state.eventSocket === socket) {
+      state.eventSocket = null;
+    }
+    if (state.unloading) {
+      return;
+    }
+    setEventStreamStatus("非同期発話: 再接続中", "processing");
+    window.clearTimeout(state.eventReconnectTimer);
+    state.eventReconnectTimer = window.setTimeout(connectAssistantEventStream, 3000);
+  });
+}
+
+function addMessage(kind, text, images = [], sourceLabel = "") {
   const wrapper = document.createElement("article");
   wrapper.className = `message ${kind}`;
 
@@ -183,7 +713,7 @@ function addMessage(kind, text, images = []) {
 
   const meta = document.createElement("div");
   meta.className = "meta";
-  meta.textContent = nowLabel();
+  meta.textContent = [nowLabel(), sourceLabel].filter(Boolean).join(" · ");
 
   wrapper.append(bubble, meta);
   element("messages").append(wrapper);
@@ -218,7 +748,20 @@ async function sendMessage(event) {
     return;
   }
   const images = state.attachment ? [state.attachment.data] : [];
-  addMessage("user", text, images);
+  const personRef = element("conversation-person-ref").value.trim();
+  const displayName = element("conversation-display-name").value.trim();
+  const interactionRef = element("conversation-interaction-ref").value.trim();
+  if (
+    !personRef.startsWith("person:")
+    || personRef.length <= "person:".length
+    || !displayName
+    || !interactionRef
+  ) {
+    showNotice("人物参照は person:<key>、表示名と会話参照は空でない値を指定してください。", true);
+    return;
+  }
+  saveConversationIdentity();
+  addMessage("person", text, images);
   input.value = "";
   clearAttachment();
   state.sending = true;
@@ -230,9 +773,17 @@ async function sendMessage(event) {
       body: JSON.stringify({
         text,
         images,
+        interaction_context: {
+          interaction_ref: interactionRef,
+          speaker_ref: personRef,
+          participants: [{
+            person_ref: personRef,
+            display_name: displayName,
+          }],
+        },
         client_context: {
           source: "OtomeKairoWebUI",
-          client_id: "web-ui",
+          client_id: state.clientId,
           locale: navigator.language,
         },
       }),
@@ -240,6 +791,7 @@ async function sendMessage(event) {
     const rendered = resultText(result);
     addMessage(rendered.kind, rendered.text);
     await loadStatus({ silent: true });
+    await refreshDashboard({ silent: true });
   } catch (error) {
     setStatus("送信失敗", "error");
     addMessage("system", error.message);
@@ -331,6 +883,7 @@ async function saveSettings({ closeAfterSave = false } = {}) {
     state.mcp = clone(mcp);
     renderSettings();
     await loadStatus({ silent: true });
+    await refreshDashboard({ silent: true });
     showNotice("設定を保存しました。");
     if (closeAfterSave) {
       closeSettings();
@@ -379,7 +932,7 @@ function renderPersona() {
     return;
   }
   element("persona-display-name").value = persona.display_name || "";
-  element("persona-user-reference").value = persona.reference_style?.user_natural_reference || "";
+  element("persona-interlocutor-address-term").value = persona.reference_style?.interlocutor_address_term || "";
   element("persona-prompt").value = persona.persona_prompt || "";
   element("persona-expression-addon").value = persona.expression_addon || "";
 }
@@ -391,7 +944,7 @@ function syncPersona() {
   }
   persona.display_name = textValue("persona-display-name");
   persona.reference_style = persona.reference_style || {};
-  persona.reference_style.user_natural_reference = textValue("persona-user-reference");
+  persona.reference_style.interlocutor_address_term = textValue("persona-interlocutor-address-term") || null;
   persona.persona_prompt = textValue("persona-prompt");
   persona.expression_addon = textValue("persona-expression-addon");
 }
@@ -642,6 +1195,7 @@ function renderMcp() {
   element("mcp-transport").value = mcp?.transport || "stdio";
   element("mcp-command").value = mcp?.command || "";
   element("mcp-args").value = (mcp?.args || []).join("\n");
+  element("mcp-enabled-tools").value = (mcp?.enabled_tools || []).join("\n");
   element("mcp-cwd").value = mcp?.cwd || "";
   element("mcp-env").value = formatEnv(mcp?.env || {});
 }
@@ -658,6 +1212,7 @@ function syncMcp() {
   mcp.transport = textValue("mcp-transport");
   mcp.command = textValue("mcp-command");
   mcp.args = parseLines(textValue("mcp-args"));
+  mcp.enabled_tools = parseLines(textValue("mcp-enabled-tools"));
   const cwd = textValue("mcp-cwd").trim();
   mcp.cwd = cwd || null;
   mcp.env = parseEnv(textValue("mcp-env"));
@@ -820,6 +1375,7 @@ function addMcp() {
     command: "npx",
     args: ["-y", "elyth-mcp-server@latest"],
     cwd: null,
+    enabled_tools: [],
     env: {},
   });
   state.selectedMcpId = id;
@@ -842,6 +1398,17 @@ function switchTab(tab) {
 }
 
 function bindEvents() {
+  element("toggle-dashboard").addEventListener("click", toggleDashboard);
+  element("refresh-dashboard").addEventListener("click", () => refreshDashboard({ silent: false }));
+  element("dashboard-runs").addEventListener("click", (event) => {
+    const button = event.target instanceof Element
+      ? event.target.closest("[data-run-action]")
+      : null;
+    if (!button) {
+      return;
+    }
+    controlAutonomousRun(button.dataset.runAction, button.dataset.runId, button);
+  });
   element("composer").addEventListener("submit", sendMessage);
   element("message-input").addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -862,6 +1429,13 @@ function bindEvents() {
   });
   element("image-input").addEventListener("change", (event) => attachFile(event.target.files[0]));
   element("remove-attachment").addEventListener("click", clearAttachment);
+  for (const id of [
+    "conversation-person-ref",
+    "conversation-display-name",
+    "conversation-interaction-ref",
+  ]) {
+    element(id).addEventListener("change", saveConversationIdentity);
+  }
 
   element("open-settings").addEventListener("click", openSettings);
   element("close-settings").addEventListener("click", closeSettings);
@@ -922,8 +1496,25 @@ function bindEvents() {
   document.querySelector("[data-action='delete-camera']").addEventListener("click", deleteCamera);
   document.querySelector("[data-action='add-mcp']").addEventListener("click", addMcp);
   document.querySelector("[data-action='delete-mcp']").addEventListener("click", deleteMcp);
+
+  window.addEventListener("beforeunload", () => {
+    state.unloading = true;
+    window.clearInterval(state.dashboardTimer);
+    window.clearTimeout(state.eventReconnectTimer);
+    state.eventSocket?.close();
+  });
 }
 
-bindEvents();
-loadIdentity();
-loadStatus({ silent: true });
+async function startApp() {
+  // 初回 token 発行後に inspection と event stream を順に開始する。
+  initializeClientId();
+  bindEvents();
+  loadConversationIdentity();
+  await loadIdentity();
+  await loadStatus({ silent: true });
+  await refreshDashboard({ silent: true });
+  connectAssistantEventStream();
+  state.dashboardTimer = window.setInterval(() => refreshDashboard({ silent: true }), 5000);
+}
+
+startApp();

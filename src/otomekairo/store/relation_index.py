@@ -479,7 +479,7 @@ class StoreRelationIndexMixin:
         return ordered[0], ordered[1]
 
     def _is_relation_ref(self, value: str) -> bool:
-        return value in {"self", "user"} or any(
+        return value == "self" or any(
             value.startswith(prefix) and value != prefix
             for prefix in RELATION_REF_PREFIXES
         )

@@ -143,7 +143,8 @@ server は orphan を timeout と同じ再評価可能状態へ戻し、未完�
 run は必要に応じて `vision.capture`、`camera.ptz`、`wait_until`、`speech` を組み合わせる。
 次の観測時刻、継続、完了、中断は `autonomous_step_generation` が目的、履歴、現在時刻、能力可否、直近 result から判断する。
 server は特定語句の文字列一致で監視間隔や終了時刻へ変換しない。
-ユーザーが停止を明示した場合、対象 run は `cancelled` に遷移する。
+特定 run は cancel API、会話からの全run停止は `autonomous_run_action.kind=cancel_all` で `cancelled` に遷移する。
+server は会話本文から停止意図を推定しない。
 
 ## ユーザー割り込み
 
@@ -152,7 +153,7 @@ in-flight capability result は受け取る。
 ユーザー応答中は、ユーザー起点で開始した最初の step を除き、run の次 step を進めない。
 ユーザー応答中に background / capability result 起点の step が完了しても、assistant_message と capability request は送信しない。
 ユーザー応答後、`paused_by_user_interaction` の run は再開する。
-ユーザーが停止を明示した場合、対象 run は `cancelled` に遷移する。
+特定 run の cancel API または `autonomous_run_action.kind=cancel_all` を受けた run は `cancelled` に遷移する。
 
 ## 実行直列化
 
