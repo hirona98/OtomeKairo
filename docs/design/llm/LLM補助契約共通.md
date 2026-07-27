@@ -54,7 +54,8 @@ JSON payload は `<<<OTOMEKAIRO_SOURCE_PACK>>>` や `<<<OTOMEKAIRO_JSON_PAYLOAD>
 人物同一性は各 role の入力に含まれる構造化済みの `person_ref` で扱う。
 `people_context` は、選択済みの構造化文脈に現れる人物だけを `person_ref / display_name` の組で持つ。
 LLM 補助 role は schema 値に API 由来の `person_ref` を使い、内部自然文で人物名が必要な場合は対応する `display_name` を使う。
-`persona_context.reference_style.interlocutor_address_term` は `expression_generation` にだけ渡し、外向き発話の二人称呼称として扱う。
+`expression_generation` が応答対象の人物を直接呼ぶ場合は、対応する `display_name` を敬称の追加、削除、言い換えなしで使う。
+`response_target_refs` が空の発話本文は人物への直接呼称を持たない。
 
 次を守る。
 

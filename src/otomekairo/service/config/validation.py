@@ -134,7 +134,6 @@ class ServiceConfigValidationMixin:
                 "persona_id",
                 "display_name",
                 "initiative_baseline",
-                "reference_style",
                 "persona_prompt",
                 "expression_addon",
             }
@@ -158,35 +157,9 @@ class ServiceConfigValidationMixin:
                 "invalid_initiative_baseline",
                 "initiative_baseline must be low, medium, or high.",
             )
-        self._validate_persona_reference_style(definition.get("reference_style"))
         expression_addon = definition.get("expression_addon")
         if expression_addon is not None and not isinstance(expression_addon, str):
             raise ServiceError(400, "invalid_expression_addon", "expression_addon must be a string.")
-
-    def _validate_persona_reference_style(self, reference_style: Any) -> None:
-        if not isinstance(reference_style, dict):
-            raise ServiceError(
-                400,
-                "invalid_persona_reference_style",
-                "reference_style must be an object.",
-            )
-        unsupported_fields = sorted(set(reference_style.keys()) - {"interlocutor_address_term"})
-        if unsupported_fields:
-            raise ServiceError(
-                400,
-                "unsupported_persona_reference_style_field",
-                f"reference_style.{unsupported_fields[0]} is not supported.",
-            )
-        interlocutor_address_term = reference_style.get("interlocutor_address_term")
-        if interlocutor_address_term is not None and (
-            not isinstance(interlocutor_address_term, str)
-            or not interlocutor_address_term.strip()
-        ):
-            raise ServiceError(
-                400,
-                "invalid_persona_interlocutor_address_term",
-                "reference_style.interlocutor_address_term must be null or a non-empty string.",
-            )
 
     def _validate_camera_source_definition(self, vision_source_id: str, definition: dict[str, Any]) -> None:
         if not isinstance(definition, dict):
@@ -459,12 +432,6 @@ class ServiceConfigValidationMixin:
             if not isinstance(value, str):
                 continue
             normalized[field_name] = value.strip()
-        reference_style = normalized.get("reference_style")
-        if isinstance(reference_style, dict):
-            normalized["reference_style"] = self._normalize_text_fields(
-                reference_style,
-                ("interlocutor_address_term",),
-            )
         return normalized
 
     def _validate_memory_set_definition(self, memory_set_id: Any, definition: dict[str, Any]) -> None:

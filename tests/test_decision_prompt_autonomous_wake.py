@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
+from otomekairo.interaction import InteractionContext, ParticipantContext
 from otomekairo.llm.contexts import (
     CurrentInput,
     DecisionContext,
@@ -27,7 +29,6 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
             {
                 "display_name": "テスト",
                 "initiative_baseline": "medium",
-                "reference_style": {"interlocutor_address_term": "マスター"},
                 "persona_prompt": "落ち着いて判断する。",
             },
             role="decision_generation",
@@ -298,7 +299,6 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
             {
                 "display_name": "テスト",
                 "initiative_baseline": "medium",
-                "reference_style": {"interlocutor_address_term": "マスター"},
                 "persona_prompt": "落ち着いて判断する。",
             },
             role="initiative_entry_check",
@@ -339,7 +339,6 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
         persona = {
             "display_name": "テスト",
             "initiative_baseline": "medium",
-            "reference_style": {"interlocutor_address_term": "マスター"},
             "persona_prompt": "落ち着いて判断する。",
         }
         activity_context = build_persona_context(persona, role="activity_state")
@@ -378,7 +377,6 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
             {
                 "display_name": "テスト",
                 "initiative_baseline": "medium",
-                "reference_style": {"interlocutor_address_term": "マスター"},
                 "persona_prompt": "落ち着いて判断する。",
             },
             role="expression_generation",
@@ -386,10 +384,10 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
         )
         current_input = CurrentInput(
             sender_kind="system",
-                sender_ref=None,
+            sender_ref=None,
             source_kind="background_thinking",
             response_target_refs=(),
-                interaction_context=None,
+            interaction_context=None,
             text="定期思考。",
         )
         context = SpeechContext(
@@ -425,9 +423,115 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
         self.assertIn("具体的な固有名、表示対象名、作品名、ページ内容", system_prompt)
         self.assertIn("内的注意状態や身体姿勢の細かな変化も主題化しない", system_prompt)
         self.assertIn("抽象的な区切りや切り替わりを短く述べるだけ", system_prompt)
+        self.assertIn(
+            "response_target_refs が空の場合の発話本文は、人物への直接呼びかけを含まない",
+            system_prompt,
+        )
         self.assertNotIn("decision に無い抑制理由", system_prompt)
         self.assertNotIn("集中", system_prompt)
         self.assertNotIn("没頭", system_prompt)
+
+    def test_expression_prompt_uses_target_display_name_as_complete_address(self) -> None:
+        persona_context = build_persona_context(
+            {
+                "display_name": "テスト",
+                "initiative_baseline": "medium",
+                "persona_prompt": "相手を別の呼び方で呼ぶ。",
+            },
+            role="expression_generation",
+            include_expression=True,
+        )
+        current_input = CurrentInput(
+            sender_kind="person",
+            sender_ref="person:test",
+            source_kind="user_message",
+            response_target_refs=("person:test",),
+            interaction_context=InteractionContext(
+                interaction_ref="interaction:test",
+                speaker_ref="person:test",
+                participants=(
+                    ParticipantContext(
+                        person_ref="person:test",
+                        display_name="田中さん",
+                    ),
+                ),
+            ),
+            text="おはよう",
+        )
+        context = SpeechContext(
+            input_text="おはよう",
+            current_input=current_input,
+            recent_turns=[],
+            time_context={},
+            affect_context={},
+            drive_state_summary=None,
+            foreground_world_state=None,
+            activity_context=None,
+            ongoing_action_summary=None,
+            initiative_context=None,
+            visual_observation_context=None,
+            self_state_context=None,
+            people_context=[
+                {
+                    "person_ref": "person:test",
+                    "display_name": "田中さん",
+                }
+            ],
+            relationship_context=None,
+            prediction_error_context=None,
+            workspace_context=None,
+            recall_hint={},
+            recall_pack={},
+            decision={"kind": "speech", "reason_summary": "挨拶へ応答する。"},
+        )
+
+        messages = build_speech_messages(
+            persona_context=persona_context,
+            context=context,
+        )
+        system_prompt = messages[0]["content"]
+        internal_context = messages[1]["content"]
+        current_input_prompt = messages[2]["content"]
+
+        self.assertIn("敬称を含む完成済みの呼び名", system_prompt)
+        self.assertIn("display_name の文字列全体を変更せず", system_prompt)
+        self.assertIn("敬称の追加、削除、言い換えは行わない", system_prompt)
+        self.assertIn(
+            "直接呼称の正本は応答対象 participant の display_name",
+            system_prompt,
+        )
+        self.assertIn("相手を別の呼び方で呼ぶ。", internal_context)
+        self.assertIn('"display_name":"田中さん"', current_input_prompt)
+        self.assertNotIn("reference_style", "\n".join(message["content"] for message in messages))
+
+        role_current_input = replace(
+            current_input,
+            interaction_context=InteractionContext(
+                interaction_ref="interaction:test",
+                speaker_ref="person:test",
+                participants=(
+                    ParticipantContext(
+                        person_ref="person:test",
+                        display_name="マスター",
+                    ),
+                ),
+            ),
+        )
+        role_context = replace(
+            context,
+            current_input=role_current_input,
+            people_context=[
+                {
+                    "person_ref": "person:test",
+                    "display_name": "マスター",
+                }
+            ],
+        )
+        role_messages = build_speech_messages(
+            persona_context=persona_context,
+            context=role_context,
+        )
+        self.assertIn('"display_name":"マスター"', role_messages[2]["content"])
 
 
 if __name__ == "__main__":

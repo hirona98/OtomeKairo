@@ -7,7 +7,6 @@ from otomekairo.interaction import InteractionContext
 
 
 PERSONA_PROMPT_EXCERPT_LIMIT = 240
-PERSONA_REFERENCE_STYLE_INTERLOCUTOR_ADDRESS_TERM = "interlocutor_address_term"
 
 
 PERSONA_CONTEXT_USE_POLICIES = {
@@ -35,7 +34,6 @@ PERSONA_CONTEXT_USE_POLICIES = {
 class PersonaContext:
     display_name: str
     initiative_baseline: dict[str, Any]
-    interlocutor_address_term: str | None
     persona_prompt_text: str
     expression_addon: str | None
     use_policy: str
@@ -46,10 +44,6 @@ class PersonaContext:
             "persona_prompt_text": self.persona_prompt_text,
             "use_policy": self.use_policy,
         }
-        if self.interlocutor_address_term is not None:
-            payload["reference_style"] = {
-                "interlocutor_address_term": self.interlocutor_address_term,
-            }
         if isinstance(self.expression_addon, str) and self.expression_addon.strip():
             payload["expression_addon"] = self.expression_addon
         return payload
@@ -80,7 +74,6 @@ def build_persona_context(
         raise ValueError(f"unsupported persona_context role: {role}")
     display_name = _persona_text(persona.get("display_name")) or "OtomeKairo"
     initiative_level = _persona_text(persona.get("initiative_baseline")) or "medium"
-    interlocutor_address_term = _persona_interlocutor_address_term(persona.get("reference_style"))
     persona_prompt_text = _persona_text(persona.get("persona_prompt")) or ""
     expression_addon = _persona_text(persona.get("expression_addon")) if include_expression else None
     return PersonaContext(
@@ -89,7 +82,6 @@ def build_persona_context(
             "level": initiative_level,
             "summary_text": persona_initiative_baseline_summary(initiative_level),
         },
-        interlocutor_address_term=interlocutor_address_term if include_expression else None,
         persona_prompt_text=persona_prompt_text,
         expression_addon=expression_addon,
         use_policy=use_policy,
@@ -113,22 +105,6 @@ def _persona_text(value: Any) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
-
-
-def _persona_interlocutor_address_term(value: Any) -> str | None:
-    if not isinstance(value, dict):
-        raise ValueError("persona.reference_style must be an object.")
-    interlocutor_address_term = _persona_text(
-        value.get(PERSONA_REFERENCE_STYLE_INTERLOCUTOR_ADDRESS_TERM)
-    )
-    if (
-        value.get(PERSONA_REFERENCE_STYLE_INTERLOCUTOR_ADDRESS_TERM) is not None
-        and interlocutor_address_term is None
-    ):
-        raise ValueError(
-            "persona.reference_style.interlocutor_address_term must be null or a non-empty string."
-        )
-    return interlocutor_address_term
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,7 +139,6 @@ class CurrentInput:
         if self.interaction_context is not None:
             payload["interaction_context"] = self.interaction_context.to_prompt_payload()
         return payload
-
 
 @dataclass(frozen=True, slots=True)
 class InitiativeCandidateFamily:

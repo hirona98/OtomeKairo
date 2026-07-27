@@ -7777,6 +7777,16 @@ class LongSmokeRunner:
     ) -> str:
         payload = {
             "text": text,
+            "interaction_context": {
+                "interaction_ref": "interaction:long-smoke:direct",
+                "speaker_ref": "person:long-smoke:operator",
+                "participants": [
+                    {
+                        "person_ref": "person:long-smoke:operator",
+                        "display_name": "Long Smoke Operator",
+                    }
+                ],
+            },
             "client_context": {
                 "source": source,
                 "client_id": client_id,

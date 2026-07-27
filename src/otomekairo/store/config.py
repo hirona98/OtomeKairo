@@ -11,7 +11,7 @@ from otomekairo.service.common import debug_log
 
 
 CONFIG_DB_FILE_NAME = "config.db"
-CURRENT_CONFIG_DB_VERSION = 7
+CURRENT_CONFIG_DB_VERSION = 8
 
 
 class ConfigStore:

@@ -42,7 +42,7 @@ response:
   "data": {
     "server_id": "server:...",
     "server_display_name": "OtomeKairo",
-    "api_version": "0.1.0",
+    "api_version": "0.2.0",
     "bootstrap_state": "unregistered",
     "console_access_token_issued": false
   }
@@ -122,7 +122,7 @@ request:
     "participants": [
       {
         "person_ref": "person:external-123",
-        "display_name": "田中"
+        "display_name": "田中さん"
       }
     ]
   },
@@ -144,7 +144,9 @@ request:
 - `interaction_context.speaker_ref` は `person:` で始まり、`participants` に含まれる値
 - `interaction_context.participants` は初期実装では1件だけを受理する
 - `participants[].person_ref` は `person:` で始まる安定参照
-- `participants[].display_name` は必須の非空表示名であり、人物同一性に使用しない
+- `participants[].display_name` は敬称を含む完成済みの非空呼び名であり、表示、内部自然文、直接呼称に使用する
+- server は `participants[].display_name` に敬称を追加せず、文字列全体を直接呼称として使用する
+- `participants[].display_name` は人物同一性、対象選択、配送先の根拠に使用しない
 - `images` は任意の画像 Data URI 配列とする。値がないときは省略する
 - `images` は最大 1 件とする
 - `client_context` は object とする。値がないときは省略する
@@ -286,7 +288,7 @@ request:
     "participants": [
       {
         "person_ref": "person:external-123",
-        "display_name": "田中"
+        "display_name": "田中さん"
       }
     ]
   },
@@ -308,7 +310,7 @@ request:
 
 - `client_context` は object とする。値がないときは省略する
 - `interaction_context` は任意とし、wake の論理的な対象人物と会話が確定している場合に渡す
-- `interaction_context` を渡す場合、`participants[].display_name` は必須の非空表示名とする
+- `interaction_context` を渡す場合、`participants[].display_name` は必須の非空呼び名とする
 - wake の `interaction_context.speaker_ref` は省略する。指定する場合は `participants` に含める
 - `interaction_context` を渡した wake の応答と非同期処理は、その `interaction_ref / participant person_ref群` を引き継ぐ
 - `reference` は object とする。値がないときは省略する

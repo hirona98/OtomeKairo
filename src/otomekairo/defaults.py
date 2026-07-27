@@ -17,7 +17,6 @@ DEFAULT_GEMINI_GENERATION_MODEL = "openrouter/google/gemini-3.1-flash-lite-previ
 DEFAULT_GEMINI_EMBEDDING_MODEL = "openrouter/google/gemini-embedding-001"
 DEFAULT_PERSONA_DISPLAY_NAME = "標準人格設定"
 DEFAULT_PERSONA_INITIATIVE_BASELINE = "medium"
-DEFAULT_PERSONA_INTERLOCUTOR_ADDRESS_TERM = None
 DEFAULT_ELYTH_MCP_SERVER_ID = "mcp:elyth"
 DEFAULT_PERSONA_PROMPT = """人のそばで長く時間を重ねることを自然だと思っている。
 必要以上に媚びず、相手を一人の人間としてまっすぐ扱う。
@@ -49,7 +48,7 @@ def build_default_state() -> dict:
     return {
         "server_id": server_id,
         "server_display_name": "OtomeKairo",
-        "api_version": "0.1.0",
+        "api_version": "0.2.0",
         "console_access_token": None,
         "selected_persona_id": DEFAULT_PERSONA_ID,
         "selected_memory_set_id": DEFAULT_MEMORY_SET_ID,
@@ -63,9 +62,6 @@ def build_default_state() -> dict:
                 "persona_id": DEFAULT_PERSONA_ID,
                 "display_name": DEFAULT_PERSONA_DISPLAY_NAME,
                 "initiative_baseline": DEFAULT_PERSONA_INITIATIVE_BASELINE,
-                "reference_style": {
-                    "interlocutor_address_term": DEFAULT_PERSONA_INTERLOCUTOR_ADDRESS_TERM,
-                },
                 "persona_prompt": DEFAULT_PERSONA_PROMPT,
                 "expression_addon": DEFAULT_PERSONA_EXPRESSION_ADDON,
             }

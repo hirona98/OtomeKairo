@@ -132,7 +132,7 @@ class ConnectorRuntimeConfigPreflightTests(unittest.TestCase):
                     INSERT INTO server_identity (
                         id, server_id, server_display_name, api_version, console_access_token
                     )
-                    VALUES (1, 'server:test', 'OtomeKairo', '0.1.0', 'db-token')
+                    VALUES (1, 'server:test', 'OtomeKairo', '0.2.0', 'db-token')
                     """
                 )
 
@@ -189,7 +189,7 @@ class WatcherRuntimeConfigPreflightTests(unittest.TestCase):
                     INSERT INTO server_identity (
                         id, server_id, server_display_name, api_version, console_access_token
                     )
-                    VALUES (1, 'server:test', 'OtomeKairo', '0.1.0', 'db-token')
+                    VALUES (1, 'server:test', 'OtomeKairo', '0.2.0', 'db-token')
                     """
                 )
                 conn.execute(

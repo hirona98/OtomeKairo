@@ -17,7 +17,7 @@ Authorization: Bearer <TOKEN>
     "participants": [
       {
         "person_ref": "person:external-123",
-        "display_name": "田中"
+        "display_name": "田中さん"
       }
     ]
   },
@@ -39,7 +39,7 @@ Authorization: Bearer <TOKEN>
 client_context は任意の object である。
 source、active_app、window_title、locale は起床入力の整形に使われる。
 interaction_context は任意であり、対象人物と会話が確定している場合に指定する。
-interaction_context を指定する場合、participants[].display_name は必須の非空表示名とし、人物同一性には使用しない。
+interaction_context を指定する場合、participants[].display_name は敬称を含む完成済みの非空呼び名とする。server は文字列全体を変更せずに使う。人物同一性、対象選択、配送先は person_ref で確定する。
 wake の speaker_ref は省略する。
 reference は省略できる。
 reference.uri はローカルパス、file:// URL、http:// URL、https:// URL を受け付ける。
@@ -86,7 +86,7 @@ cURLの例
 curl.exe -k -X POST {BASE_URL}/api/wake ^
   -H "Authorization: Bearer <TOKEN>" ^
   -H "Content-Type: application/json" ^
-  -d "{\"interaction_context\":{\"interaction_ref\":\"interaction:console:direct-123\",\"participants\":[{\"person_ref\":\"person:external-123\",\"display_name\":\"田中\"}]},\"client_context\":{\"source\":\"CocoroConsole\",\"client_id\":\"console-...\",\"locale\":\"ja-JP\"},\"reference\":{\"uri\":\"/tmp/otomekairo-watch/camera/latest.jpg\",\"label\":\"部屋カメラの変化\",\"reason_summary\":\"軽量CVが前回との差分を検出した。\",\"content_hint\":\"auto\"}}"
+  -d "{\"interaction_context\":{\"interaction_ref\":\"interaction:console:direct-123\",\"participants\":[{\"person_ref\":\"person:external-123\",\"display_name\":\"田中さん\"}]},\"client_context\":{\"source\":\"CocoroConsole\",\"client_id\":\"console-...\",\"locale\":\"ja-JP\"},\"reference\":{\"uri\":\"/tmp/otomekairo-watch/camera/latest.jpg\",\"label\":\"部屋カメラの変化\",\"reason_summary\":\"軽量CVが前回との差分を検出した。\",\"content_hint\":\"auto\"}}"
 
 PowerShellの例
 --------------
@@ -95,4 +95,4 @@ Invoke-RestMethod -Method Post `
   -Uri "{BASE_URL}/api/wake" `
   -Headers @{ Authorization = "Bearer <TOKEN>" } `
   -ContentType "application/json; charset=utf-8" `
-  -Body '{"interaction_context":{"interaction_ref":"interaction:console:direct-123","participants":[{"person_ref":"person:external-123","display_name":"田中"}]},"client_context":{"source":"CocoroConsole","client_id":"console-...","locale":"ja-JP"},"reference":{"uri":"/tmp/otomekairo-watch/camera/latest.jpg","label":"部屋カメラの変化","reason_summary":"軽量CVが前回との差分を検出した。","content_hint":"auto"}}'
+  -Body '{"interaction_context":{"interaction_ref":"interaction:console:direct-123","participants":[{"person_ref":"person:external-123","display_name":"田中さん"}]},"client_context":{"source":"CocoroConsole","client_id":"console-...","locale":"ja-JP"},"reference":{"uri":"/tmp/otomekairo-watch/camera/latest.jpg","label":"部屋カメラの変化","reason_summary":"軽量CVが前回との差分を検出した。","content_hint":"auto"}}'

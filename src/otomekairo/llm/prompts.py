@@ -43,9 +43,15 @@ def _person_reference_instruction() -> str:
 
 def _expression_address_instruction() -> str:
     return (
-        "persona_context.reference_style.interlocutor_address_term がある場合、それは OtomeKairo から応答対象を直接呼ぶ場面の二人称呼称です。"
+        "current_input.response_target_refs に含まれる person_ref に対応する "
+        "current_input.interaction_context.participants[].display_name は、敬称を含む完成済みの呼び名です。"
         "人物同一性と配送先は current_input と people_context の person_ref で確定しています。"
-        "呼びかけが自然な場合は設定された二人称呼称を使い、それ以外は display_name を使うか日本語として主語を省略してください。"
+        "人物への直接呼びかけが自然な場合だけ、応答対象の display_name の文字列全体を変更せずに使ってください。"
+        "敬称の追加、削除、言い換えは行わないでください。"
+        "直接呼称の正本は応答対象 participant の display_name であり、"
+        "persona_context、people_context、recent_turns は言い回しと文脈の補助です。"
+        "response_target_refs が空の場合の発話本文は、人物への直接呼びかけを含まない形にしてください。"
+        "直接呼びかけを置かない文では、日本語として主語を省略してください。"
         "置換前提の仮本文を作らず、最終的な外向き本文を直接生成してください。"
     )
 

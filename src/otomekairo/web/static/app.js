@@ -757,7 +757,7 @@ async function sendMessage(event) {
     || !displayName
     || !interactionRef
   ) {
-    showNotice("人物参照は person:<key>、表示名と会話参照は空でない値を指定してください。", true);
+    showNotice("人物参照は person:<key>、呼び名と会話参照は空でない値を指定してください。", true);
     return;
   }
   saveConversationIdentity();
@@ -932,7 +932,6 @@ function renderPersona() {
     return;
   }
   element("persona-display-name").value = persona.display_name || "";
-  element("persona-interlocutor-address-term").value = persona.reference_style?.interlocutor_address_term || "";
   element("persona-prompt").value = persona.persona_prompt || "";
   element("persona-expression-addon").value = persona.expression_addon || "";
 }
@@ -943,8 +942,6 @@ function syncPersona() {
     return;
   }
   persona.display_name = textValue("persona-display-name");
-  persona.reference_style = persona.reference_style || {};
-  persona.reference_style.interlocutor_address_term = textValue("persona-interlocutor-address-term") || null;
   persona.persona_prompt = textValue("persona-prompt");
   persona.expression_addon = textValue("persona-expression-addon");
 }

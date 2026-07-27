@@ -8,7 +8,7 @@ from otomekairo.service.common import ServiceError
 
 @dataclass(frozen=True, slots=True)
 class ParticipantContext:
-    # 外部システムが確定した人物参照と表示用情報を保持する。
+    # 外部システムが確定した人物参照と人間向けの呼び名を保持する。
     person_ref: str
     display_name: str
 
@@ -38,7 +38,6 @@ class InteractionContext:
         if self.speaker_ref is not None:
             payload["speaker_ref"] = self.speaker_ref
         return payload
-
 
 def normalize_interaction_context(
     value: Any,
