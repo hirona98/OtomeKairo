@@ -6,6 +6,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SERVER_VENV_DIR="${REPO_ROOT}/.venv"
+MICROPHONE_CONNECTOR_DIR="${REPO_ROOT}/connectors/microphone"
+MICROPHONE_VENV_DIR="${MICROPHONE_CONNECTOR_DIR}/.venv"
+MICROPHONE_CONFIG_FILE="${MICROPHONE_CONNECTOR_DIR}/config.local.json"
 TAPO_CONNECTOR_DIR="${REPO_ROOT}/connectors/tapo_c220"
 TAPO_VENV_DIR="${TAPO_CONNECTOR_DIR}/.venv"
 TAPO_CONFIG_FILE="${TAPO_CONNECTOR_DIR}/config.local.json"
@@ -23,6 +26,7 @@ SERVER_PORT="${OTOMEKAIRO_PORT:-55601}"
 CONNECTOR_SERVER_URL="${OTOMEKAIRO_SERVER_URL:-https://127.0.0.1:${SERVER_PORT}}"
 
 SERVER_PID=""
+MICROPHONE_PID=""
 TAPO_PID=""
 TAPO_WATCHER_PID=""
 MCP_PID=""
@@ -45,13 +49,13 @@ cleanup() {
 
   trap - EXIT INT TERM
 
-  for pid in "${MCP_PID}" "${TAPO_WATCHER_PID}" "${TAPO_PID}" "${SERVER_PID}"; do
+  for pid in "${MCP_PID}" "${TAPO_WATCHER_PID}" "${TAPO_PID}" "${MICROPHONE_PID}" "${SERVER_PID}"; do
     if [[ -n "${pid}" ]] && kill -0 "${pid}" >/dev/null 2>&1; then
       kill "${pid}" >/dev/null 2>&1 || true
     fi
   done
 
-  for pid in "${MCP_PID}" "${TAPO_WATCHER_PID}" "${TAPO_PID}" "${SERVER_PID}"; do
+  for pid in "${MCP_PID}" "${TAPO_WATCHER_PID}" "${TAPO_PID}" "${MICROPHONE_PID}" "${SERVER_PID}"; do
     if [[ -n "${pid}" ]]; then
       wait "${pid}" >/dev/null 2>&1 || true
     fi
@@ -144,6 +148,7 @@ trap 'cleanup 143' INT TERM
 trap 'cleanup $?' EXIT
 
 require_executable "${SERVER_VENV_DIR}/bin/python" "server venv"
+require_executable "${MICROPHONE_VENV_DIR}/bin/python" "microphone connector venv"
 require_executable "${TAPO_VENV_DIR}/bin/python" "Tapo connector venv"
 require_executable "${TAPO_WATCHER_VENV_DIR}/bin/python" "Tapo watcher venv"
 require_executable "${MCP_VENV_DIR}/bin/python" "MCP connector venv"
@@ -170,6 +175,11 @@ wait_for_server
 
 export OTOMEKAIRO_SERVER_URL="${CONNECTOR_SERVER_URL}"
 
+microphone_args=()
+if [[ -f "${MICROPHONE_CONFIG_FILE}" ]]; then
+  microphone_args=(--config "${MICROPHONE_CONFIG_FILE}")
+fi
+
 tapo_args=()
 if [[ -f "${TAPO_CONFIG_FILE}" ]]; then
   tapo_args=(--config "${TAPO_CONFIG_FILE}")
@@ -179,6 +189,11 @@ mcp_args=()
 if [[ -f "${MCP_CONFIG_FILE}" ]]; then
   mcp_args=(--config "${MCP_CONFIG_FILE}")
 fi
+
+echo "starting microphone connector" >&2
+"${MICROPHONE_VENV_DIR}/bin/python" -m otomekairo_microphone_connector "${microphone_args[@]}" &
+MICROPHONE_PID="$!"
+CHILD_PIDS+=("${MICROPHONE_PID}")
 
 if connector_runtime_config_ready "Tapo C220" "tapo_c220" "tapo-c220-connector-main" "${TAPO_CONFIG_FILE}"; then
   echo "starting Tapo C220 connector" >&2

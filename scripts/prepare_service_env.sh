@@ -6,6 +6,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SERVER_VENV_DIR="${REPO_ROOT}/.venv"
+MICROPHONE_CONNECTOR_DIR="${REPO_ROOT}/connectors/microphone"
+MICROPHONE_VENV_DIR="${MICROPHONE_CONNECTOR_DIR}/.venv"
 TAPO_CONNECTOR_DIR="${REPO_ROOT}/connectors/tapo_c220"
 TAPO_VENV_DIR="${TAPO_CONNECTOR_DIR}/.venv"
 TAPO_WATCHER_DIR="${REPO_ROOT}/watchers/tapo_c220"
@@ -28,6 +30,11 @@ if ! command -v openssl >/dev/null 2>&1; then
 fi
 
 "${SCRIPT_DIR}/setup_venv.sh"
+
+if [[ ! -d "${MICROPHONE_VENV_DIR}" ]]; then
+  python3 -m venv "${MICROPHONE_VENV_DIR}"
+fi
+"${MICROPHONE_VENV_DIR}/bin/python" -m pip install -e "${MICROPHONE_CONNECTOR_DIR}"
 
 if [[ ! -d "${TAPO_VENV_DIR}" ]]; then
   python3 -m venv "${TAPO_VENV_DIR}"
@@ -61,6 +68,7 @@ fi
 echo "service 実行環境を準備しました。"
 echo "Repo   : ${REPO_ROOT}"
 echo "Server : ${SERVER_VENV_DIR}/bin/python"
+echo "Mic    : ${MICROPHONE_VENV_DIR}/bin/python"
 echo "Tapo   : ${TAPO_VENV_DIR}/bin/python"
 echo "Watcher: ${TAPO_WATCHER_VENV_DIR}/bin/python"
 echo "MCP    : ${MCP_VENV_DIR}/bin/python"
