@@ -42,21 +42,18 @@ OtomeKairo の外部接点は、少なくとも次の面に分ける。
 
 対話面は、人との明示的な往復だけを扱う。
 設定変更や観測取得は別責務として扱う。
-対話入力を送る connector は人物識別を完了し、安定した `person_ref` と `interaction_ref` を付ける。
+テキスト対話入力を送る connector は人物識別を完了し、安定した `person_ref` と `interaction_ref` を付ける。
 OtomeKairo は人物参照を確定済み入力として扱い、表示名による同一人物推定を実行しない。
+音声入力は OtomeKairo が登録済み話者 embedding から人物参照を確定する。
 人物と相互作用の意味境界は [../foundation/人物と相互作用.md](../foundation/人物と相互作用.md) を正とする。
 
 ### ブラウザ音声の責務境界
 
-将来のブラウザ音声入力では、ブラウザはマイクから取得した音声を OtomeKairo へ送り、OtomeKairo が生成した音声を受け取って再生する。
-ブラウザは STT、音声起動ワード判定、話者識別、TTS を実行しない。
-STT、音声起動ワード判定、話者識別、TTS は OtomeKairo 本体の責務にする。
-音声合成と音声認識の設定正本も OtomeKairo に置く。
-
-現段階では音声設定の保存と編集 UI だけを提供する。
-音声 upload、stream、STT、話者登録、話者識別、TTS、合成音声 download の API と runtime は提供しない。
-ブラウザ UI の話者登録操作は無効表示にする。
-音声の wire 契約は実装時に `docs/design/api/` 配下へ追加する。
+ブラウザと microphone connector はマイクから取得した音声だけを OtomeKairo へ送る。
+ブラウザと microphone connector は STT、音声起動ワード判定、話者識別を実行しない。
+OtomeKairo は音声入力リース、VAD、STT、音声起動ワード判定、話者識別、音声人物参照、対話入力生成を担う。
+CocoroConsole は音声を取得せず、OtomeKairo の設定と話者登録を操作し、対話表示と既存 TTS を担う。
+音声入力の意味規則は [../audio/音声入力と話者識別.md](../audio/音声入力と話者識別.md)、wire 契約は [../api/audio_stream.md](../api/audio_stream.md) を正とする。
 
 ## 観測面
 

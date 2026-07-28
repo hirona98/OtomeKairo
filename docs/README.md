@@ -20,6 +20,7 @@ OtomeKairo は、人格設定と記憶を基盤に、その時点で成立する
 | [design/configuration/](design/configuration/) | 設定定義、設定変更、人格設定、モデルプリセット |
 | [design/llm/](design/llm/) | LLM を使う判断と補助処理の契約 |
 | [design/capability/](design/capability/) | capability manifest、視覚機能、能力由来の source pack |
+| [design/audio/](design/audio/) | 音声入力、VAD、STT、音声起動ワード、話者識別、音声人物 |
 | [design/integration/](design/integration/) | 外部接点、権限境界、connector 配置 |
 | [design/api/](design/api/) | HTTP / WebSocket の path、method、認証、request / response、error code |
 | [design/memory/](design/memory/) | 記憶 subsystem の内部構造、想起、更新、管理境界 |
@@ -29,6 +30,7 @@ OtomeKairo は、人格設定と記憶を基盤に、その時点で成立する
 
 - 検証層と合否基準は [design/verification/検証基盤.md](design/verification/検証基盤.md) に置く
 - 意味境界、状態遷移、判断責務は `design/foundation/`、`design/runtime/`、`design/configuration/`、`design/llm/`、`design/capability/`、`design/integration/` に置く
+- 音声入力、STT、話者識別、音声人物の意味規則は `design/audio/` に置く
 - HTTP / WebSocket の path、method、認証、request / response、error code は `design/api/` に置く
 - 記憶 subsystem の内部契約は `design/memory/` に置く
 - 感情モデルは [design/runtime/感情モデル.md](design/runtime/感情モデル.md) を正本とし、memory 文書はそこへリンクする
@@ -70,8 +72,9 @@ OtomeKairo は、人格設定と記憶を基盤に、その時点で成立する
 1. [design/integration/外部接点とAPI概念.md](design/integration/外部接点とAPI概念.md)
 2. [design/integration/接続と権限境界.md](design/integration/接続と権限境界.md)
 3. [design/api/README.md](design/api/README.md)
-4. [design/capability/capability_manifest.md](design/capability/capability_manifest.md)
-5. [design/integration/外部接続connector配置方針.md](design/integration/外部接続connector配置方針.md)
+4. [design/audio/音声入力と話者識別.md](design/audio/音声入力と話者識別.md)
+5. [design/capability/capability_manifest.md](design/capability/capability_manifest.md)
+6. [design/integration/外部接続connector配置方針.md](design/integration/外部接続connector配置方針.md)
 
 ### LLM 境界
 

@@ -19,6 +19,10 @@ API 仕様は次のように分ける。
 - [event_stream.md](event_stream.md)
   - `events/stream`
   - 接続 client の capability binding 提示
+- [audio_stream.md](audio_stream.md)
+  - microphone connector と Web microphone の PCM stream
+  - input device catalog
+  - 話者登録と話者管理
 - [状態と設定.md](状態と設定.md)
   - `status`
   - `config`
@@ -50,16 +54,16 @@ OtomeKairo設定の `conversation_display_name` を `interaction_context` とし
 モデル指定値とVRM表示設定はWeb UIへ現在値を無効表示し、表示設定とモーション設定はWeb UIへ編集欄を設けない。
 VRM、表示、モーションはCocoroConsoleから端末設定APIへ保存する。
 最後に接続した端末が存在しない場合、端末依存の設定欄を無効にする。
-ブラウザ UI は `/ui/api/config/avatar-speech/editor-state` を通じて、アバターごとの STT / TTS とマイクしきい値を編集する。
-話者登録 UI は表示だけを行い、音声処理を OtomeKairo へ実装するまで操作を無効にする。
-現段階のブラウザ UI は音声を取得、upload、再生せず、STT / TTS を実行しない。
-将来のブラウザは音声の取得・送信と受信・再生だけを担当し、STT / TTS を OtomeKairo が担当する。
+ブラウザ UI は `/ui/api/config/avatar-speech/editor-state` を通じて、アバターごとの STT / TTS と物理マイク設定を編集する。
+ブラウザ UI は `/ui/api/audio/stream` へ取得音声だけを送り、VAD、STT、音声起動ワード判定、話者識別を実行しない。
+ブラウザ UI は `/ui/api/audio/...` を通じて input device 確認と話者管理を行う。
+ブラウザ UI は TTS を実行せず、今回の音声入力実装では assistant 発話本文を表示する。
 ブラウザの直接会話入力はOtomeKairoの `conversation_display_name` を
 `participants[].display_name` に使用し、呼び名をブラウザstorageへ保存しない。
 ブラウザ UI は運用ダッシュボードを常設し、`/ui/api/inspection/current-state` と `/ui/api/inspection/cycle-summaries` を 5 秒周期で読み取る。
 運用ダッシュボードは現在状態、自律実行、capability availability、最近の cycle timeline を表示する。
 運用ダッシュボードの pause / resume / cancel は `/ui/api/autonomous-runs/{run_id}/{operation}` を通じて既存の autonomous run 操作を呼び出す。
-ブラウザ UI は対話入力と同じ session-scoped `client_id` で `/ui/api/events/stream` へ接続し、`assistant_message` を会話欄へ即時表示する。
+ブラウザ UI は対話入力と同じ session-scoped `client_id` で `/ui/api/events/stream` へ接続し、`conversation_input`、`assistant_message`、`audio_runtime_state` を即時表示する。
 `/ui/api/events/stream` は server が保持する `console_access_token` で認可し、token をブラウザへ返さない。
 `/ui/api/events/stream` は `Origin` と `Host` が一致する同一 origin の接続だけを受理する。
 ブラウザ UI は画面上で `console_access_token` の入力を要求しない。
