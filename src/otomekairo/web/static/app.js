@@ -1626,7 +1626,7 @@ function renderTtsPanel(engine) {
 function renderMicrophoneSettings() {
   const microphone = state.avatarSpeech.microphone_settings;
   element("physical-input-enabled").checked = microphone.physical_input_enabled;
-  element("microphone-response-client-id").value = microphone.response_client_id;
+  element("microphone-response-client-id").value = state.clientId;
   renderPhysicalInputDevices(microphone.input_device);
   element("vad-probability-threshold").value = microphone.vad_probability_threshold;
   element("speaker-recognition-threshold").value = microphone.speaker_recognition_threshold;
@@ -1640,7 +1640,7 @@ function syncMicrophoneSettings() {
   state.avatarSpeech.microphone_settings = {
     physical_input_enabled: boolValue("physical-input-enabled"),
     input_device: selectedDevice ? JSON.parse(selectedDevice) : null,
-    response_client_id: textValue("microphone-response-client-id").trim(),
+    response_client_id: state.clientId,
     vad_probability_threshold: numberValue("vad-probability-threshold", 0.5),
     speaker_recognition_threshold: numberValue("speaker-recognition-threshold", 0.6),
   };
