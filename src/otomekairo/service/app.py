@@ -6,12 +6,14 @@ from pathlib import Path
 from typing import Any
 
 from otomekairo.event_stream import EventStreamRegistry
+from otomekairo.audio.runtime import AudioRuntime
 from otomekairo.evidence import EvidenceResolver
 from otomekairo.llm.client import LLMClient
 from otomekairo.log_stream import LogStreamRegistry
 from otomekairo.memory.consolidator import MemoryConsolidator
 from otomekairo.recall.builder import RecallBuilder
 from otomekairo.service.autonomous_run import ServiceAutonomousRunMixin
+from otomekairo.service.audio import ServiceAudioMixin
 from otomekairo.service.capability import ServiceCapabilityMixin
 from otomekairo.service.common import ServiceError, configure_debug_log_stream_sink, debug_log
 from otomekairo.service.cycle_coordinator import CycleCoordinator
@@ -26,6 +28,7 @@ from otomekairo.store.file_store import FileStore
 
 # サービス
 class OtomeKairoService(
+    ServiceAudioMixin,
     ServiceCapabilityMixin,
     ServiceDocsMixin,
     ServiceAutonomousRunMixin,
@@ -80,6 +83,7 @@ class OtomeKairoService(
         self._capability_runtime_state: dict[str, dict[str, Any]] = {}
         self._stream_event_lock = threading.Lock()
         self._next_stream_event_value = 1
+        self._audio_runtime = AudioRuntime(self)
         self.recover_capability_runtime_state_after_startup()
         self.recover_autonomous_run_runtime_state_after_startup()
         debug_log("Service", "initialized")

@@ -1,0 +1,32 @@
+{
+  "silero_vad": {
+    "file": "silero_vad.onnx",
+    "inputs": {
+      "input": ["batch", "samples"],
+      "sr": [],
+      "state": [2, "batch", 128]
+    },
+    "license": "MIT",
+    "model_id": "silero-vad-v5-16k-opset15",
+    "outputs": {
+      "output": ["batch", 1],
+      "stateN": ["dynamic", "dynamic", "dynamic"]
+    },
+    "sha256": "597d30b3ec076608d059477bb14cfeffdf951bf5cae370d38f65d33bbfe82004",
+    "source": "https://github.com/snakers4/silero-vad"
+  },
+  "wespeaker": {
+    "file": "wespeaker_resnet34.onnx",
+    "inputs": {
+      "feats": ["batch", "frames", 80]
+    },
+    "license": "CC BY 4.0",
+    "model_id": "wespeaker-resnet34-voxceleb-v1",
+    "outputs": {
+      "embs": ["batch", 256]
+    },
+    "sha256": "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1",
+    "source": "https://github.com/wenet-e2e/wespeaker",
+    "training_dataset": "VoxCeleb"
+  }
+}

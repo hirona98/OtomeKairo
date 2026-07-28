@@ -121,6 +121,7 @@ class ServiceConfigInspectionMixin:
         current_time: str,
     ) -> dict[str, Any]:
         return {
+            "audio_runtime_state": self._audio_runtime.snapshot(),
             "wake_runtime_state": self._snapshot_wake_runtime_state(current_time=current_time),
             "wake_policy_observations": self._snapshot_wake_policy_observations(state=state),
             "memory_postprocess_runtime_state": self._snapshot_memory_postprocess_runtime_state(),

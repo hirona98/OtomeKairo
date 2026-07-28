@@ -12,7 +12,8 @@ capability request / result の wire 契約は [../api/実行連携.md](../api/�
 
 外部接続 connector は、OtomeKairo 本体とは別の実行 client として扱う。
 OtomeKairo 本体は capability manifest、判断、状態、記憶、inspection の正本を持つ。
-connector は接続先の機器、サービス、OS API を扱い、capability request を実行し、result を返す。
+capability connector は接続先の機器、サービス、OS API を扱い、capability request を実行し、result を返す。
+microphone connector は capability binding を持たず、OS audio API から取得した PCM を音声入力 stream へ送る。
 外部 watcher は、OtomeKairo 本体とは別の実行 process として扱う。
 watcher は軽量な外部監視を行い、変化時に `/api/wake` へ参照付き wake を送る。
 watcher は capability request を受けず、hello を送らず、capability binding 候補を持たない。
@@ -37,6 +38,16 @@ watcher は host、camera account、監視閾値をローカル設定の正本�
 
 ```text
 connectors/
+  microphone/
+    pyproject.toml
+    README.md
+    config.example.json
+    src/
+      otomekairo_microphone_connector/
+        __main__.py
+        config.py
+        stream.py
+        capture.py
   webcam/
     pyproject.toml
     README.md
@@ -77,11 +88,12 @@ OpenCV、デバイス SDK、外部サービス SDK、OS 固有ライブラリは
 
 ## 簡易常駐起動
 
-専用 PC で運用する場合、repository を `/opt/OtomeKairo` に固定し、OtomeKairo server、Tapo C220 connector、Tapo C220 watcher、MCP client connector を単一の systemd service lifecycle でまとめて起動する。
+専用 PC で運用する場合、repository を `/opt/OtomeKairo` に固定し、OtomeKairo server、microphone connector、Tapo C220 connector、Tapo C220 watcher、MCP client connector を単一の systemd service lifecycle でまとめて起動する。
 これは運用上の process 管理単位であり、connector の実行 client 境界、watcher の外部監視境界、hello、capability request / result、runtime config API、wake reference API の意味境界は変更しない。
 
 この単一 service は、server を `0.0.0.0:55601` で listen させ、同一 PC 上の connector と watcher は `https://127.0.0.1:55601` へ接続する。
 どれか 1 つの process が終了した場合は service 全体を終了させ、systemd の restart に任せる。
+microphone connector は音声入力が無効でも idle process として起動する。
 camera source または MCP server の runtime config が未登録の場合、connector は起動しない。
 watcher runtime config が未登録または無効の場合、watcher は起動しない。
 
@@ -233,6 +245,14 @@ MCP server の API key、token、command env、内部 URL の秘密部分を `he
 MCP server の tool 名、description、input schema は capability manifest の正本ではなく、接続中 MCP server の tool catalog として扱う。
 `enabled_tools` は実行権限の設定値であり、tool catalog の正本ではない。
 
+## microphone connector
+
+microphone connector の初期実装は `connectors/microphone/` に置く。
+Ubuntu の PortAudio / ALSA input device を列挙し、server へ device catalog を送る。
+server が選択した device だけを開き、PCM16LE 16000 Hz mono 20 ms frame を `/api/audio/stream` へ送る。
+VAD、STT、音声起動ワード判定、話者識別、話者登録の完成判定は server が実行する。
+音声入力の意味規則は [../audio/音声入力と話者識別.md](../audio/音声入力と話者識別.md)、wire は [../api/audio_stream.md](../api/audio_stream.md) を正とする。
+
 ## connector の責務
 
 connector は少なくとも次を担う。
@@ -254,6 +274,15 @@ connector は次を担わない。
 - raw payload の永続保存
 - OtomeKairo server の設定定義編集
 - LLM role、API key、記憶集合の管理
+
+microphone connector は上記に加えて、次を担わない。
+
+- VAD
+- STT
+- 音声起動ワード判定
+- 話者 embedding の生成、保存、照合
+- `person_ref` と `interaction_ref` の決定
+- raw音声の保存
 
 ## watcher の責務
 
@@ -280,6 +309,7 @@ watcher は次を担わない。
 ## 設定と秘密情報
 
 connector のローカル設定は server URL、TLS 検証、再接続間隔、`client_id`、token 明示上書きなど、OtomeKairo へ接続するための項目に限定する。
+microphone device、物理入力の有効状態、応答先 client は OtomeKairo 本体の `microphone_settings` に置く。
 watcher はローカル設定ファイルを持たず、`config.db` から `console_access_token` と有効な `watcher_id` を読む。
 watcher の server URL、TLS 検証、再接続間隔、token 明示上書きは環境変数で扱う。
 camera connector の host と camera account は OtomeKairo 本体の `camera_source` 設定定義で扱う。

@@ -510,6 +510,18 @@ p {
   gap: var(--space-3);
 }
 
+.web-microphone-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto minmax(80px, auto);
+  align-items: end;
+  gap: var(--space-3);
+}
+
+.web-microphone-controls .status {
+  align-self: center;
+  white-space: nowrap;
+}
+
 #message-input {
   min-height: 60px;
   max-height: 150px;
@@ -926,14 +938,62 @@ p {
   border-top: 1px solid var(--line);
 }
 
-.disabled-speaker-list {
+.speaker-list {
+  display: grid;
+  gap: 6px;
   min-height: 74px;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #f5f6f8;
+  background: #f8fafc;
   color: var(--muted);
   font-size: 12px;
+}
+
+.speaker-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.speaker-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.speaker-summary {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.speaker-summary strong {
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.speaker-actions,
+.speaker-enrollment-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.speaker-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.speaker-actions button {
+  min-height: 26px;
+  padding: 3px 7px;
+}
+
+.speaker-enrollment-state {
+  justify-content: space-between;
 }
 
 .speaker-registration-row {
@@ -1188,5 +1248,19 @@ input[type="checkbox"]:disabled {
 
   .conversation-identity {
     grid-template-columns: 1fr;
+  }
+
+  .web-microphone-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .speaker-row,
+  .speaker-enrollment-state {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .speaker-actions {
+    justify-content: flex-start;
   }
 }

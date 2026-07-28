@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 
 from otomekairo.capabilities import capability_manifests
@@ -354,6 +355,34 @@ class ServiceConfigValidationMixin:
             value = normalized.get(field_name)
             if isinstance(value, str):
                 normalized[field_name] = value.strip()
+        stt = normalized.get("stt")
+        if isinstance(stt, dict):
+            normalized_stt = {**stt}
+            profile_id = normalized_stt.get("profile_id")
+            if isinstance(profile_id, str):
+                normalized_stt["profile_id"] = profile_id.strip()
+            wake_words = normalized_stt.get("wake_words")
+            if isinstance(wake_words, list):
+                normalized_stt["wake_words"] = [
+                    item.strip() if isinstance(item, str) else item
+                    for item in wake_words
+                ]
+            normalized["stt"] = normalized_stt
+        return normalized
+
+    def _normalize_microphone_settings(self, definition: Any) -> Any:
+        if not isinstance(definition, dict):
+            return definition
+        normalized = {**definition}
+        response_client_id = normalized.get("response_client_id")
+        if isinstance(response_client_id, str):
+            normalized["response_client_id"] = response_client_id.strip()
+        input_device = normalized.get("input_device")
+        if isinstance(input_device, dict):
+            normalized["input_device"] = {
+                key: value.strip() if isinstance(value, str) else value
+                for key, value in input_device.items()
+            }
         return normalized
 
     def _validate_avatar_definition(self, avatar_id: str, definition: dict[str, Any]) -> None:
@@ -377,45 +406,118 @@ class ServiceConfigValidationMixin:
             raise ServiceError(400, "invalid_microphone_settings", "microphone_settings must be an object.")
         self._validate_exact_fields(
             definition,
-            {"input_threshold_db", "speaker_recognition_threshold"},
+            {
+                "physical_input_enabled",
+                "input_device",
+                "response_client_id",
+                "vad_probability_threshold",
+                "speaker_recognition_threshold",
+            },
             "microphone_settings",
         )
-        input_threshold = definition.get("input_threshold_db")
-        if type(input_threshold) is not int or not -50 <= input_threshold <= 0:
+        if not isinstance(definition.get("physical_input_enabled"), bool):
             raise ServiceError(
                 400,
                 "invalid_microphone_settings",
-                "microphone_settings.input_threshold_db must be an integer from -50 to 0.",
+                "microphone_settings.physical_input_enabled must be a boolean.",
             )
-        speaker_threshold = definition.get("speaker_recognition_threshold")
-        if type(speaker_threshold) not in {int, float} or not 0.1 <= float(speaker_threshold) <= 0.9:
+        input_device = definition.get("input_device")
+        if input_device is not None:
+            if not isinstance(input_device, dict):
+                raise ServiceError(
+                    400,
+                    "invalid_microphone_settings",
+                    "microphone_settings.input_device must be null or an object.",
+                )
+            self._validate_exact_fields(
+                input_device,
+                {"host_api", "name"},
+                "microphone_settings.input_device",
+            )
+            for field_name in ("host_api", "name"):
+                value = input_device.get(field_name)
+                if not isinstance(value, str) or not value or value != value.strip():
+                    raise ServiceError(
+                        400,
+                        "invalid_microphone_settings",
+                        f"microphone_settings.input_device.{field_name} must be a trimmed non-empty string.",
+                    )
+        response_client_id = definition.get("response_client_id")
+        if (
+            not isinstance(response_client_id, str)
+            or response_client_id != response_client_id.strip()
+        ):
             raise ServiceError(
                 400,
                 "invalid_microphone_settings",
-                "microphone_settings.speaker_recognition_threshold must be from 0.1 to 0.9.",
+                "microphone_settings.response_client_id must be a trimmed string.",
             )
+        for field_name in (
+            "vad_probability_threshold",
+            "speaker_recognition_threshold",
+        ):
+            threshold = definition.get(field_name)
+            if (
+                type(threshold) not in {int, float}
+                or not math.isfinite(float(threshold))
+                or not 0.1 <= float(threshold) <= 0.9
+            ):
+                raise ServiceError(
+                    400,
+                    "invalid_microphone_settings",
+                    f"microphone_settings.{field_name} must be from 0.1 to 0.9.",
+                )
 
     def _validate_stt_definition(self, definition: Any) -> None:
         if not isinstance(definition, dict):
             raise ServiceError(400, "invalid_stt_settings", "avatar.stt must be an object.")
         self._validate_exact_fields(
             definition,
-            {"enabled", "engine", "wake_word", "profile_id", "api_key", "language"},
+            {"enabled", "engine", "wake_words", "profile_id", "api_key"},
             "avatar.stt",
         )
         if not isinstance(definition.get("enabled"), bool):
             raise ServiceError(400, "invalid_stt_settings", "avatar.stt.enabled must be a boolean.")
         if definition.get("engine") != "amivoice":
             raise ServiceError(400, "unsupported_stt_engine", "avatar.stt.engine must be amivoice.")
-        for field_name in ("wake_word", "profile_id", "api_key", "language"):
-            if not isinstance(definition.get(field_name), str):
+        wake_words = definition.get("wake_words")
+        if not isinstance(wake_words, list):
+            raise ServiceError(
+                400, "invalid_stt_settings", "avatar.stt.wake_words must be an array."
+            )
+        seen_wake_words: set[str] = set()
+        for wake_word in wake_words:
+            if (
+                not isinstance(wake_word, str)
+                or not wake_word
+                or wake_word != wake_word.strip()
+            ):
                 raise ServiceError(
                     400,
                     "invalid_stt_settings",
-                    f"avatar.stt.{field_name} must be a string.",
+                    "avatar.stt.wake_words must contain trimmed non-empty strings.",
                 )
-        if not definition["language"].strip():
-            raise ServiceError(400, "invalid_stt_settings", "avatar.stt.language is required.")
+            if wake_word in seen_wake_words:
+                raise ServiceError(
+                    400,
+                    "invalid_stt_settings",
+                    "avatar.stt.wake_words must not contain duplicates.",
+                )
+            seen_wake_words.add(wake_word)
+        profile_id = definition.get("profile_id")
+        if not isinstance(profile_id, str):
+            raise ServiceError(400, "invalid_stt_settings", "avatar.stt.profile_id must be a string.")
+        if profile_id and (
+            re.fullmatch(r":[A-Za-z0-9_-]+", profile_id) is None
+            or profile_id[1:].startswith("__")
+        ):
+            raise ServiceError(
+                400,
+                "invalid_stt_settings",
+                "avatar.stt.profile_id has an invalid format.",
+            )
+        if not isinstance(definition.get("api_key"), str):
+            raise ServiceError(400, "invalid_stt_settings", "avatar.stt.api_key must be a string.")
 
     def _validate_tts_definition(self, definition: Any) -> None:
         if not isinstance(definition, dict):

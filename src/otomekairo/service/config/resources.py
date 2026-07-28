@@ -140,7 +140,9 @@ class ServiceConfigResourcesMixin:
                 "avatar_not_found",
                 "The selected_avatar_id does not exist in avatars.",
             )
-        microphone_settings = definition.get("microphone_settings")
+        microphone_settings = self._normalize_microphone_settings(
+            definition.get("microphone_settings")
+        )
         self._validate_microphone_settings(microphone_settings)
 
         state["selected_avatar_id"] = selected_avatar_id
@@ -160,6 +162,9 @@ class ServiceConfigResourcesMixin:
                 and presentation.get("avatar_id") in normalized_avatars
             ]
         self.store.write_state(state)
+        audio_runtime = getattr(self, "_audio_runtime", None)
+        if audio_runtime is not None:
+            audio_runtime.reload_settings()
         self._append_avatar_speech_editor_state_audit_event(state=state, operation="write")
         return self._build_avatar_speech_editor_state(state)
 

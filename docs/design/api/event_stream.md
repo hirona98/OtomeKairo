@@ -37,7 +37,11 @@ client -> server:
       "version": "1"
     }
   ],
-  "event_subscriptions": ["assistant_message"],
+  "event_subscriptions": [
+    "conversation_input",
+    "assistant_message",
+    "audio_runtime_state"
+  ],
   "mcp_servers": [
     {
       "mcp_server_id": "mcp:elyth",
@@ -85,6 +89,8 @@ client -> server:
 - `caps` はその client が現在受けられる capability binding 候補の一覧である
 - `event_subscriptions` はその client が受信して処理する server-driven event の一覧である
 - `assistant_message` を表示できる client だけが `event_subscriptions` に `assistant_message` を入れる
+- 音声由来のユーザー発話を表示できる client だけが `conversation_input` を入れる
+- 音声 runtime を表示できる client だけが `audio_runtime_state` を入れる
 - `mcp_servers` は `mcp.call_tool` を実行できる client が接続中 MCP server の許可済み tool catalog を通知する一覧である
 - `vision_sources` はその client が `vision.capture` で観測できる視覚 source の一覧である
 - capability 識別子は `vision.capture` のような canonical 名を使う
@@ -117,7 +123,9 @@ client -> server:
 event type の分類軸は次に固定する。
 
 - `*_request` は server から client への capability 実行要求である
+- `conversation_input` は音声入力から確定したユーザー発話を入力元 client に表示させる通知である
 - `assistant_message` は server が生成した assistant 発話を client に表示させる通知である
+- `audio_runtime_state` は音声 runtime の process-local snapshot を表示させる通知である
 - server は `event_subscriptions` に `assistant_message` を宣言した client だけへ `assistant_message` を送る
 - `assistant_message.data.source_kind` は発話生成の起点を示し、event type を増やして起点ごとの発話通知を分けない
 - `assistant_message.data.interaction_ref / recipient_person_refs` は論理配送先を示す
@@ -126,6 +134,7 @@ event type の分類軸は次に固定する。
 
 `capability_result` は event type として使わない。capability result そのものは client が `/api/capability/result` へ HTTP POST する payload であり、event stream の発話通知ではない。
 `spontaneous_speech` は event type として使わない。自発発話も `assistant_message` に統一し、起点は `source_kind` で表す。
+音声入力の状態遷移と配送規則は [../audio/音声入力と話者識別.md](../audio/音声入力と話者識別.md) を正とする。
 
 server -> client の代表例:
 
@@ -286,6 +295,49 @@ server -> client の代表例:
 }
 ```
 
+```json
+{
+  "event_id": 11,
+  "type": "conversation_input",
+  "data": {
+    "utterance_seq": 18,
+    "source_kind": "physical_microphone",
+    "message": "おとめ、今日の予定を教えて",
+    "interaction_ref": "interaction:voice:direct:550e8400-e29b-41d4-a716-446655440000",
+    "speaker_ref": "person:voice:550e8400-e29b-41d4-a716-446655440000",
+    "participant_refs": [
+      "person:voice:550e8400-e29b-41d4-a716-446655440000"
+    ],
+    "display_name": "ひろ"
+  }
+}
+```
+
+```json
+{
+  "event_id": 12,
+  "type": "audio_runtime_state",
+  "data": {
+    "available": true,
+    "active_source": "physical_microphone",
+    "lease_generation": 12,
+    "mode": "normal",
+    "paused_reason": null,
+    "vad": {
+      "speaking": false,
+      "probability": 0.03,
+      "dbfs": -42.1
+    },
+    "queue": {
+      "processing": null,
+      "waiting": []
+    },
+    "enrollment": null,
+    "last_utterance_result": null
+  }
+}
+```
+
 少なくとも次の event type を持つ。
 
 - `vision.capture_request`: 視覚 source の画像取得を client に要求する
@@ -298,12 +350,17 @@ server -> client の代表例:
 - `location.status_request`: 位置状態の取得を client に要求する
 - `social.status_request`: 社会的文脈の状態取得を client に要求する
 - `mcp.call_tool_request`: MCP server の tool 実行を client に要求する
+- `conversation_input`: 音声入力から確定したユーザー発話を入力元 client に表示させる
 - `assistant_message`: server が生成した assistant 発話を client に表示させる
+- `audio_runtime_state`: 音声 runtime の完全 snapshot を表示させる
 
 `vision.capture_request`、`camera.ptz_request`、`external.status_request`、`schedule.status_request`、`device.status_request`、`body.status_request`、`environment.status_request`、`location.status_request`、`social.status_request`、`mcp.call_tool_request` は capability 実行要求である。
 `assistant_message` は server が生成した assistant 発話を client へ表示させる通知である。
-`assistant_message.data.source_kind` は `capability_result / wake / background_thinking / autonomous_run` のいずれかであり、capability result follow-up の場合だけ `request_id / capability_id` を持つ。
+`assistant_message.data.source_kind` は `conversation / capability_result / wake / background_thinking / autonomous_run` のいずれかであり、capability result follow-up の場合だけ `request_id / capability_id` を持つ。
 `assistant_message.data.interaction_ref / recipient_person_refs` は全発話通知で必須とする。
+`conversation_input.data.message / interaction_ref / speaker_ref / participant_refs / display_name / source_kind / utterance_seq` は必須とする。
+`audio_runtime_state.data` は [列挙とinspection.md](列挙とinspection.md) の `runtime_detail.audio_runtime_state` と同じ shape にする。
+`audio_runtime_state` は完全 snapshot とし、差分 event にしない。
 server は同じ cycle または非同期処理の起点に保存した client へ物理配送する。
 起点 client、`interaction_ref`、`recipient_person_refs` のいずれかが確定しない場合は配送しない。
 人物と相互作用に紐づかない定期思考の発話は外部へ配送しない。

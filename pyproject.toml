@@ -13,7 +13,10 @@ authors = [
   { name = "hiro9" }
 ]
 dependencies = [
+  "kaldi-native-fbank>=1.22.3",
   "litellm>=1.0.0",
+  "numpy>=2.0.0",
+  "onnxruntime>=1.20.0",
   "pytest>=8.0.0",
   "sqlite-vec>=0.1.6"
 ]
@@ -26,6 +29,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "otomekairo" = ["default_console_motion.json"]
+"otomekairo.audio.model_assets" = ["*.json", "*.md", "*.onnx"]
 "otomekairo.web.static" = ["*.html", "*.js", "*.css"]
 
 [tool.pytest.ini_options]

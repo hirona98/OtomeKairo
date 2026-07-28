@@ -128,7 +128,7 @@ def build_default_state() -> dict:
     return {
         "server_id": server_id,
         "server_display_name": "OtomeKairo",
-        "api_version": "0.2.0",
+        "api_version": "0.3.0",
         "console_access_token": None,
         "selected_persona_id": DEFAULT_PERSONA_ID,
         "selected_memory_set_id": DEFAULT_MEMORY_SET_ID,
@@ -137,8 +137,11 @@ def build_default_state() -> dict:
         "thinking_speech_level": DEFAULT_THINKING_SPEECH_LEVEL,
         "conversation_display_name": "",
         "microphone_settings": {
-            "input_threshold_db": -20,
-            "speaker_recognition_threshold": 0.4,
+            "physical_input_enabled": True,
+            "input_device": None,
+            "response_client_id": "",
+            "vad_probability_threshold": 0.5,
+            "speaker_recognition_threshold": 0.6,
         },
         "wake_policy": {
             "mode": "disabled",
@@ -232,10 +235,9 @@ def build_default_avatar() -> dict:
         "stt": {
             "enabled": False,
             "engine": "amivoice",
-            "wake_word": "",
+            "wake_words": [],
             "profile_id": "",
             "api_key": "",
-            "language": "ja",
         },
     }
 
