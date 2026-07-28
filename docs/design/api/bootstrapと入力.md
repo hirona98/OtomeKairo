@@ -73,6 +73,8 @@ response:
 未発行状態では新しい token を発行し、発行済み状態では既存 token を返さない。
 発行済み状態では `409 first_console_already_registered` を返す。
 この endpoint は既存 token の確認、再表示、復旧には使わない。
+CocoroConsoleは取得した token を `Connection.json` へ保存する。
+設定画面を開いている間に初回登録が完了した場合、ユーザーが token 欄を編集していなければ取得した token を保存値として維持する。
 
 主な失敗:
 

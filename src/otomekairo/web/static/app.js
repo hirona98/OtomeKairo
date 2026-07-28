@@ -3,8 +3,10 @@ const state = {
   clientId: "",
   editor: null,
   avatarSpeech: null,
+  consoleClient: null,
   camera: null,
   mcp: null,
+  apiDocs: null,
   selectedAvatarId: "",
   selectedPersonaId: "",
   selectedModelPresetId: "",
@@ -67,17 +69,8 @@ const RESULT_KIND_LABELS = {
   failed: "失敗",
 };
 
-const SETTINGS_PAGES = {
-  avatar: ["アバター", "アバターごとの音声合成と音声認識を設定します。"],
-  conversation: ["会話入力", "マイク入力と話者識別を設定します。"],
-  persona: ["人格設定", "個の判断と表現の基底を設定します。"],
-  model: ["モデル", "生成モデルと会話取り込み範囲を設定します。"],
-  memory: ["記憶", "記憶集合と埋め込みモデルを設定します。"],
-  system: ["定期思考", "OtomeKairo内部の定期思考を設定します。"],
-  camera: ["カメラ", "観測に利用するカメラを設定します。"],
-  watcher: ["Watcher", "カメラ変化の監視方法を設定します。"],
-  mcp: ["ツール（MCP）", "接続するMCP serverと利用可能なtoolを設定します。"],
-};
+const DESKTOP_WAKE_OBSERVATION_ID = "observation:main_desktop";
+const DEFAULT_WAKE_INTERVAL_SECONDS = 300;
 
 function element(id) {
   return document.getElementById(id);
@@ -126,7 +119,10 @@ async function apiRequest(path, options = {}) {
   if (!payload.ok) {
     const code = payload.error?.code || `http_${response.status}`;
     const message = payload.error?.message || "API request failed.";
-    throw new Error(`${code}: ${message}`);
+    const error = new Error(`${code}: ${message}`);
+    error.code = code;
+    error.status = response.status;
+    throw error;
   }
   return payload.data;
 }
@@ -158,15 +154,44 @@ function loadConversationIdentity() {
   const interactionRef = localStorage.getItem("otomekairo.interaction_ref")
     || `interaction:web:direct:${personRef.slice("person:".length)}`;
   element("conversation-person-ref").value = personRef;
-  element("conversation-display-name").value = localStorage.getItem("otomekairo.display_name") || "";
+  element("conversation-display-name").value = "";
   element("conversation-interaction-ref").value = interactionRef;
-  saveConversationIdentity();
+  saveConversationReferences();
 }
 
-function saveConversationIdentity() {
+function saveConversationReferences() {
   localStorage.setItem("otomekairo.person_ref", element("conversation-person-ref").value.trim());
-  localStorage.setItem("otomekairo.display_name", element("conversation-display-name").value.trim());
   localStorage.setItem("otomekairo.interaction_ref", element("conversation-interaction-ref").value.trim());
+}
+
+async function saveConversationDisplayName() {
+  const displayName = element("conversation-display-name").value.trim();
+  try {
+    const config = await apiRequest("/ui/api/config/current", {
+      method: "PATCH",
+      body: JSON.stringify({ conversation_display_name: displayName }),
+    });
+    element("conversation-display-name").value =
+      config.settings_snapshot.conversation_display_name || "";
+    if (state.editor) {
+      state.editor.current.conversation_display_name =
+        config.settings_snapshot.conversation_display_name || "";
+      element("settings-conversation-display-name").value =
+        state.editor.current.conversation_display_name;
+    }
+  } catch (error) {
+    showNotice(error.message, true);
+  }
+}
+
+async function loadConversationDisplayName() {
+  try {
+    const config = await apiRequest("/ui/api/config");
+    element("conversation-display-name").value =
+      config.settings_snapshot.conversation_display_name || "";
+  } catch (error) {
+    showNotice(error.message, true);
+  }
 }
 
 function arrayById(items, idKey, id) {
@@ -194,6 +219,17 @@ function textValue(id) {
 function intValue(id, fallback = 1) {
   const value = Number.parseInt(element(id).value, 10);
   return Number.isFinite(value) ? value : fallback;
+}
+
+// APIへ送る前に整数契約を検証し、小数の切り捨てを防ぐ。
+function boundedIntValue(id, label, min, max = null) {
+  const value = Number(textValue(id));
+  const isInRange = value >= min && (max === null || value <= max);
+  if (!Number.isInteger(value) || !isInRange) {
+    const range = max === null ? `${min}以上` : `${min}以上${max}以下`;
+    throw new Error(`${label}には${range}の整数を入力してください。`);
+  }
+  return value;
 }
 
 function numberValue(id, fallback = 1) {
@@ -858,16 +894,29 @@ function closeSettings() {
 
 async function loadSettingsDrafts() {
   try {
-    const [editor, avatarSpeech, camera, mcp] = await Promise.all([
+    const [editor, avatarSpeech, camera, mcp, apiDocs] = await Promise.all([
       apiRequest("/ui/api/config/editor-state"),
       apiRequest("/ui/api/config/avatar-speech/editor-state"),
       apiRequest("/ui/api/config/camera-sources/editor-state"),
       apiRequest("/ui/api/config/mcp-servers/editor-state"),
+      apiRequest("/ui/api/docs"),
     ]);
+    let consoleClient = null;
+    try {
+      consoleClient = await apiRequest(
+        "/ui/api/config/console-clients/last-connected/editor-state",
+      );
+    } catch (error) {
+      if (error.code !== "console_client_settings_not_found") {
+        throw error;
+      }
+    }
     state.editor = clone(editor);
     state.avatarSpeech = clone(avatarSpeech);
+    state.consoleClient = consoleClient ? clone(consoleClient) : null;
     state.camera = clone(camera);
     state.mcp = clone(mcp);
+    state.apiDocs = clone(apiDocs);
     state.selectedAvatarId = state.avatarSpeech.selected_avatar_id;
     state.selectedPersonaId = state.editor.current.selected_persona_id;
     state.selectedModelPresetId = state.editor.current.selected_model_preset_id;
@@ -899,10 +948,27 @@ async function saveSettings({ closeAfterSave = false } = {}) {
       method: "PUT",
       body: JSON.stringify(state.mcp),
     });
+    let consoleClient = state.consoleClient;
+    if (consoleClient) {
+      const consoleSettingsPatch = {
+        process: consoleClient.settings.process,
+        desktop_capture: consoleClient.settings.desktop_capture,
+      };
+      consoleClient = await apiRequest(
+        `/ui/api/config/console-clients/${encodeURIComponent(consoleClient.client_id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(consoleSettingsPatch),
+        },
+      );
+    }
     state.editor = clone(editor);
     state.avatarSpeech = clone(avatarSpeech);
     state.camera = clone(camera);
     state.mcp = clone(mcp);
+    state.consoleClient = consoleClient ? clone(consoleClient) : null;
+    element("conversation-display-name").value =
+      state.editor.current.conversation_display_name || "";
     renderSettings();
     await loadStatus({ silent: true });
     await refreshDashboard({ silent: true });
@@ -921,11 +987,36 @@ function renderSettings() {
   }
   renderAvatar();
   renderMicrophoneSettings();
+  renderConsoleClientSettings();
   renderCurrent();
   renderPersona();
   renderModel();
   renderMemory();
   renderCapabilities();
+  renderApiDocumentation();
+}
+
+function renderApiDocumentation() {
+  const baseUrl = window.location.origin;
+  element("api-doc-base-url").textContent = baseUrl;
+  element("watcher-wake-api-url").textContent = `${baseUrl}/api/wake`;
+  const sections = state.apiDocs?.sections || [];
+  const documents = sections.map((section) => {
+    const details = document.createElement("details");
+    details.className = "api-doc-section";
+
+    const summary = document.createElement("summary");
+    summary.textContent = section.title || section.section_id;
+
+    const body = document.createElement("pre");
+    body.className = "api-doc-body";
+    // 文書の共通プレースホルダーをブラウザから到達できるoriginへ置換する。
+    body.textContent = (section.body_text || "").replaceAll("{BASE_URL}", baseUrl);
+
+    details.append(summary, body);
+    return details;
+  });
+  element("api-doc-sections").replaceChildren(...documents);
 }
 
 function renderAvatar() {
@@ -951,6 +1042,7 @@ function renderAvatar() {
   const sbv2 = tts.style_bert_vits2_config;
   const aivis = tts.aivis_cloud_config;
   element("avatar-display-name").value = avatar.display_name;
+  renderAvatarPresentation();
   element("stt-enabled").checked = stt.enabled;
   element("stt-engine").value = stt.engine;
   element("stt-wake-word").value = stt.wake_word;
@@ -982,14 +1074,26 @@ function renderAvatar() {
   element("sbv2-length").value = sbv2.length;
   element("sbv2-auto-split").checked = sbv2.auto_split;
   element("sbv2-split-interval").value = sbv2.split_interval;
+  element("sbv2-assist-text").value = sbv2.assist_text;
+  element("sbv2-assist-text-weight").value = sbv2.assist_text_weight;
+  element("sbv2-reference-audio-path").value = sbv2.reference_audio_path;
   element("aivis-api-key").value = aivis.api_key;
+  element("aivis-endpoint-url").value = aivis.endpoint_url;
   element("aivis-model-uuid").value = aivis.model_uuid;
   element("aivis-speaker-uuid").value = aivis.speaker_uuid;
   element("aivis-style-id").value = aivis.style_id;
+  element("aivis-style-name").value = aivis.style_name;
+  element("aivis-use-ssml").checked = aivis.use_ssml;
+  element("aivis-language").value = aivis.language;
   element("aivis-speaking-rate").value = aivis.speaking_rate;
   element("aivis-emotional-intensity").value = aivis.emotional_intensity;
   element("aivis-tempo-dynamics").value = aivis.tempo_dynamics;
+  element("aivis-pitch").value = aivis.pitch;
   element("aivis-volume").value = aivis.volume;
+  element("aivis-output-format").value = aivis.output_format;
+  element("aivis-output-bitrate").value = aivis.output_bitrate;
+  element("aivis-output-sampling-rate").value = aivis.output_sampling_rate;
+  element("aivis-output-audio-channels").value = aivis.output_audio_channels;
   renderTtsPanel(tts.engine);
 }
 
@@ -1033,18 +1137,84 @@ function syncAvatar() {
     language: textValue("sbv2-language"),
     auto_split: boolValue("sbv2-auto-split"),
     split_interval: numberValue("sbv2-split-interval", 0.5),
+    assist_text: textValue("sbv2-assist-text"),
+    assist_text_weight: numberValue("sbv2-assist-text-weight", 0),
+    reference_audio_path: textValue("sbv2-reference-audio-path"),
   };
   avatar.tts.aivis_cloud_config = {
     api_key: textValue("aivis-api-key"),
+    endpoint_url: textValue("aivis-endpoint-url"),
     model_uuid: textValue("aivis-model-uuid"),
     speaker_uuid: textValue("aivis-speaker-uuid"),
     style_id: intValue("aivis-style-id", 0),
+    style_name: textValue("aivis-style-name"),
+    use_ssml: boolValue("aivis-use-ssml"),
+    language: textValue("aivis-language"),
     speaking_rate: numberValue("aivis-speaking-rate", 1),
     emotional_intensity: numberValue("aivis-emotional-intensity", 1),
     tempo_dynamics: numberValue("aivis-tempo-dynamics", 1),
+    pitch: numberValue("aivis-pitch", 0),
     volume: numberValue("aivis-volume", 1),
+    output_format: textValue("aivis-output-format"),
+    output_bitrate: intValue("aivis-output-bitrate", 0),
+    output_sampling_rate: intValue("aivis-output-sampling-rate", 16000),
+    output_audio_channels: textValue("aivis-output-audio-channels"),
   };
   state.avatarSpeech.selected_avatar_id = state.selectedAvatarId;
+}
+
+function renderAvatarPresentation() {
+  const presentations = state.consoleClient?.settings?.avatar_presentations || [];
+  const presentation = arrayById(
+    presentations,
+    "avatar_id",
+    state.selectedAvatarId,
+  );
+  element("avatar-model").value = presentation?.model || "";
+  element("avatar-convert-mtoon").checked =
+    presentation?.convert_unlit_to_mtoon || false;
+  element("avatar-shadow-exclusion-enabled").checked =
+    presentation?.shadow_exclusion_enabled || false;
+  element("avatar-shadow-excluded-meshes").value =
+    (presentation?.shadow_excluded_mesh_names || []).join(", ");
+}
+
+function renderConsoleClientSettings() {
+  const available = Boolean(state.consoleClient);
+  document.querySelectorAll("[data-console-setting]").forEach((fieldset) => {
+    fieldset.disabled = fieldset.hasAttribute("data-always-disabled") || !available;
+  });
+  element("model-conversation-input-enabled").disabled = !available;
+  element("model-conversation-input-enabled").checked =
+    available && state.consoleClient.settings.process.conversation_input_enabled === true;
+  element("current-wake-desktop-observation").disabled = !available;
+  if (!available) {
+    renderAvatarPresentation();
+    return;
+  }
+
+  const settings = state.consoleClient.settings;
+  const desktop = settings.desktop_capture;
+  element("desktop-capture-idle-timeout").value = desktop.idle_timeout_minutes;
+  element("desktop-capture-exclude-patterns").value = desktop.exclude_patterns.join("\n");
+  renderAvatarPresentation();
+}
+
+function syncConsoleClientSettings() {
+  if (!state.consoleClient) {
+    return;
+  }
+  const settings = state.consoleClient.settings;
+  settings.process = {
+    ...settings.process,
+    conversation_input_enabled: boolValue("model-conversation-input-enabled"),
+  };
+  // CocoroConsoleに表示しない取得方式の設定値は変更せず保持する。
+  settings.desktop_capture = {
+    ...settings.desktop_capture,
+    idle_timeout_minutes: intValue("desktop-capture-idle-timeout", 10),
+    exclude_patterns: parseLines(textValue("desktop-capture-exclude-patterns")),
+  };
 }
 
 function renderTtsPanel(engine) {
@@ -1062,7 +1232,7 @@ function renderMicrophoneSettings() {
 
 function syncMicrophoneSettings() {
   state.avatarSpeech.microphone_settings = {
-    input_threshold_db: numberValue("microphone-input-threshold", -20),
+    input_threshold_db: boundedIntValue("microphone-input-threshold", "入力しきい値", -50, 0),
     speaker_recognition_threshold: numberValue("speaker-recognition-threshold", 0.4),
   };
 }
@@ -1074,7 +1244,7 @@ function updateMicrophoneSettingLabels() {
     numberValue("speaker-recognition-threshold", 0.4).toFixed(2);
 }
 
-async function copySpeechApiKey(inputId, label) {
+async function copyApiKey(inputId, label) {
   try {
     await navigator.clipboard.writeText(textValue(inputId));
     showNotice(`${label}をコピーしました。`);
@@ -1083,7 +1253,7 @@ async function copySpeechApiKey(inputId, label) {
   }
 }
 
-async function pasteSpeechApiKey(inputId, label) {
+async function pasteApiKey(inputId, label) {
   try {
     element(inputId).value = await navigator.clipboard.readText();
     showNotice(`${label}を貼り付けました。`);
@@ -1093,23 +1263,72 @@ async function pasteSpeechApiKey(inputId, label) {
 }
 
 function renderCurrent() {
+  const displayName = state.editor.current.conversation_display_name || "";
+  const wakePolicy = state.editor.current.wake_policy || {};
+  const observations = Array.isArray(wakePolicy.observations) ? wakePolicy.observations : [];
+  element("settings-conversation-display-name").value = displayName;
+  element("conversation-display-name").value = displayName;
   element("current-thinking-level").value = state.editor.current.thinking_speech_level ?? 5;
-  element("current-wake-enabled").checked = state.editor.current.wake_policy?.mode === "interval";
-  element("current-wake-interval").value = state.editor.current.wake_policy?.interval_seconds || "";
+  element("current-wake-enabled").checked = wakePolicy.mode === "interval";
+  element("current-wake-interval").value = wakePolicy.interval_seconds;
+  element("current-wake-desktop-observation").checked =
+    observations.some((observation) => isDesktopWakeObservation(observation));
 }
 
 function syncCurrent() {
   state.editor.current.selected_persona_id = state.selectedPersonaId;
   state.editor.current.selected_memory_set_id = state.selectedMemorySetId;
   state.editor.current.selected_model_preset_id = state.selectedModelPresetId;
+  state.editor.current.conversation_display_name =
+    textValue("settings-conversation-display-name").trim();
   state.editor.current.thinking_speech_level = intValue("current-thinking-level", 5);
-  const observations = state.editor.current.wake_policy?.observations;
-  state.editor.current.wake_policy = element("current-wake-enabled").checked
-    ? { mode: "interval", interval_seconds: intValue("current-wake-interval", 60) }
-    : { mode: "disabled" };
-  if (Array.isArray(observations)) {
+  let observations = Array.isArray(state.editor.current.wake_policy?.observations)
+    ? state.editor.current.wake_policy.observations
+    : [];
+  if (state.consoleClient) {
+    // 対象端末のデスクトップ観測だけをCocoroConsoleと同じ定義で置き換える。
+    observations = observations.filter((observation) => !isDesktopWakeObservation(observation));
+    if (boolValue("current-wake-desktop-observation")) {
+      observations.push({
+        observation_id: DESKTOP_WAKE_OBSERVATION_ID,
+        enabled: true,
+        capability_id: "vision.capture",
+        input: {
+          vision_source_id: desktopVisionSourceId(),
+          mode: "still",
+        },
+      });
+    }
+  }
+  state.editor.current.wake_policy = {
+    mode: element("current-wake-enabled").checked ? "interval" : "disabled",
+    interval_seconds: intValue(
+      "current-wake-interval",
+      DEFAULT_WAKE_INTERVAL_SECONDS,
+    ),
+  };
+  if (observations.length) {
     state.editor.current.wake_policy.observations = observations;
   }
+}
+
+function desktopVisionSourceId() {
+  const clientId = state.consoleClient.client_id.trim();
+  const sourceToken = Array.from(clientId)
+    .filter((character) => /[\p{L}\p{N}_-]/u.test(character))
+    .join("");
+  return `vision_source:${sourceToken}:desktop`;
+}
+
+function isDesktopWakeObservation(observation) {
+  if (observation?.observation_id === DESKTOP_WAKE_OBSERVATION_ID) {
+    return true;
+  }
+  return Boolean(
+    state.consoleClient
+    && observation?.capability_id === "vision.capture"
+    && observation?.input?.vision_source_id === desktopVisionSourceId(),
+  );
 }
 
 function renderPersona() {
@@ -1165,7 +1384,7 @@ function syncModel() {
   preset.model = textValue("model-model");
   preset.api_key = textValue("model-api-key");
   preset.max_output_tokens = intValue("model-max-output-tokens", 4000);
-  preset.timeout_seconds = intValue("model-timeout-seconds", 90);
+  preset.timeout_seconds = boundedIntValue("model-timeout-seconds", "タイムアウト（秒）", 1);
   preset.web_search_enabled = boolValue("model-web-search-enabled");
   const apiBase = textValue("model-api-base").trim();
   if (apiBase) {
@@ -1214,24 +1433,6 @@ function syncMemory() {
   memory.embedding.api_key = textValue("memory-api-key");
 }
 
-async function copyMemoryApiKey() {
-  try {
-    await navigator.clipboard.writeText(textValue("memory-api-key"));
-    showNotice("記憶セットのAPIキーをコピーしました。");
-  } catch (error) {
-    showNotice(`クリップボードへコピーできません: ${error.message}`, true);
-  }
-}
-
-async function pasteMemoryApiKey() {
-  try {
-    element("memory-api-key").value = await navigator.clipboard.readText();
-    showNotice("記憶セットのAPIキーを貼り付けました。");
-  } catch (error) {
-    showNotice(`クリップボードから読み込めません: ${error.message}`, true);
-  }
-}
-
 function pasteLlmApiKeyToMemory() {
   const apiKey = preferredLlmApiKey();
   if (!apiKey) {
@@ -1267,6 +1468,22 @@ function renderCamera() {
   element("camera-connector-kind").value = camera?.connector_kind || "tapo_c220";
   element("camera-client-id").value = camera?.client_id || "tapo-c220-connector-main";
   element("camera-vision-source-id").value = camera?.vision_source_id || "";
+  element("camera-watcher-id").value = cameraWatcher(camera).watcher_id;
+}
+
+function updateCameraGeneratedIds() {
+  const camera = arrayById(state.camera.camera_sources, "vision_source_id", state.selectedCameraId);
+  if (!camera) {
+    return;
+  }
+  const draft = {
+    ...camera,
+    display_name: textValue("camera-display-name"),
+  };
+  // 保存時にserverが生成するIDを入力中の表示名から先に表示する。
+  draft.vision_source_id = defaultVisionSourceId(draft);
+  element("camera-vision-source-id").value = draft.vision_source_id;
+  element("camera-watcher-id").value = defaultWatcherId(draft);
 }
 
 function syncCamera() {
@@ -1274,6 +1491,7 @@ function syncCamera() {
   if (!camera) {
     return;
   }
+  const previousVisionSourceId = camera.vision_source_id;
   camera.enabled = boolValue("camera-enabled");
   camera.display_name = textValue("camera-display-name");
   camera.vision_source_id = defaultVisionSourceId(camera);
@@ -1288,6 +1506,9 @@ function syncCamera() {
   };
   camera.watcher = cameraWatcher(camera);
   state.selectedCameraId = camera.vision_source_id;
+  if (state.selectedWatcherSourceId === previousVisionSourceId) {
+    state.selectedWatcherSourceId = camera.vision_source_id;
+  }
 }
 
 function watcherItems() {
@@ -1296,7 +1517,7 @@ function watcherItems() {
     const displayName = camera.display_name || camera.vision_source_id;
     return {
       vision_source_id: camera.vision_source_id,
-      display_name: `${displayName} (${camera.vision_source_id} / ${watcher.watcher_id})`,
+      display_name: `${displayName} / カメラモーション / ${camera.vision_source_id} / 即時wake`,
     };
   });
 }
@@ -1311,7 +1532,7 @@ function renderWatcher() {
   element("watcher-vision-source-id").value = camera?.vision_source_id || "";
   element("watcher-enabled").checked = watcher.enabled === true;
   element("watcher-id").value = watcher.watcher_id;
-  element("watcher-kind").value = watcher.kind;
+  element("watcher-kind").value = `カメラモーション (${watcher.kind})`;
   element("watcher-poll-interval").value = watcher.poll_interval_seconds;
   element("watcher-min-wake-interval").value = watcher.min_wake_interval_seconds;
   element("watcher-motion-threshold").value = watcher.motion_ratio_threshold;
@@ -1375,12 +1596,10 @@ function renderMcp() {
   const mcp = arrayById(state.mcp.mcp_servers, "mcp_server_id", state.selectedMcpId);
   element("mcp-enabled").checked = mcp?.enabled === true;
   element("mcp-server-id").value = mcp?.mcp_server_id || "";
-  element("mcp-connector-kind").value = mcp?.connector_kind || "mcp_client";
   element("mcp-client-id").value = mcp?.client_id || "mcp-client-connector-main";
   element("mcp-transport").value = mcp?.transport || "stdio";
   element("mcp-command").value = mcp?.command || "";
   element("mcp-args").value = (mcp?.args || []).join("\n");
-  element("mcp-enabled-tools").value = (mcp?.enabled_tools || []).join("\n");
   element("mcp-cwd").value = mcp?.cwd || "";
   element("mcp-env").value = formatEnv(mcp?.env || {});
 }
@@ -1391,13 +1610,12 @@ function syncMcp() {
     return;
   }
   mcp.mcp_server_id = textValue("mcp-server-id");
-  mcp.connector_kind = textValue("mcp-connector-kind");
+  // CocoroConsoleに表示しないconnector_kindとenabled_toolsは既存値を保持する。
   mcp.client_id = textValue("mcp-client-id");
   mcp.enabled = boolValue("mcp-enabled");
   mcp.transport = textValue("mcp-transport");
   mcp.command = textValue("mcp-command");
   mcp.args = parseLines(textValue("mcp-args"));
-  mcp.enabled_tools = parseLines(textValue("mcp-enabled-tools"));
   const cwd = textValue("mcp-cwd").trim();
   mcp.cwd = cwd || null;
   mcp.env = parseEnv(textValue("mcp-env"));
@@ -1407,6 +1625,7 @@ function syncMcp() {
 function syncAllForms() {
   syncAvatar();
   syncMicrophoneSettings();
+  syncConsoleClientSettings();
   syncCurrent();
   syncPersona();
   syncModel();
@@ -1617,9 +1836,6 @@ function switchTab(tab) {
   document.querySelectorAll(".tab-page").forEach((page) => {
     page.classList.toggle("active", page.dataset.page === tab);
   });
-  const page = SETTINGS_PAGES[tab] || SETTINGS_PAGES.avatar;
-  element("settings-page-title").textContent = page[0];
-  element("settings-page-description").textContent = page[1];
   element("settings-page-select").value = tab;
 }
 
@@ -1655,13 +1871,9 @@ function bindEvents() {
   });
   element("image-input").addEventListener("change", (event) => attachFile(event.target.files[0]));
   element("remove-attachment").addEventListener("click", clearAttachment);
-  for (const id of [
-    "conversation-person-ref",
-    "conversation-display-name",
-    "conversation-interaction-ref",
-  ]) {
-    element(id).addEventListener("change", saveConversationIdentity);
-  }
+  element("conversation-person-ref").addEventListener("change", saveConversationReferences);
+  element("conversation-interaction-ref").addEventListener("change", saveConversationReferences);
+  element("conversation-display-name").addEventListener("change", saveConversationDisplayName);
 
   element("open-settings").addEventListener("click", openSettings);
   element("close-settings").addEventListener("click", closeSettings);
@@ -1709,6 +1921,7 @@ function bindEvents() {
     renderCamera();
     renderWatcher();
   });
+  element("camera-display-name").addEventListener("input", updateCameraGeneratedIds);
   element("watcher-select").addEventListener("change", () => {
     syncWatcher();
     state.selectedWatcherSourceId = element("watcher-select").value;
@@ -1723,21 +1936,23 @@ function bindEvents() {
   document.querySelector("[data-action='add-avatar']").addEventListener("click", addAvatar);
   document.querySelector("[data-action='duplicate-avatar']").addEventListener("click", duplicateAvatar);
   document.querySelector("[data-action='delete-avatar']").addEventListener("click", deleteAvatar);
-  element("copy-stt-api-key").addEventListener("click", () => copySpeechApiKey("stt-api-key", "STT APIキー"));
-  element("paste-stt-api-key").addEventListener("click", () => pasteSpeechApiKey("stt-api-key", "STT APIキー"));
-  element("copy-aivis-api-key").addEventListener("click", () => copySpeechApiKey("aivis-api-key", "Aivis Cloud APIキー"));
-  element("paste-aivis-api-key").addEventListener("click", () => pasteSpeechApiKey("aivis-api-key", "Aivis Cloud APIキー"));
+  element("copy-stt-api-key").addEventListener("click", () => copyApiKey("stt-api-key", "STT APIキー"));
+  element("paste-stt-api-key").addEventListener("click", () => pasteApiKey("stt-api-key", "STT APIキー"));
+  element("copy-aivis-api-key").addEventListener("click", () => copyApiKey("aivis-api-key", "Aivis Cloud APIキー"));
+  element("paste-aivis-api-key").addEventListener("click", () => pasteApiKey("aivis-api-key", "Aivis Cloud APIキー"));
   document.querySelector("[data-action='add-persona']").addEventListener("click", addPersona);
   document.querySelector("[data-action='duplicate-persona']").addEventListener("click", duplicatePersona);
   document.querySelector("[data-action='delete-persona']").addEventListener("click", deletePersona);
   document.querySelector("[data-action='add-model']").addEventListener("click", addModel);
   document.querySelector("[data-action='duplicate-model']").addEventListener("click", duplicateModel);
   document.querySelector("[data-action='delete-model']").addEventListener("click", deleteModel);
+  element("copy-model-api-key").addEventListener("click", () => copyApiKey("model-api-key", "モデルのAPIキー"));
+  element("paste-model-api-key").addEventListener("click", () => pasteApiKey("model-api-key", "モデルのAPIキー"));
   document.querySelector("[data-action='add-memory']").addEventListener("click", addMemory);
   document.querySelector("[data-action='duplicate-memory']").addEventListener("click", duplicateMemory);
   document.querySelector("[data-action='delete-memory']").addEventListener("click", deleteMemory);
-  element("copy-memory-api-key").addEventListener("click", copyMemoryApiKey);
-  element("paste-memory-api-key").addEventListener("click", pasteMemoryApiKey);
+  element("copy-memory-api-key").addEventListener("click", () => copyApiKey("memory-api-key", "記憶セットのAPIキー"));
+  element("paste-memory-api-key").addEventListener("click", () => pasteApiKey("memory-api-key", "記憶セットのAPIキー"));
   element("paste-llm-api-key-to-memory").addEventListener("click", pasteLlmApiKeyToMemory);
   document.querySelector("[data-action='add-camera']").addEventListener("click", addCamera);
   document.querySelector("[data-action='delete-camera']").addEventListener("click", deleteCamera);
@@ -1758,6 +1973,7 @@ async function startApp() {
   bindEvents();
   loadConversationIdentity();
   await loadIdentity();
+  await loadConversationDisplayName();
   await loadStatus({ silent: true });
   await refreshDashboard({ silent: true });
   connectAssistantEventStream();

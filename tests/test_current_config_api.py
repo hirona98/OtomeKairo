@@ -62,12 +62,40 @@ class CurrentConfigApiTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.error_code, "unsupported_model_preset_fields")
 
-    def test_default_thinking_speech_level_is_standard(self) -> None:
+    def test_model_preset_rejects_fractional_timeout_seconds(self) -> None:
+        service = DummyService()
+        state = service.store.read_state()
+        selected_id = state["selected_model_preset_id"]
+        preset = deepcopy(state["model_presets"][selected_id])
+        preset["timeout_seconds"] = 1.5
+
+        with self.assertRaises(ServiceError) as raised:
+            service._validate_model_preset_definition(selected_id, preset)
+
+        self.assertEqual(raised.exception.error_code, "invalid_timeout_seconds")
+
+    def test_default_current_settings_use_standard_thinking_values(self) -> None:
         service = DummyService()
 
         response = service.get_config("token")
 
         self.assertEqual(response["settings_snapshot"]["thinking_speech_level"], 5)
+        self.assertEqual(
+            response["settings_snapshot"]["wake_policy"],
+            {"mode": "disabled", "interval_seconds": 300},
+        )
+
+    def test_wake_policy_requires_interval_in_all_modes(self) -> None:
+        service = DummyService()
+
+        service._validate_wake_policy({"mode": "disabled", "interval_seconds": 600})
+
+        with self.assertRaises(ServiceError) as raised:
+            service._validate_wake_policy({"mode": "disabled"})
+        self.assertEqual(
+            raised.exception.error_code,
+            "invalid_wake_policy_interval_seconds",
+        )
 
     def test_patch_current_accepts_thinking_speech_bounds(self) -> None:
         service = DummyService()

@@ -8,6 +8,8 @@
   --line: #d8e0eb;
   --accent: #4873cf;
   --accent-dark: #335caf;
+  --navigation-hover-bg: #e1e8f2;
+  --navigation-active-bg: #d4e0f5;
   --assistant: #b5c7eb;
   --danger: #b42318;
   --ok: #137333;
@@ -63,13 +65,20 @@ button {
   font-size: 12px;
 }
 
-button:hover {
+/* 個別ボタンのhover指定を優先できる詳細度に保つ。 */
+button:where(:not(:disabled)):hover {
   background: var(--accent-dark);
 }
 
 button:disabled {
-  cursor: not-allowed;
   opacity: 0.55;
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
 }
 
 input,
@@ -501,11 +510,6 @@ p {
   gap: var(--space-3);
 }
 
-input[readonly] {
-  color: var(--muted);
-  background: #f8fafc;
-}
-
 #message-input {
   min-height: 60px;
   max-height: 150px;
@@ -705,40 +709,24 @@ input[readonly] {
   text-align: left;
 }
 
-.settings-nav-button:hover {
-  background: #f1f4f8;
+.settings-nav-button:not(.active):hover {
+  background: var(--navigation-hover-bg);
+  color: var(--accent-dark);
 }
 
 .settings-nav-button.active {
   border-left: 3px solid var(--accent);
   padding-left: 15px;
-  background: #eaf0fb;
+  background: var(--navigation-active-bg);
   color: var(--accent-dark);
   font-weight: 700;
 }
 
 .settings-content {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
-}
-
-.settings-page-header {
-  padding: 16px 20px 13px;
-  border-bottom: 1px solid var(--line);
-}
-
-.settings-page-header h3 {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.settings-page-header p {
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: 12px;
 }
 
 .settings-body {
@@ -758,6 +746,125 @@ input[readonly] {
 
 .preset-name-field {
   max-width: 520px;
+}
+
+.model-settings-page {
+  align-content: start;
+}
+
+.model-use-field {
+  justify-self: start;
+}
+
+.model-selector-row select {
+  flex: 0 1 500px;
+}
+
+.model-preset-name-row {
+  max-width: 680px;
+}
+
+.model-settings-list,
+.console-settings-list {
+  display: grid;
+  gap: 10px;
+}
+
+.model-setting-row,
+.console-setting-row {
+  display: grid;
+  grid-template-columns: var(--console-setting-label-width, 150px) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.model-setting-row {
+  --console-setting-label-width: 180px;
+}
+
+.model-setting-row > label,
+.console-setting-row > label {
+  color: var(--muted);
+}
+
+.console-setting-row-top {
+  align-items: start;
+}
+
+.console-control-with-hint {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.inline-suffix-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: var(--label-size);
+}
+
+.inline-suffix-control input {
+  flex: 0 0 60px;
+  width: 60px;
+}
+
+.desktop-pattern-field {
+  margin-top: 5px;
+}
+
+.watcher-settings-list {
+  --console-setting-label-width: 170px;
+}
+
+.console-info-box {
+  padding: 12px;
+  border: 1px solid #b9ccf3;
+  border-radius: 4px;
+  background: #eef4ff;
+  color: #334a72;
+  font-size: var(--label-size);
+  line-height: 1.5;
+}
+
+.api-documentation-group,
+.api-doc-sections {
+  display: grid;
+  gap: 10px;
+}
+
+.api-doc-section {
+  color: var(--muted);
+}
+
+.api-doc-section summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.api-doc-body {
+  margin: 10px 0 0;
+  padding: 2px;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.model-api-key-controls input {
+  flex: 0 1 220px;
+  min-width: 120px;
+}
+
+.model-api-key-controls button {
+  white-space: nowrap;
+}
+
+.model-web-search-field {
+  margin-top: 4px;
 }
 
 .wide-control {
@@ -858,6 +965,20 @@ label textarea {
   font-size: var(--field-size);
 }
 
+input:not([type="checkbox"]):disabled,
+select:disabled,
+textarea:disabled {
+  border-color: #c4ccd7;
+  background: #e8ebf0;
+  color: var(--muted);
+  -webkit-text-fill-color: var(--muted);
+  opacity: 1;
+}
+
+input[type="checkbox"]:disabled {
+  opacity: 0.55;
+}
+
 .form-grid .wide-label {
   grid-column: 1 / -1;
 }
@@ -878,16 +999,6 @@ label textarea {
 
 .checkbox-field input[type="checkbox"] {
   order: -1;
-}
-
-.system-policy-grid {
-  align-items: end;
-}
-
-.system-policy-checkbox {
-  grid-column: 1 / -1;
-  align-self: end;
-  margin-bottom: 1px;
 }
 
 .field-hint {
@@ -955,10 +1066,6 @@ label textarea {
 .capability-group {
   display: grid;
   gap: 8px;
-}
-
-.mcp-form-grid {
-  grid-template-columns: 1fr;
 }
 
 .settings-actions {
@@ -1034,10 +1141,6 @@ label textarea {
     display: none;
   }
 
-  .settings-page-header {
-    padding: 12px;
-  }
-
   .settings-body {
     padding: 12px;
   }
@@ -1059,6 +1162,15 @@ label textarea {
   .inline-control-row {
     align-items: stretch;
     flex-wrap: wrap;
+  }
+
+  .model-setting-row,
+  .console-setting-row {
+    grid-template-columns: 1fr;
+  }
+
+  .model-api-key-controls input {
+    flex: 1 1 100%;
   }
 
   .api-key-field input {

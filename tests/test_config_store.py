@@ -11,9 +11,9 @@ class ConfigStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root_dir = Path(temp_dir)
             with sqlite3.connect(root_dir / "config.db") as conn:
-                conn.execute("PRAGMA user_version = 8")
+                conn.execute("PRAGMA user_version = 10")
 
-            with self.assertRaisesRegex(RuntimeError, "Unsupported config.db schema version: 8"):
+            with self.assertRaisesRegex(RuntimeError, "Unsupported config.db schema version: 10"):
                 FileStore(root_dir)
 
     def test_file_store_uses_config_db_without_server_state_json(self) -> None:
@@ -61,6 +61,16 @@ class ConfigStoreTests(unittest.TestCase):
             state["avatars"]["avatar:default"]["tts"]["aivis_cloud_config"][
                 "api_key"
             ] = "tts-secret"
+            state["conversation_display_name"] = "田中さん"
+            state["console_client_settings"] = {
+                "console-main": {
+                    "last_connected_at": "2026-07-27T12:00:00+09:00",
+                    "settings": {
+                        "client_id": "console-main",
+                        "process": {},
+                    },
+                }
+            }
             store.write_state(state)
 
             reloaded_store = FileStore(root_dir)
@@ -93,6 +103,13 @@ class ConfigStoreTests(unittest.TestCase):
                     "aivis_cloud_config"
                 ]["api_key"],
                 "tts-secret",
+            )
+            self.assertEqual(reloaded_state["conversation_display_name"], "田中さん")
+            self.assertEqual(
+                reloaded_state["console_client_settings"]["console-main"][
+                    "last_connected_at"
+                ],
+                "2026-07-27T12:00:00+09:00",
             )
 
 

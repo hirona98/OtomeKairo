@@ -25,6 +25,7 @@ otomekairo-run = "otomekairo.run:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
+"otomekairo" = ["default_console_motion.json"]
 "otomekairo.web.static" = ["*.html", "*.js", "*.css"]
 
 [tool.pytest.ini_options]

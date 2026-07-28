@@ -784,7 +784,10 @@ class LongSmokeRunner:
             self._assert_current_editor_state_ready(editor_state)
 
         if self.args.profile == "real-llm-smoke":
-            current["wake_policy"] = {"mode": "disabled"}
+            current["wake_policy"] = {
+                "mode": "disabled",
+                "interval_seconds": self.args.wake_interval_seconds,
+            }
         else:
             current["wake_policy"] = {
                 "mode": "interval",
@@ -859,7 +862,10 @@ class LongSmokeRunner:
             raise SmokeError("real LLM config state selected model/memory definitions were not found.")
 
         current = editor_state["current"]
-        current["wake_policy"] = {"mode": "disabled"}
+        current["wake_policy"] = {
+            "mode": "disabled",
+            "interval_seconds": self.args.wake_interval_seconds,
+        }
 
         for model_preset in editor_state["model_presets"]:
             if model_preset.get("model_preset_id") != self.selected_model_preset_id:
@@ -2113,7 +2119,16 @@ class LongSmokeRunner:
             time.sleep(0.25)
 
     def _set_wake_policy_disabled(self) -> None:
-        self.api.post("/api/config/update-wake-policy", {"wake_policy": {"mode": "disabled"}})
+        current = self.api.get("/api/config")["settings_snapshot"]["wake_policy"]
+        self.api.post(
+            "/api/config/update-wake-policy",
+            {
+                "wake_policy": {
+                    "mode": "disabled",
+                    "interval_seconds": current["interval_seconds"],
+                }
+            },
+        )
 
     def _set_wake_policy_interval(self, *, interval_seconds: int) -> None:
         self.api.post(

@@ -117,7 +117,13 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 self._write_success(HTTPStatus.OK, self.server.service.read_server_identity())
                 return
             if method == "POST" and parsed.path == "/api/bootstrap/register-first-console":
-                self._read_json_body()
+                payload = self._read_json_body()
+                if payload:
+                    raise ServiceError(
+                        400,
+                        "unsupported_console_connect_fields",
+                        "CocoroConsole connect body must be an empty object.",
+                    )
                 self._write_success(HTTPStatus.CREATED, self.server.service.register_first_console())
                 return
             if method == "POST" and parsed.path == "/api/bootstrap/reissue-console-access-token":
@@ -158,6 +164,30 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 return
             if method == "GET" and parsed.path == "/api/config/mcp-servers/editor-state":
                 self._write_success(HTTPStatus.OK, self.server.service.get_mcp_servers_editor_state(token))
+                return
+            if (
+                method == "GET"
+                and parsed.path
+                == "/api/config/console-clients/last-connected/editor-state"
+            ):
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.get_last_connected_console_client_editor_state(token),
+                )
+                return
+            if (
+                method == "GET"
+                and parsed.path.startswith("/api/config/console-clients/")
+                and parsed.path.endswith("/editor-state")
+            ):
+                path_parts = parsed.path.split("/")
+                if len(path_parts) != 6:
+                    raise ServiceError(404, "route_not_found", "The requested route does not exist.")
+                client_id = unquote(path_parts[4])
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.get_console_client_editor_state(token, client_id),
+                )
                 return
             if method == "GET" and parsed.path.startswith("/api/config/connectors/") and parsed.path.endswith("/runtime-config"):
                 path_parts = parsed.path.split("/")
@@ -260,6 +290,21 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                     self.server.service.select_model_preset(token, payload.get("model_preset_id")),
                 )
                 return
+            if (
+                method == "POST"
+                and parsed.path.startswith("/api/config/console-clients/")
+                and parsed.path.endswith("/connect")
+            ):
+                path_parts = parsed.path.split("/")
+                if len(path_parts) != 6:
+                    raise ServiceError(404, "route_not_found", "The requested route does not exist.")
+                self._read_json_body()
+                client_id = unquote(path_parts[4])
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.connect_console_client(token, client_id),
+                )
+                return
             if method == "PATCH" and parsed.path == "/api/config/current":
                 payload = self._read_json_body()
                 self._write_success(
@@ -293,6 +338,40 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 self._write_success(
                     HTTPStatus.OK,
                     self.server.service.replace_mcp_servers_editor_state(token, payload),
+                )
+                return
+            if (
+                method == "PUT"
+                and parsed.path.startswith("/api/config/console-clients/")
+                and parsed.path.endswith("/editor-state")
+            ):
+                path_parts = parsed.path.split("/")
+                if len(path_parts) != 6:
+                    raise ServiceError(404, "route_not_found", "The requested route does not exist.")
+                client_id = unquote(path_parts[4])
+                payload = self._read_json_body()
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.replace_console_client_editor_state(
+                        token,
+                        client_id,
+                        payload,
+                    ),
+                )
+                return
+            if method == "PATCH" and parsed.path.startswith("/api/config/console-clients/"):
+                path_parts = parsed.path.split("/")
+                if len(path_parts) != 5:
+                    raise ServiceError(404, "route_not_found", "The requested route does not exist.")
+                client_id = unquote(path_parts[4])
+                payload = self._read_json_body()
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.patch_console_client_settings(
+                        token,
+                        client_id,
+                        payload,
+                    ),
                 )
                 return
             if method == "GET" and parsed.path.startswith("/api/config/camera-sources/"):
@@ -600,6 +679,19 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         if method == "GET" and path == "/ui/api/status":
             self._write_success(HTTPStatus.OK, self.server.service.get_status(token))
             return
+        if method == "GET" and path == "/ui/api/docs":
+            self._write_success(HTTPStatus.OK, self.server.service.get_docs(token))
+            return
+        if method == "GET" and path == "/ui/api/config":
+            self._write_success(HTTPStatus.OK, self.server.service.get_config(token))
+            return
+        if method == "PATCH" and path == "/ui/api/config/current":
+            payload = self._read_json_body()
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.patch_current(token, payload),
+            )
+            return
         if method == "GET" and path == "/ui/api/inspection/current-state":
             self._write_success(HTTPStatus.OK, self.server.service.get_current_state_inspection(token))
             return
@@ -651,6 +743,45 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         if method == "PUT" and path == "/ui/api/config/mcp-servers/editor-state":
             payload = self._read_json_body()
             self._write_success(HTTPStatus.OK, self.server.service.replace_mcp_servers_editor_state(token, payload))
+            return
+        if (
+            method == "GET"
+            and path == "/ui/api/config/console-clients/last-connected/editor-state"
+        ):
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.get_last_connected_console_client_editor_state(token),
+            )
+            return
+        if (
+            method == "PUT"
+            and path.startswith("/ui/api/config/console-clients/")
+            and path.endswith("/editor-state")
+        ):
+            path_parts = path.split("/")
+            if len(path_parts) != 7:
+                raise ServiceError(404, "route_not_found", "The requested route does not exist.")
+            client_id = unquote(path_parts[5])
+            payload = self._read_json_body()
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.replace_console_client_editor_state(
+                    token,
+                    client_id,
+                    payload,
+                ),
+            )
+            return
+        if method == "PATCH" and path.startswith("/ui/api/config/console-clients/"):
+            path_parts = path.split("/")
+            if len(path_parts) != 6:
+                raise ServiceError(404, "route_not_found", "The requested route does not exist.")
+            client_id = unquote(path_parts[5])
+            payload = self._read_json_body()
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.patch_console_client_settings(token, client_id, payload),
+            )
             return
 
         raise ServiceError(404, "route_not_found", "The requested route does not exist.")

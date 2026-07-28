@@ -50,6 +50,8 @@ response:
 - `docs/` 全体の任意読み取り API ではない
 - 初期対象は会話 API と API起床の Console 表示用文書だけとする
 - 表示用文書は利用者向け説明であり、API wire 契約の正本は `docs/design/api/` 配下の該当文書とする
+- 外部から呼び出す endpoint の基点は `{BASE_URL}` と表記する
+- CocoroConsole は接続設定のOtomeKairo URL、ブラウザ UI はアクセス中の origin で `{BASE_URL}` を表示時に置換する
 - response に token、API key、credential、内部 URL、絶対パスを含めない
 
 response:

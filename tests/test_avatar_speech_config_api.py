@@ -61,6 +61,11 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(avatar["stt"]["engine"], "amivoice")
+        self.assertIn("assist_text", avatar["tts"]["style_bert_vits2_config"])
+        self.assertEqual(
+            avatar["tts"]["aivis_cloud_config"]["output_format"],
+            "wav",
+        )
         self.assertEqual(service.store.events[-1]["kind"], "avatar_speech_editor_state_read")
 
     def test_public_read_masks_stt_and_tts_api_keys(self) -> None:
@@ -128,6 +133,16 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
         invalid_microphone["microphone_settings"]["input_threshold_db"] = -51
         cases.append(
             ("invalid microphone", invalid_microphone, "invalid_microphone_settings")
+        )
+
+        fractional_microphone = deepcopy(original)
+        fractional_microphone["microphone_settings"]["input_threshold_db"] = -20.5
+        cases.append(
+            (
+                "fractional microphone",
+                fractional_microphone,
+                "invalid_microphone_settings",
+            )
         )
 
         invalid_engine = deepcopy(original)
