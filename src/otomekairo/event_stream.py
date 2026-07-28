@@ -60,6 +60,17 @@ class ServerWebSocket:
         return payload
 
     def receive_text(self) -> str | None:
+        # テキスト専用streamはbinary messageを受理しない。
+        message = self.receive_message()
+        if message is None:
+            return None
+        message_kind, payload = message
+        if message_kind != "text":
+            raise WebSocketProtocolError("WebSocket message must be text.")
+        return payload.decode("utf-8")
+
+    def receive_message(self) -> tuple[str, bytes] | None:
+        # 音声streamはtext controlとbinary PCMを同じ接続で受理する。
         # ループ
         while True:
             opcode, payload = self._read_frame()
@@ -71,9 +82,11 @@ class ServerWebSocket:
                 continue
             if opcode == 0xA:
                 continue
-            if opcode != 0x1:
-                raise WebSocketProtocolError(f"Unsupported opcode: {opcode}")
-            return payload.decode("utf-8")
+            if opcode == 0x1:
+                return "text", payload
+            if opcode == 0x2:
+                return "binary", payload
+            raise WebSocketProtocolError(f"Unsupported opcode: {opcode}")
 
     def send_json(self, payload: dict[str, Any]) -> None:
         # エンコード
@@ -303,10 +316,14 @@ class EventStreamRegistry:
             except OSError:
                 continue
 
-    def remove_connection(self, session_id: str) -> None:
+    def remove_connection(self, session_id: str) -> str | None:
         # 削除
         with self._lock:
-            self._sessions.pop(session_id, None)
+            session = self._sessions.pop(session_id, None)
+        if session is None:
+            return None
+        client_id = session.get("client_id")
+        return client_id if isinstance(client_id, str) else None
 
     def has_capability(self, client_id: str, capability: str) -> bool:
         # 走査
@@ -572,6 +589,27 @@ class EventStreamRegistry:
 
         # 結果
         return True
+
+    def send_to_subscribers(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> int:
+        # runtime snapshotの配送先は明示購読中の全clientとする。
+        with self._lock:
+            targets = [
+                dict(session)
+                for session in self._sessions.values()
+                if event_type in session.get("event_subscriptions", [])
+            ]
+        sent_count = 0
+        for target in targets:
+            try:
+                target["websocket"].send_json(payload)
+                sent_count += 1
+            except OSError:
+                self.remove_connection(target["session_id"])
+        return sent_count
 
     def close_all(self) -> None:
         # スナップショット

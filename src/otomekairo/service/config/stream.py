@@ -25,7 +25,11 @@ CAMERA_PTZ_OPERATIONS = {
     "zoom_out",
 }
 CAMERA_PTZ_AMOUNTS = {"small", "medium"}
-EVENT_STREAM_EVENT_SUBSCRIPTIONS = {"assistant_message"}
+EVENT_STREAM_EVENT_SUBSCRIPTIONS = {
+    "assistant_message",
+    "audio_runtime_state",
+    "conversation_input",
+}
 MCP_TRANSPORTS = {"stdio"}
 
 
@@ -146,6 +150,9 @@ class ServiceConfigStreamMixin:
                 f"mcp_servers={len(mcp_servers)}"
             ),
         )
+        audio_runtime = getattr(self, "_audio_runtime", None)
+        if audio_runtime is not None:
+            audio_runtime.on_event_client_connected(client_id.strip())
 
     def _normalize_event_subscriptions(self, value: Any) -> list[str]:
         if value is None:
@@ -230,7 +237,14 @@ class ServiceConfigStreamMixin:
 
     def unregister_event_stream_connection(self, session_id: str) -> None:
         # レジストリ
-        self._event_stream_registry.remove_connection(session_id)
+        client_id = self._event_stream_registry.remove_connection(session_id)
+        if (
+            client_id is not None
+            and not self._event_stream_registry.is_client_connected(client_id)
+        ):
+            audio_runtime = getattr(self, "_audio_runtime", None)
+            if audio_runtime is not None:
+                audio_runtime.on_event_client_disconnected(client_id)
 
     def close_event_streams(self) -> None:
         # レジストリ

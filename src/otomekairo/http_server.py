@@ -31,6 +31,8 @@ SUPPRESSED_HTTP_LOG_EXACT_PATHS = {
     "/api/bootstrap/probe",
     "/api/autonomous-runs",
     "/api/capability/result",
+    "/api/audio/stream",
+    "/ui/api/audio/stream",
 }
 SUPPRESSED_HTTP_LOG_PATH_PREFIXES = (
     "/api/inspection",
@@ -214,6 +216,87 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 return
             if method == "GET" and parsed.path == "/api/docs":
                 self._write_success(HTTPStatus.OK, self.server.service.get_docs(token))
+                return
+            if method == "GET" and parsed.path == "/api/audio/stream":
+                self._handle_audio_stream(
+                    token,
+                    endpoint_source="physical_microphone",
+                )
+                return
+            if method == "GET" and parsed.path == "/api/audio/input-devices":
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.list_audio_input_devices(token),
+                )
+                return
+            if method == "GET" and parsed.path == "/api/audio/speakers":
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.list_audio_speakers(token),
+                )
+                return
+            if method == "POST" and parsed.path == "/api/audio/speaker-enrollments":
+                self._write_success(
+                    HTTPStatus.CREATED,
+                    self.server.service.start_audio_speaker_enrollment(
+                        token,
+                        self._read_json_body(),
+                    ),
+                )
+                return
+            if (
+                method == "DELETE"
+                and parsed.path.startswith("/api/audio/speaker-enrollments/")
+            ):
+                enrollment_id = unquote(parsed.path.rsplit("/", 1)[-1])
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.cancel_audio_speaker_enrollment(
+                        token,
+                        enrollment_id,
+                    ),
+                )
+                return
+            if (
+                method == "PUT"
+                and parsed.path.startswith("/api/audio/speakers/")
+                and parsed.path.endswith("/display-name")
+            ):
+                path_parts = parsed.path.split("/")
+                if len(path_parts) != 6:
+                    raise ServiceError(
+                        404,
+                        "route_not_found",
+                        "The requested route does not exist.",
+                    )
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.rename_audio_speaker(
+                        token,
+                        unquote(path_parts[4]),
+                        self._read_json_body(),
+                    ),
+                )
+                return
+            if (
+                method == "DELETE"
+                and parsed.path.startswith("/api/audio/speakers/")
+                and parsed.path.endswith("/registration")
+            ):
+                path_parts = parsed.path.split("/")
+                if len(path_parts) != 6:
+                    raise ServiceError(
+                        404,
+                        "route_not_found",
+                        "The requested route does not exist.",
+                    )
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.unregister_audio_speaker(
+                        token,
+                        unquote(path_parts[4]),
+                    ),
+                )
                 return
             if method == "GET" and parsed.path == "/api/events/stream":
                 self._handle_events_stream(token)
@@ -541,6 +624,88 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             self.server.service.unregister_event_stream_connection(session_id)
             debug_log("HTTP", f"events/stream disconnected session={session_id}", level="DEBUG")
 
+    def _handle_audio_stream(
+        self,
+        token: str | None,
+        *,
+        endpoint_source: str,
+    ) -> None:
+        # connectorとWeb UIは認証方法だけを分け、同じ音声protocolを使用する。
+        self.server.service._require_token(token)
+        upgrade = self.headers.get("Upgrade", "")
+        connection = self.headers.get("Connection", "")
+        websocket_key = self.headers.get("Sec-WebSocket-Key")
+        websocket_version = self.headers.get("Sec-WebSocket-Version")
+        if upgrade.lower() != "websocket" or "upgrade" not in connection.lower():
+            raise ServiceError(
+                400,
+                "invalid_websocket_upgrade",
+                "Upgrade: websocket is required.",
+            )
+        if not isinstance(websocket_key, str) or not websocket_key.strip():
+            raise ServiceError(
+                400,
+                "missing_websocket_key",
+                "Sec-WebSocket-Key is required.",
+            )
+        if websocket_version != "13":
+            raise ServiceError(
+                400,
+                "invalid_websocket_version",
+                "Sec-WebSocket-Version must be 13.",
+            )
+
+        accept_value = build_websocket_accept(websocket_key.strip())
+        self.send_response(HTTPStatus.SWITCHING_PROTOCOLS)
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept_value)
+        self.end_headers()
+        self.wfile.flush()
+
+        websocket = ServerWebSocket(self.connection)
+        session_id = self.server.service.register_audio_stream_connection(
+            websocket,
+            endpoint_source=endpoint_source,
+        )
+        debug_log(
+            "HTTP",
+            f"audio/stream connected session={session_id} source={endpoint_source}",
+            level="DEBUG",
+        )
+        try:
+            while True:
+                message = websocket.receive_message()
+                if message is None:
+                    break
+                message_kind, message_payload = message
+                self.server.service.handle_audio_stream_message(
+                    session_id,
+                    message_kind,
+                    message_payload,
+                )
+        except ServiceError as exc:
+            self.server.service.send_audio_stream_error(
+                session_id,
+                code=exc.error_code,
+                message=exc.message,
+            )
+            websocket.close()
+        except (ValueError, WebSocketProtocolError):
+            self.server.service.send_audio_stream_error(
+                session_id,
+                code="invalid_audio_control",
+                message="The audio stream protocol is invalid.",
+            )
+            websocket.close()
+        finally:
+            self.server.service.unregister_audio_stream_connection(session_id)
+            debug_log(
+                "HTTP",
+                f"audio/stream disconnected session={session_id}",
+                level="DEBUG",
+            )
+
     def _handle_logs_stream(self, token: str | None) -> None:
         # 認可
         self.server.service._require_token(token)
@@ -673,6 +838,90 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             self._require_web_ui_websocket_origin()
             self._handle_events_stream(token)
             return
+        if method == "GET" and path == "/ui/api/audio/stream":
+            self._require_web_ui_websocket_origin(
+                error_code="invalid_audio_origin",
+                subject="audio stream",
+            )
+            self._handle_audio_stream(
+                token,
+                endpoint_source="web_microphone",
+            )
+            return
+        if method == "GET" and path == "/ui/api/audio/input-devices":
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.list_audio_input_devices(token),
+            )
+            return
+        if method == "GET" and path == "/ui/api/audio/speakers":
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.list_audio_speakers(token),
+            )
+            return
+        if method == "POST" and path == "/ui/api/audio/speaker-enrollments":
+            self._write_success(
+                HTTPStatus.CREATED,
+                self.server.service.start_audio_speaker_enrollment(
+                    token,
+                    self._read_json_body(),
+                ),
+            )
+            return
+        if (
+            method == "DELETE"
+            and path.startswith("/ui/api/audio/speaker-enrollments/")
+        ):
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.cancel_audio_speaker_enrollment(
+                    token,
+                    unquote(path.rsplit("/", 1)[-1]),
+                ),
+            )
+            return
+        if (
+            method == "PUT"
+            and path.startswith("/ui/api/audio/speakers/")
+            and path.endswith("/display-name")
+        ):
+            path_parts = path.split("/")
+            if len(path_parts) != 7:
+                raise ServiceError(
+                    404,
+                    "route_not_found",
+                    "The requested route does not exist.",
+                )
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.rename_audio_speaker(
+                    token,
+                    unquote(path_parts[5]),
+                    self._read_json_body(),
+                ),
+            )
+            return
+        if (
+            method == "DELETE"
+            and path.startswith("/ui/api/audio/speakers/")
+            and path.endswith("/registration")
+        ):
+            path_parts = path.split("/")
+            if len(path_parts) != 7:
+                raise ServiceError(
+                    404,
+                    "route_not_found",
+                    "The requested route does not exist.",
+                )
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.unregister_audio_speaker(
+                    token,
+                    unquote(path_parts[5]),
+                ),
+            )
+            return
         if method == "GET" and path == "/ui/api/bootstrap/server-identity":
             self._write_success(HTTPStatus.OK, self.server.service.read_server_identity())
             return
@@ -786,7 +1035,12 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
 
         raise ServiceError(404, "route_not_found", "The requested route does not exist.")
 
-    def _require_web_ui_websocket_origin(self) -> None:
+    def _require_web_ui_websocket_origin(
+        self,
+        *,
+        error_code: str = "invalid_web_ui_origin",
+        subject: str = "event stream",
+    ) -> None:
         # UI 用 stream の server-held token を別 origin から利用させない。
         origin = self.headers.get("Origin")
         host = self.headers.get("Host")
@@ -797,7 +1051,11 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             or not isinstance(host, str)
             or parsed_origin.netloc != host
         ):
-            raise ServiceError(403, "invalid_web_ui_origin", "The Web UI event stream requires a same-origin request.")
+            raise ServiceError(
+                403,
+                error_code,
+                f"The Web UI {subject} requires a same-origin request.",
+            )
 
     def _handle_autonomous_run_operation(self, token: str | None, run_id: str, operation: str) -> None:
         # 通常 API とブラウザ UI で同じ autonomous run 操作境界を使う。

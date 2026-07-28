@@ -57,6 +57,7 @@ class AudioSegmenter:
         self._speaking = False
         self._amivoice_samples: list[int] = []
         self._speaker_samples: list[int] = []
+        self._amivoice_prebuffer_samples = 0
         self._first_positive_offset = 0
         self._last_positive_end = 0
         self._silence_samples = 0
@@ -100,6 +101,7 @@ class AudioSegmenter:
                 return None
             self._speaking = True
             self._amivoice_samples = [*self._prebuffer, *window]
+            self._amivoice_prebuffer_samples = len(self._prebuffer)
             self._speaker_samples = list(window)
             self._first_positive_offset = 0
             self._last_positive_end = len(window)
@@ -130,16 +132,20 @@ class AudioSegmenter:
             amivoice_samples = self._amivoice_samples
             self._prebuffer.clear()
         else:
-            trailing_start = max(0, len(self._amivoice_samples) - END_SILENCE_SAMPLES)
-            amivoice_samples = self._amivoice_samples[:]
+            trailing_start = (
+                self._amivoice_prebuffer_samples + self._last_positive_end
+            )
+            trailing_end = trailing_start + END_SILENCE_SAMPLES
+            amivoice_samples = self._amivoice_samples[:trailing_end]
             self._prebuffer = deque(
-                self._amivoice_samples[trailing_start:],
+                self._amivoice_samples[trailing_start:trailing_end],
                 maxlen=PREBUFFER_SAMPLES,
             )
 
         self._speaking = False
         self._amivoice_samples = []
         self._speaker_samples = []
+        self._amivoice_prebuffer_samples = 0
         self._first_positive_offset = 0
         self._last_positive_end = 0
         self._silence_samples = 0
