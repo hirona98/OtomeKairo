@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import struct
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from otomekairo.defaults import build_default_state
+from otomekairo.memory.utils import now_iso
 from otomekairo.service.common import debug_log
 
 
 CONFIG_DB_FILE_NAME = "config.db"
-CURRENT_CONFIG_DB_VERSION = 11
+CURRENT_CONFIG_DB_VERSION = 12
 
 
 class ConfigStore:
@@ -79,6 +81,160 @@ class ConfigStore:
         # 設定 state 全体を単一 transaction で置き換える。
         with self._config_db() as conn:
             self._write_state(conn, state)
+
+    def list_voice_speakers(
+        self,
+        *,
+        registered_only: bool = False,
+        include_embedding: bool = False,
+    ) -> list[dict[str, Any]]:
+        # 話者一覧の読み取りでは embedding を明示指定時だけ復元する。
+        query = """
+            SELECT
+                person_ref,
+                display_name,
+                registration_status,
+                embedding,
+                model_id,
+                registered_at,
+                updated_at
+            FROM voice_speakers
+        """
+        params: tuple[Any, ...] = ()
+        if registered_only:
+            query += "\nWHERE registration_status = ?"
+            params = ("registered",)
+        query += "\nORDER BY created_at ASC, person_ref ASC"
+        with self._config_db() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [
+            self._voice_speaker_from_row(row, include_embedding=include_embedding)
+            for row in rows
+        ]
+
+    def get_voice_speaker(
+        self,
+        person_ref: str,
+        *,
+        include_embedding: bool = False,
+    ) -> dict[str, Any] | None:
+        # 人物参照は音声人物の安定識別子として扱う。
+        with self._config_db() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    person_ref,
+                    display_name,
+                    registration_status,
+                    embedding,
+                    model_id,
+                    registered_at,
+                    updated_at
+                FROM voice_speakers
+                WHERE person_ref = ?
+                """,
+                (person_ref,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._voice_speaker_from_row(row, include_embedding=include_embedding)
+
+    def replace_voice_speaker_registration(
+        self,
+        *,
+        person_ref: str,
+        display_name: str,
+        embedding: list[float],
+        model_id: str,
+    ) -> dict[str, Any]:
+        # 3サンプルから確定した embedding だけを原子的に保存する。
+        timestamp = now_iso()
+        embedding_blob = struct.pack(f"<{len(embedding)}f", *embedding)
+        with self._config_db() as conn:
+            existing = conn.execute(
+                """
+                SELECT created_at
+                FROM voice_speakers
+                WHERE person_ref = ?
+                """,
+                (person_ref,),
+            ).fetchone()
+            created_at = existing["created_at"] if existing is not None else timestamp
+            conn.execute(
+                """
+                INSERT INTO voice_speakers (
+                    person_ref,
+                    display_name,
+                    registration_status,
+                    embedding,
+                    model_id,
+                    created_at,
+                    registered_at,
+                    updated_at
+                )
+                VALUES (?, ?, 'registered', ?, ?, ?, ?, ?)
+                ON CONFLICT(person_ref) DO UPDATE SET
+                    display_name = excluded.display_name,
+                    registration_status = 'registered',
+                    embedding = excluded.embedding,
+                    model_id = excluded.model_id,
+                    registered_at = excluded.registered_at,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    person_ref,
+                    display_name,
+                    embedding_blob,
+                    model_id,
+                    created_at,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+        speaker = self.get_voice_speaker(person_ref)
+        if speaker is None:
+            raise RuntimeError("voice speaker registration was not persisted.")
+        return speaker
+
+    def rename_voice_speaker(
+        self,
+        *,
+        person_ref: str,
+        display_name: str,
+    ) -> dict[str, Any] | None:
+        # 表示名だけを変更し、登録状態と embedding を維持する。
+        with self._config_db() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE voice_speakers
+                SET display_name = ?, updated_at = ?
+                WHERE person_ref = ?
+                """,
+                (display_name, now_iso(), person_ref),
+            )
+        if cursor.rowcount == 0:
+            return None
+        return self.get_voice_speaker(person_ref)
+
+    def unregister_voice_speaker(self, person_ref: str) -> dict[str, Any] | None:
+        # 人物rowを維持したまま音声登録情報だけを削除する。
+        with self._config_db() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE voice_speakers
+                SET
+                    registration_status = 'unregistered',
+                    embedding = NULL,
+                    model_id = NULL,
+                    registered_at = NULL,
+                    updated_at = ?
+                WHERE person_ref = ?
+                """,
+                (now_iso(), person_ref),
+            )
+        if cursor.rowcount == 0:
+            return None
+        return self.get_voice_speaker(person_ref)
 
     def _initialize_config_db(self) -> None:
         # 現行 schema 以外は受け付けない。
@@ -183,6 +339,33 @@ class ConfigStore:
                 client_id TEXT PRIMARY KEY,
                 last_connected_at TEXT,
                 payload_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS voice_speakers (
+                person_ref TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                registration_status TEXT NOT NULL
+                    CHECK (registration_status IN ('registered', 'unregistered')),
+                embedding BLOB,
+                model_id TEXT,
+                created_at TEXT NOT NULL,
+                registered_at TEXT,
+                updated_at TEXT NOT NULL,
+                CHECK (
+                    (
+                        registration_status = 'registered'
+                        AND embedding IS NOT NULL
+                        AND model_id IS NOT NULL
+                        AND registered_at IS NOT NULL
+                    )
+                    OR
+                    (
+                        registration_status = 'unregistered'
+                        AND embedding IS NULL
+                        AND model_id IS NULL
+                        AND registered_at IS NULL
+                    )
+                )
             );
             """
         )
@@ -317,3 +500,26 @@ class ConfigStore:
 
     def _to_json(self, payload: Any) -> str:
         return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+    def _voice_speaker_from_row(
+        self,
+        row: sqlite3.Row,
+        *,
+        include_embedding: bool,
+    ) -> dict[str, Any]:
+        speaker = {
+            "person_ref": row["person_ref"],
+            "display_name": row["display_name"],
+            "registration_status": row["registration_status"],
+            "model_id": row["model_id"],
+            "registered_at": row["registered_at"],
+            "updated_at": row["updated_at"],
+        }
+        if include_embedding:
+            blob = row["embedding"]
+            speaker["embedding"] = (
+                list(struct.unpack(f"<{len(blob) // 4}f", blob))
+                if blob is not None
+                else None
+            )
+        return speaker

@@ -140,7 +140,9 @@ class ServiceConfigResourcesMixin:
                 "avatar_not_found",
                 "The selected_avatar_id does not exist in avatars.",
             )
-        microphone_settings = definition.get("microphone_settings")
+        microphone_settings = self._normalize_microphone_settings(
+            definition.get("microphone_settings")
+        )
         self._validate_microphone_settings(microphone_settings)
 
         state["selected_avatar_id"] = selected_avatar_id

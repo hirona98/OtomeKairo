@@ -1480,6 +1480,58 @@ class FileStore:
         # 委譲
         self.config_store.write_state(state)
 
+    def list_voice_speakers(
+        self,
+        *,
+        registered_only: bool = False,
+        include_embedding: bool = False,
+    ) -> list[dict[str, Any]]:
+        # 話者登録は config.db の専用tableへ委譲する。
+        return self.config_store.list_voice_speakers(
+            registered_only=registered_only,
+            include_embedding=include_embedding,
+        )
+
+    def get_voice_speaker(
+        self,
+        person_ref: str,
+        *,
+        include_embedding: bool = False,
+    ) -> dict[str, Any] | None:
+        return self.config_store.get_voice_speaker(
+            person_ref,
+            include_embedding=include_embedding,
+        )
+
+    def replace_voice_speaker_registration(
+        self,
+        *,
+        person_ref: str,
+        display_name: str,
+        embedding: list[float],
+        model_id: str,
+    ) -> dict[str, Any]:
+        return self.config_store.replace_voice_speaker_registration(
+            person_ref=person_ref,
+            display_name=display_name,
+            embedding=embedding,
+            model_id=model_id,
+        )
+
+    def rename_voice_speaker(
+        self,
+        *,
+        person_ref: str,
+        display_name: str,
+    ) -> dict[str, Any] | None:
+        return self.config_store.rename_voice_speaker(
+            person_ref=person_ref,
+            display_name=display_name,
+        )
+
+    def unregister_voice_speaker(self, person_ref: str) -> dict[str, Any] | None:
+        return self.config_store.unregister_voice_speaker(person_ref)
+
     def __getattr__(self, name: str) -> Any:
         # 委譲
         return getattr(self.memory_store, name)

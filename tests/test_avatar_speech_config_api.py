@@ -40,8 +40,11 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
         self.assertEqual(
             response["microphone_settings"],
             {
-                "input_threshold_db": -20,
-                "speaker_recognition_threshold": 0.4,
+                "physical_input_enabled": True,
+                "input_device": None,
+                "response_client_id": "",
+                "vad_probability_threshold": 0.5,
+                "speaker_recognition_threshold": 0.6,
             },
         )
         avatar = response["avatars"][0]
@@ -61,6 +64,8 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(avatar["stt"]["engine"], "amivoice")
+        self.assertEqual(avatar["stt"]["wake_words"], [])
+        self.assertNotIn("language", avatar["stt"])
         self.assertIn("assist_text", avatar["tts"]["style_bert_vits2_config"])
         self.assertEqual(
             avatar["tts"]["aivis_cloud_config"]["output_format"],
@@ -102,14 +107,17 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
         avatar["tts"]["aivis_cloud_config"]["api_key"] = "new-tts-secret"
         definition["avatars"].append(avatar)
         definition["selected_avatar_id"] = avatar["avatar_id"]
-        definition["microphone_settings"]["input_threshold_db"] = -35
+        definition["microphone_settings"]["vad_probability_threshold"] = 0.55
         definition["microphone_settings"]["speaker_recognition_threshold"] = 0.65
 
         response = service.replace_avatar_speech_editor_state("token", definition)
 
         self.assertEqual(response, service.get_avatar_speech_editor_state("token"))
         self.assertEqual(response["selected_avatar_id"], "avatar:second")
-        self.assertEqual(response["microphone_settings"]["input_threshold_db"], -35)
+        self.assertEqual(
+            response["microphone_settings"]["vad_probability_threshold"],
+            0.55,
+        )
         self.assertEqual(response["avatars"][1]["display_name"], "2番目")
         self.assertEqual(
             service.store.events[-2]["kind"],
@@ -130,13 +138,13 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
         cases.append(("missing selected", missing_selected, "avatar_not_found"))
 
         invalid_microphone = deepcopy(original)
-        invalid_microphone["microphone_settings"]["input_threshold_db"] = -51
+        invalid_microphone["microphone_settings"]["vad_probability_threshold"] = 0.05
         cases.append(
             ("invalid microphone", invalid_microphone, "invalid_microphone_settings")
         )
 
         fractional_microphone = deepcopy(original)
-        fractional_microphone["microphone_settings"]["input_threshold_db"] = -20.5
+        fractional_microphone["microphone_settings"]["physical_input_enabled"] = 1
         cases.append(
             (
                 "fractional microphone",
