@@ -221,6 +221,17 @@ function intValue(id, fallback = 1) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+// APIへ送る前に整数契約を検証し、小数の切り捨てを防ぐ。
+function boundedIntValue(id, label, min, max = null) {
+  const value = Number(textValue(id));
+  const isInRange = value >= min && (max === null || value <= max);
+  if (!Number.isInteger(value) || !isInRange) {
+    const range = max === null ? `${min}以上` : `${min}以上${max}以下`;
+    throw new Error(`${label}には${range}の整数を入力してください。`);
+  }
+  return value;
+}
+
 function numberValue(id, fallback = 1) {
   const value = Number.parseFloat(element(id).value);
   return Number.isFinite(value) ? value : fallback;
@@ -1221,7 +1232,7 @@ function renderMicrophoneSettings() {
 
 function syncMicrophoneSettings() {
   state.avatarSpeech.microphone_settings = {
-    input_threshold_db: numberValue("microphone-input-threshold", -20),
+    input_threshold_db: boundedIntValue("microphone-input-threshold", "入力しきい値", -50, 0),
     speaker_recognition_threshold: numberValue("speaker-recognition-threshold", 0.4),
   };
 }
@@ -1373,7 +1384,7 @@ function syncModel() {
   preset.model = textValue("model-model");
   preset.api_key = textValue("model-api-key");
   preset.max_output_tokens = intValue("model-max-output-tokens", 4000);
-  preset.timeout_seconds = intValue("model-timeout-seconds", 90);
+  preset.timeout_seconds = boundedIntValue("model-timeout-seconds", "タイムアウト（秒）", 1);
   preset.web_search_enabled = boolValue("model-web-search-enabled");
   const apiBase = textValue("model-api-base").trim();
   if (apiBase) {
@@ -1480,6 +1491,7 @@ function syncCamera() {
   if (!camera) {
     return;
   }
+  const previousVisionSourceId = camera.vision_source_id;
   camera.enabled = boolValue("camera-enabled");
   camera.display_name = textValue("camera-display-name");
   camera.vision_source_id = defaultVisionSourceId(camera);
@@ -1494,6 +1506,9 @@ function syncCamera() {
   };
   camera.watcher = cameraWatcher(camera);
   state.selectedCameraId = camera.vision_source_id;
+  if (state.selectedWatcherSourceId === previousVisionSourceId) {
+    state.selectedWatcherSourceId = camera.vision_source_id;
+  }
 }
 
 function watcherItems() {

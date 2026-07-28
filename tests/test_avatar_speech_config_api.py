@@ -135,6 +135,16 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
             ("invalid microphone", invalid_microphone, "invalid_microphone_settings")
         )
 
+        fractional_microphone = deepcopy(original)
+        fractional_microphone["microphone_settings"]["input_threshold_db"] = -20.5
+        cases.append(
+            (
+                "fractional microphone",
+                fractional_microphone,
+                "invalid_microphone_settings",
+            )
+        )
+
         invalid_engine = deepcopy(original)
         invalid_engine["avatars"][0]["tts"]["engine"] = "unknown"
         cases.append(("invalid engine", invalid_engine, "unsupported_tts_engine"))

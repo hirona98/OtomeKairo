@@ -381,11 +381,11 @@ class ServiceConfigValidationMixin:
             "microphone_settings",
         )
         input_threshold = definition.get("input_threshold_db")
-        if type(input_threshold) not in {int, float} or not -50 <= float(input_threshold) <= 0:
+        if type(input_threshold) is not int or not -50 <= input_threshold <= 0:
             raise ServiceError(
                 400,
                 "invalid_microphone_settings",
-                "microphone_settings.input_threshold_db must be from -50 to 0.",
+                "microphone_settings.input_threshold_db must be an integer from -50 to 0.",
             )
         speaker_threshold = definition.get("speaker_recognition_threshold")
         if type(speaker_threshold) not in {int, float} or not 0.1 <= float(speaker_threshold) <= 0.9:
@@ -1110,15 +1110,11 @@ class ServiceConfigValidationMixin:
                 "invalid_max_output_tokens",
                 "max_output_tokens must be an integer >= 1.",
             )
-        if (
-            isinstance(timeout_seconds, bool)
-            or not isinstance(timeout_seconds, (int, float))
-            or timeout_seconds <= 0
-        ):
+        if type(timeout_seconds) is not int or timeout_seconds < 1:
             raise ServiceError(
                 400,
                 "invalid_timeout_seconds",
-                "timeout_seconds must be a positive number.",
+                "timeout_seconds must be an integer >= 1.",
             )
         if not isinstance(web_search_enabled, bool):
             raise ServiceError(

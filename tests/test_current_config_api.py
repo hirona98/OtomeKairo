@@ -62,6 +62,18 @@ class CurrentConfigApiTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.error_code, "unsupported_model_preset_fields")
 
+    def test_model_preset_rejects_fractional_timeout_seconds(self) -> None:
+        service = DummyService()
+        state = service.store.read_state()
+        selected_id = state["selected_model_preset_id"]
+        preset = deepcopy(state["model_presets"][selected_id])
+        preset["timeout_seconds"] = 1.5
+
+        with self.assertRaises(ServiceError) as raised:
+            service._validate_model_preset_definition(selected_id, preset)
+
+        self.assertEqual(raised.exception.error_code, "invalid_timeout_seconds")
+
     def test_default_current_settings_use_standard_thinking_values(self) -> None:
         service = DummyService()
 
