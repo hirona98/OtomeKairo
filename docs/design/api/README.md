@@ -42,12 +42,20 @@ API 仕様は次のように分ける。
 `GET /` は `/ui/` へリダイレクトする。
 `/ui/api/...` はブラウザ UI 専用の同一 server 内部呼び出し面であり、外部接点向け API として扱わない。
 ブラウザ UI は `/ui/api/conversation` を通じて既存の会話入力処理を呼び出す。
-ブラウザ UI は永続化した `person_ref / display_name / interaction_ref` を `interaction_context` として送る。
+ブラウザ UI はブラウザstorageへ永続化した `person_ref / interaction_ref` と、
+OtomeKairo設定の `conversation_display_name` を `interaction_context` として送る。
 ブラウザ UI は CocoroConsole と同じ責務カテゴリの左ナビゲーションを持ち、`/ui/api/config/...` を通じて既存設定操作を呼び出す。
+ブラウザ UI は `/ui/api/docs` を通じて `GET /api/docs` と同じAPI説明を表示し、`console_access_token` をブラウザへ返さない。
+デスクトップ取得は最後に接続したCocoroConsole端末設定を編集する。
+モデル指定値とVRM表示設定はWeb UIへ現在値を無効表示し、表示設定とモーション設定はWeb UIへ編集欄を設けない。
+VRM、表示、モーションはCocoroConsoleから端末設定APIへ保存する。
+最後に接続した端末が存在しない場合、端末依存の設定欄を無効にする。
 ブラウザ UI は `/ui/api/config/avatar-speech/editor-state` を通じて、アバターごとの STT / TTS とマイクしきい値を編集する。
 話者登録 UI は表示だけを行い、音声処理を OtomeKairo へ実装するまで操作を無効にする。
 現段階のブラウザ UI は音声を取得、upload、再生せず、STT / TTS を実行しない。
 将来のブラウザは音声の取得・送信と受信・再生だけを担当し、STT / TTS を OtomeKairo が担当する。
+ブラウザの直接会話入力はOtomeKairoの `conversation_display_name` を
+`participants[].display_name` に使用し、呼び名をブラウザstorageへ保存しない。
 ブラウザ UI は運用ダッシュボードを常設し、`/ui/api/inspection/current-state` と `/ui/api/inspection/cycle-summaries` を 5 秒周期で読み取る。
 運用ダッシュボードは現在状態、自律実行、capability availability、最近の cycle timeline を表示する。
 運用ダッシュボードの pause / resume / cancel は `/ui/api/autonomous-runs/{run_id}/{operation}` を通じて既存の autonomous run 操作を呼び出す。

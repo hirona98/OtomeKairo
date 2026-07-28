@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import uuid
+from importlib import resources
 
 
 # 既定の識別子
@@ -9,6 +11,7 @@ DEFAULT_MEMORY_SET_ID = "memory_set:default"
 DEFAULT_MODEL_PRESET_ID = "model_preset:default"
 DEFAULT_AVATAR_ID = "avatar:default"
 DEFAULT_THINKING_SPEECH_LEVEL = 5
+DEFAULT_WAKE_INTERVAL_SECONDS = 300
 DEFAULT_PROMPT_WINDOW_RECENT_TURN_LIMIT = 30
 DEFAULT_PROMPT_WINDOW_RECENT_TURN_MINUTES = 30
 DEFAULT_GENERATION_MAX_OUTPUT_TOKENS = 4000
@@ -43,6 +46,82 @@ DEFAULT_PERSONA_EXPRESSION_ADDON = """## 感情タグ（任意）
 [face:Fun]最高に素敵です。"""
 
 
+def build_default_console_motion() -> dict:
+    # 既定モーション一覧はデータ資源として保持し、端末設定作成時に毎回独立した値を返す。
+    text = resources.files("otomekairo").joinpath("default_console_motion.json").read_text(encoding="utf-8")
+    return json.loads(text)
+
+
+def build_default_console_client_settings(client_id: str) -> dict:
+    # CocoroConsole 端末で実行する表示・入力・観測の既定値。
+    return {
+        "client_id": client_id,
+        "process": {
+            "console_api_port": 55600,
+            "cocoro_shell_port": 55605,
+            "conversation_input_enabled": True,
+        },
+        "display": {
+            "restore_window_position": False,
+            "topmost": True,
+            "escape_cursor": False,
+            "escape_positions": [],
+            "touch_virtual_key_enabled": False,
+            "virtual_key": "Win+Tab",
+            "auto_move": False,
+            "show_message_window": True,
+            "ambient_occlusion_enabled": False,
+            "msaa_level": 4,
+            "avatar_shadow_mode": 1,
+            "avatar_shadow_resolution": 0,
+            "background_shadow_mode": 2,
+            "background_shadow_resolution": 2,
+            "avatar_window_size": 1200,
+            "avatar_position_x": 0.0,
+            "avatar_position_y": 0.0,
+            "message_window": {
+                "max_message_count": 3,
+                "max_total_characters": 300,
+                "min_window_size": 200.0,
+                "max_window_size": 600.0,
+                "font_size": 14.0,
+                "horizontal_offset": -0.2,
+                "vertical_offset": 0.05,
+            },
+            "window_placements": {},
+        },
+        "desktop_capture": {
+            "enabled": False,
+            "capture_active_window_only": True,
+            "idle_timeout_minutes": 10,
+            "exclude_patterns": [
+                ".*CocoroAI.*",
+                ".*支払.*",
+                ".*決済.*",
+                ".*パスワード.*",
+                ".*Password.*",
+                ".*ログイン.*",
+                ".*Login.*",
+                ".*プライベート.*",
+                ".*Private.*",
+                ".*シークレット.*",
+                ".*Secret.*",
+                ".*incognito.*",
+            ],
+        },
+        "avatar_presentations": [
+            {
+                "avatar_id": DEFAULT_AVATAR_ID,
+                "model": "default",
+                "convert_unlit_to_mtoon": False,
+                "shadow_exclusion_enabled": True,
+                "shadow_excluded_mesh_names": ["Face", "U_Char_1"],
+            }
+        ],
+        "motion": build_default_console_motion(),
+    }
+
+
 # 構築
 def build_default_state() -> dict:
     server_id = f"server:{uuid.uuid4().hex}"
@@ -56,12 +135,14 @@ def build_default_state() -> dict:
         "selected_model_preset_id": DEFAULT_MODEL_PRESET_ID,
         "selected_avatar_id": DEFAULT_AVATAR_ID,
         "thinking_speech_level": DEFAULT_THINKING_SPEECH_LEVEL,
+        "conversation_display_name": "",
         "microphone_settings": {
             "input_threshold_db": -20,
             "speaker_recognition_threshold": 0.4,
         },
         "wake_policy": {
             "mode": "disabled",
+            "interval_seconds": DEFAULT_WAKE_INTERVAL_SECONDS,
         },
         "personas": {
             DEFAULT_PERSONA_ID: {
@@ -85,6 +166,7 @@ def build_default_state() -> dict:
         "mcp_servers": {
             DEFAULT_ELYTH_MCP_SERVER_ID: build_default_elyth_mcp_server(),
         },
+        "console_client_settings": {},
     }
 
 
@@ -92,7 +174,7 @@ def build_default_avatar() -> dict:
     # CocoroConsole の音声設定と同じ単位で扱うアバター設定
     return {
         "avatar_id": DEFAULT_AVATAR_ID,
-        "display_name": "標準アバター",
+        "display_name": "初音ミクSD",
         "tts": {
             "enabled": False,
             "engine": "voicevox",
@@ -123,16 +205,28 @@ def build_default_avatar() -> dict:
                 "language": "JP",
                 "auto_split": True,
                 "split_interval": 0.5,
+                "assist_text": "",
+                "assist_text_weight": 0.0,
+                "reference_audio_path": "",
             },
             "aivis_cloud_config": {
                 "api_key": "",
+                "endpoint_url": "",
                 "model_uuid": "",
                 "speaker_uuid": "",
                 "style_id": 0,
+                "style_name": "",
+                "use_ssml": False,
+                "language": "ja",
                 "speaking_rate": 1.0,
                 "emotional_intensity": 1.0,
                 "tempo_dynamics": 1.0,
+                "pitch": 0.0,
                 "volume": 1.0,
+                "output_format": "wav",
+                "output_bitrate": 0,
+                "output_sampling_rate": 16000,
+                "output_audio_channels": "mono",
             },
         },
         "stt": {

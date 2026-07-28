@@ -128,11 +128,13 @@
           <option value="system">定期思考</option>
         </optgroup>
         <optgroup label="観測と監視">
+          <option value="desktop">デスクトップ</option>
           <option value="camera">カメラ</option>
           <option value="watcher">Watcher</option>
         </optgroup>
         <optgroup label="外部連携">
           <option value="mcp">ツール（MCP）</option>
+          <option value="api">API説明</option>
         </optgroup>
       </select>
     </label>
@@ -150,17 +152,15 @@
         <div class="settings-navigation-category">自律動作</div>
         <button type="button" class="settings-nav-button" data-tab="system">定期思考</button>
         <div class="settings-navigation-category">観測と監視</div>
+        <button type="button" class="settings-nav-button" data-tab="desktop">デスクトップ</button>
         <button type="button" class="settings-nav-button" data-tab="camera">カメラ</button>
         <button type="button" class="settings-nav-button" data-tab="watcher">Watcher</button>
         <div class="settings-navigation-category">外部連携</div>
         <button type="button" class="settings-nav-button" data-tab="mcp">ツール（MCP）</button>
+        <button type="button" class="settings-nav-button" data-tab="api">API説明</button>
       </nav>
 
       <div class="settings-content">
-        <header class="settings-page-header">
-          <h3 id="settings-page-title">アバター</h3>
-          <p id="settings-page-description">アバターごとの音声合成と音声認識を設定します。</p>
-        </header>
         <div class="settings-body">
           <section class="tab-page active" data-page="avatar">
             <div class="selector-row">
@@ -170,6 +170,16 @@
               <button type="button" data-action="delete-avatar">削除</button>
             </div>
             <label class="preset-name-field">プリセット名<input id="avatar-display-name"></label>
+
+            <fieldset class="settings-group" data-console-setting data-always-disabled disabled>
+              <legend>VRM</legend>
+              <div class="form-grid">
+                <label>VRMファイル:<input id="avatar-model" disabled></label>
+                <label class="checkbox-field wide-label">UnlitをMToonに変換する（正常に表示されないときに有効にしてみてください）<input id="avatar-convert-mtoon" type="checkbox"></label>
+                <label class="checkbox-field wide-label">指定したメッシュに影を落とさない（顔などを想定）<input id="avatar-shadow-exclusion-enabled" type="checkbox"></label>
+                <label class="wide-label">メッシュ名:<input id="avatar-shadow-excluded-meshes" disabled></label>
+              </div>
+            </fieldset>
 
             <fieldset class="settings-group">
               <legend>音声合成</legend>
@@ -232,6 +242,9 @@
                     <label>Length<input id="sbv2-length" type="number" step="0.1"></label>
                     <label class="checkbox-field">Auto Split<input id="sbv2-auto-split" type="checkbox"></label>
                     <label>Split Interval<input id="sbv2-split-interval" type="number" step="0.1"></label>
+                    <label>Assist Text<input id="sbv2-assist-text"></label>
+                    <label>Assist Text Weight<input id="sbv2-assist-text-weight" type="number" step="0.1"></label>
+                    <label>Reference Audio Path<input id="sbv2-reference-audio-path"></label>
                   </div>
                 </details>
               </div>
@@ -245,6 +258,7 @@
                       <button type="button" class="plain-button" id="paste-aivis-api-key">上書き貼り付け</button>
                     </span>
                   </label>
+                  <label>Endpoint URL<input id="aivis-endpoint-url"></label>
                   <label>Model UUID<input id="aivis-model-uuid"></label>
                   <label>Speaker UUID<input id="aivis-speaker-uuid"></label>
                   <label>Style ID<input id="aivis-style-id" type="number" min="0"></label>
@@ -255,7 +269,15 @@
                     <label>話速<input id="aivis-speaking-rate" type="number" min="0.5" max="2" step="0.1"></label>
                     <label>感情強度<input id="aivis-emotional-intensity" type="number" min="0" max="2" step="0.1"></label>
                     <label>テンポ変化<input id="aivis-tempo-dynamics" type="number" min="0" max="2" step="0.1"></label>
+                    <label>Style Name<input id="aivis-style-name"></label>
+                    <label class="checkbox-field">SSMLを使用する<input id="aivis-use-ssml" type="checkbox"></label>
+                    <label>Language<input id="aivis-language"></label>
+                    <label>Pitch<input id="aivis-pitch" type="number" min="-1" max="1" step="0.1"></label>
                     <label>音量<input id="aivis-volume" type="number" min="0" max="2" step="0.1"></label>
+                    <label>Output Format<input id="aivis-output-format"></label>
+                    <label>Output Bitrate<input id="aivis-output-bitrate" type="number" min="0"></label>
+                    <label>Output Sampling Rate<input id="aivis-output-sampling-rate" type="number" min="1"></label>
+                    <label>Output Audio Channels<input id="aivis-output-audio-channels"></label>
                   </div>
                 </details>
               </div>
@@ -286,6 +308,11 @@
 
           <section class="tab-page" data-page="conversation">
             <fieldset class="settings-group">
+              <legend>呼び名</legend>
+              <label>会話入力で使う共通の呼び名<input id="settings-conversation-display-name"></label>
+              <p class="field-hint">敬称を含む完成済みの文字列を participants[].display_name として送ります。</p>
+            </fieldset>
+            <fieldset class="settings-group">
               <legend>マイク・話者識別</legend>
               <p class="field-hint">マイクと話者識別を設定します。識別した話者の呼び名は participants[].display_name として送ります。</p>
               <div class="range-field">
@@ -310,6 +337,25 @@
             </fieldset>
           </section>
 
+          <section class="tab-page" data-page="desktop">
+            <fieldset class="settings-group" data-console-setting>
+              <legend>デスクトップキャプチャ</legend>
+              <div class="console-settings-list">
+                <div class="console-setting-row">
+                  <label for="desktop-capture-idle-timeout">アイドル時スキップ:</label>
+                  <div class="inline-suffix-control">
+                    <input id="desktop-capture-idle-timeout" type="number" min="0">
+                    <span>分（0で無効）</span>
+                  </div>
+                </div>
+                <label class="desktop-pattern-field">
+                  スキップタイトルパターン（正規表現でマッチしたウィンドウタイトルはキャプチャをスキップします）
+                  <textarea id="desktop-capture-exclude-patterns" rows="8" spellcheck="false"></textarea>
+                </label>
+              </div>
+            </fieldset>
+          </section>
+
           <section class="tab-page" data-page="persona">
             <div class="selector-row">
               <select id="persona-select"></select>
@@ -323,28 +369,67 @@
             <label class="wide-label">表現補助<textarea id="persona-expression-addon" rows="8"></textarea></label>
           </section>
 
-          <section class="tab-page" data-page="model">
-            <div class="selector-row">
+          <section class="tab-page model-settings-page" data-page="model">
+            <label class="checkbox-field model-use-field">言語モデルを使用する
+              <input id="model-conversation-input-enabled" type="checkbox">
+            </label>
+            <div class="selector-row model-selector-row">
               <select id="model-select"></select>
               <button type="button" data-action="add-model">追加</button>
               <button type="button" data-action="duplicate-model">複製</button>
               <button type="button" data-action="delete-model">削除</button>
             </div>
-            <label class="preset-name-field">プリセット名<input id="model-display-name"></label>
-            <div class="memory-settings-card">
-              <label>モデル<input id="model-model"></label>
-              <label>エンドポイントURL<input id="model-api-base"></label>
-              <label>推論の深さ<input id="model-reasoning-effort"></label>
-              <label>最大出力トークン<input id="model-max-output-tokens" type="number" min="1"></label>
-              <label>タイムアウト（秒）<input id="model-timeout-seconds" type="number" min="1"></label>
-              <label class="checkbox-field">Web検索を有効にする<input id="model-web-search-enabled" type="checkbox"></label>
-              <label>APIキー<input id="model-api-key" type="password" autocomplete="new-password"></label>
+            <div class="model-setting-row model-preset-name-row">
+              <label for="model-display-name">プリセット名:</label>
+              <input id="model-display-name">
             </div>
-            <fieldset class="settings-group">
+            <fieldset class="settings-group model-settings-group">
+              <legend>生成モデル設定</legend>
+              <div class="model-settings-list">
+                <div class="model-setting-row">
+                  <label for="model-model">モデル:</label>
+                  <input id="model-model">
+                </div>
+                <div class="model-setting-row">
+                  <label for="model-api-base">エンドポイントURL:</label>
+                  <input id="model-api-base">
+                </div>
+                <div class="model-setting-row">
+                  <label for="model-api-key">APIキー:</label>
+                  <div class="inline-control-row model-api-key-controls">
+                    <input id="model-api-key" type="password" autocomplete="new-password">
+                    <button type="button" class="plain-button" id="copy-model-api-key">コピー</button>
+                    <button type="button" class="plain-button" id="paste-model-api-key">上書き貼り付け</button>
+                  </div>
+                </div>
+                <div class="model-setting-row">
+                  <label for="model-reasoning-effort">推論の深さ:</label>
+                  <input id="model-reasoning-effort">
+                </div>
+                <div class="model-setting-row">
+                  <label for="model-max-output-tokens">最大出力トークン:</label>
+                  <input id="model-max-output-tokens" type="number" min="1">
+                </div>
+                <div class="model-setting-row">
+                  <label for="model-timeout-seconds">タイムアウト（秒）:</label>
+                  <input id="model-timeout-seconds" type="number" min="1">
+                </div>
+                <label class="checkbox-field model-web-search-field">Web検索を使用する
+                  <input id="model-web-search-enabled" type="checkbox">
+                </label>
+              </div>
+            </fieldset>
+            <fieldset class="settings-group model-settings-group">
               <legend>直近会話の取り込み範囲（記憶は別途入ります）</legend>
-              <div class="settings-group-grid">
-                <label>件数<input id="model-recent-turn-limit" type="number" min="1"></label>
-                <label>時間（分）<input id="model-recent-turn-minutes" type="number" min="1"></label>
+              <div class="model-settings-list">
+                <div class="model-setting-row">
+                  <label for="model-recent-turn-limit">件数:</label>
+                  <input id="model-recent-turn-limit" type="number" min="1">
+                </div>
+                <div class="model-setting-row">
+                  <label for="model-recent-turn-minutes">時間（分）:</label>
+                  <input id="model-recent-turn-minutes" type="number" min="1">
+                </div>
               </div>
             </fieldset>
           </section>
@@ -374,90 +459,208 @@
 
           <section class="tab-page" data-page="system">
             <fieldset class="settings-group">
-              <legend>判断機会ポリシー</legend>
-              <div class="settings-group-grid system-policy-grid">
-                <label class="checkbox-field system-policy-checkbox">定期思考を有効にする<input id="current-wake-enabled"
-                    type="checkbox"></label>
-                <label>定期思考間隔<input id="current-wake-interval" type="number" min="1"></label>
-                <label>発話頻度（1 控えめ / 5 標準 / 10 多め）<input id="current-thinking-level" type="number" min="1" max="10"></label>
+              <legend>定期思考</legend>
+              <div class="console-settings-list">
+                <p class="field-hint">OtomeKairoサーバー内部のスケジュールで発生する定期思考を設定します。外部Watcherからのwakeには適用されません。</p>
+                <label class="checkbox-field">定期思考を有効にする
+                  <input id="current-wake-enabled" type="checkbox">
+                </label>
+                <div class="console-setting-row">
+                  <label for="current-wake-interval">定期思考間隔:</label>
+                  <div class="inline-suffix-control">
+                    <input id="current-wake-interval" type="number" min="1">
+                    <span>秒</span>
+                  </div>
+                </div>
+                <label class="checkbox-field">思考前にデスクトップを観測する
+                  <input id="current-wake-desktop-observation" type="checkbox">
+                </label>
+                <div class="console-setting-row">
+                  <label for="current-thinking-level">発話頻度:</label>
+                  <div class="inline-suffix-control">
+                    <input id="current-thinking-level" type="number" min="1" max="10">
+                    <span>1控えめ / 5標準 / 10多め</span>
+                  </div>
+                </div>
               </div>
             </fieldset>
           </section>
 
           <section class="tab-page" data-page="camera">
             <fieldset class="settings-group capability-group">
-              <legend>視覚</legend>
-              <div class="field-caption">登録済みカメラ</div>
+              <legend>カメラ</legend>
+              <div class="field-caption">登録済みカメラ:</div>
               <div class="selector-row">
                 <select id="camera-select"></select>
                 <button type="button" data-action="add-camera">追加</button>
                 <button type="button" data-action="delete-camera">削除</button>
               </div>
-              <div class="form-grid mcp-form-grid">
-                <label class="checkbox-field">有効<input id="camera-enabled" type="checkbox"></label>
-                <label>表示名（LLMが理解しやすい名前）<input id="camera-display-name"></label>
-                <label>ホスト/IP<input id="camera-host"></label>
-                <label>ユーザー名<input id="camera-username"></label>
-                <label>パスワード<input id="camera-password" type="password" autocomplete="new-password"></label>
-                <label>接続種別<input id="camera-connector-kind" readonly></label>
-                <label>接続クライアント<input id="camera-client-id" readonly></label>
-                <label>視覚ソースID<input id="camera-vision-source-id" readonly></label>
+              <label class="checkbox-field">定期思考でこのカメラを観測する
+                <input id="camera-enabled" type="checkbox">
+              </label>
+              <div class="console-settings-list">
+                <div class="console-setting-row console-setting-row-top">
+                  <label for="camera-display-name">表示名:</label>
+                  <div class="console-control-with-hint">
+                    <input id="camera-display-name">
+                    <span class="field-hint">LLMが理解しやすい名前にしてください。</span>
+                  </div>
+                </div>
+                <div class="console-setting-row">
+                  <label for="camera-host">ホスト/IP:</label>
+                  <input id="camera-host">
+                </div>
+                <div class="console-setting-row">
+                  <label for="camera-username">ユーザー名:</label>
+                  <input id="camera-username">
+                </div>
+                <div class="console-setting-row">
+                  <label for="camera-password">パスワード:</label>
+                  <input id="camera-password" type="password" autocomplete="new-password">
+                </div>
+                <div class="console-setting-row">
+                  <label for="camera-connector-kind">接続種別:</label>
+                  <input id="camera-connector-kind" disabled>
+                </div>
+                <div class="console-setting-row">
+                  <label for="camera-client-id">接続クライアント:</label>
+                  <input id="camera-client-id" disabled>
+                </div>
+                <div class="console-setting-row">
+                  <label for="camera-vision-source-id">視覚ソースID:</label>
+                  <input id="camera-vision-source-id" disabled>
+                </div>
+                <div class="console-setting-row">
+                  <label for="camera-watcher-id">watcher ID:</label>
+                  <input id="camera-watcher-id" disabled>
+                </div>
               </div>
             </fieldset>
           </section>
 
           <section class="tab-page" data-page="mcp">
             <fieldset class="settings-group capability-group">
-              <legend>MCP</legend>
-              <div class="field-caption">登録済みMCP server</div>
+              <legend>MCPツール</legend>
+              <div class="field-caption">登録済みMCP server:</div>
               <div class="selector-row">
                 <select id="mcp-select"></select>
                 <button type="button" data-action="add-mcp">追加</button>
                 <button type="button" data-action="delete-mcp">削除</button>
               </div>
-              <div class="form-grid">
-                <label class="checkbox-field">有効<input id="mcp-enabled" type="checkbox"></label>
-                <label>MCP server ID<input id="mcp-server-id"></label>
-                <label>command<input id="mcp-command"></label>
-                <label class="wide-label">args<textarea id="mcp-args" rows="3" spellcheck="false"></textarea>
-                  <span class="field-hint">command に渡す引数。1 行を 1 引数として保存します。</span>
-                </label>
-                <label class="wide-label">実行を許可するtool名<textarea id="mcp-enabled-tools" rows="4"
-                    spellcheck="false"></textarea>
-                  <span class="field-hint">1 行を 1 tool 名として保存します。空欄ではすべてのtoolを拒否します。</span>
-                </label>
-                <label>cwd<input id="mcp-cwd"></label>
-                <label>接続クライアント<input id="mcp-client-id"></label>
-                <label>transport<input id="mcp-transport" readonly></label>
-                <label>接続種別<input id="mcp-connector-kind"></label>
-                <label class="wide-label">env<textarea id="mcp-env" rows="4" spellcheck="false"></textarea>
-                  <span class="field-hint">KEY=VALUE を 1 行ずつ入力します。</span>
-                </label>
+              <label class="checkbox-field">有効
+                <input id="mcp-enabled" type="checkbox">
+              </label>
+              <div class="console-settings-list">
+                <div class="console-setting-row console-setting-row-top">
+                  <label for="mcp-server-id">MCP server ID:</label>
+                  <div class="console-control-with-hint">
+                    <input id="mcp-server-id">
+                    <span class="field-hint">システム内で MCP server を一意に識別する ID。例: mcp:elyth</span>
+                  </div>
+                </div>
+                <div class="console-setting-row console-setting-row-top">
+                  <label for="mcp-command">command:</label>
+                  <div class="console-control-with-hint">
+                    <input id="mcp-command">
+                    <span class="field-hint">MCP server を起動する実行コマンド。例: npx</span>
+                  </div>
+                </div>
+                <div class="console-setting-row console-setting-row-top">
+                  <label for="mcp-args">args:</label>
+                  <div class="console-control-with-hint">
+                    <textarea id="mcp-args" rows="3" spellcheck="false"></textarea>
+                    <span class="field-hint">command に渡す引数。1 行を 1 引数として保存する。空行は保存しない。</span>
+                  </div>
+                </div>
+                <div class="console-setting-row console-setting-row-top">
+                  <label for="mcp-cwd">cwd:</label>
+                  <div class="console-control-with-hint">
+                    <input id="mcp-cwd">
+                    <span class="field-hint">MCP server 起動時の作業ディレクトリ。不要な場合は空欄にする。</span>
+                  </div>
+                </div>
+                <div class="console-setting-row console-setting-row-top">
+                  <label for="mcp-client-id">接続クライアント:</label>
+                  <div class="console-control-with-hint">
+                    <input id="mcp-client-id">
+                    <span class="field-hint">この MCP server を起動する MCP client connector の client_id。通常は既定値を使う。</span>
+                  </div>
+                </div>
+                <div class="console-setting-row console-setting-row-top">
+                  <label for="mcp-transport">transport:</label>
+                  <div class="console-control-with-hint">
+                    <input id="mcp-transport" disabled>
+                    <span class="field-hint">MCP server との通信方式。現在は stdio 固定。</span>
+                  </div>
+                </div>
+                <div class="console-setting-row console-setting-row-top">
+                  <label for="mcp-env">env:</label>
+                  <div class="console-control-with-hint">
+                    <textarea id="mcp-env" rows="5" spellcheck="false"></textarea>
+                    <span class="field-hint">KEY=VALUE を1行ずつ入力します。</span>
+                  </div>
+                </div>
               </div>
             </fieldset>
           </section>
 
           <section class="tab-page" data-page="watcher">
             <fieldset class="settings-group capability-group">
-              <legend>カメラ</legend>
-              <div class="field-caption">登録済みカメラ</div>
+              <legend>Watcher</legend>
+              <p class="console-info-box">Watcherは外部の変化を監視し、検出時に <code id="watcher-wake-api-url"></code> へwakeを送信して即時に判断を開始します。定期思考の有効状態と実行間隔は適用されません。最小wake間隔は連続通知だけを抑制します。</p>
+              <div class="field-caption">カメラモーションWatcher:</div>
               <div class="selector-row">
                 <select id="watcher-select"></select>
               </div>
-              <div class="form-grid mcp-form-grid">
-                <label class="checkbox-field">有効<input id="watcher-enabled" type="checkbox"></label>
-                <label>表示名<input id="watcher-display-name" readonly></label>
-                <label>視覚ソースID<input id="watcher-vision-source-id" readonly></label>
-                <label>watcher ID<input id="watcher-id" readonly></label>
-                <label>種別<input id="watcher-kind" readonly></label>
-                <label>監視頻度（秒）<input id="watcher-poll-interval" type="number" min="0.2" step="0.1"></label>
-                <label>wake最小間隔（秒）<input id="watcher-min-wake-interval" type="number" min="1" step="1"></label>
-                <label>差分比閾値（変化した画素の割合 0～1）<input id="watcher-motion-threshold" type="number" min="0.001"
-                    max="1" step="0.001"></label>
-                <label>画素差分閾値（1画素を変化扱いする明暗差 1～255）<input id="watcher-pixel-threshold" type="number"
-                    min="1" max="255" step="1"></label>
-                <label>縮小幅<input id="watcher-resize-width" type="number" min="64" max="1920" step="1"></label>
+              <label class="checkbox-field">変化検出による即時wakeを有効にする
+                <input id="watcher-enabled" type="checkbox">
+              </label>
+              <div class="console-settings-list watcher-settings-list">
+                <div class="console-setting-row">
+                  <label for="watcher-display-name">カメラ:</label>
+                  <input id="watcher-display-name" disabled>
+                </div>
+                <div class="console-setting-row">
+                  <label for="watcher-vision-source-id">視覚ソースID:</label>
+                  <input id="watcher-vision-source-id" disabled>
+                </div>
+                <div class="console-setting-row">
+                  <label for="watcher-id">Watcher ID:</label>
+                  <input id="watcher-id" disabled>
+                </div>
+                <div class="console-setting-row">
+                  <label for="watcher-kind">種別:</label>
+                  <input id="watcher-kind" disabled>
+                </div>
+                <div class="console-setting-row">
+                  <label for="watcher-poll-interval">監視頻度（秒）:</label>
+                  <input id="watcher-poll-interval" type="number" min="0.2" step="0.1">
+                </div>
+                <div class="console-setting-row">
+                  <label for="watcher-min-wake-interval">最小wake間隔（秒）:</label>
+                  <input id="watcher-min-wake-interval" type="number" min="1" step="1">
+                </div>
+                <div class="console-setting-row">
+                  <label for="watcher-motion-threshold">差分比閾値（0～1）:</label>
+                  <input id="watcher-motion-threshold" type="number" min="0.001" max="1" step="0.001">
+                </div>
+                <div class="console-setting-row">
+                  <label for="watcher-pixel-threshold">画素差分閾値（1～255）:</label>
+                  <input id="watcher-pixel-threshold" type="number" min="1" max="255" step="1">
+                </div>
+                <div class="console-setting-row">
+                  <label for="watcher-resize-width">縮小幅:</label>
+                  <input id="watcher-resize-width" type="number" min="64" max="1920" step="1">
+                </div>
               </div>
+            </fieldset>
+          </section>
+
+          <section class="tab-page" data-page="api">
+            <fieldset class="settings-group api-documentation-group">
+              <legend>ドキュメント</legend>
+              <p class="field-hint">OtomeKairoが公開する説明ドキュメントを表示します。外部から呼び出すアドレスは <code id="api-doc-base-url"></code> です。</p>
+              <div id="api-doc-sections" class="api-doc-sections"></div>
             </fieldset>
           </section>
         </div>

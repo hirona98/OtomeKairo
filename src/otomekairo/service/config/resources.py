@@ -5,6 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from otomekairo.defaults import build_default_console_client_settings
 from otomekairo.service.common import ServiceError
 from otomekairo.service.config.constants import (
     MCP_CONNECTOR_KINDS,
@@ -145,6 +146,19 @@ class ServiceConfigResourcesMixin:
         state["selected_avatar_id"] = selected_avatar_id
         state["microphone_settings"] = deepcopy(microphone_settings)
         state["avatars"] = normalized_avatars
+        for client_entry in state.get("console_client_settings", {}).values():
+            settings = client_entry.get("settings")
+            if not isinstance(settings, dict):
+                continue
+            presentations = settings.get("avatar_presentations")
+            if not isinstance(presentations, list):
+                continue
+            settings["avatar_presentations"] = [
+                presentation
+                for presentation in presentations
+                if isinstance(presentation, dict)
+                and presentation.get("avatar_id") in normalized_avatars
+            ]
         self.store.write_state(state)
         self._append_avatar_speech_editor_state_audit_event(state=state, operation="write")
         return self._build_avatar_speech_editor_state(state)
@@ -160,6 +174,145 @@ class ServiceConfigResourcesMixin:
             "model_presets": self._catalog_entries(state["model_presets"], "model_preset_id"),
         }
 
+    def connect_console_client(self, token: str | None, client_id: str) -> dict[str, Any]:
+        # 端末設定の取得と最終接続端末の更新を一つの接続操作にする。
+        state = self._require_token(token)
+        normalized_client_id = self._validate_console_client_id(client_id)
+        entries = state.setdefault("console_client_settings", {})
+        entry = entries.get(normalized_client_id)
+        if not isinstance(entry, dict):
+            settings = build_default_console_client_settings(normalized_client_id)
+            self._validate_console_client_settings(normalized_client_id, settings)
+            entry = {
+                "last_connected_at": None,
+                "settings": settings,
+            }
+            entries[normalized_client_id] = entry
+        entry["last_connected_at"] = self._now_iso()
+        self.store.write_state(state)
+        return self._build_console_client_editor_state(normalized_client_id, entry)
+
+    def get_console_client_editor_state(self, token: str | None, client_id: str) -> dict[str, Any]:
+        state = self._require_token(token)
+        normalized_client_id = self._validate_console_client_id(client_id)
+        entry = state.get("console_client_settings", {}).get(normalized_client_id)
+        if not isinstance(entry, dict):
+            raise ServiceError(
+                404,
+                "console_client_settings_not_found",
+                "The requested CocoroConsole client settings do not exist.",
+            )
+        return self._build_console_client_editor_state(normalized_client_id, entry)
+
+    def get_last_connected_console_client_editor_state(self, token: str | None) -> dict[str, Any]:
+        state = self._require_token(token)
+        entries = state.get("console_client_settings", {})
+        connected_entries = [
+            (client_id, entry)
+            for client_id, entry in entries.items()
+            if isinstance(entry, dict)
+            and isinstance(entry.get("last_connected_at"), str)
+            and entry["last_connected_at"]
+        ]
+        if not connected_entries:
+            raise ServiceError(
+                404,
+                "console_client_settings_not_found",
+                "No CocoroConsole client has connected.",
+            )
+        client_id, entry = max(
+            connected_entries,
+            key=lambda item: (item[1]["last_connected_at"], item[0]),
+        )
+        return self._build_console_client_editor_state(client_id, entry)
+
+    def replace_console_client_editor_state(
+        self,
+        token: str | None,
+        client_id: str,
+        definition: dict[str, Any],
+    ) -> dict[str, Any]:
+        state = self._require_token(token)
+        normalized_client_id = self._validate_console_client_id(client_id)
+        entries = state.get("console_client_settings", {})
+        entry = entries.get(normalized_client_id)
+        if not isinstance(entry, dict):
+            raise ServiceError(
+                404,
+                "console_client_settings_not_found",
+                "The requested CocoroConsole client settings do not exist.",
+            )
+        settings = deepcopy(definition)
+        self._validate_console_client_settings(normalized_client_id, settings)
+        self._validate_console_avatar_references(state, settings)
+        entry["settings"] = settings
+        self.store.write_state(state)
+        return self._build_console_client_editor_state(normalized_client_id, entry)
+
+    def patch_console_client_settings(
+        self,
+        token: str | None,
+        client_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        state = self._require_token(token)
+        normalized_client_id = self._validate_console_client_id(client_id)
+        entries = state.get("console_client_settings", {})
+        entry = entries.get(normalized_client_id)
+        if not isinstance(entry, dict):
+            raise ServiceError(
+                404,
+                "console_client_settings_not_found",
+                "The requested CocoroConsole client settings do not exist.",
+            )
+        supported_fields = {
+            "process",
+            "display",
+            "desktop_capture",
+            "avatar_presentations",
+            "motion",
+        }
+        unsupported_fields = sorted(set(payload) - supported_fields)
+        if unsupported_fields or not payload:
+            raise ServiceError(
+                400,
+                "unsupported_console_client_settings_fields",
+                "CocoroConsole client settings patch must contain supported top-level sections.",
+            )
+        settings = deepcopy(entry["settings"])
+        for field_name, value in payload.items():
+            settings[field_name] = deepcopy(value)
+        self._validate_console_client_settings(normalized_client_id, settings)
+        self._validate_console_avatar_references(state, settings)
+        entry["settings"] = settings
+        self.store.write_state(state)
+        return self._build_console_client_editor_state(normalized_client_id, entry)
+
+    def _validate_console_avatar_references(
+        self,
+        state: dict[str, Any],
+        settings: dict[str, Any],
+    ) -> None:
+        avatar_ids = set(state["avatars"])
+        for presentation in settings["avatar_presentations"]:
+            if presentation["avatar_id"] not in avatar_ids:
+                raise ServiceError(
+                    404,
+                    "avatar_not_found",
+                    "avatar_presentations contains an unknown avatar_id.",
+                )
+
+    def _build_console_client_editor_state(
+        self,
+        client_id: str,
+        entry: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "client_id": client_id,
+            "last_connected_at": entry.get("last_connected_at"),
+            "settings": deepcopy(entry["settings"]),
+        }
+
     def patch_current(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:
         # 状態
         state = self._require_token(token)
@@ -172,6 +325,7 @@ class ServiceConfigResourcesMixin:
             "selected_model_preset_id",
             "thinking_speech_level",
             "wake_policy",
+            "conversation_display_name",
         }
         unsupported_fields = sorted(set(payload.keys()) - supported_fields)
         if unsupported_fields:
@@ -220,6 +374,16 @@ class ServiceConfigResourcesMixin:
         if "wake_policy" in payload:
             self._validate_wake_policy(payload["wake_policy"])
             state["wake_policy"] = payload["wake_policy"]
+
+        if "conversation_display_name" in payload:
+            conversation_display_name = payload["conversation_display_name"]
+            if not isinstance(conversation_display_name, str):
+                raise ServiceError(
+                    400,
+                    "invalid_conversation_display_name",
+                    "conversation_display_name must be a string.",
+                )
+            state["conversation_display_name"] = conversation_display_name.strip()
 
         # 永続化
         self.store.write_state(state)
@@ -670,6 +834,7 @@ class ServiceConfigResourcesMixin:
             "selected_model_preset_id",
             "thinking_speech_level",
             "wake_policy",
+            "conversation_display_name",
         }
         unsupported_current_fields = sorted(set(current.keys()) - supported_current_fields)
         if unsupported_current_fields:
@@ -692,6 +857,13 @@ class ServiceConfigResourcesMixin:
         # 動作設定検証
         self._validate_thinking_speech_level(thinking_speech_level)
         self._validate_wake_policy(current.get("wake_policy"))
+        conversation_display_name = current.get("conversation_display_name")
+        if not isinstance(conversation_display_name, str):
+            raise ServiceError(
+                400,
+                "invalid_conversation_display_name",
+                "conversation_display_name must be a string.",
+            )
 
         # 永続化
         state["selected_persona_id"] = selected_persona_id
@@ -699,6 +871,7 @@ class ServiceConfigResourcesMixin:
         state["selected_model_preset_id"] = selected_model_preset_id
         state["thinking_speech_level"] = thinking_speech_level
         state["wake_policy"] = current["wake_policy"]
+        state["conversation_display_name"] = conversation_display_name.strip()
         state["personas"] = personas
         state["memory_sets"] = memory_sets
         state["model_presets"] = model_presets
@@ -726,6 +899,7 @@ class ServiceConfigResourcesMixin:
             "wake_policy": deepcopy(state["wake_policy"]),
             "selected_model_preset_id": state["selected_model_preset_id"],
             "thinking_speech_level": state["thinking_speech_level"],
+            "conversation_display_name": state["conversation_display_name"],
         }
 
     def _build_editor_state(self, state: dict[str, Any]) -> dict[str, Any]:

@@ -6,12 +6,12 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from otomekairo.defaults import DEFAULT_THINKING_SPEECH_LEVEL, build_default_state
+from otomekairo.defaults import build_default_state
 from otomekairo.service.common import debug_log
 
 
 CONFIG_DB_FILE_NAME = "config.db"
-CURRENT_CONFIG_DB_VERSION = 9
+CURRENT_CONFIG_DB_VERSION = 11
 
 
 class ConfigStore:
@@ -42,6 +42,7 @@ class ConfigStore:
                     selected_model_preset_id,
                     selected_avatar_id,
                     thinking_speech_level,
+                    conversation_display_name,
                     wake_policy_json,
                     microphone_settings_json
                 FROM current_config
@@ -62,6 +63,7 @@ class ConfigStore:
                 "thinking_speech_level": current[
                     "thinking_speech_level"
                 ],
+                "conversation_display_name": current["conversation_display_name"],
                 "wake_policy": json.loads(current["wake_policy_json"]),
                 "microphone_settings": json.loads(current["microphone_settings_json"]),
                 "personas": self._read_payload_table(conn, "personas", "persona_id"),
@@ -70,6 +72,7 @@ class ConfigStore:
                 "avatars": self._read_payload_table(conn, "avatars", "avatar_id"),
                 "camera_sources": self._read_payload_table(conn, "camera_sources", "vision_source_id"),
                 "mcp_servers": self._read_payload_table(conn, "mcp_servers", "mcp_server_id"),
+                "console_client_settings": self._read_console_client_settings(conn),
             }
 
     def write_state(self, state: dict[str, Any]) -> None:
@@ -141,6 +144,7 @@ class ConfigStore:
                 selected_model_preset_id TEXT NOT NULL,
                 selected_avatar_id TEXT NOT NULL,
                 thinking_speech_level INTEGER NOT NULL DEFAULT 5,
+                conversation_display_name TEXT NOT NULL,
                 wake_policy_json TEXT NOT NULL,
                 microphone_settings_json TEXT NOT NULL
             );
@@ -174,31 +178,14 @@ class ConfigStore:
                 mcp_server_id TEXT PRIMARY KEY,
                 payload_json TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS console_client_settings (
+                client_id TEXT PRIMARY KEY,
+                last_connected_at TEXT,
+                payload_json TEXT NOT NULL
+            );
             """
         )
-        self._ensure_current_config_column(
-            conn=conn,
-            column_name="thinking_speech_level",
-            column_definition=(
-                "thinking_speech_level INTEGER NOT NULL "
-                f"DEFAULT {DEFAULT_THINKING_SPEECH_LEVEL}"
-            ),
-        )
-
-    def _ensure_current_config_column(
-        self,
-        *,
-        conn: sqlite3.Connection,
-        column_name: str,
-        column_definition: str,
-    ) -> None:
-        columns = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(current_config)").fetchall()
-        }
-        if column_name not in columns:
-            conn.execute(f"ALTER TABLE current_config ADD COLUMN {column_definition}")
-
     def _write_state(self, conn: sqlite3.Connection, state: dict[str, Any]) -> None:
         conn.execute("DELETE FROM server_identity")
         conn.execute("DELETE FROM current_config")
@@ -209,6 +196,7 @@ class ConfigStore:
             "avatars",
             "camera_sources",
             "mcp_servers",
+            "console_client_settings",
         ):
             conn.execute(f"DELETE FROM {table_name}")
 
@@ -235,10 +223,11 @@ class ConfigStore:
                 selected_model_preset_id,
                 selected_avatar_id,
                 thinking_speech_level,
+                conversation_display_name,
                 wake_policy_json,
                 microphone_settings_json
             )
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 state["selected_persona_id"],
@@ -246,6 +235,7 @@ class ConfigStore:
                 state["selected_model_preset_id"],
                 state["selected_avatar_id"],
                 state["thinking_speech_level"],
+                state["conversation_display_name"],
                 self._to_json(state["wake_policy"]),
                 self._to_json(state["microphone_settings"]),
             ),
@@ -256,6 +246,7 @@ class ConfigStore:
         self._write_payload_table(conn, "avatars", "avatar_id", state["avatars"])
         self._write_payload_table(conn, "camera_sources", "vision_source_id", state.get("camera_sources", {}))
         self._write_payload_table(conn, "mcp_servers", "mcp_server_id", state.get("mcp_servers", {}))
+        self._write_console_client_settings(conn, state.get("console_client_settings", {}))
 
     def _read_payload_table(self, conn: sqlite3.Connection, table_name: str, id_column: str) -> dict[str, dict[str, Any]]:
         rows = conn.execute(
@@ -284,6 +275,44 @@ class ConfigStore:
                 VALUES (?, ?)
                 """,
                 (entry_id, self._to_json(payload)),
+            )
+
+    def _read_console_client_settings(self, conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+        rows = conn.execute(
+            """
+            SELECT client_id, last_connected_at, payload_json
+            FROM console_client_settings
+            ORDER BY client_id ASC
+            """
+        ).fetchall()
+        return {
+            row["client_id"]: {
+                "last_connected_at": row["last_connected_at"],
+                "settings": json.loads(row["payload_json"]),
+            }
+            for row in rows
+        }
+
+    def _write_console_client_settings(
+        self,
+        conn: sqlite3.Connection,
+        entries: dict[str, dict[str, Any]],
+    ) -> None:
+        for client_id, entry in entries.items():
+            conn.execute(
+                """
+                INSERT INTO console_client_settings (
+                    client_id,
+                    last_connected_at,
+                    payload_json
+                )
+                VALUES (?, ?, ?)
+                """,
+                (
+                    client_id,
+                    entry.get("last_connected_at"),
+                    self._to_json(entry["settings"]),
+                ),
             )
 
     def _to_json(self, payload: Any) -> str:

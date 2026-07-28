@@ -61,6 +61,11 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(avatar["stt"]["engine"], "amivoice")
+        self.assertIn("assist_text", avatar["tts"]["style_bert_vits2_config"])
+        self.assertEqual(
+            avatar["tts"]["aivis_cloud_config"]["output_format"],
+            "wav",
+        )
         self.assertEqual(service.store.events[-1]["kind"], "avatar_speech_editor_state_read")
 
     def test_public_read_masks_stt_and_tts_api_keys(self) -> None:

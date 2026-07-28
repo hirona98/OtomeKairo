@@ -235,7 +235,7 @@ class WakeReferenceTests(unittest.TestCase):
         service = DummyImmediateWakePipeline()
 
         pipeline, input_text, _ = service._run_wake_pipeline(
-            state={"wake_policy": {"mode": "disabled"}},
+            state={"wake_policy": {"mode": "disabled", "interval_seconds": 300}},
             started_at="2026-07-05T12:00:00+09:00",
             trigger_kind="wake",
             client_context={},
