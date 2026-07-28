@@ -77,7 +77,7 @@
         <form class="composer" id="composer">
           <div class="conversation-identity">
             <label>人物参照<input id="conversation-person-ref" spellcheck="false"></label>
-            <label>呼び名<input id="conversation-display-name" required></label>
+            <label>呼ばれ方<input id="conversation-display-name" required></label>
             <label>会話参照<input id="conversation-interaction-ref" spellcheck="false"></label>
           </div>
           <div class="web-microphone-controls">
@@ -318,13 +318,12 @@
 
           <section class="tab-page" data-page="conversation">
             <fieldset class="settings-group">
-              <legend>呼び名</legend>
-              <label>会話入力で使う共通の呼び名<input id="settings-conversation-display-name"></label>
-              <p class="field-hint">敬称を含む完成済みの文字列を participants[].display_name として送ります。</p>
+              <legend>呼ばれ方</legend>
+              <label>会話入力で使う共通の呼ばれ方<input id="settings-conversation-display-name"></label>
             </fieldset>
             <fieldset class="settings-group">
               <legend>マイク・話者識別</legend>
-              <p class="field-hint">マイクと話者識別を設定します。識別した話者の呼び名は participants[].display_name として送ります。</p>
+              <p class="field-hint">マイクと話者識別を設定します。</p>
               <div class="form-grid">
                 <label class="checkbox-field wide-control">物理マイクを使用する<input id="physical-input-enabled" type="checkbox"></label>
                 <label>物理マイクdevice

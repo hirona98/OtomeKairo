@@ -1195,7 +1195,7 @@ async function sendMessage(event) {
     || !displayName
     || !interactionRef
   ) {
-    showNotice("人物参照は person:<key>、呼び名と会話参照は空でない値を指定してください。", true);
+    showNotice("人物参照は person:<key>、呼ばれ方と会話参照は空でない値を指定してください。", true);
     return;
   }
   saveConversationIdentity();
@@ -1783,7 +1783,7 @@ async function startSpeakerEnrollment(personRef = null) {
       display_name: textValue("speaker-enrollment-display-name").trim(),
     };
   if (!personRef && !body.display_name) {
-    showNotice("新しい話者の呼び名を入力してください。", true);
+    showNotice("新しい話者の呼ばれ方を入力してください。", true);
     return;
   }
   try {
@@ -1825,7 +1825,7 @@ async function renameSpeaker(personRef) {
   if (!speaker) {
     return;
   }
-  const displayName = window.prompt("新しい呼び名を入力してください。", speaker.display_name);
+  const displayName = window.prompt("新しい呼ばれ方を入力してください。", speaker.display_name);
   if (displayName === null || !displayName.trim()) {
     return;
   }
