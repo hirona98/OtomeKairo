@@ -80,6 +80,16 @@
             <label>呼び名<input id="conversation-display-name" required></label>
             <label>会話参照<input id="conversation-interaction-ref" spellcheck="false"></label>
           </div>
+          <div class="web-microphone-controls">
+            <label>Webマイク
+              <select id="web-microphone-device">
+                <option value="">デバイスを選択</option>
+              </select>
+            </label>
+            <button type="button" class="plain-button" id="refresh-web-microphones">更新</button>
+            <button type="button" id="toggle-web-microphone">音声入力を開始</button>
+            <span id="web-microphone-status" class="status">停止中</span>
+          </div>
           <div class="attachment-preview" id="attachment-preview" hidden>
             <img id="attachment-image" alt="添付画像プレビュー">
             <button type="button" class="plain-button" id="remove-attachment">削除</button>
@@ -100,7 +110,7 @@
 
     <footer class="statusbar">
       <span id="connection-status" class="status">未接続</span>
-      <span id="event-stream-status" class="status">非同期発話: 接続中</span>
+      <span id="event-stream-status" class="status">イベント: 接続中</span>
     </footer>
   </div>
 
@@ -292,7 +302,7 @@
                     <option value="amivoice">AmiVoice</option>
                   </select>
                 </label>
-                <label>音声起動ワード<input id="stt-wake-word"></label>
+                <label>音声起動ワード（1行1件）<textarea id="stt-wake-words" rows="3"></textarea></label>
                 <label>Profile ID<input id="stt-profile-id"></label>
                 <label class="api-key-field wide-label">API Key
                   <span class="inline-control-row">
@@ -302,7 +312,7 @@
                   </span>
                 </label>
               </div>
-              <p class="field-hint">音声起動ワードは音声入力を開始する語です。複数指定はカンマで区切ります。</p>
+              <p class="field-hint">物理マイクでは文字起こしの先頭がいずれかの音声起動ワードと一致した場合に起動します。空欄では常時有効です。</p>
             </fieldset>
           </section>
 
@@ -315,24 +325,37 @@
             <fieldset class="settings-group">
               <legend>マイク・話者識別</legend>
               <p class="field-hint">マイクと話者識別を設定します。識別した話者の呼び名は participants[].display_name として送ります。</p>
+              <div class="form-grid">
+                <label class="checkbox-field wide-control">物理マイクを使用する<input id="physical-input-enabled" type="checkbox"></label>
+                <label>物理マイクdevice
+                  <select id="physical-input-device">
+                    <option value="">未選択</option>
+                  </select>
+                </label>
+                <label>応答先client ID<input id="microphone-response-client-id" spellcheck="false"></label>
+              </div>
               <div class="range-field">
-                <label for="microphone-input-threshold">入力しきい値</label>
-                <input id="microphone-input-threshold" type="range" min="-50" max="0" step="1">
-                <output id="microphone-input-threshold-value"></output>
+                <label for="vad-probability-threshold">VADしきい値</label>
+                <input id="vad-probability-threshold" type="range" min="0.1" max="0.9" step="0.05">
+                <output id="vad-probability-threshold-value"></output>
               </div>
               <div class="range-field">
                 <label for="speaker-recognition-threshold">識別感度</label>
                 <input id="speaker-recognition-threshold" type="range" min="0.1" max="0.9" step="0.05">
                 <output id="speaker-recognition-threshold-value"></output>
               </div>
-              <div class="speaker-enrollment" aria-disabled="true">
+              <div class="speaker-enrollment">
                 <div class="field-caption">登録済み話者</div>
-                <div class="disabled-speaker-list">登録済み話者はいません</div>
+                <div class="speaker-list" id="speaker-list">登録済み話者はいません</div>
                 <div class="speaker-registration-row">
-                  <label>話者の呼び名<input disabled></label>
-                  <button type="button" disabled>5秒録音して登録</button>
+                  <label>新しい話者の呼び名<input id="speaker-enrollment-display-name"></label>
+                  <button type="button" id="start-speaker-enrollment">3発話で登録</button>
                 </div>
-                <p class="field-hint">話者登録は音声処理をOtomeKairoへ移設する段階で利用可能になります。</p>
+                <div class="speaker-enrollment-state">
+                  <span id="speaker-enrollment-status">登録待機中</span>
+                  <button type="button" class="plain-button" id="cancel-speaker-enrollment" disabled>登録を中止</button>
+                </div>
+                <p class="field-hint">Webマイクを開始してから登録を開始し、2秒以上の発話を3回行います。</p>
               </div>
             </fieldset>
           </section>

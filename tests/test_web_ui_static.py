@@ -44,6 +44,7 @@ class WebUiHttpBoundaryTests(unittest.TestCase):
         for path, content_type in (
             ("/ui/", "text/html"),
             ("/ui/app.js", "text/javascript"),
+            ("/ui/audio-worklet.js", "text/javascript"),
             ("/ui/styles.css", "text/css"),
         ):
             status, headers, body = self.request(path)

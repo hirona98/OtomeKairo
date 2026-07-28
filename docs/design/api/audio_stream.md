@@ -74,6 +74,9 @@ Web UI は `capture_settings` に次を追加する。
 ```
 
 device ID 実値は送らない。
+`echo_cancellation / noise_suppression / auto_gain_control` は
+browser が実値を公開しない場合に `null` とする。
+`device_id_present` は必ず boolean とする。
 
 server -> client:
 
@@ -84,12 +87,15 @@ server -> client:
   "lease_generation": 12,
   "input_source": "physical_microphone",
   "mode": "normal",
+  "paused_reason": null,
   "heartbeat_interval_seconds": 5,
   "lease_timeout_seconds": 15
 }
 ```
 
 `audio_started` 前の binary message は protocol error とする。
+`paused_reason` は開始直後から送信可能な場合に `null`、開始時点で pause 中の場合に pause reason を持つ。
+client は `paused_reason=null` の `audio_started` または `audio_resumed` を受信した後だけ PCM を送る。
 2 件目の Web input は `audio_input_busy` とする。
 Web input が physical input を横取りする場合は、physical client へ `audio_paused` を送ってから Web client へ `audio_started` を送る。
 

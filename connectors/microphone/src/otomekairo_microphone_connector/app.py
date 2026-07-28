@@ -281,7 +281,18 @@ class MicrophoneConnector:
                     control_type = control.get("type")
                     if control_type == "audio_started":
                         lease_generation = self._lease_generation(control)
-                        paused = False
+                        paused_reason = control.get("paused_reason")
+                        if (
+                            "paused_reason" not in control
+                            or (
+                                paused_reason is not None
+                                and not isinstance(paused_reason, str)
+                            )
+                        ):
+                            raise ConnectorError(
+                                "audio_started paused_reason is invalid."
+                            )
+                        paused = paused_reason is not None
                         last_heartbeat = now
                         if capture is not None:
                             capture.clear_frames()

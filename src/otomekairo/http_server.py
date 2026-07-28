@@ -43,6 +43,11 @@ WEB_STATIC_FILES = {
     "/ui/": ("index.html", "text/html; charset=utf-8", "no-store"),
     "/ui/index.html": ("index.html", "text/html; charset=utf-8", "no-store"),
     "/ui/app.js": ("app.js", "text/javascript; charset=utf-8", "max-age=60"),
+    "/ui/audio-worklet.js": (
+        "audio-worklet.js",
+        "text/javascript; charset=utf-8",
+        "max-age=60",
+    ),
     "/ui/styles.css": ("styles.css", "text/css; charset=utf-8", "max-age=60"),
 }
 

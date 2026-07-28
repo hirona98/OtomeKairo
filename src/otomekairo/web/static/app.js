@@ -7,6 +7,10 @@ const state = {
   camera: null,
   mcp: null,
   apiDocs: null,
+  audioInputDevices: null,
+  speakers: [],
+  audioRuntime: null,
+  activeEnrollment: null,
   selectedAvatarId: "",
   selectedPersonaId: "",
   selectedModelPresetId: "",
@@ -25,6 +29,19 @@ const state = {
   dashboardTimer: null,
   eventSocket: null,
   eventReconnectTimer: null,
+  webAudio: {
+    socket: null,
+    stream: null,
+    context: null,
+    sourceNode: null,
+    workletNode: null,
+    heartbeatTimer: null,
+    leaseGeneration: null,
+    paused: true,
+    starting: false,
+    stopping: false,
+    startSequence: 0,
+  },
   unloading: false,
 };
 
@@ -71,6 +88,7 @@ const RESULT_KIND_LABELS = {
 
 const DESKTOP_WAKE_OBSERVATION_ID = "observation:main_desktop";
 const DEFAULT_WAKE_INTERVAL_SECONDS = 300;
+const WEB_MICROPHONE_DEVICE_KEY = "otomekairo.web_microphone_device_id";
 
 function element(id) {
   return document.getElementById(id);
@@ -700,24 +718,28 @@ function assistantSourceLabel(sourceKind) {
   }[sourceKind] || "非同期";
 }
 
-// 対話入力と同じ client_id で購読し、非同期発話の物理配送先を一致させる。
-function connectAssistantEventStream() {
+// 対話入力と同じ client_id で購読し、音声入力と発話の配送先を一致させる。
+function connectEventStream() {
   if (state.unloading || state.eventSocket) {
     return;
   }
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const socket = new WebSocket(`${protocol}//${window.location.host}/ui/api/events/stream`);
   state.eventSocket = socket;
-  setEventStreamStatus("非同期発話: 接続中", "processing");
+  setEventStreamStatus("イベント: 接続中", "processing");
 
   socket.addEventListener("open", () => {
     socket.send(JSON.stringify({
       type: "hello",
       client_id: state.clientId,
       caps: [],
-      event_subscriptions: ["assistant_message"],
+      event_subscriptions: [
+        "conversation_input",
+        "assistant_message",
+        "audio_runtime_state",
+      ],
     }));
-    setEventStreamStatus("非同期発話: 接続済み");
+    setEventStreamStatus("イベント: 接続済み");
   });
   socket.addEventListener("message", (event) => {
     let payload;
@@ -726,11 +748,31 @@ function connectAssistantEventStream() {
     } catch {
       return;
     }
-    if (payload?.type !== "assistant_message" || typeof payload.data?.message !== "string") {
-      return;
+    if (payload?.type === "assistant_message" && typeof payload.data?.message === "string") {
+      addMessage(
+        "assistant",
+        payload.data.message,
+        [],
+        assistantSourceLabel(payload.data.source_kind),
+      );
+      refreshDashboard({ silent: true });
+    } else if (
+      payload?.type === "conversation_input"
+      && typeof payload.data?.message === "string"
+    ) {
+      const sourceLabel = payload.data.source_kind === "web_microphone"
+        ? "Webマイク"
+        : "物理マイク";
+      addMessage(
+        "person",
+        payload.data.message,
+        [],
+        [payload.data.display_name, sourceLabel].filter(Boolean).join(" · "),
+      );
+      refreshDashboard({ silent: true });
+    } else if (payload?.type === "audio_runtime_state" && payload.data) {
+      updateAudioRuntimeState(payload.data);
     }
-    addMessage("assistant", payload.data.message, [], assistantSourceLabel(payload.data.source_kind));
-    refreshDashboard({ silent: true });
   });
   socket.addEventListener("error", () => socket.close());
   socket.addEventListener("close", () => {
@@ -740,10 +782,356 @@ function connectAssistantEventStream() {
     if (state.unloading) {
       return;
     }
-    setEventStreamStatus("非同期発話: 再接続中", "processing");
+    setEventStreamStatus("イベント: 再接続中", "processing");
     window.clearTimeout(state.eventReconnectTimer);
-    state.eventReconnectTimer = window.setTimeout(connectAssistantEventStream, 3000);
+    state.eventReconnectTimer = window.setTimeout(connectEventStream, 3000);
   });
+}
+
+function websocketUrl(path) {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}${path}`;
+}
+
+function setWebMicrophoneStatus(text, kind = "") {
+  const status = element("web-microphone-status");
+  status.textContent = text;
+  status.className = `status ${kind}`.trim();
+}
+
+function webMicrophoneHasLease() {
+  return (
+    state.webAudio.socket?.readyState === WebSocket.OPEN
+    && Number.isInteger(state.webAudio.leaseGeneration)
+  );
+}
+
+function renderWebMicrophoneControls() {
+  const running = Boolean(state.webAudio.socket);
+  const busy = running || state.webAudio.starting || state.webAudio.stopping;
+  element("web-microphone-device").disabled = busy;
+  element("refresh-web-microphones").disabled = busy;
+  const button = element("toggle-web-microphone");
+  button.textContent = running ? "音声入力を停止" : "音声入力を開始";
+  button.disabled = state.webAudio.starting || state.webAudio.stopping;
+  if (!running && !state.webAudio.starting && !state.webAudio.stopping) {
+    setWebMicrophoneStatus("停止中");
+  }
+  if (state.settingsOpen) {
+    renderSpeakerEnrollment();
+  }
+}
+
+async function refreshWebMicrophoneDevices({ requestPermission = false } = {}) {
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    showNotice("このブラウザではマイク入力を使用できません。", true);
+    return;
+  }
+  let permissionStream = null;
+  try {
+    if (requestPermission) {
+      permissionStream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: false,
+      });
+    }
+    const devices = (await navigator.mediaDevices.enumerateDevices())
+      .filter((device) => device.kind === "audioinput" && device.deviceId);
+    const select = element("web-microphone-device");
+    const storedDeviceId = localStorage.getItem(WEB_MICROPHONE_DEVICE_KEY) || "";
+    select.innerHTML = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = devices.length > 0
+      ? "デバイスを選択"
+      : "利用可能なマイクなし";
+    select.append(placeholder);
+    devices.forEach((device, index) => {
+      const option = document.createElement("option");
+      option.value = device.deviceId;
+      option.textContent = device.label || `マイク ${index + 1}`;
+      select.append(option);
+    });
+    // 保存済みdeviceが消えた場合は別deviceへ自動切替しない。
+    select.value = devices.some((device) => device.deviceId === storedDeviceId)
+      ? storedDeviceId
+      : "";
+  } catch (error) {
+    showNotice(`マイク一覧を取得できません: ${error.message}`, true);
+  } finally {
+    permissionStream?.getTracks().forEach((track) => track.stop());
+  }
+}
+
+function audioPauseLabel(reason) {
+  return {
+    queue_full: "処理待ち",
+    stt_disabled: "STT無効",
+    stt_configuration_error: "STT設定エラー",
+    speaker_enrollment_required: "話者登録待ち",
+    microphone_device_unavailable: "マイク利用不可",
+    response_client_unavailable: "イベント接続待ち",
+    audio_runtime_unavailable: "音声runtime利用不可",
+    settings_reloaded: "設定更新",
+  }[reason] || "一時停止";
+}
+
+function startWebAudioHeartbeat(intervalSeconds) {
+  window.clearInterval(state.webAudio.heartbeatTimer);
+  state.webAudio.heartbeatTimer = window.setInterval(() => {
+    const socket = state.webAudio.socket;
+    const leaseGeneration = state.webAudio.leaseGeneration;
+    if (socket?.readyState !== WebSocket.OPEN || !Number.isInteger(leaseGeneration)) {
+      return;
+    }
+    socket.send(JSON.stringify({
+      type: "audio_heartbeat",
+      lease_generation: leaseGeneration,
+    }));
+  }, intervalSeconds * 1000);
+}
+
+function handleWebAudioControl(socket, payload) {
+  if (state.webAudio.socket !== socket || typeof payload?.type !== "string") {
+    return;
+  }
+  if (payload.type === "audio_started") {
+    if (
+      !Object.hasOwn(payload, "paused_reason")
+      || (payload.paused_reason !== null && typeof payload.paused_reason !== "string")
+    ) {
+      throw new Error("audio_started.paused_reason is invalid.");
+    }
+    state.webAudio.leaseGeneration = payload.lease_generation;
+    state.webAudio.paused = payload.paused_reason !== null;
+    startWebAudioHeartbeat(payload.heartbeat_interval_seconds || 5);
+    setWebMicrophoneStatus(
+      state.webAudio.paused
+        ? audioPauseLabel(payload.paused_reason)
+        : "入力中",
+      state.webAudio.paused ? "processing" : "",
+    );
+    renderSpeakerEnrollment();
+  } else if (payload.type === "audio_paused") {
+    state.webAudio.paused = true;
+    setWebMicrophoneStatus(audioPauseLabel(payload.reason), "processing");
+    if (payload.reason === "settings_reloaded") {
+      stopWebMicrophone({ sendStop: false });
+    }
+  } else if (payload.type === "audio_resumed") {
+    if (payload.lease_generation === state.webAudio.leaseGeneration) {
+      state.webAudio.paused = false;
+      setWebMicrophoneStatus(
+        state.audioRuntime?.mode === "enrollment" ? "話者登録中" : "入力中",
+      );
+    }
+  } else if (payload.type === "audio_stopped") {
+    stopWebMicrophone({ sendStop: false });
+  } else if (payload.type === "audio_error") {
+    showNotice(`${payload.code || "audio_error"}: ${payload.message || "音声入力に失敗しました。"}`, true);
+    stopWebMicrophone({ sendStop: false });
+  }
+}
+
+async function startWebMicrophone() {
+  if (state.webAudio.socket || state.webAudio.starting) {
+    return;
+  }
+  if (state.eventSocket?.readyState !== WebSocket.OPEN) {
+    showNotice("イベント接続が完了してから音声入力を開始してください。", true);
+    return;
+  }
+  const deviceId = element("web-microphone-device").value;
+  if (!deviceId) {
+    showNotice("使用するWebマイクを選択してください。", true);
+    return;
+  }
+
+  const startSequence = state.webAudio.startSequence + 1;
+  state.webAudio.startSequence = startSequence;
+  state.webAudio.starting = true;
+  renderWebMicrophoneControls();
+  setWebMicrophoneStatus("開始中", "processing");
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        deviceId: { exact: deviceId },
+        echoCancellation: { ideal: true },
+        noiseSuppression: { ideal: true },
+        autoGainControl: { ideal: false },
+      },
+      video: false,
+    });
+    if (startSequence !== state.webAudio.startSequence) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    state.webAudio.stream = stream;
+    const track = stream.getAudioTracks()[0];
+    if (!track) {
+      throw new Error("音声trackを取得できません。");
+    }
+
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass || !window.AudioWorkletNode) {
+      throw new Error("AudioWorkletに対応していないブラウザです。");
+    }
+    const context = new AudioContextClass();
+    state.webAudio.context = context;
+    await context.audioWorklet.addModule("/ui/audio-worklet.js");
+    if (startSequence !== state.webAudio.startSequence) {
+      return;
+    }
+    const sourceNode = context.createMediaStreamSource(stream);
+    const workletNode = new AudioWorkletNode(
+      context,
+      "otomekairo-pcm-processor",
+      { numberOfInputs: 1, numberOfOutputs: 0 },
+    );
+    state.webAudio.sourceNode = sourceNode;
+    state.webAudio.workletNode = workletNode;
+    workletNode.port.onmessage = (event) => {
+      const socket = state.webAudio.socket;
+      if (
+        socket?.readyState === WebSocket.OPEN
+        && Number.isInteger(state.webAudio.leaseGeneration)
+        && !state.webAudio.paused
+        && event.data instanceof ArrayBuffer
+        && event.data.byteLength === 640
+      ) {
+        socket.send(event.data);
+      }
+    };
+    sourceNode.connect(workletNode);
+    await context.resume();
+    if (startSequence !== state.webAudio.startSequence) {
+      return;
+    }
+
+    const socket = new WebSocket(websocketUrl("/ui/api/audio/stream"));
+    state.webAudio.socket = socket;
+    state.webAudio.starting = false;
+    renderWebMicrophoneControls();
+    socket.addEventListener("open", () => {
+      const settings = track.getSettings();
+      const actualBoolean = (value) => (
+        typeof value === "boolean" ? value : null
+      );
+      socket.send(JSON.stringify({
+        type: "audio_start",
+        protocol_version: "1",
+        client_id: state.clientId,
+        input_source: "web_microphone",
+        format: {
+          sample_rate: 16000,
+          channels: 1,
+          sample_format: "pcm_s16le",
+          frame_duration_ms: 20,
+          bytes_per_frame: 640,
+        },
+        device: null,
+        capture_settings: {
+          source_sample_rate: context.sampleRate,
+          echo_cancellation: actualBoolean(settings.echoCancellation),
+          noise_suppression: actualBoolean(settings.noiseSuppression),
+          auto_gain_control: actualBoolean(settings.autoGainControl),
+          device_id_present: typeof settings.deviceId === "string" && settings.deviceId.length > 0,
+        },
+      }));
+      setWebMicrophoneStatus("リース待ち", "processing");
+    });
+    socket.addEventListener("message", (event) => {
+      if (typeof event.data !== "string") {
+        return;
+      }
+      try {
+        handleWebAudioControl(socket, JSON.parse(event.data));
+      } catch {
+        showNotice("音声streamから不正な制御messageを受信しました。", true);
+        stopWebMicrophone({ sendStop: false });
+      }
+    });
+    socket.addEventListener("error", () => socket.close());
+    socket.addEventListener("close", () => {
+      if (state.webAudio.socket === socket && !state.webAudio.stopping) {
+        showNotice("Webマイク接続が終了しました。", true);
+        stopWebMicrophone({ sendStop: false });
+      }
+    });
+  } catch (error) {
+    if (startSequence !== state.webAudio.startSequence) {
+      return;
+    }
+    state.webAudio.starting = false;
+    await stopWebMicrophone({ sendStop: false });
+    showNotice(`Webマイクを開始できません: ${error.message}`, true);
+  }
+}
+
+async function stopWebMicrophone({ sendStop = true } = {}) {
+  if (state.webAudio.stopping) {
+    return;
+  }
+  state.webAudio.stopping = true;
+  state.webAudio.starting = false;
+  state.webAudio.startSequence += 1;
+  const socket = state.webAudio.socket;
+  const stream = state.webAudio.stream;
+  const context = state.webAudio.context;
+  const sourceNode = state.webAudio.sourceNode;
+  const workletNode = state.webAudio.workletNode;
+  const leaseGeneration = state.webAudio.leaseGeneration;
+
+  window.clearInterval(state.webAudio.heartbeatTimer);
+  if (
+    sendStop
+    && socket?.readyState === WebSocket.OPEN
+    && Number.isInteger(leaseGeneration)
+  ) {
+    socket.send(JSON.stringify({
+      type: "audio_stop",
+      lease_generation: leaseGeneration,
+    }));
+  }
+  state.webAudio.socket = null;
+  state.webAudio.stream = null;
+  state.webAudio.context = null;
+  state.webAudio.sourceNode = null;
+  state.webAudio.workletNode = null;
+  state.webAudio.heartbeatTimer = null;
+  state.webAudio.leaseGeneration = null;
+  state.webAudio.paused = true;
+  if (workletNode?.port) {
+    workletNode.port.onmessage = null;
+  }
+  try {
+    sourceNode?.disconnect();
+    workletNode?.disconnect();
+  } catch {
+    // 既にbrowser側で切断済みの場合も後始末を継続する。
+  }
+  stream?.getTracks().forEach((track) => track.stop());
+  socket?.close();
+  if (context && context.state !== "closed") {
+    await context.close();
+  }
+  state.webAudio.stopping = false;
+  renderWebMicrophoneControls();
+}
+
+function updateAudioRuntimeState(runtimeState) {
+  const hadEnrollment = Boolean(state.audioRuntime?.enrollment || state.activeEnrollment);
+  state.audioRuntime = clone(runtimeState);
+  if (runtimeState.enrollment) {
+    state.activeEnrollment = {
+      ...state.activeEnrollment,
+      ...runtimeState.enrollment,
+    };
+  } else if (hadEnrollment) {
+    state.activeEnrollment = null;
+    refreshSpeakers();
+  }
+  renderSpeakerEnrollment();
 }
 
 function addMessage(kind, text, images = [], sourceLabel = "") {
@@ -894,12 +1282,22 @@ function closeSettings() {
 
 async function loadSettingsDrafts() {
   try {
-    const [editor, avatarSpeech, camera, mcp, apiDocs] = await Promise.all([
+    const [
+      editor,
+      avatarSpeech,
+      camera,
+      mcp,
+      apiDocs,
+      audioInputDevices,
+      speakers,
+    ] = await Promise.all([
       apiRequest("/ui/api/config/editor-state"),
       apiRequest("/ui/api/config/avatar-speech/editor-state"),
       apiRequest("/ui/api/config/camera-sources/editor-state"),
       apiRequest("/ui/api/config/mcp-servers/editor-state"),
       apiRequest("/ui/api/docs"),
+      apiRequest("/ui/api/audio/input-devices"),
+      apiRequest("/ui/api/audio/speakers"),
     ]);
     let consoleClient = null;
     try {
@@ -917,6 +1315,8 @@ async function loadSettingsDrafts() {
     state.camera = clone(camera);
     state.mcp = clone(mcp);
     state.apiDocs = clone(apiDocs);
+    state.audioInputDevices = clone(audioInputDevices);
+    state.speakers = clone(speakers.speakers || []);
     state.selectedAvatarId = state.avatarSpeech.selected_avatar_id;
     state.selectedPersonaId = state.editor.current.selected_persona_id;
     state.selectedModelPresetId = state.editor.current.selected_model_preset_id;
@@ -1045,7 +1445,7 @@ function renderAvatar() {
   renderAvatarPresentation();
   element("stt-enabled").checked = stt.enabled;
   element("stt-engine").value = stt.engine;
-  element("stt-wake-word").value = stt.wake_word;
+  element("stt-wake-words").value = stt.wake_words.join("\n");
   element("stt-profile-id").value = stt.profile_id;
   element("stt-api-key").value = stt.api_key;
   element("tts-enabled").checked = tts.enabled;
@@ -1105,7 +1505,7 @@ function syncAvatar() {
   avatar.display_name = textValue("avatar-display-name");
   avatar.stt.enabled = boolValue("stt-enabled");
   avatar.stt.engine = textValue("stt-engine");
-  avatar.stt.wake_word = textValue("stt-wake-word");
+  avatar.stt.wake_words = parseLines(textValue("stt-wake-words"));
   avatar.stt.profile_id = textValue("stt-profile-id");
   avatar.stt.api_key = textValue("stt-api-key");
   avatar.tts.enabled = boolValue("tts-enabled");
@@ -1225,23 +1625,241 @@ function renderTtsPanel(engine) {
 
 function renderMicrophoneSettings() {
   const microphone = state.avatarSpeech.microphone_settings;
-  element("microphone-input-threshold").value = microphone.input_threshold_db;
+  element("physical-input-enabled").checked = microphone.physical_input_enabled;
+  element("microphone-response-client-id").value = microphone.response_client_id;
+  renderPhysicalInputDevices(microphone.input_device);
+  element("vad-probability-threshold").value = microphone.vad_probability_threshold;
   element("speaker-recognition-threshold").value = microphone.speaker_recognition_threshold;
   updateMicrophoneSettingLabels();
+  renderSpeakerList();
+  renderSpeakerEnrollment();
 }
 
 function syncMicrophoneSettings() {
+  const selectedDevice = textValue("physical-input-device");
   state.avatarSpeech.microphone_settings = {
-    input_threshold_db: boundedIntValue("microphone-input-threshold", "入力しきい値", -50, 0),
-    speaker_recognition_threshold: numberValue("speaker-recognition-threshold", 0.4),
+    physical_input_enabled: boolValue("physical-input-enabled"),
+    input_device: selectedDevice ? JSON.parse(selectedDevice) : null,
+    response_client_id: textValue("microphone-response-client-id").trim(),
+    vad_probability_threshold: numberValue("vad-probability-threshold", 0.5),
+    speaker_recognition_threshold: numberValue("speaker-recognition-threshold", 0.6),
   };
 }
 
 function updateMicrophoneSettingLabels() {
-  element("microphone-input-threshold-value").textContent =
-    `${numberValue("microphone-input-threshold", -20).toFixed(0)} dB`;
+  element("vad-probability-threshold-value").textContent =
+    numberValue("vad-probability-threshold", 0.5).toFixed(2);
   element("speaker-recognition-threshold-value").textContent =
-    numberValue("speaker-recognition-threshold", 0.4).toFixed(2);
+    numberValue("speaker-recognition-threshold", 0.6).toFixed(2);
+}
+
+function renderPhysicalInputDevices(selectedDevice) {
+  const select = element("physical-input-device");
+  const selectedValue = selectedDevice
+    ? JSON.stringify({
+      host_api: selectedDevice.host_api,
+      name: selectedDevice.name,
+    })
+    : "";
+  select.innerHTML = "";
+  const emptyOption = document.createElement("option");
+  emptyOption.value = "";
+  emptyOption.textContent = "未選択";
+  select.append(emptyOption);
+  let selectedFound = false;
+  for (const device of state.audioInputDevices?.devices || []) {
+    const option = document.createElement("option");
+    option.value = JSON.stringify({
+      host_api: device.host_api,
+      name: device.name,
+    });
+    option.textContent = [
+      `${device.host_api}: ${device.name}`,
+      `${device.default_sample_rate} Hz`,
+      device.ambiguous ? "同名重複" : "",
+    ].filter(Boolean).join(" / ");
+    option.disabled = device.ambiguous === true;
+    select.append(option);
+    if (option.value === selectedValue && !option.disabled) {
+      selectedFound = true;
+    }
+  }
+  if (selectedValue && !selectedFound) {
+    const unavailableOption = document.createElement("option");
+    unavailableOption.value = selectedValue;
+    unavailableOption.textContent =
+      `${selectedDevice.host_api}: ${selectedDevice.name} / 現在利用不可`;
+    select.append(unavailableOption);
+  }
+  select.value = selectedValue;
+}
+
+async function refreshSpeakers() {
+  try {
+    const response = await apiRequest("/ui/api/audio/speakers");
+    state.speakers = clone(response.speakers || []);
+    renderSpeakerList();
+  } catch (error) {
+    showNotice(error.message, true);
+  }
+}
+
+function renderSpeakerList() {
+  const container = element("speaker-list");
+  if (state.speakers.length === 0) {
+    container.textContent = "登録済み話者はいません";
+    return;
+  }
+  const rows = state.speakers.map((speaker) => {
+    const row = document.createElement("div");
+    row.className = "speaker-row";
+    const summary = document.createElement("div");
+    summary.className = "speaker-summary";
+    const name = document.createElement("strong");
+    name.textContent = speaker.display_name;
+    const registration = document.createElement("span");
+    registration.textContent = speaker.registration_status === "registered"
+      ? "音声登録済み"
+      : "音声未登録";
+    summary.append(name, registration);
+
+    const actions = document.createElement("div");
+    actions.className = "speaker-actions";
+    for (const [action, label] of [
+      ["rename", "名前変更"],
+      ["reenroll", "再登録"],
+      ["unregister", "登録解除"],
+    ]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "plain-button";
+      button.dataset.speakerAction = action;
+      button.dataset.personRef = speaker.person_ref;
+      button.textContent = label;
+      if (
+        action === "unregister"
+        && speaker.registration_status !== "registered"
+      ) {
+        button.disabled = true;
+      }
+      if (action === "reenroll" && !webMicrophoneHasLease()) {
+        button.disabled = true;
+      }
+      actions.append(button);
+    }
+    row.append(summary, actions);
+    return row;
+  });
+  container.replaceChildren(...rows);
+}
+
+function renderSpeakerEnrollment() {
+  const enrollment = state.activeEnrollment || state.audioRuntime?.enrollment;
+  const startButton = element("start-speaker-enrollment");
+  const cancelButton = element("cancel-speaker-enrollment");
+  startButton.disabled = Boolean(enrollment) || !webMicrophoneHasLease();
+  cancelButton.disabled = !enrollment;
+  if (!enrollment) {
+    element("speaker-enrollment-status").textContent = "登録待機中";
+    renderSpeakerList();
+    return;
+  }
+  const completed = enrollment.completed_samples || 0;
+  const required = enrollment.required_samples || 3;
+  element("speaker-enrollment-status").textContent =
+    `話者登録中: ${completed} / ${required} 発話`;
+  renderSpeakerList();
+}
+
+async function startSpeakerEnrollment(personRef = null) {
+  if (!webMicrophoneHasLease()) {
+    showNotice("Webマイクを開始してから話者登録を開始してください。", true);
+    return;
+  }
+  const body = personRef
+    ? { owner_client_id: state.clientId, person_ref: personRef }
+    : {
+      owner_client_id: state.clientId,
+      display_name: textValue("speaker-enrollment-display-name").trim(),
+    };
+  if (!personRef && !body.display_name) {
+    showNotice("新しい話者の呼び名を入力してください。", true);
+    return;
+  }
+  try {
+    state.activeEnrollment = await apiRequest(
+      "/ui/api/audio/speaker-enrollments",
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+    element("speaker-enrollment-display-name").value = "";
+    renderSpeakerEnrollment();
+    setWebMicrophoneStatus("話者登録中");
+  } catch (error) {
+    showNotice(error.message, true);
+  }
+}
+
+async function cancelSpeakerEnrollment() {
+  const enrollmentId = state.activeEnrollment?.enrollment_id
+    || state.audioRuntime?.enrollment?.enrollment_id;
+  if (!enrollmentId) {
+    return;
+  }
+  try {
+    await apiRequest(
+      `/ui/api/audio/speaker-enrollments/${encodeURIComponent(enrollmentId)}`,
+      { method: "DELETE" },
+    );
+    state.activeEnrollment = null;
+    renderSpeakerEnrollment();
+  } catch (error) {
+    showNotice(error.message, true);
+  }
+}
+
+async function renameSpeaker(personRef) {
+  const speaker = state.speakers.find((item) => item.person_ref === personRef);
+  if (!speaker) {
+    return;
+  }
+  const displayName = window.prompt("新しい呼び名を入力してください。", speaker.display_name);
+  if (displayName === null || !displayName.trim()) {
+    return;
+  }
+  try {
+    await apiRequest(
+      `/ui/api/audio/speakers/${encodeURIComponent(personRef)}/display-name`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ display_name: displayName.trim() }),
+      },
+    );
+    await refreshSpeakers();
+  } catch (error) {
+    showNotice(error.message, true);
+  }
+}
+
+async function unregisterSpeaker(personRef) {
+  const speaker = state.speakers.find((item) => item.person_ref === personRef);
+  if (
+    !speaker
+    || !window.confirm(`${speaker.display_name}の音声登録を解除しますか？`)
+  ) {
+    return;
+  }
+  try {
+    await apiRequest(
+      `/ui/api/audio/speakers/${encodeURIComponent(personRef)}/registration`,
+      { method: "DELETE" },
+    );
+    await refreshSpeakers();
+  } catch (error) {
+    showNotice(error.message, true);
+  }
 }
 
 async function copyApiKey(inputId, label) {
@@ -1874,6 +2492,24 @@ function bindEvents() {
   element("conversation-person-ref").addEventListener("change", saveConversationReferences);
   element("conversation-interaction-ref").addEventListener("change", saveConversationReferences);
   element("conversation-display-name").addEventListener("change", saveConversationDisplayName);
+  element("web-microphone-device").addEventListener("change", () => {
+    const deviceId = element("web-microphone-device").value;
+    if (deviceId) {
+      localStorage.setItem(WEB_MICROPHONE_DEVICE_KEY, deviceId);
+    } else {
+      localStorage.removeItem(WEB_MICROPHONE_DEVICE_KEY);
+    }
+  });
+  element("refresh-web-microphones").addEventListener("click", () => {
+    refreshWebMicrophoneDevices({ requestPermission: true });
+  });
+  element("toggle-web-microphone").addEventListener("click", () => {
+    if (state.webAudio.socket) {
+      stopWebMicrophone();
+    } else {
+      startWebMicrophone();
+    }
+  });
 
   element("open-settings").addEventListener("click", openSettings);
   element("close-settings").addEventListener("click", closeSettings);
@@ -1897,8 +2533,27 @@ function bindEvents() {
   element("tts-engine").addEventListener("change", () => {
     renderTtsPanel(element("tts-engine").value);
   });
-  element("microphone-input-threshold").addEventListener("input", updateMicrophoneSettingLabels);
+  element("vad-probability-threshold").addEventListener("input", updateMicrophoneSettingLabels);
   element("speaker-recognition-threshold").addEventListener("input", updateMicrophoneSettingLabels);
+  element("start-speaker-enrollment").addEventListener("click", () => {
+    startSpeakerEnrollment();
+  });
+  element("cancel-speaker-enrollment").addEventListener("click", cancelSpeakerEnrollment);
+  element("speaker-list").addEventListener("click", (event) => {
+    const button = event.target instanceof Element
+      ? event.target.closest("[data-speaker-action]")
+      : null;
+    if (!button || button.disabled) {
+      return;
+    }
+    if (button.dataset.speakerAction === "rename") {
+      renameSpeaker(button.dataset.personRef);
+    } else if (button.dataset.speakerAction === "reenroll") {
+      startSpeakerEnrollment(button.dataset.personRef);
+    } else if (button.dataset.speakerAction === "unregister") {
+      unregisterSpeaker(button.dataset.personRef);
+    }
+  });
   element("persona-select").addEventListener("change", () => {
     syncPersona();
     state.selectedPersonaId = element("persona-select").value;
@@ -1963,7 +2618,19 @@ function bindEvents() {
     state.unloading = true;
     window.clearInterval(state.dashboardTimer);
     window.clearTimeout(state.eventReconnectTimer);
+    stopWebMicrophone();
     state.eventSocket?.close();
+  });
+  window.addEventListener("pagehide", () => stopWebMicrophone());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      stopWebMicrophone();
+    }
+  });
+  navigator.mediaDevices?.addEventListener("devicechange", () => {
+    if (!state.webAudio.socket) {
+      refreshWebMicrophoneDevices({ requestPermission: false });
+    }
   });
 }
 
@@ -1976,7 +2643,8 @@ async function startApp() {
   await loadConversationDisplayName();
   await loadStatus({ silent: true });
   await refreshDashboard({ silent: true });
-  connectAssistantEventStream();
+  await refreshWebMicrophoneDevices({ requestPermission: false });
+  connectEventStream();
   state.dashboardTimer = window.setInterval(() => refreshDashboard({ silent: true }), 5000);
 }
 

@@ -575,6 +575,13 @@ class AudioRuntime:
                 else None
             )
             self._reset_vad_metrics_locked()
+            initial_pause_reason = self._evaluate_pause_reason_locked(connection)
+            if (
+                initial_pause_reason is None
+                and len(self._waiting) >= MAX_WAITING_UTTERANCES
+            ):
+                initial_pause_reason = "queue_full"
+            self._paused_reason = initial_pause_reason
             connection.websocket.send_json(
                 {
                     "type": "audio_started",
@@ -586,11 +593,11 @@ class AudioRuntime:
                         if self._enrollment is not None
                         else "normal"
                     ),
+                    "paused_reason": initial_pause_reason,
                     "heartbeat_interval_seconds": HEARTBEAT_INTERVAL_SECONDS,
                     "lease_timeout_seconds": LEASE_TIMEOUT_SECONDS,
                 }
             )
-            self._refresh_pause_state_locked()
         self._publish_state(force=True)
 
     def _handle_binary(
@@ -1556,13 +1563,25 @@ class AudioRuntime:
                 "capture_settings.source_sample_rate is invalid.",
             )
         if source == "web_microphone":
-            for field_name in fields - {"source_sample_rate"}:
-                if not isinstance(value.get(field_name), bool):
+            for field_name in fields - {
+                "source_sample_rate",
+                "device_id_present",
+            }:
+                if value.get(field_name) is not None and not isinstance(
+                    value.get(field_name),
+                    bool,
+                ):
                     raise ServiceError(
                         400,
                         "invalid_audio_start",
-                        f"capture_settings.{field_name} must be a boolean.",
+                        f"capture_settings.{field_name} must be a boolean or null.",
                     )
+            if not isinstance(value.get("device_id_present"), bool):
+                raise ServiceError(
+                    400,
+                    "invalid_audio_start",
+                    "capture_settings.device_id_present must be a boolean.",
+                )
         return deepcopy(value)
 
     def _normalize_catalog_device(self, value: Any) -> dict[str, Any]:

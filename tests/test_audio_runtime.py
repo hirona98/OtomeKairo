@@ -98,8 +98,8 @@ class AudioRuntimeControlTests(unittest.TestCase):
                             "device": None,
                             "capture_settings": {
                                 "source_sample_rate": 48000,
-                                "echo_cancellation": True,
-                                "noise_suppression": True,
+                                "echo_cancellation": None,
+                                "noise_suppression": None,
                                 "auto_gain_control": False,
                                 "device_id_present": True,
                             },
@@ -109,12 +109,8 @@ class AudioRuntimeControlTests(unittest.TestCase):
 
                 self.assertEqual(audio_socket.sent[0]["type"], "audio_started")
                 self.assertEqual(
-                    audio_socket.sent[1],
-                    {
-                        "type": "audio_paused",
-                        "lease_generation": 1,
-                        "reason": "stt_disabled",
-                    },
+                    audio_socket.sent[0]["paused_reason"],
+                    "stt_disabled",
                 )
 
                 enrollment = service.start_audio_speaker_enrollment(
