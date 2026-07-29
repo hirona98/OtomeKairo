@@ -40,6 +40,7 @@ client -> server:
   "event_subscriptions": [
     "conversation_input",
     "assistant_message",
+    "assistant_audio",
     "audio_runtime_state"
   ],
   "mcp_servers": [
@@ -89,6 +90,7 @@ client -> server:
 - `caps` はその client が現在受けられる capability binding 候補の一覧である
 - `event_subscriptions` はその client が受信して処理する server-driven event の一覧である
 - `assistant_message` を表示できる client だけが `event_subscriptions` に `assistant_message` を入れる
+- `assistant_audio` の直後の binary WAV を再生できる client だけが `event_subscriptions` に `assistant_audio` を入れる
 - 音声由来のユーザー発話を表示できる client だけが `conversation_input` を入れる
 - 音声 runtime を表示できる client だけが `audio_runtime_state` を入れる
 - `mcp_servers` は `mcp.call_tool` を実行できる client が接続中 MCP server の許可済み tool catalog を通知する一覧である
@@ -125,8 +127,10 @@ event type の分類軸は次に固定する。
 - `*_request` は server から client への capability 実行要求である
 - `conversation_input` は音声入力から確定したユーザー発話を入力元 client に表示させる通知である
 - `assistant_message` は server が生成した assistant 発話を client に表示させる通知である
+- `assistant_audio` は server が合成した assistant 発話音声の配送 metadata である
 - `audio_runtime_state` は音声 runtime の process-local snapshot を表示させる通知である
 - server は `event_subscriptions` に `assistant_message` を宣言した client だけへ `assistant_message` を送る
+- server は `event_subscriptions` に `assistant_audio` を宣言した client だけを音声合成の配送先にする
 - `assistant_message.data.source_kind` は発話生成の起点を示し、event type を増やして起点ごとの発話通知を分けない
 - `assistant_message.data.interaction_ref / recipient_person_refs` は論理配送先を示す
 - capability result follow-up の発話通知は `assistant_message` に `source_kind=capability_result`、`request_id`、`capability_id` を入れる
@@ -298,6 +302,26 @@ server -> client の代表例:
 ```json
 {
   "event_id": 11,
+  "type": "assistant_audio",
+  "data": {
+    "delivery_id": "tts_delivery:...",
+    "cycle_id": "cycle:...",
+    "source_kind": "wake",
+    "interaction_ref": "interaction:discord:channel-123",
+    "recipient_person_refs": ["person:external-123"],
+    "status": "succeeded",
+    "media_type": "audio/wav",
+    "byte_count": 48236,
+    "error_code": null
+  }
+}
+```
+
+この JSON message の直後に、`byte_count=48236` の1個の binary WebSocket messageを送る。
+
+```json
+{
+  "event_id": 12,
   "type": "conversation_input",
   "data": {
     "utterance_seq": 18,
@@ -315,7 +339,7 @@ server -> client の代表例:
 
 ```json
 {
-  "event_id": 12,
+  "event_id": 13,
   "type": "audio_runtime_state",
   "data": {
     "available": true,
@@ -352,12 +376,25 @@ server -> client の代表例:
 - `mcp.call_tool_request`: MCP server の tool 実行を client に要求する
 - `conversation_input`: 音声入力から確定したユーザー発話を入力元 client に表示させる
 - `assistant_message`: server が生成した assistant 発話を client に表示させる
+- `assistant_audio`: server が生成した assistant 発話の合成結果を metadata と WAV で配送する
 - `audio_runtime_state`: 音声 runtime の完全 snapshot を表示させる
 
 `vision.capture_request`、`camera.ptz_request`、`external.status_request`、`schedule.status_request`、`device.status_request`、`body.status_request`、`environment.status_request`、`location.status_request`、`social.status_request`、`mcp.call_tool_request` は capability 実行要求である。
 `assistant_message` は server が生成した assistant 発話を client へ表示させる通知である。
 `assistant_message.data.source_kind` は `conversation / capability_result / wake / background_thinking / autonomous_run` のいずれかであり、capability result follow-up の場合だけ `request_id / capability_id` を持つ。
 `assistant_message.data.interaction_ref / recipient_person_refs` は全発話通知で必須とする。
+`assistant_message.data.audio_delivery` と HTTP response の `speech.audio_delivery` は `delivery_id / status / error_code` を持つ。
+`audio_delivery.status` は `queued / disabled / failed` のいずれかとする。
+`queued` のときだけ `delivery_id` を返し、`disabled` のときは `error_code=null`、`failed` のときは `tts_target_unavailable / tts_queue_full` のいずれかを返す。
+`assistant_audio.data` は `delivery_id / cycle_id / source_kind / interaction_ref / recipient_person_refs / status / media_type / byte_count / error_code` を持つ。
+音声合成に成功した場合、server は `status=succeeded / media_type=audio/wav / byte_count>0 / error_code=null` の JSON message と、その直後の1個の binary messageを同じ送信lock内で配送する。
+binary message は RIFF/WAVE の PCM 16-bit または IEEE float 32-bit とし、長さを `byte_count` と一致させる。
+音声合成に失敗した場合、server は `status=failed / media_type=null / byte_count=0` の JSON messageだけを送り、`error_code` を `tts_request_failed / tts_response_invalid / tts_response_too_large` のいずれかにする。
+client は `status=succeeded` の `assistant_audio` を受信した場合だけ、直後の binary messageを対応する音声として扱う。
+server は音声合成を timeout 60 秒、FIFO 1 worker、queue 上限32件、WAV上限32 MiBで実行し、再試行とengine fallbackを実行しない。
+TTS入力では発話本文先頭の`[face:Joy] / [face:Angry] / [face:Sorrow] / [face:Fun]`を1個だけ除去し、それ以外の文字、空白、改行を保持する。
+server はTTS入力を文字列長で切り詰めない。
+音声合成失敗は先行する発話本文の成功を取り消さない。
 `conversation_input.data.message / interaction_ref / speaker_ref / participant_refs / display_name / source_kind / utterance_seq` は必須とする。
 `audio_runtime_state.data` は [列挙とinspection.md](列挙とinspection.md) の `runtime_detail.audio_runtime_state` と同じ shape にする。
 `audio_runtime_state` は完全 snapshot とし、差分 event にしない。

@@ -482,20 +482,6 @@ class ServiceSpontaneousCapabilityCycleMixin:
         capability_id = self._capability_result_capability_id(capability_response)
         if isinstance(request_record, dict):
             request_id = request_record.get("request_id", request_id)
-        event = {
-            "event_id": self._next_stream_event_id(),
-            "type": "assistant_message",
-            "data": {
-                "cycle_id": cycle_id,
-                "source_kind": "capability_result",
-                "request_id": request_id,
-                "capability_id": capability_id,
-                "interaction_ref": interaction_context.interaction_ref,
-                "recipient_person_refs": list(interaction_context.participant_refs),
-                "system_text": f"[capability_result] {capability_id}",
-                "message": speech_payload["speech_text"],
-            },
-        }
         if not self._event_stream_registry.client_accepts_event(target_client_id, "assistant_message"):
             debug_log(
                 "CapabilityResult",
@@ -506,7 +492,19 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 level="DEBUG",
             )
             return
-        sent = self._event_stream_registry.send_to_client(target_client_id, event)
+        sent, _ = self._emit_assistant_message_with_audio(
+            target_client_id=target_client_id,
+            event_data={
+                "cycle_id": cycle_id,
+                "source_kind": "capability_result",
+                "request_id": request_id,
+                "capability_id": capability_id,
+                "interaction_ref": interaction_context.interaction_ref,
+                "recipient_person_refs": list(interaction_context.participant_refs),
+                "system_text": f"[capability_result] {capability_id}",
+            },
+            speech_text=speech_payload["speech_text"],
+        )
         debug_log(
             "CapabilityResult",
             (

@@ -26,6 +26,7 @@ CAMERA_PTZ_OPERATIONS = {
 }
 CAMERA_PTZ_AMOUNTS = {"small", "medium"}
 EVENT_STREAM_EVENT_SUBSCRIPTIONS = {
+    "assistant_audio",
     "assistant_message",
     "audio_runtime_state",
     "conversation_input",

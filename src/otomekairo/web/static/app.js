@@ -29,6 +29,10 @@ const state = {
   dashboardTimer: null,
   eventSocket: null,
   eventReconnectTimer: null,
+  assistantAudio: {
+    pendingMetadata: null,
+    playbackTail: Promise.resolve(),
+  },
   webAudio: {
     socket: null,
     stream: null,
@@ -718,6 +722,27 @@ function assistantSourceLabel(sourceKind) {
   }[sourceKind] || "非同期";
 }
 
+function playAssistantAudio(arrayBuffer, metadata) {
+  const playback = async () => {
+    const blob = new Blob([arrayBuffer], { type: metadata.media_type });
+    const objectUrl = URL.createObjectURL(blob);
+    const audio = new Audio(objectUrl);
+    try {
+      await new Promise((resolve, reject) => {
+        audio.addEventListener("ended", resolve, { once: true });
+        audio.addEventListener("error", () => reject(new Error("音声を再生できません。")), { once: true });
+        audio.play().catch(reject);
+      });
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  };
+  state.assistantAudio.playbackTail = state.assistantAudio.playbackTail
+    .catch(() => undefined)
+    .then(playback)
+    .catch((error) => showNotice(error.message, true));
+}
+
 // 対話入力と同じ client_id で購読し、音声入力と発話の配送先を一致させる。
 function connectEventStream() {
   if (state.unloading || state.eventSocket) {
@@ -725,6 +750,7 @@ function connectEventStream() {
   }
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const socket = new WebSocket(`${protocol}//${window.location.host}/ui/api/events/stream`);
+  socket.binaryType = "arraybuffer";
   state.eventSocket = socket;
   setEventStreamStatus("イベント: 接続中", "processing");
 
@@ -736,12 +762,26 @@ function connectEventStream() {
       event_subscriptions: [
         "conversation_input",
         "assistant_message",
+        "assistant_audio",
         "audio_runtime_state",
       ],
     }));
     setEventStreamStatus("イベント: 接続済み");
   });
   socket.addEventListener("message", (event) => {
+    if (event.data instanceof ArrayBuffer) {
+      const metadata = state.assistantAudio.pendingMetadata;
+      state.assistantAudio.pendingMetadata = null;
+      if (
+        metadata
+        && metadata.status === "succeeded"
+        && metadata.media_type === "audio/wav"
+        && event.data.byteLength === metadata.byte_count
+      ) {
+        playAssistantAudio(event.data, metadata);
+      }
+      return;
+    }
     let payload;
     try {
       payload = JSON.parse(event.data);
@@ -756,6 +796,12 @@ function connectEventStream() {
         assistantSourceLabel(payload.data.source_kind),
       );
       refreshDashboard({ silent: true });
+    } else if (payload?.type === "assistant_audio" && payload.data) {
+      state.assistantAudio.pendingMetadata = (
+        payload.data.status === "succeeded"
+          ? payload.data
+          : null
+      );
     } else if (
       payload?.type === "conversation_input"
       && typeof payload.data?.message === "string"
@@ -776,6 +822,7 @@ function connectEventStream() {
   });
   socket.addEventListener("error", () => socket.close());
   socket.addEventListener("close", () => {
+    state.assistantAudio.pendingMetadata = null;
     if (state.eventSocket === socket) {
       state.eventSocket = null;
     }

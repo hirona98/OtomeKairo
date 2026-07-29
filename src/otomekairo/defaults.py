@@ -10,6 +10,7 @@ DEFAULT_PERSONA_ID = "persona:default"
 DEFAULT_MEMORY_SET_ID = "memory_set:default"
 DEFAULT_MODEL_PRESET_ID = "model_preset:default"
 DEFAULT_AVATAR_ID = "avatar:default"
+API_VERSION = "0.4.0"
 DEFAULT_THINKING_SPEECH_LEVEL = 5
 DEFAULT_WAKE_INTERVAL_SECONDS = 300
 DEFAULT_PROMPT_WINDOW_RECENT_TURN_LIMIT = 30
@@ -128,7 +129,7 @@ def build_default_state() -> dict:
     return {
         "server_id": server_id,
         "server_display_name": "OtomeKairo",
-        "api_version": "0.3.0",
+        "api_version": API_VERSION,
         "console_access_token": None,
         "selected_persona_id": DEFAULT_PERSONA_ID,
         "selected_memory_set_id": DEFAULT_MEMORY_SET_ID,

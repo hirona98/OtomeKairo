@@ -10,13 +10,36 @@ from otomekairo.service.common import ServiceError, debug_log
 
 class ServiceInputCycleMixin:
     # 入力API
-    def handle_conversation(self, token: str | None, payload: dict) -> dict[str, Any]:
+    def handle_conversation(
+        self,
+        token: str | None,
+        payload: dict,
+        *,
+        defer_audio_delivery: bool = False,
+    ) -> dict[str, Any]:
         # 一つの個の判断状態を会話到着順に更新する。
         self._cycle_coordinator.enter_foreground()
         try:
-            return self._handle_conversation_cycle(token, payload)
+            response = self._handle_conversation_cycle(token, payload)
         finally:
             self._cycle_coordinator.leave_foreground()
+
+        # 音声入力経路はassistant_message eventとの順序を保つため呼び出し側で配送する。
+        if not defer_audio_delivery:
+            client_context = payload.get("client_context")
+            target_client_id = (
+                client_context.get("client_id")
+                if isinstance(client_context, dict)
+                else None
+            )
+            reservation = self._attach_response_audio_delivery(
+                response,
+                target_client_id=target_client_id,
+                source_kind="conversation",
+            )
+            if reservation is not None:
+                self._tts_runtime.activate(reservation)
+        return response
 
     def _handle_conversation_cycle(self, token: str | None, payload: dict) -> dict[str, Any]:
         # 認可

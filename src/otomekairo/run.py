@@ -74,6 +74,7 @@ def main() -> None:
         # 終了処理
         debug_log("Run", "shutdown begin")
         service.close_audio_runtime()
+        service.close_tts_runtime()
         service.close_event_streams()
         service.stop_background_thinking_scheduler()
         service.stop_background_autonomous_run_scheduler()

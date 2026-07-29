@@ -92,6 +92,19 @@ class ServerWebSocket:
         # エンコード
         self.send_text(json.dumps(payload, ensure_ascii=False))
 
+    def send_json_and_binary(
+        self,
+        payload: dict[str, Any],
+        binary: bytes,
+    ) -> None:
+        # 音声metadataと直後のbinary messageを他の送信から分離する。
+        text = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        with self._send_lock:
+            if self._closed:
+                return
+            self._send_frame_unlocked(opcode=0x1, payload=text)
+            self._send_frame_unlocked(opcode=0x2, payload=binary)
+
     def send_text(self, text: str) -> None:
         # エンコード
         self._send_frame(opcode=0x1, payload=text.encode("utf-8"))
@@ -588,6 +601,36 @@ class EventStreamRegistry:
             return False
 
         # 結果
+        return True
+
+    def send_to_client_with_binary(
+        self,
+        client_id: str,
+        payload: dict[str, Any],
+        binary: bytes,
+    ) -> bool:
+        # スナップショット
+        event_type = payload.get("type")
+        with self._lock:
+            target_session = None
+            for session in self._sessions.values():
+                if session.get("client_id") != client_id:
+                    continue
+                if event_type not in session.get("event_subscriptions", []):
+                    continue
+                target_session = session
+
+        # 空
+        if target_session is None:
+            return False
+
+        # metadataとbinaryを一つの送信単位として配送する。
+        websocket = target_session["websocket"]
+        try:
+            websocket.send_json_and_binary(payload, binary)
+        except OSError:
+            self.remove_connection(target_session["session_id"])
+            return False
         return True
 
     def send_to_subscribers(

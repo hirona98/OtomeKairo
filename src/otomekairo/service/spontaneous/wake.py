@@ -25,35 +25,33 @@ class ServiceSpontaneousWakeMixin:
         client_context: dict[str, Any],
         interaction_context: InteractionContext | None,
         pipeline: dict[str, Any],
-    ) -> None:
+    ) -> dict[str, Any] | None:
         if trigger_kind not in {"wake", "background_thinking"}:
-            return
+            return None
         speech_payload = pipeline.get("speech_payload")
         if not isinstance(speech_payload, dict):
             debug_log("Wake", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_speech", level="DEBUG")
-            return
+            return None
         if interaction_context is None:
             debug_log("Wake", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_interaction", level="DEBUG")
-            return
+            return None
         target_client_id = self._wake_assistant_message_target_client_id(client_context)
         if target_client_id is None:
             debug_log("Wake", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_client", level="DEBUG")
-            return
+            return None
 
-        event = {
-            "event_id": self._next_stream_event_id(),
-            "type": "assistant_message",
-            "data": {
+        sent, audio_delivery = self._emit_assistant_message_with_audio(
+            target_client_id=target_client_id,
+            event_data={
                 "cycle_id": cycle_id,
                 "source_kind": trigger_kind,
                 "trigger_kind": trigger_kind,
                 "interaction_ref": interaction_context.interaction_ref,
                 "recipient_person_refs": list(interaction_context.participant_refs),
                 "system_text": f"[{trigger_kind}]",
-                "message": speech_payload["speech_text"],
             },
-        }
-        sent = self._event_stream_registry.send_to_client(target_client_id, event)
+            speech_text=speech_payload["speech_text"],
+        )
         debug_log(
             "Wake",
             (
@@ -62,6 +60,7 @@ class ServiceSpontaneousWakeMixin:
             ),
             level="DEBUG",
         )
+        return audio_delivery
 
     def _wake_assistant_message_target_client_id(self, client_context: dict[str, Any]) -> str | None:
         client_id = self._client_context_text(client_context.get("client_id"), limit=128)
@@ -274,13 +273,18 @@ class ServiceSpontaneousWakeMixin:
                     selected_candidate=selected_candidate,
                     client_context=client_context,
                 )
-                self._emit_wake_assistant_message_event(
+                audio_delivery = self._emit_wake_assistant_message_event(
                     cycle_id=cycle_id,
                     trigger_kind=trigger_kind,
                     client_context=client_context,
                     interaction_context=interaction_context,
                     pipeline=pipeline,
                 )
+                if (
+                    isinstance(audio_delivery, dict)
+                    and isinstance(response.get("speech"), dict)
+                ):
+                    response["speech"]["audio_delivery"] = audio_delivery
                 debug_log(
                     "Wake",
                     f"{self._short_cycle_id(cycle_id)} done result={response['result_kind']}",

@@ -53,7 +53,12 @@ client_context は任意の object である。
     "recipient_person_refs": ["person:external-123"],
     "result_kind": "speech",
     "speech": {
-      "text": "こんにちは"
+      "text": "こんにちは",
+      "audio_delivery": {
+        "delivery_id": "tts_delivery:...",
+        "status": "queued",
+        "error_code": null
+      }
     },
     "capability_request": null,
     "autonomous_run": null
@@ -62,6 +67,8 @@ client_context は任意の object である。
 
 result_kind は speech、capability_request、noop、internal_failure のいずれかである。
 発話がない結果では speech は null になる。
+speech.audio_delivery はTTSの受付結果であり、queued、disabled、failedのいずれかを返す。
+queuedの音声はevent streamのassistant_audio metadataと直後のbinary WAVで配送される。
 
 cURLの例
 --------

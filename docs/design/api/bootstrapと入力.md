@@ -42,7 +42,7 @@ response:
   "data": {
     "server_id": "server:...",
     "server_display_name": "OtomeKairo",
-    "api_version": "0.3.0",
+    "api_version": "0.4.0",
     "bootstrap_state": "unregistered",
     "console_access_token_issued": false
   }
@@ -174,7 +174,12 @@ response:
     "recipient_person_refs": ["person:external-123"],
     "result_kind": "speech",
     "speech": {
-      "text": "やわらかく穏やかに受け取ったよ。こんにちは"
+      "text": "やわらかく穏やかに受け取ったよ。こんにちは",
+      "audio_delivery": {
+        "delivery_id": "tts_delivery:...",
+        "status": "queued",
+        "error_code": null
+      }
     },
     "capability_request": null,
     "autonomous_run": null
@@ -190,6 +195,11 @@ response:
 - `noop`
 - `internal_failure`
 
+`speech.audio_delivery` は発話本文とは独立した音声配送の受付結果である。
+shape と配送規則は [event_stream.md](event_stream.md) の `assistant_audio` を正とする。
+TTS が無効でも `result_kind=speech` と `speech.text` は成功し、`audio_delivery.status=disabled` を返す。
+TTS の配送先が接続されていない場合と queue が満杯の場合も発話本文は成功し、`audio_delivery.status=failed` を返す。
+
 内部で `decision.kind=autonomous_run` が選ばれた場合、server は response の `result_kind` として `autonomous_run` を返さない。
 会話入力で即時承諾発話を返す場合は `result_kind=speech` とし、`speech` と `autonomous_run` 要約を返す。
 承諾発話がなく capability request を開始した場合は `result_kind=capability_request` とする。
@@ -202,7 +212,12 @@ response:
     "cycle_id": "cycle:...",
     "result_kind": "speech",
     "speech": {
-      "text": "うん、1分後に声をかけるね。"
+      "text": "うん、1分後に声をかけるね。",
+      "audio_delivery": {
+        "delivery_id": "tts_delivery:...",
+        "status": "queued",
+        "error_code": null
+      }
     },
     "capability_request": null,
     "autonomous_run": {

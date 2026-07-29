@@ -1073,6 +1073,7 @@ class AudioRuntime:
                     ],
                 },
             },
+            defer_audio_delivery=True,
         )
         if item.source == "physical_microphone":
             with self._lock:
@@ -1086,19 +1087,17 @@ class AudioRuntime:
                     ).isoformat()
         speech = response.get("speech")
         if isinstance(speech, dict) and isinstance(speech.get("text"), str):
-            self._service._event_stream_registry.send_to_client(
-                target_client_id,
-                {
-                    "event_id": self._service._next_stream_event_id(),
-                    "type": "assistant_message",
-                    "data": {
-                        "source_kind": "conversation",
-                        "interaction_ref": interaction_ref,
-                        "recipient_person_refs": [person_ref],
-                        "message": speech["text"],
-                    },
+            _, audio_delivery = self._service._emit_assistant_message_with_audio(
+                target_client_id=target_client_id,
+                event_data={
+                    "cycle_id": response.get("cycle_id"),
+                    "source_kind": "conversation",
+                    "interaction_ref": interaction_ref,
+                    "recipient_person_refs": [person_ref],
                 },
+                speech_text=speech["text"],
             )
+            speech["audio_delivery"] = audio_delivery
         with self._lock:
             if self._item_is_current_locked(item):
                 self._last_utterance_result = {

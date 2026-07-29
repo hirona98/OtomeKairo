@@ -1911,18 +1911,6 @@ class ServiceAutonomousRunMixin:
                 level="DEBUG",
             )
             return
-        event = {
-            "event_id": self._next_stream_event_id(),
-            "type": "assistant_message",
-            "data": {
-                "source_kind": "autonomous_run",
-                "run_id": run.get("run_id"),
-                "interaction_ref": interaction_ref,
-                "recipient_person_refs": participant_refs,
-                "system_text": "[autonomous_run]",
-                "message": speech_payload["speech_text"],
-            },
-        }
         if not self._event_stream_registry.client_accepts_event(target_client_id, "assistant_message"):
             debug_log(
                 "AutonomousRun",
@@ -1930,7 +1918,18 @@ class ServiceAutonomousRunMixin:
                 level="DEBUG",
             )
             return
-        sent = self._event_stream_registry.send_to_client(target_client_id, event)
+        sent, _ = self._emit_assistant_message_with_audio(
+            target_client_id=target_client_id,
+            event_data={
+                "cycle_id": self._autonomous_run_event_cycle_id(run),
+                "source_kind": "autonomous_run",
+                "run_id": run.get("run_id"),
+                "interaction_ref": interaction_ref,
+                "recipient_person_refs": participant_refs,
+                "system_text": "[autonomous_run]",
+            },
+            speech_text=speech_payload["speech_text"],
+        )
         debug_log(
             "AutonomousRun",
             (

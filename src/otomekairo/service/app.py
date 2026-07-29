@@ -21,13 +21,16 @@ from otomekairo.service.config.mixin import ServiceConfigMixin
 from otomekairo.service.docs import ServiceDocsMixin
 from otomekairo.service.memory import ServiceMemoryMixin
 from otomekairo.service.input.mixin import ServiceInputMixin
+from otomekairo.service.speech_output import ServiceSpeechOutputMixin
 from otomekairo.service.spontaneous.mixin import ServiceSpontaneousMixin
 from otomekairo.service.visual_daily import ServiceVisualDailyMixin
 from otomekairo.store.file_store import FileStore
+from otomekairo.tts import TtsRuntime
 
 
 # サービス
 class OtomeKairoService(
+    ServiceSpeechOutputMixin,
     ServiceAudioMixin,
     ServiceCapabilityMixin,
     ServiceDocsMixin,
@@ -78,6 +81,7 @@ class OtomeKairoService(
             "current_digest_id": None,
         }
         self._event_stream_registry = EventStreamRegistry()
+        self._tts_runtime = TtsRuntime(self)
         self._capability_request_lock = threading.RLock()
         self._pending_capability_requests: dict[str, dict[str, Any]] = {}
         self._capability_runtime_state: dict[str, dict[str, Any]] = {}

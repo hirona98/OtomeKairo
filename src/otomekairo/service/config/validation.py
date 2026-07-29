@@ -666,6 +666,18 @@ class ServiceConfigValidationMixin:
                     "invalid_aivis_cloud_config",
                     f"aivis_cloud_config.{field_name} is required.",
                 )
+        if definition["output_format"] != "wav":
+            raise ServiceError(
+                400,
+                "invalid_aivis_cloud_config",
+                "aivis_cloud_config.output_format must be wav.",
+            )
+        if definition.get("output_bitrate") != 0:
+            raise ServiceError(
+                400,
+                "invalid_aivis_cloud_config",
+                "aivis_cloud_config.output_bitrate must be 0 for WAV.",
+            )
         if not isinstance(definition.get("use_ssml"), bool):
             raise ServiceError(400, "invalid_aivis_cloud_config", "aivis_cloud_config.use_ssml must be a boolean.")
         self._validate_integer_range(definition, "style_id", "aivis_cloud_config", minimum=0)

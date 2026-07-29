@@ -5,7 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from otomekairo.defaults import build_default_console_client_settings
+from otomekairo.defaults import API_VERSION, build_default_console_client_settings
 from otomekairo.service.common import ServiceError
 from otomekairo.service.config.constants import (
     MCP_CONNECTOR_KINDS,
@@ -31,7 +31,8 @@ class ServiceConfigResourcesMixin:
         return {
             "server_id": state["server_id"],
             "server_display_name": state["server_display_name"],
-            "api_version": state["api_version"],
+            # API互換版は永続設定ではなく、実行中コードの契約版を返す。
+            "api_version": API_VERSION,
             "bootstrap_state": self._bootstrap_state(state),
             "console_access_token_issued": state["console_access_token"] is not None,
         }

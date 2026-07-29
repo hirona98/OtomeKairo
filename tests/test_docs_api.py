@@ -21,6 +21,14 @@ class DummyService(ServiceDocsMixin, ServiceConfigMixin):
 
 
 class DocsApiTests(unittest.TestCase):
+    def test_server_identity_uses_running_code_api_version(self) -> None:
+        service = DummyService()
+        service.store.state["api_version"] = "0.3.0"
+
+        identity = service.read_server_identity()
+
+        self.assertEqual(identity["api_version"], "0.4.0")
+
     def test_docs_requires_token(self) -> None:
         service = DummyService()
 
