@@ -1219,7 +1219,13 @@ function resultText(result) {
   if (result?.result_kind === "noop") {
     return { kind: "system", text: "応答はありません。" };
   }
-  return { kind: "system", text: "処理が完了しました。" };
+  if (result?.result_kind === "internal_failure") {
+    return {
+      kind: "system",
+      text: `応答の生成に失敗しました。サーバーログを確認してください。cycle: ${result.cycle_id || "不明"}`,
+    };
+  }
+  return { kind: "system", text: "予期しない処理結果を受信しました。" };
 }
 
 async function sendMessage(event) {
@@ -1245,7 +1251,7 @@ async function sendMessage(event) {
     showNotice("人物参照は person:<key>、呼ばれ方と会話参照は空でない値を指定してください。", true);
     return;
   }
-  saveConversationIdentity();
+  saveConversationReferences();
   addMessage("person", text, images);
   input.value = "";
   clearAttachment();
