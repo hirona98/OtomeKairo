@@ -175,8 +175,7 @@ function initializeClientId() {
 }
 
 function loadConversationIdentity() {
-  const generatedId = idSuffix();
-  const personRef = localStorage.getItem("otomekairo.person_ref") || `person:web:${generatedId}`;
+  const personRef = localStorage.getItem("otomekairo.person_ref") || `person:web:${idSuffix()}`;
   const interactionRef = localStorage.getItem("otomekairo.interaction_ref")
     || `interaction:web:direct:${personRef.slice("person:".length)}`;
   state.conversationPersonRef = personRef;
