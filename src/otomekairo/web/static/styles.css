@@ -504,12 +504,6 @@ p {
   background: #ffffff;
 }
 
-.conversation-identity {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(120px, 0.6fr) minmax(220px, 1.2fr);
-  gap: var(--space-3);
-}
-
 .web-microphone-controls {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) auto auto minmax(80px, auto);
@@ -1244,10 +1238,6 @@ input[type="checkbox"]:disabled {
 
   .selector-row select {
     flex-basis: 100%;
-  }
-
-  .conversation-identity {
-    grid-template-columns: 1fr;
   }
 
   .web-microphone-controls {

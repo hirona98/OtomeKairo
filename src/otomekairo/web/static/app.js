@@ -1,6 +1,10 @@
 const state = {
   identity: null,
   clientId: "",
+  conversationPersonRef: "",
+  conversationInteractionRef: "",
+  conversationDisplayName: "",
+  selectedPersonaDisplayName: "",
   editor: null,
   avatarSpeech: null,
   consoleClient: null,
@@ -175,42 +179,19 @@ function loadConversationIdentity() {
   const personRef = localStorage.getItem("otomekairo.person_ref") || `person:web:${generatedId}`;
   const interactionRef = localStorage.getItem("otomekairo.interaction_ref")
     || `interaction:web:direct:${personRef.slice("person:".length)}`;
-  element("conversation-person-ref").value = personRef;
-  element("conversation-display-name").value = "";
-  element("conversation-interaction-ref").value = interactionRef;
-  saveConversationReferences();
+  state.conversationPersonRef = personRef;
+  state.conversationInteractionRef = interactionRef;
+  localStorage.setItem("otomekairo.person_ref", personRef);
+  localStorage.setItem("otomekairo.interaction_ref", interactionRef);
 }
 
-function saveConversationReferences() {
-  localStorage.setItem("otomekairo.person_ref", element("conversation-person-ref").value.trim());
-  localStorage.setItem("otomekairo.interaction_ref", element("conversation-interaction-ref").value.trim());
-}
-
-async function saveConversationDisplayName() {
-  const displayName = element("conversation-display-name").value.trim();
-  try {
-    const config = await apiRequest("/ui/api/config/current", {
-      method: "PATCH",
-      body: JSON.stringify({ conversation_display_name: displayName }),
-    });
-    element("conversation-display-name").value =
-      config.settings_snapshot.conversation_display_name || "";
-    if (state.editor) {
-      state.editor.current.conversation_display_name =
-        config.settings_snapshot.conversation_display_name || "";
-      element("settings-conversation-display-name").value =
-        state.editor.current.conversation_display_name;
-    }
-  } catch (error) {
-    showNotice(error.message, true);
-  }
-}
-
-async function loadConversationDisplayName() {
+async function loadConversationConfig() {
   try {
     const config = await apiRequest("/ui/api/config");
-    element("conversation-display-name").value =
+    state.conversationDisplayName =
       config.settings_snapshot.conversation_display_name || "";
+    state.selectedPersonaDisplayName =
+      config.selected_persona?.display_name || "";
   } catch (error) {
     showNotice(error.message, true);
   }
@@ -447,7 +428,7 @@ function renderDashboardOverview() {
   if (state.identity) {
     element("server-summary").textContent = [
       state.identity.server_display_name || state.identity.server_id,
-      snapshot.settings_snapshot?.selected_persona_id,
+      state.selectedPersonaDisplayName,
     ].filter(Boolean).join(" · ");
   }
 }
@@ -1239,19 +1220,13 @@ async function sendMessage(event) {
     return;
   }
   const images = state.attachment ? [state.attachment.data] : [];
-  const personRef = element("conversation-person-ref").value.trim();
-  const displayName = element("conversation-display-name").value.trim();
-  const interactionRef = element("conversation-interaction-ref").value.trim();
-  if (
-    !personRef.startsWith("person:")
-    || personRef.length <= "person:".length
-    || !displayName
-    || !interactionRef
-  ) {
-    showNotice("人物参照は person:<key>、呼ばれ方と会話参照は空でない値を指定してください。", true);
+  const personRef = state.conversationPersonRef;
+  const displayName = state.conversationDisplayName;
+  const interactionRef = state.conversationInteractionRef;
+  if (!displayName) {
+    showNotice("設定画面の「会話入力」で呼ばれ方を設定してください。", true);
     return;
   }
-  saveConversationReferences();
   addMessage("person", text, images);
   input.value = "";
   clearAttachment();
@@ -1420,8 +1395,14 @@ async function saveSettings({ closeAfterSave = false } = {}) {
     state.camera = clone(camera);
     state.mcp = clone(mcp);
     state.consoleClient = consoleClient ? clone(consoleClient) : null;
-    element("conversation-display-name").value =
+    state.conversationDisplayName =
       state.editor.current.conversation_display_name || "";
+    const selectedPersona = arrayById(
+      state.editor.personas,
+      "persona_id",
+      state.editor.current.selected_persona_id,
+    );
+    state.selectedPersonaDisplayName = selectedPersona?.display_name || "";
     renderSettings();
     await loadStatus({ silent: true });
     await refreshDashboard({ silent: true });
@@ -1938,7 +1919,6 @@ function renderCurrent() {
   const wakePolicy = state.editor.current.wake_policy || {};
   const observations = Array.isArray(wakePolicy.observations) ? wakePolicy.observations : [];
   element("settings-conversation-display-name").value = displayName;
-  element("conversation-display-name").value = displayName;
   element("current-thinking-level").value = state.editor.current.thinking_speech_level ?? 5;
   element("current-wake-enabled").checked = wakePolicy.mode === "interval";
   element("current-wake-interval").value = wakePolicy.interval_seconds;
@@ -2542,9 +2522,6 @@ function bindEvents() {
   });
   element("image-input").addEventListener("change", (event) => attachFile(event.target.files[0]));
   element("remove-attachment").addEventListener("click", clearAttachment);
-  element("conversation-person-ref").addEventListener("change", saveConversationReferences);
-  element("conversation-interaction-ref").addEventListener("change", saveConversationReferences);
-  element("conversation-display-name").addEventListener("change", saveConversationDisplayName);
   element("web-microphone-device").addEventListener("change", () => {
     const deviceId = element("web-microphone-device").value;
     if (deviceId) {
@@ -2693,7 +2670,7 @@ async function startApp() {
   bindEvents();
   loadConversationIdentity();
   await loadIdentity();
-  await loadConversationDisplayName();
+  await loadConversationConfig();
   await loadStatus({ silent: true });
   await refreshDashboard({ silent: true });
   await refreshWebMicrophoneDevices({ requestPermission: false });
