@@ -20,7 +20,8 @@ API 仕様は次のように分ける。
   - `events/stream`
   - 接続 client の capability binding 提示
 - [audio_stream.md](audio_stream.md)
-  - microphone connector と Web microphone の PCM stream
+  - microphone connector、CocoroConsole、Web microphone の PCM stream
+  - Web 入力 session と実効入力状態
   - input device catalog
   - 話者登録と話者管理
 - [状態と設定.md](状態と設定.md)
@@ -54,8 +55,9 @@ OtomeKairo設定の `conversation_display_name` を `interaction_context` とし
 モデル指定値とVRM表示設定はWeb UIへ現在値を無効表示し、表示設定とモーション設定はWeb UIへ編集欄を設けない。
 VRM、表示、モーションはCocoroConsoleから端末設定APIへ保存する。
 最後に接続した端末が存在しない場合、端末依存の設定欄を無効にする。
-ブラウザ UI は `/ui/api/config/avatar-speech/editor-state` を通じて、アバターごとの STT / TTS と物理マイク設定を編集する。
-ブラウザ UI は `/ui/api/audio/stream` へ取得音声だけを送り、VAD、STT、音声起動ワード判定、話者識別を実行しない。
+ブラウザ UI は `/ui/api/config/avatar-speech/editor-state` を通じて、アバターごとの STT / TTS と通常のマイク入力元を編集する。
+ブラウザ UI は入力欄でローカルマイクまたはWebマイクを選択し、Webマイク選択時だけ `/ui/api/audio/stream` へ取得音声を送る。
+ブラウザ UI はVAD、STT、音声起動ワード判定、話者識別を実行しない。
 ブラウザ UI は `/ui/api/audio/...` を通じて input device 確認と話者管理を行う。
 ブラウザ UI は TTS providerへ接続せず、OtomeKairoから受信した`assistant_audio`のWAVをブラウザ音声出力で直接再生する。
 ブラウザの直接会話入力はOtomeKairoの `conversation_display_name` を

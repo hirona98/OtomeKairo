@@ -52,6 +52,26 @@ class ServiceAudioMixin:
         self._require_token(token)
         return self._audio_runtime.list_input_devices()
 
+    def get_audio_input_state(self, token: str | None) -> dict[str, Any]:
+        self._require_token(token)
+        return self._audio_runtime.input_state()
+
+    def start_web_audio_input_session(
+        self,
+        token: str | None,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        self._require_token(token)
+        return self._audio_runtime.start_web_input_session(payload)
+
+    def stop_web_audio_input_session(
+        self,
+        token: str | None,
+        input_session_id: str,
+    ) -> dict[str, Any]:
+        self._require_token(token)
+        return self._audio_runtime.stop_web_input_session(input_session_id)
+
     def list_audio_speakers(self, token: str | None) -> dict[str, Any]:
         self._require_token(token)
         return self._audio_runtime.list_speakers()

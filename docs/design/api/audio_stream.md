@@ -2,7 +2,7 @@
 
 ## この文書の境界
 
-この文書は、音声入力 WebSocket、話者管理 HTTP API、音声 input device API の path、method、認証、request / response、message、error code を正本にする。
+この文書は、音声入力 WebSocket、Web 入力 session、話者管理 HTTP API、音声 input device API の path、method、認証、request / response、message、error code を正本にする。
 入力リース、VAD、STT、話者識別、話者登録、配送の意味規則は [../audio/音声入力と話者識別.md](../audio/音声入力と話者識別.md) を正とする。
 アバター音声設定 bundle は [状態と設定.md](状態と設定.md)、表示用 event は [event_stream.md](event_stream.md)、runtime inspection は [列挙とinspection.md](列挙とinspection.md) を正とする。
 
@@ -12,7 +12,13 @@
 
 - 認証: `Authorization: Bearer <console_access_token>`
 - 利用主体: microphone connector
-- 役割: connector control と PCM binary frame の双方向 stream
+- 役割: `local_microphone` の connector control と PCM binary frame の双方向 stream
+
+### `GET /api/audio/console-stream`
+
+- 認証: `Authorization: Bearer <console_access_token>`
+- 利用主体: CocoroConsole
+- 役割: `console_microphone` の control と PCM binary frame の双方向 stream
 
 ### `GET /ui/api/audio/stream`
 
@@ -40,9 +46,10 @@ client -> server:
 ```json
 {
   "type": "audio_start",
-  "protocol_version": "1",
+  "protocol_version": "2",
   "client_id": "microphone-connector-main",
-  "input_source": "physical_microphone",
+  "input_source": "local_microphone",
+  "input_session_id": null,
   "format": {
     "sample_rate": 16000,
     "channels": 1,
@@ -60,8 +67,10 @@ client -> server:
 }
 ```
 
-Web UI は `client_id` に対話 input と event stream で使用する session-scoped client ID を指定する。
-`input_source` は connector endpoint では `physical_microphone`、Web endpoint では `web_microphone` と一致させる。
+`input_source` は local connector endpoint では `local_microphone`、CocoroConsole endpoint では `console_microphone`、Web endpoint では `web_microphone` と一致させる。
+local connector と CocoroConsole は `input_session_id=null` を送る。
+Web UI は `client_id` に対話 input と event stream で使用する session-scoped client ID、`input_session_id` に開始済み Web 入力 session の ID を指定する。
+CocoroConsole の `device` は `device_id / name` を持つ。
 Web UI は `capture_settings` に次を追加する。
 
 ```json
@@ -83,9 +92,9 @@ server -> client:
 ```json
 {
   "type": "audio_started",
-  "protocol_version": "1",
+  "protocol_version": "2",
   "lease_generation": 12,
-  "input_source": "physical_microphone",
+  "input_source": "local_microphone",
   "mode": "normal",
   "paused_reason": null,
   "heartbeat_interval_seconds": 5,
@@ -96,8 +105,85 @@ server -> client:
 `audio_started` 前の binary message は protocol error とする。
 `paused_reason` は開始直後から送信可能な場合に `null`、開始時点で pause 中の場合に pause reason を持つ。
 client は `paused_reason=null` の `audio_started` または `audio_resumed` を受信した後だけ PCM を送る。
-2 件目の Web input は `audio_input_busy` とする。
-Web input が physical input を横取りする場合は、physical client へ `audio_paused` を送ってから Web client へ `audio_started` を送る。
+実効入力元と異なる source の `audio_start` は `audio_source_not_selected` とする。
+2 件目の Web 入力 session は `audio_input_busy` とする。
+通常入力と Web 入力 session の切替では旧 client へ `audio_paused` を送って generation を失効させてから、新しい source へ `audio_started` を送る。
+
+## Web 入力 session API
+
+### `POST /ui/api/audio/input-sessions`
+
+- 認証: server が保持する `console_access_token`
+- 利用主体: 同一 origin の Web UI
+- 役割: 現在のタブだけで有効な入力元と応答先を開始する
+- DBへ保存しない
+
+request:
+
+```json
+{
+  "owner_client_id": "web-ui:...",
+  "input_source": "local_microphone"
+}
+```
+
+`input_source` は `local_microphone / web_microphone` のいずれかにする。
+`owner_client_id` は接続中の event stream client と一致させる。
+
+response:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "input_session_id": "web_audio_input:...",
+    "owner_client_id": "web-ui:...",
+    "input_source": "local_microphone"
+  }
+}
+```
+
+### `DELETE /ui/api/audio/input-sessions/{input_session_id}`
+
+- 役割: Web 入力 session を終了して通常入力へ戻す
+- request body は不要とする
+
+owner の event stream 切断、Web audio stream 切断、heartbeat timeout でも同じ終了処理を実行する。
+
+## 実効入力状態 API
+
+### `GET /api/audio/input-state`
+
+- 認証: 必要
+- 利用主体: microphone connector、CocoroConsole
+- 役割: DB上の通常入力元とWeb入力sessionを解決した現在の実効入力元を返す
+
+response:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "configured_source": "console_microphone",
+    "effective_source": "local_microphone",
+    "local_input_device": {
+      "host_api": "ALSA",
+      "name": "USB Audio Device"
+    },
+    "console": {
+      "client_id": "console-main",
+      "input_device": {
+        "device_id": "{endpoint-id}",
+        "name": "Microphone"
+      }
+    }
+  }
+}
+```
+
+このresponseはprocess-localな実効値を含み、設定の正本として保存しない。
+
+## 音声stream data/control
 
 ### PCM binary message
 
@@ -154,7 +240,7 @@ server -> client:
 `audio_paused` 後は `audio_resumed` または新しい `audio_started` まで binary message を送らない。
 `reason` は次のいずれかにする。
 
-- `preempted_by_web`
+- `source_switched`
 - `queue_full`
 - `stt_disabled`
 - `stt_configuration_error`
@@ -185,7 +271,7 @@ server -> client:
 ```
 
 stop、disconnect、timeout では構築中発話を破棄する。
-Web input の stop 後、physical connector は新しい `audio_start` を送る。
+入力停止後は、実効入力元のproviderが新しい `audio_start` を送る。
 
 ### device catalog
 
@@ -386,7 +472,9 @@ request body は不要とする。
 | `403` | `invalid_audio_origin` | Web audio stream の Origin と Host が一致しない |
 | `404` | `speaker_not_found` | 対象人物が存在しない |
 | `404` | `speaker_enrollment_not_found` | 対象登録 session が存在しない |
+| `404` | `audio_input_session_not_found` | 対象Web入力sessionが存在しない |
 | `409` | `audio_input_busy` | 別の Web input がリースを保持中 |
+| `409` | `audio_source_not_selected` | 接続sourceが現在の実効入力元ではない |
 | `409` | `audio_lease_revoked` | 接続のリース generation が失効済み |
 | `409` | `speaker_enrollment_busy` | 別の登録 session が進行中 |
 | `409` | `speaker_enrollment_owner_mismatch` | owner 以外が中止を要求 |

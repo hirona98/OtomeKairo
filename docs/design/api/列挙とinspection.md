@@ -126,22 +126,27 @@ response:
         "available": true,
         "unavailable_reason": null,
         "model_ids": {
-          "vad": "silero-vad-v5",
-          "speaker": "wespeaker-resnet34-voxceleb-v1"
+          "silero_vad": "silero-vad-v5",
+          "wespeaker": "wespeaker-resnet34-voxceleb-v1"
+        },
+        "configured_source": "local_microphone",
+        "effective_source": "local_microphone",
+        "response_client_id": "console-main",
+        "selected_device": {
+          "host_api": "ALSA",
+          "name": "USB Audio Device"
         },
         "connector": {
           "client_id": "microphone-connector-main",
-          "connected": true,
-          "selected_device": {
-            "host_api": "ALSA",
-            "name": "USB Audio Device"
-          }
+          "connected": true
         },
-        "active_source": "physical_microphone",
+        "active_source": "local_microphone",
         "lease_generation": 12,
+        "last_heartbeat_at": "2026-03-31T09:00:00+09:00",
+        "settings_generation": 4,
         "mode": "normal",
         "paused_reason": null,
-        "physical_activation": {
+        "normal_activation": {
           "state": "waiting",
           "active_until": null
         },

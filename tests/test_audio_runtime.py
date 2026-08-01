@@ -80,6 +80,14 @@ class AudioRuntimeControlTests(unittest.TestCase):
                     },
                 )
 
+                input_session = service.start_web_audio_input_session(
+                    "token",
+                    {
+                        "owner_client_id": "web-audio-test",
+                        "input_source": "web_microphone",
+                    },
+                )
+
                 audio_socket = FakeWebSocket()
                 audio_session_id = service.register_audio_stream_connection(
                     audio_socket,
@@ -91,9 +99,12 @@ class AudioRuntimeControlTests(unittest.TestCase):
                     json.dumps(
                         {
                             "type": "audio_start",
-                            "protocol_version": "1",
+                            "protocol_version": "2",
                             "client_id": "web-audio-test",
                             "input_source": "web_microphone",
+                            "input_session_id": input_session[
+                                "input_session_id"
+                            ],
                             "format": AUDIO_FORMAT,
                             "device": None,
                             "capture_settings": {

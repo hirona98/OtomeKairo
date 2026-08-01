@@ -374,15 +374,25 @@ class ServiceConfigValidationMixin:
         if not isinstance(definition, dict):
             return definition
         normalized = {**definition}
-        response_client_id = normalized.get("response_client_id")
-        if isinstance(response_client_id, str):
-            normalized["response_client_id"] = response_client_id.strip()
-        input_device = normalized.get("input_device")
+        input_device = normalized.get("local_input_device")
         if isinstance(input_device, dict):
-            normalized["input_device"] = {
+            normalized["local_input_device"] = {
                 key: value.strip() if isinstance(value, str) else value
                 for key, value in input_device.items()
             }
+        console = normalized.get("console")
+        if isinstance(console, dict):
+            normalized_console = {**console}
+            client_id = normalized_console.get("client_id")
+            if isinstance(client_id, str):
+                normalized_console["client_id"] = client_id.strip()
+            console_device = normalized_console.get("input_device")
+            if isinstance(console_device, dict):
+                normalized_console["input_device"] = {
+                    key: value.strip() if isinstance(value, str) else value
+                    for key, value in console_device.items()
+                }
+            normalized["console"] = normalized_console
         return normalized
 
     def _validate_avatar_definition(self, avatar_id: str, definition: dict[str, Any]) -> None:
@@ -407,32 +417,33 @@ class ServiceConfigValidationMixin:
         self._validate_exact_fields(
             definition,
             {
-                "physical_input_enabled",
-                "input_device",
-                "response_client_id",
+                "input_source",
+                "local_input_device",
+                "console",
                 "vad_probability_threshold",
                 "speaker_recognition_threshold",
             },
             "microphone_settings",
         )
-        if not isinstance(definition.get("physical_input_enabled"), bool):
+        input_source = definition.get("input_source")
+        if input_source not in {"local_microphone", "console_microphone"}:
             raise ServiceError(
                 400,
                 "invalid_microphone_settings",
-                "microphone_settings.physical_input_enabled must be a boolean.",
+                "microphone_settings.input_source is unsupported.",
             )
-        input_device = definition.get("input_device")
+        input_device = definition.get("local_input_device")
         if input_device is not None:
             if not isinstance(input_device, dict):
                 raise ServiceError(
                     400,
                     "invalid_microphone_settings",
-                    "microphone_settings.input_device must be null or an object.",
+                    "microphone_settings.local_input_device must be null or an object.",
                 )
             self._validate_exact_fields(
                 input_device,
                 {"host_api", "name"},
-                "microphone_settings.input_device",
+                "microphone_settings.local_input_device",
             )
             for field_name in ("host_api", "name"):
                 value = input_device.get(field_name)
@@ -440,17 +451,37 @@ class ServiceConfigValidationMixin:
                     raise ServiceError(
                         400,
                         "invalid_microphone_settings",
-                        f"microphone_settings.input_device.{field_name} must be a trimmed non-empty string.",
+                        f"microphone_settings.local_input_device.{field_name} must be a trimmed non-empty string.",
                     )
-        response_client_id = definition.get("response_client_id")
-        if (
-            not isinstance(response_client_id, str)
-            or response_client_id != response_client_id.strip()
-        ):
+        console = definition.get("console")
+        if console is not None:
+            if not isinstance(console, dict):
+                raise ServiceError(400, "invalid_microphone_settings", "microphone_settings.console must be null or an object.")
+            self._validate_exact_fields(
+                console,
+                {"client_id", "input_device"},
+                "microphone_settings.console",
+            )
+            client_id = console.get("client_id")
+            if not isinstance(client_id, str) or not client_id or client_id != client_id.strip():
+                raise ServiceError(400, "invalid_microphone_settings", "microphone_settings.console.client_id must be a trimmed non-empty string.")
+            console_device = console.get("input_device")
+            if not isinstance(console_device, dict):
+                raise ServiceError(400, "invalid_microphone_settings", "microphone_settings.console.input_device must be an object.")
+            self._validate_exact_fields(
+                console_device,
+                {"device_id", "name"},
+                "microphone_settings.console.input_device",
+            )
+            for field_name in ("device_id", "name"):
+                value = console_device.get(field_name)
+                if not isinstance(value, str) or not value or value != value.strip():
+                    raise ServiceError(400, "invalid_microphone_settings", f"microphone_settings.console.input_device.{field_name} must be a trimmed non-empty string.")
+        if input_source == "console_microphone" and console is None:
             raise ServiceError(
                 400,
                 "invalid_microphone_settings",
-                "microphone_settings.response_client_id must be a trimmed string.",
+                "microphone_settings.console is required for console_microphone.",
             )
         for field_name in (
             "vad_probability_threshold",

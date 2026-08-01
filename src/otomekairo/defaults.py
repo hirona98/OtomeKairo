@@ -10,7 +10,7 @@ DEFAULT_PERSONA_ID = "persona:default"
 DEFAULT_MEMORY_SET_ID = "memory_set:default"
 DEFAULT_MODEL_PRESET_ID = "model_preset:default"
 DEFAULT_AVATAR_ID = "avatar:default"
-API_VERSION = "0.4.0"
+API_VERSION = "0.6.0"
 DEFAULT_THINKING_SPEECH_LEVEL = 5
 DEFAULT_WAKE_INTERVAL_SECONDS = 300
 DEFAULT_PROMPT_WINDOW_RECENT_TURN_LIMIT = 30
@@ -138,9 +138,9 @@ def build_default_state() -> dict:
         "thinking_speech_level": DEFAULT_THINKING_SPEECH_LEVEL,
         "conversation_display_name": "",
         "microphone_settings": {
-            "physical_input_enabled": True,
-            "input_device": None,
-            "response_client_id": "",
+            "input_source": "local_microphone",
+            "local_input_device": None,
+            "console": None,
             "vad_probability_threshold": 0.5,
             "speaker_recognition_threshold": 0.6,
         },

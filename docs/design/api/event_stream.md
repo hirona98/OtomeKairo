@@ -325,7 +325,7 @@ server -> client の代表例:
   "type": "conversation_input",
   "data": {
     "utterance_seq": 18,
-    "source_kind": "physical_microphone",
+    "source_kind": "local_microphone",
     "message": "おとめ、今日の予定を教えて",
     "interaction_ref": "interaction:voice:direct:550e8400-e29b-41d4-a716-446655440000",
     "speaker_ref": "person:voice:550e8400-e29b-41d4-a716-446655440000",
@@ -343,14 +343,36 @@ server -> client の代表例:
   "type": "audio_runtime_state",
   "data": {
     "available": true,
-    "active_source": "physical_microphone",
+    "unavailable_reason": null,
+    "model_ids": {
+      "silero_vad": "silero-vad-v5",
+      "wespeaker": "wespeaker-resnet34-voxceleb-v1"
+    },
+    "configured_source": "local_microphone",
+    "effective_source": "local_microphone",
+    "response_client_id": "console-main",
+    "selected_device": {
+      "host_api": "ALSA",
+      "name": "USB Audio Device"
+    },
+    "connector": {
+      "client_id": "microphone-connector-main",
+      "connected": true
+    },
+    "active_source": "local_microphone",
     "lease_generation": 12,
+    "last_heartbeat_at": "2026-03-31T09:00:00+09:00",
+    "settings_generation": 4,
     "mode": "normal",
     "paused_reason": null,
     "vad": {
       "speaking": false,
       "probability": 0.03,
       "dbfs": -42.1
+    },
+    "normal_activation": {
+      "state": "waiting",
+      "active_until": null
     },
     "queue": {
       "processing": null,

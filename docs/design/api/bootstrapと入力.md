@@ -24,7 +24,7 @@ response:
 
 | 値 | 意味 |
 |----|------|
-| `unregistered` | `console_access_token` が未発行であり、`register-first-console` が token を発行する |
+| `unregistered` | `console_access_token` が未発行であり、`acquire-console-access-token` が token を発行する |
 | `registered` | `console_access_token` は発行済みであり、通常 API は認証を要求する |
 
 `probe` は token 実値を返さない。
@@ -42,7 +42,7 @@ response:
   "data": {
     "server_id": "server:...",
     "server_display_name": "OtomeKairo",
-    "api_version": "0.4.0",
+    "api_version": "0.6.0",
     "bootstrap_state": "unregistered",
     "console_access_token_issued": false
   }
@@ -52,12 +52,12 @@ response:
 `server-identity` は接続先識別と bootstrap 状態だけを返す。
 `console_access_token_issued` は発行有無を示す boolean であり、token 実値は返さない。
 
-### `POST /api/bootstrap/register-first-console`
+### `POST /api/bootstrap/acquire-console-access-token`
 
 - 認証: 不要
-- 役割: 未発行状態の server に初回 console token を発行する
+- 役割: CocoroConsoleが通常APIで使用するtokenを取得する
 - request body: `{}` とする
-- 実行条件: `console_access_token` が未発行であること
+- 成功時HTTP status: `200`
 
 response:
 
@@ -70,17 +70,11 @@ response:
 }
 ```
 
-未発行状態では新しい token を発行し、発行済み状態では既存 token を返さない。
-発行済み状態では `409 first_console_already_registered` を返す。
-この endpoint は既存 token の確認、再表示、復旧には使わない。
+未発行状態では新しい token を発行し、発行済み状態では既存 token を返す。
+同時要求ではすべてのrequestへ同じ tokenを返す。
 CocoroConsoleは取得した token を `Connection.json` へ保存する。
-設定画面を開いている間に初回登録が完了した場合、ユーザーが token 欄を編集していなければ取得した token を保存値として維持する。
-
-主な失敗:
-
-| HTTP | `error.code` | 意味 |
-|------|--------------|------|
-| `409` | `first_console_already_registered` | 初回 console token は発行済み |
+保存tokenが未設定または不正な場合、CocoroConsoleは起動時にこのendpointからtokenを取得し直す。
+このendpointへ到達できるクライアントはtokenを取得できる。
 
 ### `POST /api/bootstrap/reissue-console-access-token`
 

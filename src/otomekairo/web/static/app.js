@@ -38,6 +38,8 @@ const state = {
     playbackTail: Promise.resolve(),
   },
   webAudio: {
+    inputSessionId: null,
+    inputSource: null,
     socket: null,
     stream: null,
     context: null,
@@ -786,9 +788,11 @@ function connectEventStream() {
       payload?.type === "conversation_input"
       && typeof payload.data?.message === "string"
     ) {
-      const sourceLabel = payload.data.source_kind === "web_microphone"
-        ? "Webマイク"
-        : "物理マイク";
+      const sourceLabel = {
+        web_microphone: "Webマイク",
+        console_microphone: "CocoroConsoleマイク",
+        local_microphone: "ローカルマイク",
+      }[payload.data.source_kind] || "音声入力";
       addMessage(
         "person",
         payload.data.message,
@@ -805,6 +809,9 @@ function connectEventStream() {
     state.assistantAudio.pendingMetadata = null;
     if (state.eventSocket === socket) {
       state.eventSocket = null;
+    }
+    if (state.webAudio.inputSessionId) {
+      stopWebMicrophone({ sendStop: false });
     }
     if (state.unloading) {
       return;
@@ -827,6 +834,15 @@ function setWebMicrophoneStatus(text, kind = "") {
 }
 
 function webMicrophoneHasLease() {
+  if (!state.webAudio.inputSessionId) {
+    return false;
+  }
+  if (state.webAudio.inputSource === "local_microphone") {
+    return (
+      state.audioRuntime?.active_source === "local_microphone"
+      && state.audioRuntime?.response_client_id === state.clientId
+    );
+  }
   return (
     state.webAudio.socket?.readyState === WebSocket.OPEN
     && Number.isInteger(state.webAudio.leaseGeneration)
@@ -834,10 +850,14 @@ function webMicrophoneHasLease() {
 }
 
 function renderWebMicrophoneControls() {
-  const running = Boolean(state.webAudio.socket);
+  const running = Boolean(state.webAudio.inputSessionId);
   const busy = running || state.webAudio.starting || state.webAudio.stopping;
-  element("web-microphone-device").disabled = busy;
-  element("refresh-web-microphones").disabled = busy;
+  const source = element("web-input-source").value;
+  const usesWebDevice = source === "web_microphone";
+  element("web-input-source").disabled = busy;
+  element("web-microphone-device-field").hidden = !usesWebDevice;
+  element("web-microphone-device").disabled = busy || !usesWebDevice;
+  element("refresh-web-microphones").disabled = busy || !usesWebDevice;
   const button = element("toggle-web-microphone");
   button.textContent = running ? "音声入力を停止" : "音声入力を開始";
   button.disabled = state.webAudio.starting || state.webAudio.stopping;
@@ -942,7 +962,10 @@ function handleWebAudioControl(socket, payload) {
   } else if (payload.type === "audio_paused") {
     state.webAudio.paused = true;
     setWebMicrophoneStatus(audioPauseLabel(payload.reason), "processing");
-    if (payload.reason === "settings_reloaded") {
+    if (
+      payload.reason === "settings_reloaded"
+      || payload.reason === "source_switched"
+    ) {
       stopWebMicrophone({ sendStop: false });
     }
   } else if (payload.type === "audio_resumed") {
@@ -961,15 +984,16 @@ function handleWebAudioControl(socket, payload) {
 }
 
 async function startWebMicrophone() {
-  if (state.webAudio.socket || state.webAudio.starting) {
+  if (state.webAudio.inputSessionId || state.webAudio.starting) {
     return;
   }
   if (state.eventSocket?.readyState !== WebSocket.OPEN) {
     showNotice("イベント接続が完了してから音声入力を開始してください。", true);
     return;
   }
+  const inputSource = element("web-input-source").value;
   const deviceId = element("web-microphone-device").value;
-  if (!deviceId) {
+  if (inputSource === "web_microphone" && !deviceId) {
     showNotice("使用するWebマイクを選択してください。", true);
     return;
   }
@@ -980,6 +1004,23 @@ async function startWebMicrophone() {
   renderWebMicrophoneControls();
   setWebMicrophoneStatus("開始中", "processing");
   try {
+    if (inputSource === "local_microphone") {
+      const inputSession = await apiRequest("/ui/api/audio/input-sessions", {
+        method: "POST",
+        body: JSON.stringify({
+          owner_client_id: state.clientId,
+          input_source: inputSource,
+        }),
+      });
+      state.webAudio.inputSessionId = inputSession.input_session_id;
+      state.webAudio.inputSource = inputSource;
+      state.webAudio.starting = false;
+      state.webAudio.paused = true;
+      setWebMicrophoneStatus("ローカルマイク接続待ち", "processing");
+      renderWebMicrophoneControls();
+      return;
+    }
+
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         deviceId: { exact: deviceId },
@@ -1035,20 +1076,38 @@ async function startWebMicrophone() {
       return;
     }
 
+    const inputSession = await apiRequest("/ui/api/audio/input-sessions", {
+      method: "POST",
+      body: JSON.stringify({
+        owner_client_id: state.clientId,
+        input_source: inputSource,
+      }),
+    });
+    state.webAudio.inputSessionId = inputSession.input_session_id;
+    state.webAudio.inputSource = inputSource;
+
     const socket = new WebSocket(websocketUrl("/ui/api/audio/stream"));
     state.webAudio.socket = socket;
     state.webAudio.starting = false;
     renderWebMicrophoneControls();
     socket.addEventListener("open", () => {
+      if (
+        state.webAudio.socket !== socket
+        || state.webAudio.inputSessionId !== inputSession.input_session_id
+      ) {
+        socket.close();
+        return;
+      }
       const settings = track.getSettings();
       const actualBoolean = (value) => (
         typeof value === "boolean" ? value : null
       );
       socket.send(JSON.stringify({
         type: "audio_start",
-        protocol_version: "1",
+        protocol_version: "2",
         client_id: state.clientId,
         input_source: "web_microphone",
+        input_session_id: state.webAudio.inputSessionId,
         format: {
           sample_rate: 16000,
           channels: 1,
@@ -1091,7 +1150,7 @@ async function startWebMicrophone() {
     }
     state.webAudio.starting = false;
     await stopWebMicrophone({ sendStop: false });
-    showNotice(`Webマイクを開始できません: ${error.message}`, true);
+    showNotice(`音声入力を開始できません: ${error.message}`, true);
   }
 }
 
@@ -1108,6 +1167,7 @@ async function stopWebMicrophone({ sendStop = true } = {}) {
   const sourceNode = state.webAudio.sourceNode;
   const workletNode = state.webAudio.workletNode;
   const leaseGeneration = state.webAudio.leaseGeneration;
+  const inputSessionId = state.webAudio.inputSessionId;
 
   window.clearInterval(state.webAudio.heartbeatTimer);
   if (
@@ -1121,6 +1181,8 @@ async function stopWebMicrophone({ sendStop = true } = {}) {
     }));
   }
   state.webAudio.socket = null;
+  state.webAudio.inputSessionId = null;
+  state.webAudio.inputSource = null;
   state.webAudio.stream = null;
   state.webAudio.context = null;
   state.webAudio.sourceNode = null;
@@ -1142,6 +1204,16 @@ async function stopWebMicrophone({ sendStop = true } = {}) {
   if (context && context.state !== "closed") {
     await context.close();
   }
+  if (inputSessionId) {
+    try {
+      await apiRequest(
+        `/ui/api/audio/input-sessions/${encodeURIComponent(inputSessionId)}`,
+        { method: "DELETE" },
+      );
+    } catch {
+      // WebSocket切断でserver側が先にsessionを終了した場合も停止完了とする。
+    }
+  }
   state.webAudio.stopping = false;
   renderWebMicrophoneControls();
 }
@@ -1157,6 +1229,24 @@ function updateAudioRuntimeState(runtimeState) {
   } else if (hadEnrollment) {
     state.activeEnrollment = null;
     refreshSpeakers();
+  }
+  if (
+    state.webAudio.inputSessionId
+    && state.webAudio.inputSource === "local_microphone"
+  ) {
+    const ownsInput = (
+      runtimeState.active_source === "local_microphone"
+      && runtimeState.response_client_id === state.clientId
+    );
+    state.webAudio.paused = !ownsInput || runtimeState.paused_reason !== null;
+    setWebMicrophoneStatus(
+      ownsInput
+        ? (runtimeState.paused_reason
+          ? audioPauseLabel(runtimeState.paused_reason)
+          : runtimeState.mode === "enrollment" ? "話者登録中" : "入力中")
+        : "ローカルマイク接続待ち",
+      state.webAudio.paused ? "processing" : "",
+    );
   }
   renderSpeakerEnrollment();
 }
@@ -1658,9 +1748,10 @@ function renderTtsPanel(engine) {
 
 function renderMicrophoneSettings() {
   const microphone = state.avatarSpeech.microphone_settings;
-  element("physical-input-enabled").checked = microphone.physical_input_enabled;
-  element("microphone-response-client-id").value = state.clientId;
-  renderPhysicalInputDevices(microphone.input_device);
+  element("microphone-input-source").value = microphone.input_source;
+  element("microphone-console-client-id").value = microphone.console?.client_id || "未設定";
+  element("microphone-console-device").value = microphone.console?.input_device?.name || "未設定";
+  renderLocalInputDevices(microphone.local_input_device);
   element("vad-probability-threshold").value = microphone.vad_probability_threshold;
   element("speaker-recognition-threshold").value = microphone.speaker_recognition_threshold;
   updateMicrophoneSettingLabels();
@@ -1669,11 +1760,11 @@ function renderMicrophoneSettings() {
 }
 
 function syncMicrophoneSettings() {
-  const selectedDevice = textValue("physical-input-device");
+  const selectedDevice = textValue("local-input-device");
   state.avatarSpeech.microphone_settings = {
-    physical_input_enabled: boolValue("physical-input-enabled"),
-    input_device: selectedDevice ? JSON.parse(selectedDevice) : null,
-    response_client_id: state.clientId,
+    input_source: textValue("microphone-input-source"),
+    local_input_device: selectedDevice ? JSON.parse(selectedDevice) : null,
+    console: state.avatarSpeech.microphone_settings.console,
     vad_probability_threshold: numberValue("vad-probability-threshold", 0.5),
     speaker_recognition_threshold: numberValue("speaker-recognition-threshold", 0.6),
   };
@@ -1686,8 +1777,8 @@ function updateMicrophoneSettingLabels() {
     numberValue("speaker-recognition-threshold", 0.6).toFixed(2);
 }
 
-function renderPhysicalInputDevices(selectedDevice) {
-  const select = element("physical-input-device");
+function renderLocalInputDevices(selectedDevice) {
+  const select = element("local-input-device");
   const selectedValue = selectedDevice
     ? JSON.stringify({
       host_api: selectedDevice.host_api,
@@ -1806,7 +1897,7 @@ function renderSpeakerEnrollment() {
 
 async function startSpeakerEnrollment(personRef = null) {
   if (!webMicrophoneHasLease()) {
-    showNotice("Webマイクを開始してから話者登録を開始してください。", true);
+    showNotice("入力欄で音声入力を開始してから話者登録を開始してください。", true);
     return;
   }
   const body = personRef
@@ -2532,8 +2623,9 @@ function bindEvents() {
   element("refresh-web-microphones").addEventListener("click", () => {
     refreshWebMicrophoneDevices({ requestPermission: true });
   });
+  element("web-input-source").addEventListener("change", renderWebMicrophoneControls);
   element("toggle-web-microphone").addEventListener("click", () => {
-    if (state.webAudio.socket) {
+    if (state.webAudio.inputSessionId) {
       stopWebMicrophone();
     } else {
       startWebMicrophone();
@@ -2657,7 +2749,7 @@ function bindEvents() {
     }
   });
   navigator.mediaDevices?.addEventListener("devicechange", () => {
-    if (!state.webAudio.socket) {
+    if (!state.webAudio.inputSessionId) {
       refreshWebMicrophoneDevices({ requestPermission: false });
     }
   });
@@ -2673,6 +2765,7 @@ async function startApp() {
   await loadStatus({ silent: true });
   await refreshDashboard({ silent: true });
   await refreshWebMicrophoneDevices({ requestPermission: false });
+  renderWebMicrophoneControls();
   connectEventStream();
   state.dashboardTimer = window.setInterval(() => refreshDashboard({ silent: true }), 5000);
 }

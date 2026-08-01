@@ -32,6 +32,8 @@ SUPPRESSED_HTTP_LOG_EXACT_PATHS = {
     "/api/autonomous-runs",
     "/api/capability/result",
     "/api/audio/stream",
+    "/api/audio/console-stream",
+    "/api/audio/input-state",
     "/ui/api/audio/stream",
 }
 SUPPRESSED_HTTP_LOG_PATH_PREFIXES = (
@@ -123,7 +125,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             if method == "GET" and parsed.path == "/api/bootstrap/server-identity":
                 self._write_success(HTTPStatus.OK, self.server.service.read_server_identity())
                 return
-            if method == "POST" and parsed.path == "/api/bootstrap/register-first-console":
+            if method == "POST" and parsed.path == "/api/bootstrap/acquire-console-access-token":
                 payload = self._read_json_body()
                 if payload:
                     raise ServiceError(
@@ -131,7 +133,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                         "unsupported_console_connect_fields",
                         "CocoroConsole connect body must be an empty object.",
                     )
-                self._write_success(HTTPStatus.CREATED, self.server.service.register_first_console())
+                self._write_success(HTTPStatus.OK, self.server.service.acquire_console_access_token())
                 return
             if method == "POST" and parsed.path == "/api/bootstrap/reissue-console-access-token":
                 self._read_json_body()
@@ -225,7 +227,19 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             if method == "GET" and parsed.path == "/api/audio/stream":
                 self._handle_audio_stream(
                     token,
-                    endpoint_source="physical_microphone",
+                    endpoint_source="local_microphone",
+                )
+                return
+            if method == "GET" and parsed.path == "/api/audio/console-stream":
+                self._handle_audio_stream(
+                    token,
+                    endpoint_source="console_microphone",
+                )
+                return
+            if method == "GET" and parsed.path == "/api/audio/input-state":
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.get_audio_input_state(token),
                 )
                 return
             if method == "GET" and parsed.path == "/api/audio/input-devices":
@@ -857,6 +871,27 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             self._write_success(
                 HTTPStatus.OK,
                 self.server.service.list_audio_input_devices(token),
+            )
+            return
+        if method == "POST" and path == "/ui/api/audio/input-sessions":
+            self._write_success(
+                HTTPStatus.CREATED,
+                self.server.service.start_web_audio_input_session(
+                    token,
+                    self._read_json_body(),
+                ),
+            )
+            return
+        if (
+            method == "DELETE"
+            and path.startswith("/ui/api/audio/input-sessions/")
+        ):
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.stop_web_audio_input_session(
+                    token,
+                    unquote(path.rsplit("/", 1)[-1]),
+                ),
             )
             return
         if method == "GET" and path == "/ui/api/audio/speakers":

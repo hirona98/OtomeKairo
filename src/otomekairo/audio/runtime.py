@@ -25,11 +25,11 @@ from otomekairo.memory.utils import local_now, now_iso
 from otomekairo.service.common import ServiceError, debug_log
 
 
-AUDIO_PROTOCOL_VERSION = "1"
+AUDIO_PROTOCOL_VERSION = "2"
 HEARTBEAT_INTERVAL_SECONDS = 5
 LEASE_TIMEOUT_SECONDS = 15
 ENROLLMENT_TIMEOUT_SECONDS = 120
-PHYSICAL_ACTIVE_SECONDS = 60
+NORMAL_ACTIVE_SECONDS = 60
 MAX_WAITING_UTTERANCES = 4
 ENROLLMENT_REQUIRED_SAMPLES = 3
 ENROLLMENT_MINIMUM_SAMPLES = 32000
@@ -64,6 +64,7 @@ class QueuedUtterance:
     lease_generation: int
     settings_generation: int
     work_generation: int
+    explicit_input: bool
     utterance: SegmentedUtterance
 
 
@@ -84,9 +85,10 @@ class AudioRuntime:
         self._paused_reason: str | None = None
         self._device_catalog_client_id: str | None = None
         self._device_catalog: list[dict[str, Any]] = []
+        self._web_input_session: dict[str, str] | None = None
         self._enrollment: dict[str, Any] | None = None
-        self._physical_active_until_monotonic: float | None = None
-        self._physical_active_until: str | None = None
+        self._normal_active_until_monotonic: float | None = None
+        self._normal_active_until: str | None = None
         self._last_utterance_result: dict[str, Any] | None = None
         self._vad_probability: float | None = None
         self._vad_speaking = False
@@ -143,7 +145,11 @@ class AudioRuntime:
         *,
         endpoint_source: str,
     ) -> str:
-        if endpoint_source not in {"physical_microphone", "web_microphone"}:
+        if endpoint_source not in {
+            "local_microphone",
+            "console_microphone",
+            "web_microphone",
+        }:
             raise ValueError("Unknown audio endpoint source.")
         session_id = f"audio_stream_session:{uuid.uuid4().hex}"
         with self._lock:
@@ -161,10 +167,18 @@ class AudioRuntime:
             connection = self._connections.pop(session_id, None)
             if connection is None:
                 return
-            if connection.endpoint_source == "physical_microphone":
+            if connection.endpoint_source == "local_microphone":
                 publish = True
             if self._active_connection is connection:
                 self._release_active_locked()
+                publish = True
+            if (
+                connection.endpoint_source == "web_microphone"
+                and self._web_input_session is not None
+                and connection.client_id
+                == self._web_input_session["owner_client_id"]
+            ):
+                self._web_input_session = None
                 publish = True
             if (
                 self._enrollment is not None
@@ -268,6 +282,12 @@ class AudioRuntime:
                 and self._enrollment["owner_client_id"] == client_id
             ):
                 self._cancel_enrollment_locked()
+            if (
+                self._web_input_session is not None
+                and self._web_input_session["owner_client_id"] == client_id
+            ):
+                self._web_input_session = None
+                self._revoke_active_locked("source_switched")
             active = self._active_connection
             if (
                 active is not None
@@ -291,7 +311,7 @@ class AudioRuntime:
     def list_input_devices(self) -> dict[str, Any]:
         with self._lock:
             connector_connected = any(
-                connection.endpoint_source == "physical_microphone"
+                connection.endpoint_source == "local_microphone"
                 for connection in self._connections.values()
             )
             return {
@@ -299,6 +319,92 @@ class AudioRuntime:
                 "connector_connected": connector_connected,
                 "devices": deepcopy(self._device_catalog),
             }
+
+    def input_state(self) -> dict[str, Any]:
+        with self._lock:
+            microphone = self._settings["microphone_settings"]
+            return {
+                "configured_source": microphone["input_source"],
+                "effective_source": self._effective_source_locked(),
+                "local_input_device": deepcopy(
+                    microphone["local_input_device"]
+                ),
+                "console": deepcopy(microphone["console"]),
+            }
+
+    def start_web_input_session(
+        self,
+        payload: dict[str, Any],
+    ) -> dict[str, str]:
+        if not isinstance(payload, dict) or set(payload) != {
+            "owner_client_id",
+            "input_source",
+        }:
+            raise ServiceError(
+                400,
+                "invalid_audio_input_session",
+                "Web audio input session fields are invalid.",
+            )
+        owner_client_id = payload.get("owner_client_id")
+        input_source = payload.get("input_source")
+        if not isinstance(owner_client_id, str) or not owner_client_id.strip():
+            raise ServiceError(
+                400,
+                "invalid_audio_input_session",
+                "owner_client_id is required.",
+            )
+        owner_client_id = owner_client_id.strip()
+        if input_source not in {"local_microphone", "web_microphone"}:
+            raise ServiceError(
+                400,
+                "invalid_audio_input_session",
+                "input_source is unsupported.",
+            )
+        with self._condition:
+            if not self._service._event_stream_registry.is_client_connected(
+                owner_client_id
+            ):
+                raise ServiceError(
+                    409,
+                    "audio_input_session_owner_unavailable",
+                    "The Web audio input session owner is not connected.",
+                )
+            if self._web_input_session is not None:
+                raise ServiceError(
+                    409,
+                    "audio_input_busy",
+                    "Another Web audio input session is active.",
+                )
+            session = {
+                "input_session_id": f"web_audio_input:{uuid.uuid4().hex}",
+                "owner_client_id": owner_client_id,
+                "input_source": input_source,
+            }
+            self._web_input_session = session
+            self._revoke_active_locked("source_switched")
+        self._publish_state(force=True)
+        return deepcopy(session)
+
+    def stop_web_input_session(
+        self,
+        input_session_id: str,
+    ) -> dict[str, str]:
+        with self._condition:
+            if (
+                self._web_input_session is None
+                or self._web_input_session["input_session_id"]
+                != input_session_id
+            ):
+                raise ServiceError(
+                    404,
+                    "audio_input_session_not_found",
+                    "The Web audio input session does not exist.",
+                )
+            session = deepcopy(self._web_input_session)
+            self._web_input_session = None
+            self._revoke_active_locked("source_switched")
+        self._publish_state(force=True)
+        return session
 
     def list_speakers(self) -> dict[str, Any]:
         return {"speakers": self._service.store.list_voice_speakers()}
@@ -445,10 +551,10 @@ class AudioRuntime:
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             active = self._active_connection
-            physical_state = (
+            normal_state = (
                 "active"
-                if self._physical_active_until_monotonic is not None
-                and self._physical_active_until_monotonic > time.monotonic()
+                if self._normal_active_until_monotonic is not None
+                and self._normal_active_until_monotonic > time.monotonic()
                 else "waiting"
             )
             models = {
@@ -467,13 +573,18 @@ class AudioRuntime:
                 "available": self._available,
                 "unavailable_reason": self._unavailable_reason,
                 "model_ids": models,
+                "configured_source": self._settings[
+                    "microphone_settings"
+                ]["input_source"],
+                "effective_source": self._effective_source_locked(),
+                "response_client_id": self._effective_response_client_id_locked(),
                 "selected_device": deepcopy(
-                    self._settings["microphone_settings"]["input_device"]
+                    active.device if active is not None else None
                 ),
                 "connector": {
                     "client_id": self._device_catalog_client_id,
                     "connected": any(
-                        connection.endpoint_source == "physical_microphone"
+                        connection.endpoint_source == "local_microphone"
                         for connection in self._connections.values()
                     ),
                 },
@@ -494,9 +605,9 @@ class AudioRuntime:
                     "probability": self._vad_probability,
                     "dbfs": self._dbfs,
                 },
-                "physical_activation": {
-                    "state": physical_state,
-                    "active_until": self._physical_active_until,
+                "normal_activation": {
+                    "state": normal_state,
+                    "active_until": self._normal_active_until,
                 },
                 "queue": {
                     "processing": (
@@ -525,31 +636,45 @@ class AudioRuntime:
     ) -> None:
         normalized = self._validate_audio_start(connection, payload)
         with self._condition:
-            active = self._active_connection
-            if active is not None and active is not connection:
-                if connection.endpoint_source == "web_microphone":
-                    if active.endpoint_source == "web_microphone":
-                        raise ServiceError(
-                            409,
-                            "audio_input_busy",
-                            "Another web microphone owns the audio input lease.",
-                        )
-                    active.websocket.send_json(
-                        {
-                            "type": "audio_paused",
-                            "lease_generation": active.lease_generation,
-                            "reason": "preempted_by_web",
-                        }
-                    )
-                    active.lease_generation = None
-                    self._active_connection = None
-                    self._discard_audio_locked()
-                else:
+            effective_source = self._effective_source_locked()
+            if connection.endpoint_source != effective_source:
+                raise ServiceError(
+                    409,
+                    "audio_source_not_selected",
+                    "The audio source is not currently selected.",
+                )
+            if connection.endpoint_source == "web_microphone":
+                session = self._web_input_session
+                if (
+                    session is None
+                    or session["input_source"] != "web_microphone"
+                    or session["owner_client_id"] != normalized["client_id"]
+                    or session["input_session_id"]
+                    != normalized["input_session_id"]
+                ):
                     raise ServiceError(
                         409,
-                        "audio_input_busy",
-                        "The web microphone owns the audio input lease.",
+                        "audio_input_session_not_found",
+                        "The Web audio input session is not active.",
                     )
+            if connection.endpoint_source == "console_microphone":
+                console = self._settings["microphone_settings"]["console"]
+                if (
+                    console is None
+                    or console["client_id"] != normalized["client_id"]
+                ):
+                    raise ServiceError(
+                        409,
+                        "audio_source_not_selected",
+                        "This CocoroConsole is not the selected audio source.",
+                    )
+            active = self._active_connection
+            if active is not None and active is not connection:
+                raise ServiceError(
+                    409,
+                    "audio_input_busy",
+                    "The selected audio source already owns the input lease.",
+                )
             elif active is connection:
                 self._release_active_locked()
 
@@ -722,7 +847,7 @@ class AudioRuntime:
         connection: AudioConnection,
         payload: dict[str, Any],
     ) -> None:
-        if connection.endpoint_source != "physical_microphone":
+        if connection.endpoint_source != "local_microphone":
             raise ServiceError(
                 400,
                 "invalid_audio_control",
@@ -787,6 +912,7 @@ class AudioRuntime:
                 lease_generation=connection.lease_generation or 0,
                 settings_generation=self._settings_generation,
                 work_generation=self._work_generation,
+                explicit_input=self._web_input_session is not None,
                 utterance=utterance,
             )
         )
@@ -968,7 +1094,7 @@ class AudioRuntime:
         matched_wake_word: str | None = None
         if result_code == "accepted" and stt_result is not None:
             matched, matched_wake_word = self._wake_accepts(
-                source=item.source,
+                explicit_input=item.explicit_input,
                 transcript=stt_result.text,
                 wake_words=settings["stt"]["wake_words"],
             )
@@ -1075,15 +1201,15 @@ class AudioRuntime:
             },
             defer_audio_delivery=True,
         )
-        if item.source == "physical_microphone":
+        if not item.explicit_input:
             with self._lock:
                 if self._item_is_current_locked(item):
-                    self._physical_active_until_monotonic = (
-                        time.monotonic() + PHYSICAL_ACTIVE_SECONDS
+                    self._normal_active_until_monotonic = (
+                        time.monotonic() + NORMAL_ACTIVE_SECONDS
                     )
-                    self._physical_active_until = (
+                    self._normal_active_until = (
                         local_now()
-                        + timedelta(seconds=PHYSICAL_ACTIVE_SECONDS)
+                        + timedelta(seconds=NORMAL_ACTIVE_SECONDS)
                     ).isoformat()
         speech = response.get("speech")
         if isinstance(speech, dict) and isinstance(speech.get("text"), str):
@@ -1141,12 +1267,12 @@ class AudioRuntime:
                     self._cancel_enrollment_locked()
                     publish = True
                 if (
-                    self._physical_active_until_monotonic is not None
+                    self._normal_active_until_monotonic is not None
                     and time.monotonic()
-                    >= self._physical_active_until_monotonic
+                    >= self._normal_active_until_monotonic
                 ):
-                    self._physical_active_until_monotonic = None
-                    self._physical_active_until = None
+                    self._normal_active_until_monotonic = None
+                    self._normal_active_until = None
                     publish = True
             if timed_out is not None:
                 timed_out.websocket.close()
@@ -1180,13 +1306,15 @@ class AudioRuntime:
         if not self._available:
             return "audio_runtime_unavailable"
         microphone = self._settings["microphone_settings"]
-        if connection.endpoint_source == "physical_microphone":
-            if not microphone["physical_input_enabled"]:
-                return "microphone_device_unavailable"
+        if connection.endpoint_source == "local_microphone":
             if (
-                microphone["input_device"] is None
-                or connection.device != microphone["input_device"]
+                microphone["local_input_device"] is None
+                or connection.device != microphone["local_input_device"]
             ):
+                return "microphone_device_unavailable"
+        if connection.endpoint_source == "console_microphone":
+            console = microphone["console"]
+            if console is None or connection.device != console["input_device"]:
                 return "microphone_device_unavailable"
         response_client_id = self._response_client_id_locked(connection)
         if (
@@ -1217,10 +1345,7 @@ class AudioRuntime:
         self,
         connection: AudioConnection,
     ) -> str | None:
-        if connection.endpoint_source == "web_microphone":
-            return connection.client_id
-        value = self._settings["microphone_settings"]["response_client_id"]
-        return value if value else None
+        return self._effective_response_client_id_locked()
 
     def _response_client_available(self, client_id: str) -> bool:
         registry = self._service._event_stream_registry
@@ -1250,6 +1375,34 @@ class AudioRuntime:
         self._active_connection = None
         self._paused_reason = None
         self._discard_audio_locked()
+
+    def _revoke_active_locked(self, reason: str) -> None:
+        active = self._active_connection
+        if active is not None and active.lease_generation is not None:
+            active.websocket.send_json(
+                {
+                    "type": "audio_paused",
+                    "lease_generation": active.lease_generation,
+                    "reason": reason,
+                }
+            )
+            active.lease_generation = None
+        self._active_connection = None
+        self._paused_reason = None
+        self._discard_audio_locked()
+
+    def _effective_source_locked(self) -> str:
+        if self._web_input_session is not None:
+            return self._web_input_session["input_source"]
+        return self._settings["microphone_settings"]["input_source"]
+
+    def _effective_response_client_id_locked(self) -> str | None:
+        if self._web_input_session is not None:
+            return self._web_input_session["owner_client_id"]
+        console = self._settings["microphone_settings"]["console"]
+        if console is None:
+            return None
+        return console["client_id"]
 
     def _discard_audio_locked(self, *, keep_processing: bool = False) -> None:
         # 実行中の外部処理結果もwork generationで失効させる。
@@ -1309,16 +1462,16 @@ class AudioRuntime:
     def _wake_accepts(
         self,
         *,
-        source: str,
+        explicit_input: bool,
         transcript: str,
         wake_words: list[str],
     ) -> tuple[bool, str | None]:
-        if source == "web_microphone" or not wake_words:
+        if explicit_input or not wake_words:
             return True, None
         now = time.monotonic()
         if (
-            self._physical_active_until_monotonic is not None
-            and self._physical_active_until_monotonic > now
+            self._normal_active_until_monotonic is not None
+            and self._normal_active_until_monotonic > now
         ):
             return True, None
         normalized_transcript = unicodedata.normalize(
@@ -1446,6 +1599,7 @@ class AudioRuntime:
             "protocol_version",
             "client_id",
             "input_source",
+            "input_session_id",
             "format",
             "device",
             "capture_settings",
@@ -1485,9 +1639,23 @@ class AudioRuntime:
                 "invalid_audio_start",
                 "audio_start.format is unsupported.",
             )
+        input_session_id = payload.get("input_session_id")
+        if connection.endpoint_source == "web_microphone":
+            if not isinstance(input_session_id, str) or not input_session_id:
+                raise ServiceError(
+                    400,
+                    "invalid_audio_start",
+                    "audio_start.input_session_id is required.",
+                )
+        elif input_session_id is not None:
+            raise ServiceError(
+                400,
+                "invalid_audio_start",
+                "audio_start.input_session_id must be null.",
+            )
         device = self._normalize_start_device(
             payload.get("device"),
-            required=connection.endpoint_source == "physical_microphone",
+            source=connection.endpoint_source,
         )
         capture_settings = self._normalize_capture_settings(
             payload.get("capture_settings"),
@@ -1495,6 +1663,7 @@ class AudioRuntime:
         )
         return {
             "client_id": client_id.strip(),
+            "input_session_id": input_session_id,
             "device": device,
             "capture_settings": capture_settings,
         }
@@ -1503,18 +1672,29 @@ class AudioRuntime:
         self,
         value: Any,
         *,
-        required: bool,
+        source: str,
     ) -> dict[str, str] | None:
-        if value is None and not required:
-            return None
-        if not isinstance(value, dict) or set(value) != {"host_api", "name"}:
+        if source == "web_microphone":
+            if value is None:
+                return None
+            raise ServiceError(
+                400,
+                "invalid_audio_start",
+                "audio_start.device must be null for web_microphone.",
+            )
+        expected_fields = (
+            {"device_id", "name"}
+            if source == "console_microphone"
+            else {"host_api", "name"}
+        )
+        if not isinstance(value, dict) or set(value) != expected_fields:
             raise ServiceError(
                 400,
                 "invalid_audio_start",
                 "audio_start.device is invalid.",
             )
         normalized: dict[str, str] = {}
-        for field_name in ("host_api", "name"):
+        for field_name in expected_fields:
             field_value = value.get(field_name)
             if not isinstance(field_value, str) or not field_value.strip():
                 raise ServiceError(

@@ -40,9 +40,9 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
         self.assertEqual(
             response["microphone_settings"],
             {
-                "physical_input_enabled": True,
-                "input_device": None,
-                "response_client_id": "",
+                "input_source": "local_microphone",
+                "local_input_device": None,
+                "console": None,
                 "vad_probability_threshold": 0.5,
                 "speaker_recognition_threshold": 0.6,
             },
@@ -144,7 +144,7 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
         )
 
         fractional_microphone = deepcopy(original)
-        fractional_microphone["microphone_settings"]["physical_input_enabled"] = 1
+        fractional_microphone["microphone_settings"]["input_source"] = 1
         cases.append(
             (
                 "fractional microphone",

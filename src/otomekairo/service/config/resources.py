@@ -37,21 +37,17 @@ class ServiceConfigResourcesMixin:
             "console_access_token_issued": state["console_access_token"] is not None,
         }
 
-    def register_first_console(self) -> dict[str, Any]:
-        # 読み込み状態
-        state = self.store.read_state()
+    def acquire_console_access_token(self) -> dict[str, Any]:
+        # 同時要求でも全クライアントへ同じ token を返すため、取得と初回発行を直列化する。
+        with self._runtime_state_lock:
+            state = self.store.read_state()
+            if state["console_access_token"] is None:
+                state["console_access_token"] = self._new_console_token()
+                self.store.write_state(state)
 
-        # 初回登録済みの token は再表示しない。
-        if state["console_access_token"] is not None:
-            raise ServiceError(409, "first_console_already_registered", "The first console token has already been issued.")
-
-        state["console_access_token"] = self._new_console_token()
-        self.store.write_state(state)
-
-        # 結果
-        return {
-            "console_access_token": state["console_access_token"],
-        }
+            return {
+                "console_access_token": state["console_access_token"],
+            }
 
     def reissue_console_access_token(self, token: str | None) -> dict[str, Any]:
         # 認可

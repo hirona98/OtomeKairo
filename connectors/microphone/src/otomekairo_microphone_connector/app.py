@@ -190,9 +190,14 @@ class MicrophoneConnector:
             while True:
                 now = time.monotonic()
                 if now - last_config_poll >= CONFIG_POLL_SECONDS:
-                    settings = self._fetch_microphone_settings()
-                    configured_enabled = settings["physical_input_enabled"]
-                    configured_device = settings["input_device"]
+                    input_state = self._fetch_input_state()
+                    configured_enabled = (
+                        input_state["effective_source"]
+                        == "local_microphone"
+                    )
+                    configured_device = input_state[
+                        "local_input_device"
+                    ]
                     last_config_poll = now
                     if (
                         capture is not None
@@ -301,11 +306,11 @@ class MicrophoneConnector:
                         if capture is not None:
                             capture.clear_frames()
                         if control.get("reason") in {
-                            "preempted_by_web",
+                            "source_switched",
                             "settings_reloaded",
                         }:
                             raise ReconnectRequested(
-                                "The physical audio lease was revoked."
+                                "The local audio lease was revoked."
                             )
                     elif control_type == "audio_resumed":
                         if self._lease_generation(control) != lease_generation:
@@ -369,9 +374,9 @@ class MicrophoneConnector:
             if capture is not None:
                 capture.close()
 
-    def _fetch_microphone_settings(self) -> dict[str, Any]:
+    def _fetch_input_state(self) -> dict[str, Any]:
         request = urllib.request.Request(
-            self.config.server.base_url + "/api/config/avatar-speech",
+            self.config.server.base_url + "/api/audio/input-state",
             method="GET",
             headers={
                 "Accept": "application/json",
@@ -389,23 +394,23 @@ class MicrophoneConnector:
                 payload = json.loads(response.read().decode("utf-8"))
         except (urllib.error.URLError, json.JSONDecodeError) as exc:
             raise ConnectorError(
-                "microphone settings could not be fetched."
+                "audio input state could not be fetched."
             ) from exc
         if (
             not isinstance(payload, dict)
             or payload.get("ok") is not True
             or not isinstance(payload.get("data"), dict)
-            or not isinstance(
-                payload["data"].get("microphone_settings"),
-                dict,
-            )
         ):
-            raise ConnectorError("microphone settings response is invalid.")
-        settings = payload["data"]["microphone_settings"]
-        enabled = settings.get("physical_input_enabled")
-        device = settings.get("input_device")
-        if not isinstance(enabled, bool):
-            raise ConnectorError("physical_input_enabled is invalid.")
+            raise ConnectorError("audio input state response is invalid.")
+        state = payload["data"]
+        effective_source = state.get("effective_source")
+        device = state.get("local_input_device")
+        if effective_source not in {
+            "local_microphone",
+            "console_microphone",
+            "web_microphone",
+        }:
+            raise ConnectorError("effective_source is invalid.")
         if device is not None and (
             not isinstance(device, dict)
             or set(device) != {"host_api", "name"}
@@ -414,10 +419,10 @@ class MicrophoneConnector:
                 for key in ("host_api", "name")
             )
         ):
-            raise ConnectorError("input_device is invalid.")
+            raise ConnectorError("local_input_device is invalid.")
         return {
-            "physical_input_enabled": enabled,
-            "input_device": deepcopy(device),
+            "effective_source": effective_source,
+            "local_input_device": deepcopy(device),
         }
 
     def _list_alsa_devices(self) -> list[dict[str, Any]]:
@@ -464,9 +469,10 @@ class MicrophoneConnector:
     ) -> dict[str, Any]:
         return {
             "type": "audio_start",
-            "protocol_version": "1",
+            "protocol_version": "2",
             "client_id": self.config.client_id,
-            "input_source": "physical_microphone",
+            "input_source": "local_microphone",
+            "input_session_id": None,
             "format": {
                 "sample_rate": 16000,
                 "channels": 1,

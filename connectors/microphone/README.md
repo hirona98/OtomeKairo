@@ -1,6 +1,6 @@
 # microphone connector
 
-この connector は Ubuntu の PortAudio / ALSA input device を OtomeKairo の物理音声入力へ接続する。
+この connector は Ubuntu の PortAudio / ALSA input device を OtomeKairo のローカル音声入力へ接続する。
 VAD、STT、音声起動ワード判定、話者識別は実行しない。
 
 ## OS準備
@@ -26,7 +26,7 @@ OtomeKairo serverと同じPCで実行する場合、tokenは`OTOMEKAIRO_DATA_DIR
 実tokenを`config.example.json`へ書かない。
 
 ローカル設定を上書きする場合は`config.example.json`を`config.local.json`へコピーする。
-マイクの有効状態、選択device、応答先clientはOtomeKairoの音声設定で管理する。
+通常入力元、選択device、応答先clientはOtomeKairoの音声設定で管理する。
 
 ## 実行
 
