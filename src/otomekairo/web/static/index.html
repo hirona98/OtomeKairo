@@ -295,23 +295,9 @@
             </fieldset>
 
             <fieldset class="settings-group">
-              <legend>音声認識（現状AmiVoiceのみ）</legend>
+              <legend>音声起動ワード</legend>
               <div class="form-grid">
-                <label class="checkbox-field wide-control">STTを使用する<input id="stt-enabled" type="checkbox"></label>
-                <label>エンジン
-                  <select id="stt-engine">
-                    <option value="amivoice">AmiVoice</option>
-                  </select>
-                </label>
-                <label>音声起動ワード（1行1件）<textarea id="stt-wake-words" rows="3"></textarea></label>
-                <label>Profile ID（先頭の:は不要）<input id="stt-profile-id"></label>
-                <label class="api-key-field wide-label">API Key
-                  <span class="inline-control-row">
-                    <input id="stt-api-key" type="password" autocomplete="new-password">
-                    <button type="button" class="plain-button" id="copy-stt-api-key">コピー</button>
-                    <button type="button" class="plain-button" id="paste-stt-api-key">上書き貼り付け</button>
-                  </span>
-                </label>
+                <label class="wide-label">音声起動ワード（1行1件）<textarea id="stt-wake-words" rows="3"></textarea></label>
               </div>
               <p class="field-hint">通常入力では文字起こしの先頭がいずれかの音声起動ワードと一致した場合に起動します。空欄では常時有効です。</p>
             </fieldset>
@@ -321,6 +307,26 @@
             <fieldset class="settings-group">
               <legend>呼ばれ方</legend>
               <label>会話入力で使う共通の呼ばれ方<input id="settings-conversation-display-name"></label>
+            </fieldset>
+            <fieldset class="settings-group">
+              <legend>音声認識（現状AmiVoiceのみ）</legend>
+              <p class="field-hint">アバタータブで選択中のアバター音声プリセットに保存します。</p>
+              <div class="form-grid">
+                <label class="checkbox-field wide-control">STTを使用する<input id="stt-enabled" type="checkbox"></label>
+                <label>エンジン
+                  <select id="stt-engine">
+                    <option value="amivoice">AmiVoice</option>
+                  </select>
+                </label>
+                <label>Profile ID（先頭の:は不要）<input id="stt-profile-id"></label>
+                <label class="api-key-field wide-label">API Key
+                  <span class="inline-control-row">
+                    <input id="stt-api-key" type="password" autocomplete="new-password">
+                    <button type="button" class="plain-button" id="copy-stt-api-key">コピー</button>
+                    <button type="button" class="plain-button" id="paste-stt-api-key">上書き貼り付け</button>
+                  </span>
+                </label>
+              </div>
             </fieldset>
             <fieldset class="settings-group">
               <legend>マイク・話者識別</legend>
