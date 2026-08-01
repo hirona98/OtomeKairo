@@ -103,7 +103,8 @@ class AmiVoiceClient:
     ) -> bytes:
         parameters = "grammarFileNames=-a-general"
         if profile_id:
-            parameters += f" profileId={profile_id}"
+            # 設定にはプロフィール名だけを保持し、AmiVoiceの参照構文は送信境界で組み立てる。
+            parameters += f" profileId=:{profile_id}"
         parts = [
             self._text_part(boundary, "u", api_key),
             self._text_part(boundary, "d", parameters),

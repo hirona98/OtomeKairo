@@ -539,13 +539,13 @@ class ServiceConfigValidationMixin:
         if not isinstance(profile_id, str):
             raise ServiceError(400, "invalid_stt_settings", "avatar.stt.profile_id must be a string.")
         if profile_id and (
-            re.fullmatch(r":[A-Za-z0-9_-]+", profile_id) is None
-            or profile_id[1:].startswith("__")
+            re.fullmatch(r"[A-Za-z0-9_-]+", profile_id) is None
+            or profile_id.startswith("__")
         ):
             raise ServiceError(
                 400,
                 "invalid_stt_settings",
-                "avatar.stt.profile_id has an invalid format.",
+                "avatar.stt.profile_id must use letters, digits, hyphen, or underscore and must not start with '__'.",
             )
         if not isinstance(definition.get("api_key"), str):
             raise ServiceError(400, "invalid_stt_settings", "avatar.stt.api_key must be a string.")

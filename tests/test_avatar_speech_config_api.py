@@ -102,6 +102,7 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
         avatar = deepcopy(definition["avatars"][0])
         avatar["avatar_id"] = "avatar:second"
         avatar["display_name"] = "2番目"
+        avatar["stt"]["profile_id"] = "service_profile-01"
         avatar["stt"]["api_key"] = "new-stt-secret"
         avatar["tts"]["engine"] = "aivis-cloud"
         avatar["tts"]["aivis_cloud_config"]["api_key"] = "new-tts-secret"
@@ -119,6 +120,7 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
             0.55,
         )
         self.assertEqual(response["avatars"][1]["display_name"], "2番目")
+        self.assertEqual(response["avatars"][1]["stt"]["profile_id"], "service_profile-01")
         self.assertEqual(
             service.store.events[-2]["kind"],
             "avatar_speech_editor_state_write",
@@ -156,6 +158,10 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
         invalid_engine = deepcopy(original)
         invalid_engine["avatars"][0]["tts"]["engine"] = "unknown"
         cases.append(("invalid engine", invalid_engine, "unsupported_tts_engine"))
+
+        invalid_profile_id = deepcopy(original)
+        invalid_profile_id["avatars"][0]["stt"]["profile_id"] = ":service-profile"
+        cases.append(("invalid profile ID", invalid_profile_id, "invalid_stt_settings"))
 
         for label, definition, expected_code in cases:
             with self.subTest(label=label):
