@@ -25,6 +25,24 @@
       }
     },
     {
+      // connector venv で microphone connector を起動する。
+      "name": "OtomeKairo: Microphone Connector",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "otomekairo_microphone_connector",
+      "cwd": "${workspaceFolder}/connectors/microphone",
+      "python": "${workspaceFolder}/connectors/microphone/.venv/bin/python",
+      "justMyCode": true,
+      "console": "integratedTerminal",
+      "env": {
+        "OTOMEKAIRO_SERVER_URL": "https://127.0.0.1:55601",
+        "OTOMEKAIRO_DATA_DIR": "${workspaceFolder}/var/otomekairo"
+      },
+      "presentation": {
+        "hidden": true
+      }
+    },
+    {
       // connector venv で Tapo C220 connector を起動する。
       "name": "OtomeKairo: Tapo C220 Connector",
       "type": "debugpy",
@@ -67,6 +85,7 @@
       "name": "OtomeKairo: Debug Server",
       "configurations": [
         "OtomeKairo: Server",
+        "OtomeKairo: Microphone Connector",
         "OtomeKairo: Tapo C220 Connector",
         "OtomeKairo: Tapo C220 Watcher"
       ],

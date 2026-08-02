@@ -13,6 +13,16 @@
       "problemMatcher": []
     },
     {
+      // microphone connector 用 venv を準備する。
+      "label": "microphone: prepare debug env",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/prepare_microphone_connector_debug_env.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
       // connector 用 venv を準備する。
       "label": "tapo_c220: prepare debug env",
       "type": "shell",
@@ -37,6 +47,7 @@
       "label": "otomekairo: prepare full debug env",
       "dependsOn": [
         "otomekairo: prepare debug env",
+        "microphone: prepare debug env",
         "tapo_c220: prepare debug env",
         "tapo_c220_watcher: prepare debug env"
       ],
