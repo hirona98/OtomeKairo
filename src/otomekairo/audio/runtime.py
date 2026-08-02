@@ -446,11 +446,36 @@ class AudioRuntime:
                         "speaker_not_found",
                         "The requested speaker does not exist.",
                     )
+                conversation_display_name_id = existing[
+                    "conversation_display_name_id"
+                ]
                 display_name = existing["display_name"]
                 target_person_ref = existing_person_ref
                 public_person_ref = existing_person_ref
             else:
-                display_name = payload["display_name"].strip()
+                conversation_display_name_id = payload[
+                    "conversation_display_name_id"
+                ].strip()
+                definition = self._service.store.get_conversation_display_name(
+                    conversation_display_name_id
+                )
+                if definition is None:
+                    raise ServiceError(
+                        404,
+                        "conversation_display_name_not_found",
+                        "The conversation display name does not exist.",
+                    )
+                if any(
+                    speaker["conversation_display_name_id"]
+                    == conversation_display_name_id
+                    for speaker in self._service.store.list_voice_speakers()
+                ):
+                    raise ServiceError(
+                        409,
+                        "conversation_display_name_already_assigned",
+                        "The conversation display name is assigned to another speaker.",
+                    )
+                display_name = definition["display_name"]
                 target_person_ref = f"person:voice:{uuid.uuid4()}"
                 public_person_ref = None
 
@@ -460,6 +485,7 @@ class AudioRuntime:
                 "owner_client_id": owner_client_id,
                 "target_person_ref": target_person_ref,
                 "public_person_ref": public_person_ref,
+                "conversation_display_name_id": conversation_display_name_id,
                 "display_name": display_name,
                 "embeddings": [],
                 "expires_monotonic": time.monotonic()
@@ -504,28 +530,46 @@ class AudioRuntime:
         self._publish_state(force=True)
         return summary
 
-    def rename_speaker(
+    def assign_speaker_conversation_display_name(
         self,
         person_ref: str,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
-        if set(payload) != {"display_name"}:
+        if set(payload) != {"conversation_display_name_id"}:
             raise ServiceError(
                 400,
-                "invalid_speaker_display_name",
-                "display_name is required.",
+                "invalid_conversation_display_name_assignment",
+                "conversation_display_name_id is required.",
             )
-        display_name = payload.get("display_name")
-        if not isinstance(display_name, str) or not display_name.strip():
+        display_name_id = payload.get("conversation_display_name_id")
+        if not isinstance(display_name_id, str) or not display_name_id.strip():
             raise ServiceError(
                 400,
-                "invalid_speaker_display_name",
-                "display_name must be a non-empty string.",
+                "invalid_conversation_display_name_assignment",
+                "conversation_display_name_id must be a non-empty string.",
             )
-        speaker = self._service.store.rename_voice_speaker(
-            person_ref=person_ref,
-            display_name=display_name.strip(),
-        )
+        normalized_display_name_id = display_name_id.strip()
+        if self._service.store.get_conversation_display_name(
+            normalized_display_name_id
+        ) is None:
+            raise ServiceError(
+                404,
+                "conversation_display_name_not_found",
+                "The conversation display name does not exist.",
+            )
+        try:
+            speaker = self._service.store.assign_voice_speaker_conversation_display_name(
+                person_ref=person_ref,
+                conversation_display_name_id=normalized_display_name_id,
+            )
+        except ValueError as exc:
+            if str(exc) == "conversation_display_name_assignment_conflict":
+                raise ServiceError(
+                    409,
+                    "conversation_display_name_already_assigned",
+                    "The conversation display name is assigned to another speaker.",
+                ) from exc
+            raise
         if speaker is None:
             raise ServiceError(
                 404,
@@ -991,7 +1035,9 @@ class AudioRuntime:
                 )
                 self._service.store.replace_voice_speaker_registration(
                     person_ref=self._enrollment["target_person_ref"],
-                    display_name=self._enrollment["display_name"],
+                    conversation_display_name_id=self._enrollment[
+                        "conversation_display_name_id"
+                    ],
                     embedding=mean_embedding,
                     model_id=self._models.speaker_model_id,
                 )
@@ -1432,6 +1478,9 @@ class AudioRuntime:
             "enrollment_id": self._enrollment["enrollment_id"],
             "owner_client_id": self._enrollment["owner_client_id"],
             "person_ref": self._enrollment["public_person_ref"],
+            "conversation_display_name_id": self._enrollment[
+                "conversation_display_name_id"
+            ],
             "display_name": self._enrollment["display_name"],
             "required_samples": ENROLLMENT_REQUIRED_SAMPLES,
             "completed_samples": len(self._enrollment["embeddings"]),
@@ -1809,7 +1858,7 @@ class AudioRuntime:
                 "invalid_speaker_enrollment",
                 "Speaker enrollment body must be an object.",
             )
-        new_fields = {"owner_client_id", "display_name"}
+        new_fields = {"owner_client_id", "conversation_display_name_id"}
         existing_fields = {"owner_client_id", "person_ref"}
         if frozenset(payload) not in {
             frozenset(new_fields),
@@ -1827,13 +1876,13 @@ class AudioRuntime:
                 "invalid_speaker_enrollment",
                 "owner_client_id is required.",
             )
-        if "display_name" in payload:
-            display_name = payload.get("display_name")
-            if not isinstance(display_name, str) or not display_name.strip():
+        if "conversation_display_name_id" in payload:
+            display_name_id = payload.get("conversation_display_name_id")
+            if not isinstance(display_name_id, str) or not display_name_id.strip():
                 raise ServiceError(
                     400,
                     "invalid_speaker_enrollment",
-                    "display_name is required for a new speaker.",
+                    "conversation_display_name_id is required for a new speaker.",
                 )
         if "person_ref" in payload:
             person_ref = payload.get("person_ref")

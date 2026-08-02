@@ -196,21 +196,35 @@ class ConsoleClientConfigApiTests(unittest.TestCase):
             ["avatar:default"],
         )
 
-    def test_conversation_display_name_is_shared_current_setting(self) -> None:
+    def test_conversation_display_name_definition_is_selected_by_id(self) -> None:
         service = DummyService()
+
+        definition = {
+            "conversation_display_name_id": "conversation_display_name:tanaka",
+            "display_name": "田中さん",
+        }
+        service.store.state["conversation_display_names"][
+            definition["conversation_display_name_id"]
+        ] = definition
 
         response = service.patch_current(
             "token",
-            {"conversation_display_name": " 田中さん "},
+            {
+                "selected_conversation_display_name_id": definition[
+                    "conversation_display_name_id"
+                ]
+            },
         )
 
         self.assertEqual(
-            response["settings_snapshot"]["conversation_display_name"],
-            "田中さん",
+            response["settings_snapshot"]["selected_conversation_display_name_id"],
+            definition["conversation_display_name_id"],
         )
         self.assertEqual(
-            service.get_editor_state("token")["current"]["conversation_display_name"],
-            "田中さん",
+            service.get_editor_state("token")["current"][
+                "selected_conversation_display_name_id"
+            ],
+            definition["conversation_display_name_id"],
         )
 
 

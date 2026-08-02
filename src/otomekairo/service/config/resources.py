@@ -78,10 +78,112 @@ class ServiceConfigResourcesMixin:
         # 応答
         return {
             "settings_snapshot": self._build_settings_snapshot(state),
+            "conversation_display_names": [
+                deepcopy(value)
+                for value in state["conversation_display_names"].values()
+            ],
             "selected_persona": deepcopy(state["personas"][state["selected_persona_id"]]),
             "selected_memory_set": self._public_memory_set(state["memory_sets"][state["selected_memory_set_id"]]),
             "selected_model_preset": self._public_model_preset(selected_preset),
         }
+
+    def list_conversation_display_names(self, token: str | None) -> dict[str, Any]:
+        self._require_token(token)
+        return {
+            "conversation_display_names": self.store.list_conversation_display_names()
+        }
+
+    def create_conversation_display_name(
+        self,
+        token: str | None,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        self._require_token(token)
+        display_name = self._conversation_display_name_from_payload(payload)
+        try:
+            return self.store.create_conversation_display_name(
+                conversation_display_name_id=f"conversation_display_name:{uuid.uuid4()}",
+                display_name=display_name,
+            )
+        except ValueError as exc:
+            if str(exc) == "duplicate_conversation_display_name":
+                raise ServiceError(
+                    409,
+                    "duplicate_conversation_display_name",
+                    "The conversation display name already exists.",
+                ) from exc
+            raise
+
+    def update_conversation_display_name(
+        self,
+        token: str | None,
+        conversation_display_name_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        self._require_token(token)
+        display_name = self._conversation_display_name_from_payload(payload)
+        try:
+            definition = self.store.update_conversation_display_name(
+                conversation_display_name_id=conversation_display_name_id,
+                display_name=display_name,
+            )
+        except ValueError as exc:
+            if str(exc) == "duplicate_conversation_display_name":
+                raise ServiceError(
+                    409,
+                    "duplicate_conversation_display_name",
+                    "The conversation display name already exists.",
+                ) from exc
+            raise
+        if definition is None:
+            raise ServiceError(
+                404,
+                "conversation_display_name_not_found",
+                "The conversation display name does not exist.",
+            )
+        return definition
+
+    def delete_conversation_display_name(
+        self,
+        token: str | None,
+        conversation_display_name_id: str,
+    ) -> dict[str, Any]:
+        self._require_token(token)
+        try:
+            definition = self.store.delete_conversation_display_name(
+                conversation_display_name_id
+            )
+        except ValueError as exc:
+            if str(exc) == "conversation_display_name_in_use":
+                raise ServiceError(
+                    409,
+                    "conversation_display_name_in_use",
+                    "The conversation display name is in use.",
+                ) from exc
+            raise
+        if definition is None:
+            raise ServiceError(
+                404,
+                "conversation_display_name_not_found",
+                "The conversation display name does not exist.",
+            )
+        return definition
+
+    def _conversation_display_name_from_payload(self, payload: dict[str, Any]) -> str:
+        if not isinstance(payload, dict) or set(payload) != {"display_name"}:
+            raise ServiceError(
+                400,
+                "invalid_conversation_display_name",
+                "display_name is required.",
+            )
+        display_name = payload.get("display_name")
+        if not isinstance(display_name, str) or not display_name.strip():
+            raise ServiceError(
+                400,
+                "invalid_conversation_display_name",
+                "display_name must be a non-empty string.",
+            )
+        return display_name.strip()
 
     def get_editor_state(self, token: str | None) -> dict[str, Any]:
         # 認可
@@ -327,7 +429,7 @@ class ServiceConfigResourcesMixin:
             "selected_model_preset_id",
             "thinking_speech_level",
             "wake_policy",
-            "conversation_display_name",
+            "selected_conversation_display_name_id",
         }
         unsupported_fields = sorted(set(payload.keys()) - supported_fields)
         if unsupported_fields:
@@ -377,15 +479,27 @@ class ServiceConfigResourcesMixin:
             self._validate_wake_policy(payload["wake_policy"])
             state["wake_policy"] = payload["wake_policy"]
 
-        if "conversation_display_name" in payload:
-            conversation_display_name = payload["conversation_display_name"]
-            if not isinstance(conversation_display_name, str):
+        if "selected_conversation_display_name_id" in payload:
+            selected_display_name_id = payload["selected_conversation_display_name_id"]
+            if selected_display_name_id is not None and (
+                not isinstance(selected_display_name_id, str)
+                or not selected_display_name_id
+            ):
                 raise ServiceError(
                     400,
-                    "invalid_conversation_display_name",
-                    "conversation_display_name must be a string.",
+                    "invalid_selected_conversation_display_name_id",
+                    "selected_conversation_display_name_id must be a non-empty string or null.",
                 )
-            state["conversation_display_name"] = conversation_display_name.strip()
+            if (
+                selected_display_name_id is not None
+                and selected_display_name_id not in state["conversation_display_names"]
+            ):
+                raise ServiceError(
+                    404,
+                    "conversation_display_name_not_found",
+                    "The selected conversation display name does not exist.",
+                )
+            state["selected_conversation_display_name_id"] = selected_display_name_id
 
         # 永続化
         self.store.write_state(state)
@@ -836,7 +950,7 @@ class ServiceConfigResourcesMixin:
             "selected_model_preset_id",
             "thinking_speech_level",
             "wake_policy",
-            "conversation_display_name",
+            "selected_conversation_display_name_id",
         }
         unsupported_current_fields = sorted(set(current.keys()) - supported_current_fields)
         if unsupported_current_fields:
@@ -859,12 +973,24 @@ class ServiceConfigResourcesMixin:
         # 動作設定検証
         self._validate_thinking_speech_level(thinking_speech_level)
         self._validate_wake_policy(current.get("wake_policy"))
-        conversation_display_name = current.get("conversation_display_name")
-        if not isinstance(conversation_display_name, str):
+        selected_display_name_id = current.get("selected_conversation_display_name_id")
+        if selected_display_name_id is not None and (
+            not isinstance(selected_display_name_id, str)
+            or not selected_display_name_id
+        ):
             raise ServiceError(
                 400,
-                "invalid_conversation_display_name",
-                "conversation_display_name must be a string.",
+                "invalid_selected_conversation_display_name_id",
+                "selected_conversation_display_name_id must be a non-empty string or null.",
+            )
+        if (
+            selected_display_name_id is not None
+            and selected_display_name_id not in state["conversation_display_names"]
+        ):
+            raise ServiceError(
+                404,
+                "conversation_display_name_not_found",
+                "The selected conversation display name does not exist.",
             )
 
         # 永続化
@@ -873,7 +999,7 @@ class ServiceConfigResourcesMixin:
         state["selected_model_preset_id"] = selected_model_preset_id
         state["thinking_speech_level"] = thinking_speech_level
         state["wake_policy"] = current["wake_policy"]
-        state["conversation_display_name"] = conversation_display_name.strip()
+        state["selected_conversation_display_name_id"] = selected_display_name_id
         state["personas"] = personas
         state["memory_sets"] = memory_sets
         state["model_presets"] = model_presets
@@ -901,7 +1027,9 @@ class ServiceConfigResourcesMixin:
             "wake_policy": deepcopy(state["wake_policy"]),
             "selected_model_preset_id": state["selected_model_preset_id"],
             "thinking_speech_level": state["thinking_speech_level"],
-            "conversation_display_name": state["conversation_display_name"],
+            "selected_conversation_display_name_id": state[
+                "selected_conversation_display_name_id"
+            ],
         }
 
     def _build_editor_state(self, state: dict[str, Any]) -> dict[str, Any]:

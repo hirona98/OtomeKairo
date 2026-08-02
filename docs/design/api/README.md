@@ -48,7 +48,7 @@ API 仕様は次のように分ける。
 `/ui/api/...` はブラウザ UI 専用の同一 server 内部呼び出し面であり、外部接点向け API として扱わない。
 ブラウザ UI は `/ui/api/conversation` を通じて既存の会話入力処理を呼び出す。
 ブラウザ UI はブラウザstorageへ永続化した `person_ref / interaction_ref` と、
-OtomeKairo設定の `conversation_display_name` を `interaction_context` として送る。
+OtomeKairo設定の `selected_conversation_display_name_id` から解決した表示名を `interaction_context` として送る。
 ブラウザ UI は CocoroConsole と同じ責務カテゴリの左ナビゲーションを持ち、`/ui/api/config/...` を通じて既存設定操作を呼び出す。
 ブラウザ UI は `/ui/api/docs` を通じて `GET /api/docs` と同じAPI説明を表示し、`console_access_token` をブラウザへ返さない。
 デスクトップ取得は最後に接続したCocoroConsole端末設定を編集する。
@@ -60,7 +60,7 @@ VRM、表示、モーションはCocoroConsoleから端末設定APIへ保存す�
 ブラウザ UI はVAD、STT、音声起動ワード判定、話者識別を実行しない。
 ブラウザ UI は `/ui/api/audio/...` を通じて input device 確認と話者管理を行う。
 ブラウザ UI は TTS providerへ接続せず、OtomeKairoから受信した`assistant_audio`のWAVをブラウザ音声出力で直接再生する。
-ブラウザの直接会話入力はOtomeKairoの `conversation_display_name` を
+ブラウザの直接会話入力はOtomeKairoの選択中 `conversation_display_name` 定義の表示名を
 `participants[].display_name` に使用し、呼び名をブラウザstorageへ保存しない。
 ブラウザ UI は運用ダッシュボードを常設し、`/ui/api/inspection/current-state` と `/ui/api/inspection/cycle-summaries` を 5 秒周期で読み取る。
 運用ダッシュボードは現在状態、自律実行、capability availability、最近の cycle timeline を表示する。

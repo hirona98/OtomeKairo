@@ -27,7 +27,7 @@ class DocsApiTests(unittest.TestCase):
 
         identity = service.read_server_identity()
 
-        self.assertEqual(identity["api_version"], "0.6.0")
+        self.assertEqual(identity["api_version"], "0.7.0")
 
     def test_docs_requires_token(self) -> None:
         service = DummyService()

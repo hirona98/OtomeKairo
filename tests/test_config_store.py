@@ -61,7 +61,12 @@ class ConfigStoreTests(unittest.TestCase):
             state["avatars"]["avatar:default"]["tts"]["aivis_cloud_config"][
                 "api_key"
             ] = "tts-secret"
-            state["conversation_display_name"] = "田中さん"
+            display_name_id = "conversation_display_name:tanaka"
+            store.create_conversation_display_name(
+                conversation_display_name_id=display_name_id,
+                display_name="田中さん",
+            )
+            state["selected_conversation_display_name_id"] = display_name_id
             state["console_client_settings"] = {
                 "console-main": {
                     "last_connected_at": "2026-07-27T12:00:00+09:00",
@@ -104,7 +109,16 @@ class ConfigStoreTests(unittest.TestCase):
                 ]["api_key"],
                 "tts-secret",
             )
-            self.assertEqual(reloaded_state["conversation_display_name"], "田中さん")
+            self.assertEqual(
+                reloaded_state["selected_conversation_display_name_id"],
+                display_name_id,
+            )
+            self.assertEqual(
+                reloaded_state["conversation_display_names"][display_name_id][
+                    "display_name"
+                ],
+                "田中さん",
+            )
             self.assertEqual(
                 reloaded_state["console_client_settings"]["console-main"][
                     "last_connected_at"

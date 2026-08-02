@@ -150,6 +150,12 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             if method == "GET" and parsed.path == "/api/config":
                 self._write_success(HTTPStatus.OK, self.server.service.get_config(token))
                 return
+            if method == "GET" and parsed.path == "/api/config/conversation-display-names":
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.list_conversation_display_names(token),
+                )
+                return
             if method == "GET" and parsed.path == "/api/config/editor-state":
                 self._write_success(HTTPStatus.OK, self.server.service.get_editor_state(token))
                 return
@@ -263,6 +269,15 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                     ),
                 )
                 return
+            if method == "POST" and parsed.path == "/api/config/conversation-display-names":
+                self._write_success(
+                    HTTPStatus.CREATED,
+                    self.server.service.create_conversation_display_name(
+                        token,
+                        self._read_json_body(),
+                    ),
+                )
+                return
             if (
                 method == "DELETE"
                 and parsed.path.startswith("/api/audio/speaker-enrollments/")
@@ -279,7 +294,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             if (
                 method == "PUT"
                 and parsed.path.startswith("/api/audio/speakers/")
-                and parsed.path.endswith("/display-name")
+                and parsed.path.endswith("/conversation-display-name")
             ):
                 path_parts = parsed.path.split("/")
                 if len(path_parts) != 6:
@@ -290,10 +305,37 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                     )
                 self._write_success(
                     HTTPStatus.OK,
-                    self.server.service.rename_audio_speaker(
+                    self.server.service.assign_audio_speaker_conversation_display_name(
                         token,
                         unquote(path_parts[4]),
                         self._read_json_body(),
+                    ),
+                )
+                return
+            if (
+                method == "PUT"
+                and parsed.path.startswith("/api/config/conversation-display-names/")
+            ):
+                display_name_id = unquote(parsed.path.rsplit("/", 1)[-1])
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.update_conversation_display_name(
+                        token,
+                        display_name_id,
+                        self._read_json_body(),
+                    ),
+                )
+                return
+            if (
+                method == "DELETE"
+                and parsed.path.startswith("/api/config/conversation-display-names/")
+            ):
+                display_name_id = unquote(parsed.path.rsplit("/", 1)[-1])
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.delete_conversation_display_name(
+                        token,
+                        display_name_id,
                     ),
                 )
                 return
@@ -900,6 +942,21 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 self.server.service.list_audio_speakers(token),
             )
             return
+        if method == "GET" and path == "/ui/api/config/conversation-display-names":
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.list_conversation_display_names(token),
+            )
+            return
+        if method == "POST" and path == "/ui/api/config/conversation-display-names":
+            self._write_success(
+                HTTPStatus.CREATED,
+                self.server.service.create_conversation_display_name(
+                    token,
+                    self._read_json_body(),
+                ),
+            )
+            return
         if method == "POST" and path == "/ui/api/audio/speaker-enrollments":
             self._write_success(
                 HTTPStatus.CREATED,
@@ -924,7 +981,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         if (
             method == "PUT"
             and path.startswith("/ui/api/audio/speakers/")
-            and path.endswith("/display-name")
+            and path.endswith("/conversation-display-name")
         ):
             path_parts = path.split("/")
             if len(path_parts) != 7:
@@ -935,10 +992,37 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 )
             self._write_success(
                 HTTPStatus.OK,
-                self.server.service.rename_audio_speaker(
+                self.server.service.assign_audio_speaker_conversation_display_name(
                     token,
                     unquote(path_parts[5]),
                     self._read_json_body(),
+                ),
+            )
+            return
+        if (
+            method == "PUT"
+            and path.startswith("/ui/api/config/conversation-display-names/")
+        ):
+            display_name_id = unquote(path.rsplit("/", 1)[-1])
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.update_conversation_display_name(
+                    token,
+                    display_name_id,
+                    self._read_json_body(),
+                ),
+            )
+            return
+        if (
+            method == "DELETE"
+            and path.startswith("/ui/api/config/conversation-display-names/")
+        ):
+            display_name_id = unquote(path.rsplit("/", 1)[-1])
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.delete_conversation_display_name(
+                    token,
+                    display_name_id,
                 ),
             )
             return

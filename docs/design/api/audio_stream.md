@@ -356,6 +356,7 @@ response:
     "speakers": [
       {
         "person_ref": "person:voice:550e8400-e29b-41d4-a716-446655440000",
+        "conversation_display_name_id": "conversation_display_name:hiro",
         "display_name": "ひろ",
         "registration_status": "registered",
         "model_id": "wespeaker-resnet34-voxceleb-v1",
@@ -382,7 +383,7 @@ response:
 ```json
 {
   "owner_client_id": "console-main",
-  "display_name": "ひろ"
+  "conversation_display_name_id": "conversation_display_name:hiro"
 }
 ```
 
@@ -395,8 +396,8 @@ response:
 }
 ```
 
-新規登録では `display_name` を必須とし、`person_ref` を送らない。
-再登録では `person_ref` を必須とし、`display_name` を送らない。
+新規登録では未割当の `conversation_display_name_id` を必須とし、`person_ref` を送らない。
+再登録では `person_ref` を必須とし、`conversation_display_name_id` を送らない。
 `owner_client_id` は接続中 event stream client と一致させる。
 
 response:
@@ -408,6 +409,7 @@ response:
     "enrollment_id": "speaker_enrollment:...",
     "owner_client_id": "console-main",
     "person_ref": null,
+    "conversation_display_name_id": "conversation_display_name:hiro",
     "display_name": "ひろ",
     "required_samples": 3,
     "completed_samples": 0,
@@ -427,24 +429,24 @@ request body は不要とする。
 成功時は中止後の enrollment summary を返す。
 `DELETE /ui/api/audio/speaker-enrollments/{enrollment_id}` は同じ処理を呼び出す。
 
-## 話者表示名変更
+## 話者の呼ばれ方割当変更
 
-### `PUT /api/audio/speakers/{person_ref}/display-name`
+### `PUT /api/audio/speakers/{person_ref}/conversation-display-name`
 
 - 認証: 必要
-- 役割: `person_ref` を維持して表示名を変更する
+- 役割: `person_ref` を維持して共有する呼ばれ方定義の割当を変更する
 
 request:
 
 ```json
 {
-  "display_name": "ひろ"
+  "conversation_display_name_id": "conversation_display_name:hiro"
 }
 ```
 
-表示名は前後空白を除いた非空文字列にする。
-過去記録を更新しない。
-`PUT /ui/api/audio/speakers/{person_ref}/display-name` は同じ処理を呼び出す。
+存在する未割当の呼ばれ方定義だけを指定する。
+過去記録は更新しない。
+`PUT /ui/api/audio/speakers/{person_ref}/conversation-display-name` は同じ処理を呼び出す。
 
 ## 音声登録解除
 
@@ -465,17 +467,19 @@ request body は不要とする。
 | `400` | `invalid_audio_frame` | PCM frame の長さまたは形式が不正 |
 | `400` | `invalid_audio_control` | control message が不正 |
 | `400` | `invalid_speaker_enrollment` | 話者登録 request が不正 |
-| `400` | `invalid_speaker_display_name` | 表示名が不正 |
+| `400` | `invalid_conversation_display_name_assignment` | 呼ばれ方定義の割当 request が不正 |
 | `401` | `invalid_token` | connector 認証が不正 |
 | `403` | `invalid_audio_origin` | Web audio stream の Origin と Host が一致しない |
 | `404` | `speaker_not_found` | 対象人物が存在しない |
 | `404` | `speaker_enrollment_not_found` | 対象登録 session が存在しない |
+| `404` | `conversation_display_name_not_found` | 対象の呼ばれ方定義が存在しない |
 | `404` | `audio_input_session_not_found` | 対象Web入力sessionが存在しない |
 | `409` | `audio_input_busy` | 別の Web input がリースを保持中 |
 | `409` | `audio_source_not_selected` | 接続sourceが現在の実効入力元ではない |
 | `409` | `audio_lease_revoked` | 接続のリース generation が失効済み |
 | `409` | `speaker_enrollment_busy` | 別の登録 session が進行中 |
 | `409` | `speaker_enrollment_owner_mismatch` | owner 以外が中止を要求 |
+| `409` | `conversation_display_name_already_assigned` | 呼ばれ方定義が別の音声話者へ割当済み |
 | `422` | `speaker_enrollment_required` | active な話者 embedding が存在しない |
 | `422` | `microphone_device_unavailable` | 選択 device が存在しない |
 | `422` | `response_client_unavailable` | 物理音声の応答先が不在 |

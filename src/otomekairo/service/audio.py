@@ -95,14 +95,17 @@ class ServiceAudioMixin:
             owner_client_id=None,
         )
 
-    def rename_audio_speaker(
+    def assign_audio_speaker_conversation_display_name(
         self,
         token: str | None,
         person_ref: str,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         self._require_token(token)
-        return self._audio_runtime.rename_speaker(person_ref, payload)
+        return self._audio_runtime.assign_speaker_conversation_display_name(
+            person_ref,
+            payload,
+        )
 
     def unregister_audio_speaker(
         self,

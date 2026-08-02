@@ -13,7 +13,7 @@ from otomekairo.service.common import debug_log
 
 
 CONFIG_DB_FILE_NAME = "config.db"
-CURRENT_CONFIG_DB_VERSION = 13
+CURRENT_CONFIG_DB_VERSION = 14
 
 
 class ConfigStore:
@@ -44,7 +44,7 @@ class ConfigStore:
                     selected_model_preset_id,
                     selected_avatar_id,
                     thinking_speech_level,
-                    conversation_display_name,
+                    selected_conversation_display_name_id,
                     wake_policy_json,
                     microphone_settings_json
                 FROM current_config
@@ -65,7 +65,10 @@ class ConfigStore:
                 "thinking_speech_level": current[
                     "thinking_speech_level"
                 ],
-                "conversation_display_name": current["conversation_display_name"],
+                "selected_conversation_display_name_id": current[
+                    "selected_conversation_display_name_id"
+                ],
+                "conversation_display_names": self._read_conversation_display_names(conn),
                 "wake_policy": json.loads(current["wake_policy_json"]),
                 "microphone_settings": json.loads(current["microphone_settings_json"]),
                 "personas": self._read_payload_table(conn, "personas", "persona_id"),
@@ -92,19 +95,21 @@ class ConfigStore:
         query = """
             SELECT
                 person_ref,
-                display_name,
+                conversation_display_name_id,
+                conversation_display_names.display_name AS display_name,
                 registration_status,
                 embedding,
                 model_id,
                 registered_at,
-                updated_at
+                voice_speakers.updated_at AS updated_at
             FROM voice_speakers
+            JOIN conversation_display_names USING (conversation_display_name_id)
         """
         params: tuple[Any, ...] = ()
         if registered_only:
             query += "\nWHERE registration_status = ?"
             params = ("registered",)
-        query += "\nORDER BY created_at ASC, person_ref ASC"
+        query += "\nORDER BY voice_speakers.created_at ASC, person_ref ASC"
         with self._config_db() as conn:
             rows = conn.execute(query, params).fetchall()
         return [
@@ -124,13 +129,15 @@ class ConfigStore:
                 """
                 SELECT
                     person_ref,
-                    display_name,
+                    conversation_display_name_id,
+                    conversation_display_names.display_name AS display_name,
                     registration_status,
                     embedding,
                     model_id,
                     registered_at,
-                    updated_at
+                    voice_speakers.updated_at AS updated_at
                 FROM voice_speakers
+                JOIN conversation_display_names USING (conversation_display_name_id)
                 WHERE person_ref = ?
                 """,
                 (person_ref,),
@@ -143,78 +150,177 @@ class ConfigStore:
         self,
         *,
         person_ref: str,
-        display_name: str,
+        conversation_display_name_id: str,
         embedding: list[float],
         model_id: str,
     ) -> dict[str, Any]:
         # 3サンプルから確定した embedding だけを原子的に保存する。
         timestamp = now_iso()
         embedding_blob = struct.pack(f"<{len(embedding)}f", *embedding)
-        with self._config_db() as conn:
-            existing = conn.execute(
-                """
-                SELECT created_at
-                FROM voice_speakers
-                WHERE person_ref = ?
-                """,
-                (person_ref,),
-            ).fetchone()
-            created_at = existing["created_at"] if existing is not None else timestamp
-            conn.execute(
-                """
-                INSERT INTO voice_speakers (
-                    person_ref,
-                    display_name,
-                    registration_status,
-                    embedding,
-                    model_id,
-                    created_at,
-                    registered_at,
-                    updated_at
+        try:
+            with self._config_db() as conn:
+                existing = conn.execute(
+                    """
+                    SELECT created_at
+                    FROM voice_speakers
+                    WHERE person_ref = ?
+                    """,
+                    (person_ref,),
+                ).fetchone()
+                created_at = existing["created_at"] if existing is not None else timestamp
+                conn.execute(
+                    """
+                    INSERT INTO voice_speakers (
+                        person_ref,
+                        conversation_display_name_id,
+                        registration_status,
+                        embedding,
+                        model_id,
+                        created_at,
+                        registered_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, 'registered', ?, ?, ?, ?, ?)
+                    ON CONFLICT(person_ref) DO UPDATE SET
+                        conversation_display_name_id = excluded.conversation_display_name_id,
+                        registration_status = 'registered',
+                        embedding = excluded.embedding,
+                        model_id = excluded.model_id,
+                        registered_at = excluded.registered_at,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        person_ref,
+                        conversation_display_name_id,
+                        embedding_blob,
+                        model_id,
+                        created_at,
+                        timestamp,
+                        timestamp,
+                    ),
                 )
-                VALUES (?, ?, 'registered', ?, ?, ?, ?, ?)
-                ON CONFLICT(person_ref) DO UPDATE SET
-                    display_name = excluded.display_name,
-                    registration_status = 'registered',
-                    embedding = excluded.embedding,
-                    model_id = excluded.model_id,
-                    registered_at = excluded.registered_at,
-                    updated_at = excluded.updated_at
-                """,
-                (
-                    person_ref,
-                    display_name,
-                    embedding_blob,
-                    model_id,
-                    created_at,
-                    timestamp,
-                    timestamp,
-                ),
-            )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("conversation_display_name_assignment_conflict") from exc
         speaker = self.get_voice_speaker(person_ref)
         if speaker is None:
             raise RuntimeError("voice speaker registration was not persisted.")
         return speaker
 
-    def rename_voice_speaker(
+    def assign_voice_speaker_conversation_display_name(
         self,
         *,
         person_ref: str,
-        display_name: str,
+        conversation_display_name_id: str,
     ) -> dict[str, Any] | None:
-        # 表示名だけを変更し、登録状態と embedding を維持する。
-        with self._config_db() as conn:
-            cursor = conn.execute(
-                """
-                UPDATE voice_speakers
-                SET display_name = ?, updated_at = ?
-                WHERE person_ref = ?
-                """,
-                (display_name, now_iso(), person_ref),
-            )
+        # 呼び名参照だけを変更し、登録状態と embedding を維持する。
+        try:
+            with self._config_db() as conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE voice_speakers
+                    SET conversation_display_name_id = ?, updated_at = ?
+                    WHERE person_ref = ?
+                    """,
+                    (conversation_display_name_id, now_iso(), person_ref),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("conversation_display_name_assignment_conflict") from exc
         if cursor.rowcount == 0:
             return None
         return self.get_voice_speaker(person_ref)
+
+    def list_conversation_display_names(self) -> list[dict[str, Any]]:
+        with self._config_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT conversation_display_name_id, display_name, created_at, updated_at
+                FROM conversation_display_names
+                ORDER BY created_at ASC, conversation_display_name_id ASC
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_conversation_display_name(
+        self,
+        conversation_display_name_id: str,
+    ) -> dict[str, Any] | None:
+        with self._config_db() as conn:
+            row = conn.execute(
+                """
+                SELECT conversation_display_name_id, display_name, created_at, updated_at
+                FROM conversation_display_names
+                WHERE conversation_display_name_id = ?
+                """,
+                (conversation_display_name_id,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def create_conversation_display_name(
+        self,
+        *,
+        conversation_display_name_id: str,
+        display_name: str,
+    ) -> dict[str, Any]:
+        timestamp = now_iso()
+        try:
+            with self._config_db() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO conversation_display_names (
+                        conversation_display_name_id, display_name, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (conversation_display_name_id, display_name, timestamp, timestamp),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("duplicate_conversation_display_name") from exc
+        created = self.get_conversation_display_name(conversation_display_name_id)
+        if created is None:
+            raise RuntimeError("conversation display name was not persisted.")
+        return created
+
+    def update_conversation_display_name(
+        self,
+        *,
+        conversation_display_name_id: str,
+        display_name: str,
+    ) -> dict[str, Any] | None:
+        try:
+            with self._config_db() as conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE conversation_display_names
+                    SET display_name = ?, updated_at = ?
+                    WHERE conversation_display_name_id = ?
+                    """,
+                    (display_name, now_iso(), conversation_display_name_id),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("duplicate_conversation_display_name") from exc
+        if cursor.rowcount == 0:
+            return None
+        return self.get_conversation_display_name(conversation_display_name_id)
+
+    def delete_conversation_display_name(
+        self,
+        conversation_display_name_id: str,
+    ) -> dict[str, Any] | None:
+        existing = self.get_conversation_display_name(conversation_display_name_id)
+        if existing is None:
+            return None
+        try:
+            with self._config_db() as conn:
+                conn.execute(
+                    """
+                    DELETE FROM conversation_display_names
+                    WHERE conversation_display_name_id = ?
+                    """,
+                    (conversation_display_name_id,),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("conversation_display_name_in_use") from exc
+        return existing
 
     def unregister_voice_speaker(self, person_ref: str) -> dict[str, Any] | None:
         # 人物rowを維持したまま音声登録情報だけを削除する。
@@ -300,9 +406,12 @@ class ConfigStore:
                 selected_model_preset_id TEXT NOT NULL,
                 selected_avatar_id TEXT NOT NULL,
                 thinking_speech_level INTEGER NOT NULL DEFAULT 5,
-                conversation_display_name TEXT NOT NULL,
+                selected_conversation_display_name_id TEXT,
                 wake_policy_json TEXT NOT NULL,
-                microphone_settings_json TEXT NOT NULL
+                microphone_settings_json TEXT NOT NULL,
+                FOREIGN KEY (selected_conversation_display_name_id)
+                    REFERENCES conversation_display_names(conversation_display_name_id)
+                    ON DELETE RESTRICT
             );
 
             CREATE TABLE IF NOT EXISTS personas (
@@ -341,9 +450,16 @@ class ConfigStore:
                 payload_json TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS conversation_display_names (
+                conversation_display_name_id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS voice_speakers (
                 person_ref TEXT PRIMARY KEY,
-                display_name TEXT NOT NULL,
+                conversation_display_name_id TEXT NOT NULL UNIQUE,
                 registration_status TEXT NOT NULL
                     CHECK (registration_status IN ('registered', 'unregistered')),
                 embedding BLOB,
@@ -351,6 +467,9 @@ class ConfigStore:
                 created_at TEXT NOT NULL,
                 registered_at TEXT,
                 updated_at TEXT NOT NULL,
+                FOREIGN KEY (conversation_display_name_id)
+                    REFERENCES conversation_display_names(conversation_display_name_id)
+                    ON DELETE RESTRICT,
                 CHECK (
                     (
                         registration_status = 'registered'
@@ -406,7 +525,7 @@ class ConfigStore:
                 selected_model_preset_id,
                 selected_avatar_id,
                 thinking_speech_level,
-                conversation_display_name,
+                selected_conversation_display_name_id,
                 wake_policy_json,
                 microphone_settings_json
             )
@@ -418,7 +537,7 @@ class ConfigStore:
                 state["selected_model_preset_id"],
                 state["selected_avatar_id"],
                 state["thinking_speech_level"],
-                state["conversation_display_name"],
+                state["selected_conversation_display_name_id"],
                 self._to_json(state["wake_policy"]),
                 self._to_json(state["microphone_settings"]),
             ),
@@ -441,6 +560,22 @@ class ConfigStore:
         ).fetchall()
         return {
             row[id_column]: json.loads(row["payload_json"])
+            for row in rows
+        }
+
+    def _read_conversation_display_names(
+        self,
+        conn: sqlite3.Connection,
+    ) -> dict[str, dict[str, Any]]:
+        rows = conn.execute(
+            """
+            SELECT conversation_display_name_id, display_name, created_at, updated_at
+            FROM conversation_display_names
+            ORDER BY created_at ASC, conversation_display_name_id ASC
+            """
+        ).fetchall()
+        return {
+            row["conversation_display_name_id"]: dict(row)
             for row in rows
         }
 
@@ -509,6 +644,7 @@ class ConfigStore:
     ) -> dict[str, Any]:
         speaker = {
             "person_ref": row["person_ref"],
+            "conversation_display_name_id": row["conversation_display_name_id"],
             "display_name": row["display_name"],
             "registration_status": row["registration_status"],
             "model_id": row["model_id"],

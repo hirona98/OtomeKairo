@@ -306,7 +306,14 @@
           <section class="tab-page" data-page="conversation">
             <fieldset class="settings-group">
               <legend>呼ばれ方</legend>
-              <label>会話入力で使う共通の呼ばれ方<input id="settings-conversation-display-name"></label>
+              <label>会話入力で使う共通の呼ばれ方
+                <select id="settings-conversation-display-name-select"></select>
+              </label>
+              <div class="conversation-display-name-list" id="conversation-display-name-list"></div>
+              <div class="speaker-registration-row">
+                <label>呼ばれ方を追加<input id="new-conversation-display-name"></label>
+                <button type="button" id="add-conversation-display-name">追加</button>
+              </div>
             </fieldset>
             <fieldset class="settings-group">
               <legend>音声認識（現状AmiVoiceのみ）</legend>
@@ -355,7 +362,7 @@
                 <div class="field-caption">登録済み話者</div>
                 <div class="speaker-list" id="speaker-list">登録済み話者はいません</div>
                 <div class="speaker-registration-row">
-                  <label>新規登録<input id="speaker-enrollment-display-name"></label>
+                  <label>新規登録<select id="speaker-enrollment-display-name-id"></select></label>
                   <button type="button" id="start-speaker-enrollment">3発話で登録</button>
                 </div>
                 <div class="speaker-enrollment-state">

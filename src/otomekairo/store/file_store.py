@@ -1507,26 +1507,67 @@ class FileStore:
         self,
         *,
         person_ref: str,
-        display_name: str,
+        conversation_display_name_id: str,
         embedding: list[float],
         model_id: str,
     ) -> dict[str, Any]:
         return self.config_store.replace_voice_speaker_registration(
             person_ref=person_ref,
-            display_name=display_name,
+            conversation_display_name_id=conversation_display_name_id,
             embedding=embedding,
             model_id=model_id,
         )
 
-    def rename_voice_speaker(
+    def assign_voice_speaker_conversation_display_name(
         self,
         *,
         person_ref: str,
+        conversation_display_name_id: str,
+    ) -> dict[str, Any] | None:
+        return self.config_store.assign_voice_speaker_conversation_display_name(
+            person_ref=person_ref,
+            conversation_display_name_id=conversation_display_name_id,
+        )
+
+    def list_conversation_display_names(self) -> list[dict[str, Any]]:
+        return self.config_store.list_conversation_display_names()
+
+    def get_conversation_display_name(
+        self,
+        conversation_display_name_id: str,
+    ) -> dict[str, Any] | None:
+        return self.config_store.get_conversation_display_name(
+            conversation_display_name_id
+        )
+
+    def create_conversation_display_name(
+        self,
+        *,
+        conversation_display_name_id: str,
+        display_name: str,
+    ) -> dict[str, Any]:
+        return self.config_store.create_conversation_display_name(
+            conversation_display_name_id=conversation_display_name_id,
+            display_name=display_name,
+        )
+
+    def update_conversation_display_name(
+        self,
+        *,
+        conversation_display_name_id: str,
         display_name: str,
     ) -> dict[str, Any] | None:
-        return self.config_store.rename_voice_speaker(
-            person_ref=person_ref,
+        return self.config_store.update_conversation_display_name(
+            conversation_display_name_id=conversation_display_name_id,
             display_name=display_name,
+        )
+
+    def delete_conversation_display_name(
+        self,
+        conversation_display_name_id: str,
+    ) -> dict[str, Any] | None:
+        return self.config_store.delete_conversation_display_name(
+            conversation_display_name_id
         )
 
     def unregister_voice_speaker(self, person_ref: str) -> dict[str, Any] | None:

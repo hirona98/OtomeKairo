@@ -997,6 +997,13 @@ p {
   gap: 10px;
 }
 
+.conversation-display-name-list {
+  display: grid;
+  margin: var(--space-3) 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

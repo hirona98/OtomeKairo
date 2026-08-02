@@ -849,6 +849,14 @@ class ServiceInputPipelineMixin:
         if not person_refs:
             return []
 
+        # 音声人物の呼び名は config DB の割当を正本にする。
+        for person_ref in person_refs:
+            if not person_ref.startswith("person:voice:"):
+                continue
+            speaker = self.store.get_voice_speaker(person_ref)
+            if speaker is not None:
+                display_names[person_ref] = speaker["display_name"]
+
         memory_set_id = state.get("selected_memory_set_id")
         if not isinstance(memory_set_id, str) or not memory_set_id.strip():
             return []
