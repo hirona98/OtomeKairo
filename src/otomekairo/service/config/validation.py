@@ -466,22 +466,26 @@ class ServiceConfigValidationMixin:
             if not isinstance(client_id, str) or not client_id or client_id != client_id.strip():
                 raise ServiceError(400, "invalid_microphone_settings", "microphone_settings.console.client_id must be a trimmed non-empty string.")
             console_device = console.get("input_device")
-            if not isinstance(console_device, dict):
-                raise ServiceError(400, "invalid_microphone_settings", "microphone_settings.console.input_device must be an object.")
-            self._validate_exact_fields(
-                console_device,
-                {"device_id", "name"},
-                "microphone_settings.console.input_device",
-            )
-            for field_name in ("device_id", "name"):
-                value = console_device.get(field_name)
-                if not isinstance(value, str) or not value or value != value.strip():
-                    raise ServiceError(400, "invalid_microphone_settings", f"microphone_settings.console.input_device.{field_name} must be a trimmed non-empty string.")
-        if input_source == "console_microphone" and console is None:
+            if console_device is not None:
+                if not isinstance(console_device, dict):
+                    raise ServiceError(400, "invalid_microphone_settings", "microphone_settings.console.input_device must be null or an object.")
+                self._validate_exact_fields(
+                    console_device,
+                    {"device_id", "name"},
+                    "microphone_settings.console.input_device",
+                )
+                for field_name in ("device_id", "name"):
+                    value = console_device.get(field_name)
+                    if not isinstance(value, str) or not value or value != value.strip():
+                        raise ServiceError(400, "invalid_microphone_settings", f"microphone_settings.console.input_device.{field_name} must be a trimmed non-empty string.")
+        if (
+            input_source == "console_microphone"
+            and (console is None or console["input_device"] is None)
+        ):
             raise ServiceError(
                 400,
                 "invalid_microphone_settings",
-                "microphone_settings.console is required for console_microphone.",
+                "microphone_settings.console and its input_device are required for console_microphone.",
             )
         for field_name in (
             "vad_probability_threshold",

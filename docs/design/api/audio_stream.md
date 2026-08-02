@@ -164,7 +164,7 @@ response:
 {
   "ok": true,
   "data": {
-    "configured_source": "console_microphone",
+    "configured_source": "local_microphone",
     "effective_source": "local_microphone",
     "local_input_device": {
       "host_api": "ALSA",
@@ -172,15 +172,13 @@ response:
     },
     "console": {
       "client_id": "console-main",
-      "input_device": {
-        "device_id": "{endpoint-id}",
-        "name": "Microphone"
-      }
+      "input_device": null
     }
   }
 }
 ```
 
+`console.input_device` は Windows input endpoint が未選択の場合に `null` とする。
 このresponseはprocess-localな実効値を含み、設定の正本として保存しない。
 
 ## 音声stream data/control

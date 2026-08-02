@@ -53,6 +53,81 @@ class AudioSegmenterTests(unittest.TestCase):
 
 
 class AudioRuntimeControlTests(unittest.TestCase):
+    def test_local_microphone_uses_console_without_windows_device(self) -> None:
+        # Windows入力deviceがなくてもconsole clientを応答先としてleaseを開始する。
+        with TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            try:
+                state = service.store.read_state()
+                state["console_access_token"] = "token"
+                state["microphone_settings"]["local_input_device"] = {
+                    "host_api": "ALSA",
+                    "name": "USB Audio Device",
+                }
+                state["microphone_settings"]["console"] = {
+                    "client_id": "console-main",
+                    "input_device": None,
+                }
+                service.store.write_state(state)
+                service._audio_runtime.reload_settings()
+
+                event_socket = FakeWebSocket()
+                event_session_id = service.register_event_stream_connection(
+                    event_socket
+                )
+                service.handle_event_stream_message(
+                    event_session_id,
+                    {
+                        "type": "hello",
+                        "client_id": "console-main",
+                        "caps": [],
+                        "event_subscriptions": [
+                            "conversation_input",
+                            "assistant_message",
+                            "audio_runtime_state",
+                        ],
+                    },
+                )
+
+                audio_socket = FakeWebSocket()
+                audio_session_id = service.register_audio_stream_connection(
+                    audio_socket,
+                    endpoint_source="local_microphone",
+                )
+                service.handle_audio_stream_message(
+                    audio_session_id,
+                    "text",
+                    json.dumps(
+                        {
+                            "type": "audio_start",
+                            "protocol_version": "2",
+                            "client_id": "microphone-connector-main",
+                            "input_source": "local_microphone",
+                            "input_session_id": None,
+                            "format": AUDIO_FORMAT,
+                            "device": {
+                                "host_api": "ALSA",
+                                "name": "USB Audio Device",
+                            },
+                            "capture_settings": {
+                                "source_sample_rate": 48000,
+                            },
+                        }
+                    ).encode("utf-8"),
+                )
+
+                self.assertEqual(audio_socket.sent[0]["type"], "audio_started")
+                self.assertEqual(
+                    audio_socket.sent[0]["paused_reason"],
+                    "stt_disabled",
+                )
+                self.assertEqual(
+                    service._audio_runtime.snapshot()["response_client_id"],
+                    "console-main",
+                )
+            finally:
+                service.close_audio_runtime()
+
     def test_web_lease_can_enter_enrollment_when_stt_is_disabled(self) -> None:
         # 通常入力をpauseしたまま同じleaseを話者登録へ切り替える。
         with TemporaryDirectory() as temp_dir:

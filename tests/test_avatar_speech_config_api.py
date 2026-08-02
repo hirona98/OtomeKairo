@@ -126,6 +126,25 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
             "avatar_speech_editor_state_write",
         )
 
+    def test_local_microphone_accepts_console_without_windows_device(self) -> None:
+        # ローカルマイクの応答先はWindows入力deviceと独立して保存する。
+        service = DummyService()
+        definition = service.get_avatar_speech_editor_state("token")
+        definition["microphone_settings"]["console"] = {
+            "client_id": "console-main",
+            "input_device": None,
+        }
+
+        response = service.replace_avatar_speech_editor_state("token", definition)
+
+        self.assertEqual(
+            response["microphone_settings"]["console"],
+            {
+                "client_id": "console-main",
+                "input_device": None,
+            },
+        )
+
     def test_invalid_editor_state_does_not_change_saved_state(self) -> None:
         cases: list[tuple[str, object, str]] = []
         service = DummyService()
@@ -151,6 +170,22 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
             (
                 "fractional microphone",
                 fractional_microphone,
+                "invalid_microphone_settings",
+            )
+        )
+
+        console_without_device = deepcopy(original)
+        console_without_device["microphone_settings"]["input_source"] = (
+            "console_microphone"
+        )
+        console_without_device["microphone_settings"]["console"] = {
+            "client_id": "console-main",
+            "input_device": None,
+        }
+        cases.append(
+            (
+                "console microphone without device",
+                console_without_device,
                 "invalid_microphone_settings",
             )
         )
