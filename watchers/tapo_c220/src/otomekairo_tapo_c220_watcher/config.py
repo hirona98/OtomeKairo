@@ -86,7 +86,7 @@ def _resolve_access_token(
     local_token = _local_config_access_token(environ=environ)
     if local_token:
         return local_token
-    bootstrap_token = _bootstrap_first_console_token(
+    bootstrap_token = _acquire_console_access_token(
         base_url=base_url,
         tls_verify=tls_verify,
         request_timeout_seconds=request_timeout_seconds,
@@ -190,7 +190,7 @@ def _enabled_watcher_ids_from_config_db(db_path: Path) -> list[str]:
     return watcher_ids
 
 
-def _bootstrap_first_console_token(
+def _acquire_console_access_token(
     *,
     base_url: str,
     tls_verify: bool,
@@ -203,10 +203,7 @@ def _bootstrap_first_console_token(
         timeout_seconds=request_timeout_seconds,
     )
     try:
-        probe = client.get("/api/bootstrap/probe")
-        if probe.get("bootstrap_state") != "unregistered":
-            return ""
-        data = client.post("/api/bootstrap/register-first-console", {})
+        data = client.post("/api/bootstrap/acquire-console-access-token", {})
     except HttpError:
         return ""
     token = data.get("console_access_token")

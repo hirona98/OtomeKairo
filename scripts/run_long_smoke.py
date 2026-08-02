@@ -749,7 +749,7 @@ class LongSmokeRunner:
             )
             return
 
-        bootstrap = self.api.post("/api/bootstrap/register-first-console", {})
+        bootstrap = self.api.post("/api/bootstrap/acquire-console-access-token", {})
         token = bootstrap.get("console_access_token")
         if not isinstance(token, str) or not token:
             raise SmokeError("bootstrap did not return console_access_token.")

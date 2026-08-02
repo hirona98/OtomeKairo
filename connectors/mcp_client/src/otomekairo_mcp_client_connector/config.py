@@ -149,7 +149,7 @@ def _resolve_access_token(
     local_token = _local_config_access_token(server=server, environ=environ, config_path=config_path)
     if local_token:
         return local_token
-    bootstrap_token = _bootstrap_first_console_token(
+    bootstrap_token = _acquire_console_access_token(
         base_url=base_url,
         tls_verify=tls_verify,
         request_timeout_seconds=request_timeout_seconds,
@@ -200,7 +200,7 @@ def _read_config_db_access_token(db_path: Path) -> str:
     return token.strip() if isinstance(token, str) and token.strip() else ""
 
 
-def _bootstrap_first_console_token(*, base_url: str, tls_verify: bool, request_timeout_seconds: float) -> str:
+def _acquire_console_access_token(*, base_url: str, tls_verify: bool, request_timeout_seconds: float) -> str:
     client = JsonApiClient(
         base_url=base_url,
         access_token="",
@@ -209,7 +209,7 @@ def _bootstrap_first_console_token(*, base_url: str, tls_verify: bool, request_t
         trace=trace_writer_from_env(),
     )
     try:
-        data = client.post("/api/bootstrap/register-first-console", {})
+        data = client.post("/api/bootstrap/acquire-console-access-token", {})
     except HttpError:
         return ""
     token = data.get("console_access_token")
