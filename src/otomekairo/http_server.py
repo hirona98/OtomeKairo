@@ -51,6 +51,7 @@ WEB_STATIC_FILES = {
         "max-age=60",
     ),
     "/ui/styles.css": ("styles.css", "text/css; charset=utf-8", "max-age=60"),
+    "/ui/LICENSE.txt": ("LICENSE.txt", "text/plain; charset=utf-8", "max-age=300"),
 }
 
 
@@ -1089,6 +1090,13 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         if method == "PUT" and path == "/ui/api/config/editor-state":
             payload = self._read_json_body()
             self._write_success(HTTPStatus.OK, self.server.service.replace_editor_state(token, payload))
+            return
+        if method == "POST" and path == "/ui/api/config/memory-sets/clone":
+            payload = self._read_json_body()
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.clone_memory_set(token, payload),
+            )
             return
         if method == "GET" and path == "/ui/api/config/avatar-speech/editor-state":
             self._write_success(

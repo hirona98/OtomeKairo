@@ -30,7 +30,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 "otomekairo" = ["default_console_motion.json"]
 "otomekairo.audio.model_assets" = ["*.json", "*.md", "*.onnx"]
-"otomekairo.web.static" = ["*.html", "*.js", "*.css"]
+"otomekairo.web.static" = ["*.html", "*.js", "*.css", "*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

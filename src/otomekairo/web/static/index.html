@@ -125,7 +125,9 @@
     <label class="settings-mobile-navigation">設定ページ
       <select id="settings-page-select">
         <optgroup label="表現">
-          <option value="avatar">アバター</option>
+          <option value="display">表示</option>
+          <option value="avatar" selected>アバター</option>
+          <option value="motion">モーション</option>
         </optgroup>
         <optgroup label="入力">
           <option value="conversation">会話入力</option>
@@ -147,13 +149,18 @@
           <option value="mcp">ツール（MCP）</option>
           <option value="api">API説明</option>
         </optgroup>
+        <optgroup label="情報">
+          <option value="license">ライセンス</option>
+        </optgroup>
       </select>
     </label>
 
     <div class="settings-layout">
       <nav class="settings-navigation" aria-label="設定カテゴリ">
         <div class="settings-navigation-category">表現</div>
+        <button type="button" class="settings-nav-button" data-tab="display">表示</button>
         <button type="button" class="settings-nav-button active" data-tab="avatar">アバター</button>
+        <button type="button" class="settings-nav-button" data-tab="motion">モーション</button>
         <div class="settings-navigation-category">入力</div>
         <button type="button" class="settings-nav-button" data-tab="conversation">会話入力</button>
         <div class="settings-navigation-category">個</div>
@@ -169,26 +176,48 @@
         <div class="settings-navigation-category">外部連携</div>
         <button type="button" class="settings-nav-button" data-tab="mcp">ツール（MCP）</button>
         <button type="button" class="settings-nav-button" data-tab="api">API説明</button>
+        <div class="settings-navigation-category">情報</div>
+        <button type="button" class="settings-nav-button" data-tab="license">ライセンス</button>
       </nav>
 
       <div class="settings-content">
         <div class="settings-body">
+          <section class="tab-page" data-page="display">
+            <p class="console-info-box">
+              表示設定（最前面表示、アバター位置、画質、吹き出しなど）は CocoroConsole で編集します。
+              Web UI では編集欄を設けません。
+            </p>
+          </section>
+
           <section class="tab-page active" data-page="avatar">
             <div class="selector-row">
               <select id="avatar-select"></select>
               <button type="button" data-action="add-avatar">追加</button>
               <button type="button" data-action="duplicate-avatar">複製</button>
-              <button type="button" data-action="delete-avatar">削除</button>
+              <button type="button" class="danger-button" data-action="delete-avatar">削除</button>
             </div>
-            <label class="preset-name-field">プリセット名<input id="avatar-display-name"></label>
+            <div class="model-setting-row model-preset-name-row">
+              <label for="avatar-display-name">プリセット名:</label>
+              <input id="avatar-display-name">
+            </div>
 
             <fieldset class="settings-group" data-console-setting data-always-disabled disabled>
               <legend>VRM</legend>
-              <div class="form-grid">
-                <label>VRMファイル:<input id="avatar-model" disabled></label>
-                <label class="checkbox-field wide-label">UnlitをMToonに変換する（正常に表示されないときに有効にしてみてください）<input id="avatar-convert-mtoon" type="checkbox"></label>
-                <label class="checkbox-field wide-label">指定したメッシュに影を落とさない（顔などを想定）<input id="avatar-shadow-exclusion-enabled" type="checkbox"></label>
-                <label class="wide-label">メッシュ名:<input id="avatar-shadow-excluded-meshes" disabled></label>
+              <div class="console-settings-list">
+                <div class="console-setting-row">
+                  <label for="avatar-model">VRMファイル:</label>
+                  <input id="avatar-model" disabled>
+                </div>
+                <label class="checkbox-field">UnlitをMToonに変換する（正常に表示されないときに有効にしてみてください）
+                  <input id="avatar-convert-mtoon" type="checkbox">
+                </label>
+                <label class="checkbox-field">指定したメッシュに影を落とさない（顔などを想定）
+                  <input id="avatar-shadow-exclusion-enabled" type="checkbox">
+                </label>
+                <div class="console-setting-row">
+                  <label for="avatar-shadow-excluded-meshes">メッシュ名:</label>
+                  <input id="avatar-shadow-excluded-meshes" disabled>
+                </div>
               </div>
             </fieldset>
 
@@ -296,84 +325,118 @@
 
           </section>
 
+          <section class="tab-page" data-page="motion">
+            <p class="console-info-box">
+              モーション設定は CocoroConsole で編集します。
+              Web UI では編集欄を設けません。
+            </p>
+          </section>
+
           <section class="tab-page" data-page="conversation">
             <fieldset class="settings-group">
-              <legend>呼ばれ方</legend>
-              <label>会話入力で使用する呼ばれ方
-                <select id="settings-conversation-display-name-select"></select>
-              </label>
-              <div class="conversation-display-name-list" id="conversation-display-name-list"></div>
-              <div class="speaker-registration-row">
-                <label>呼ばれ方を追加<input id="new-conversation-display-name"></label>
-                <button type="button" id="add-conversation-display-name">追加</button>
+              <legend>会話入力</legend>
+              <div class="console-settings-list">
+                <div class="console-setting-row">
+                  <label for="settings-conversation-display-name-select">会話入力で使用:</label>
+                  <select id="settings-conversation-display-name-select"></select>
+                </div>
+                <div class="console-setting-row">
+                  <label for="conversation-display-name-edit">呼ばれ方を管理:</label>
+                  <div class="conversation-display-name-manage">
+                    <input id="conversation-display-name-edit">
+                    <button type="button" id="add-conversation-display-name">追加</button>
+                    <button type="button" id="update-conversation-display-name">変更</button>
+                    <button type="button" class="danger-button" id="delete-conversation-display-name">削除</button>
+                  </div>
+                </div>
               </div>
             </fieldset>
             <fieldset class="settings-group">
               <legend>音声認識（現状AmiVoiceのみ）</legend>
-              <p class="field-hint">アバタータブで選択中のアバター音声プリセットに保存します。</p>
-              <div class="form-grid">
-                <label class="checkbox-field wide-control">STTを使用する<input id="stt-enabled" type="checkbox"></label>
-                <label>エンジン
+              <p class="field-hint">アバターページで選択中の音声プリセットに保存します。</p>
+              <div class="console-settings-list">
+                <label class="checkbox-field">STTを使用する
+                  <input id="stt-enabled" type="checkbox">
+                </label>
+                <div class="console-setting-row">
+                  <label for="stt-engine">エンジン:</label>
                   <select id="stt-engine">
                     <option value="amivoice">AmiVoice</option>
                   </select>
-                </label>
-                <label>Profile ID（先頭の:は不要）<input id="stt-profile-id"></label>
-                <label class="api-key-field wide-label">API Key
-                  <span class="inline-control-row">
+                </div>
+                <div class="console-setting-row">
+                  <label for="stt-profile-id">Profile ID:</label>
+                  <input id="stt-profile-id" placeholder="先頭の:は不要">
+                </div>
+                <div class="console-setting-row">
+                  <label for="stt-api-key">API Key:</label>
+                  <div class="inline-control-row">
                     <input id="stt-api-key" type="password" autocomplete="new-password">
                     <button type="button" class="plain-button" id="copy-stt-api-key">コピー</button>
                     <button type="button" class="plain-button" id="paste-stt-api-key">上書き貼り付け</button>
-                  </span>
-                </label>
+                  </div>
+                </div>
               </div>
             </fieldset>
             <fieldset class="settings-group">
               <legend>音声起動ワード</legend>
-              <div class="form-grid">
-                <label class="wide-label">音声起動ワード（1行1件）<textarea id="stt-wake-words" rows="3"></textarea></label>
+              <div class="console-settings-list">
+                <div class="console-setting-row console-setting-row-top">
+                  <label for="stt-wake-words">音声起動ワード:</label>
+                  <div class="console-control-with-hint">
+                    <textarea id="stt-wake-words" rows="3"></textarea>
+                    <span class="field-hint">1行1件。通常の音声入力では、文字起こしの先頭がいずれかの音声起動ワードと一致すると会話入力になります。空欄ではすべての発話が会話入力になります。</span>
+                  </div>
+                </div>
               </div>
-              <p class="field-hint">通常の音声入力では、文字起こしの先頭がいずれかの音声起動ワードと一致すると会話入力になります。空欄ではすべての発話が会話入力になります。</p>
             </fieldset>
             <fieldset class="settings-group">
               <legend>マイク・話者識別</legend>
-              <p class="field-hint">会話欄で音声入力を開始していない間に使用するマイクと、話者識別を設定します。</p>
-              <div class="form-grid">
-                <label>使用するマイク
+              <div class="console-settings-list">
+                <div class="console-setting-row">
+                  <label for="microphone-input-source">使用するマイク:</label>
                   <select id="microphone-input-source">
-                    <option value="local_microphone">OtomeKairo端末のマイク</option>
-                    <option value="console_microphone">CocoroConsole端末のマイク</option>
+                    <option value="local_microphone">OtomeKairo側のマイク</option>
+                    <option value="console_microphone">CocoroConsole側のマイク</option>
                   </select>
-                </label>
-                <label>OtomeKairo側のマイク
+                </div>
+                <div class="console-setting-row">
+                  <label for="local-input-device">OtomeKairo:</label>
                   <select id="local-input-device">
                     <option value="">未選択</option>
                   </select>
-                </label>
-                <label>CocoroConsole側のマイク<input id="microphone-console-device" disabled></label>
-              </div>
-              <div class="range-field">
-                <label for="vad-probability-threshold">VADしきい値</label>
-                <input id="vad-probability-threshold" type="range" min="0.1" max="0.9" step="0.05">
-                <output id="vad-probability-threshold-value"></output>
+                </div>
+                <div class="console-setting-row">
+                  <label for="microphone-console-device">CocoroConsole:</label>
+                  <input id="microphone-console-device" disabled>
+                </div>
+                <div class="range-field">
+                  <label for="vad-probability-threshold">VADしきい値:</label>
+                  <input id="vad-probability-threshold" type="range" min="0.1" max="0.9" step="0.05">
+                  <output id="vad-probability-threshold-value"></output>
+                </div>
+                <p class="field-hint field-hint-indent">値を下げると音声を拾いやすくなり、環境音による誤検出も増えます。</p>
               </div>
               <div class="speaker-enrollment">
-                <div class="field-caption">登録済み話者</div>
-                <div class="speaker-list" id="speaker-list">登録済み話者はいません</div>
-                <div class="speaker-registration-row">
-                  <label>新規登録<select id="speaker-enrollment-display-name-id"></select></label>
-                  <button type="button" id="start-speaker-enrollment">3発話で登録</button>
+                <div class="console-setting-row console-setting-row-top">
+                  <label>登録済み話者:</label>
+                  <div class="speaker-list" id="speaker-list">登録済み話者はいません</div>
                 </div>
-                <div class="speaker-enrollment-state">
-                  <span id="speaker-enrollment-status">会話欄で音声入力を開始してください</span>
-                  <button type="button" class="plain-button" id="cancel-speaker-enrollment" disabled>登録を中止</button>
+                <div class="console-setting-row">
+                  <label for="speaker-enrollment-display-name-id">新規登録:</label>
+                  <div class="speaker-registration-row">
+                    <select id="speaker-enrollment-display-name-id"></select>
+                    <button type="button" id="start-speaker-enrollment">3発話で登録</button>
+                    <button type="button" class="plain-button" id="cancel-speaker-enrollment" disabled>登録を中止</button>
+                  </div>
                 </div>
-                <p class="field-hint">会話欄で音声入力を開始してから登録を開始し、2秒以上の発話を3回行います。</p>
-              </div>
-              <div class="range-field">
-                <label for="speaker-recognition-threshold">識別しきい値</label>
-                <input id="speaker-recognition-threshold" type="range" min="0.1" max="0.9" step="0.05">
-                <output id="speaker-recognition-threshold-value"></output>
+                <p class="field-hint field-hint-indent" id="speaker-enrollment-status">会話欄で音声入力を開始してください</p>
+                <p class="field-hint field-hint-indent">選択中のマイクへ2秒以上の発話を3回入力すると登録が完了します。</p>
+                <div class="range-field">
+                  <label for="speaker-recognition-threshold">識別しきい値:</label>
+                  <input id="speaker-recognition-threshold" type="range" min="0.1" max="0.9" step="0.05">
+                  <output id="speaker-recognition-threshold-value"></output>
+                </div>
               </div>
             </fieldset>
           </section>
@@ -402,12 +465,22 @@
               <select id="persona-select"></select>
               <button type="button" data-action="add-persona">追加</button>
               <button type="button" data-action="duplicate-persona">複製</button>
-              <button type="button" data-action="delete-persona">削除</button>
+              <button type="button" class="danger-button" data-action="delete-persona">削除</button>
             </div>
-            <label class="preset-name-field">プリセット名<input id="persona-display-name"></label>
-            <label class="wide-label">人格本文<textarea id="persona-prompt" class="persona-prompt-field"
-                rows="20"></textarea></label>
-            <label class="wide-label">表現補助<textarea id="persona-expression-addon" rows="8"></textarea></label>
+            <div class="model-setting-row model-preset-name-row">
+              <label for="persona-display-name">プリセット名:</label>
+              <input id="persona-display-name">
+            </div>
+            <div class="field-block">
+              <div class="field-caption">人格本文</div>
+              <p class="field-hint">役割、距離感、価値観、話し方、強い原則を自由文でまとめて書きます。</p>
+              <textarea id="persona-prompt" class="persona-prompt-field" rows="20"></textarea>
+            </div>
+            <div class="field-block">
+              <div class="field-caption">表現補助</div>
+              <p class="field-hint">会話時の表現生成でだけ使う補助指示を入れます。表情指定や出力補助に使えます。</p>
+              <textarea id="persona-expression-addon" rows="8"></textarea>
+            </div>
           </section>
 
           <section class="tab-page model-settings-page" data-page="model">
@@ -418,7 +491,7 @@
               <select id="model-select"></select>
               <button type="button" data-action="add-model">追加</button>
               <button type="button" data-action="duplicate-model">複製</button>
-              <button type="button" data-action="delete-model">削除</button>
+              <button type="button" class="danger-button" data-action="delete-model">削除</button>
             </div>
             <div class="model-setting-row model-preset-name-row">
               <label for="model-display-name">プリセット名:</label>
@@ -476,25 +549,39 @@
           </section>
 
           <section class="tab-page" data-page="memory">
-            <div class="selector-row">
+            <div class="selector-row memory-selector-row">
               <select id="memory-select"></select>
               <button type="button" data-action="add-memory">追加</button>
+              <button type="button" data-action="clone-memory">記憶複製</button>
               <button type="button" data-action="duplicate-memory">設定複製</button>
-              <button type="button" data-action="delete-memory">削除</button>
+              <button type="button" class="danger-button" data-action="delete-memory">削除</button>
             </div>
-            <div class="memory-settings-card">
-              <label>プリセット名<input id="memory-display-name"></label>
-              <label>モデル<input id="memory-embedding-model"></label>
-              <label>エンドポイントURL<input id="memory-api-base"></label>
-              <label>次元数<input id="memory-dimension" type="number" min="1"></label>
-              <label class="api-key-field">APIキー
-                <span class="inline-control-row">
+            <div class="model-settings-list">
+              <div class="model-setting-row">
+                <label for="memory-display-name">プリセット名:</label>
+                <input id="memory-display-name">
+              </div>
+              <div class="model-setting-row">
+                <label for="memory-embedding-model">モデル:</label>
+                <input id="memory-embedding-model">
+              </div>
+              <div class="model-setting-row">
+                <label for="memory-api-base">エンドポイントURL:</label>
+                <input id="memory-api-base">
+              </div>
+              <div class="model-setting-row">
+                <label for="memory-dimension">次元数:</label>
+                <input id="memory-dimension" type="number" min="1">
+              </div>
+              <div class="model-setting-row">
+                <label for="memory-api-key">APIキー:</label>
+                <div class="inline-control-row model-api-key-controls">
                   <input id="memory-api-key" type="password" autocomplete="new-password">
                   <button type="button" class="plain-button" id="copy-memory-api-key">コピー</button>
                   <button type="button" class="plain-button" id="paste-memory-api-key">上書き貼り付け</button>
                   <button type="button" class="plain-button" id="paste-llm-api-key-to-memory">LLMモデルのAPIキーを貼り付け</button>
-                </span>
-              </label>
+                </div>
+              </div>
             </div>
           </section>
 
@@ -534,7 +621,7 @@
               <div class="selector-row">
                 <select id="camera-select"></select>
                 <button type="button" data-action="add-camera">追加</button>
-                <button type="button" data-action="delete-camera">削除</button>
+                <button type="button" class="danger-button" data-action="delete-camera">削除</button>
               </div>
               <label class="checkbox-field">定期思考でこのカメラを観測する
                 <input id="camera-enabled" type="checkbox">
@@ -586,7 +673,7 @@
               <div class="selector-row">
                 <select id="mcp-select"></select>
                 <button type="button" data-action="add-mcp">追加</button>
-                <button type="button" data-action="delete-mcp">削除</button>
+                <button type="button" class="danger-button" data-action="delete-mcp">削除</button>
               </div>
               <label class="checkbox-field">有効
                 <input id="mcp-enabled" type="checkbox">
@@ -700,18 +787,27 @@
           <section class="tab-page" data-page="api">
             <fieldset class="settings-group api-documentation-group">
               <legend>ドキュメント</legend>
-              <p class="field-hint">OtomeKairoが公開する説明ドキュメントを表示します。外部から呼び出すアドレスは <code id="api-doc-base-url"></code> です。</p>
+              <p class="field-hint">OtomeKairo が公開する説明ドキュメントを表示します。</p>
+              <p class="field-hint">外部から呼び出すアドレスは <code id="api-doc-base-url"></code> です。</p>
               <div id="api-doc-sections" class="api-doc-sections"></div>
             </fieldset>
+          </section>
+
+          <section class="tab-page" data-page="license">
+            <div class="license-panel">
+              <pre id="license-text" class="license-text">ライセンスを読み込み中…</pre>
+            </div>
           </section>
         </div>
       </div>
     </div>
 
     <div class="settings-actions">
-      <button type="button" id="ok-settings">OK</button>
-      <button type="button" id="cancel-settings">キャンセル</button>
-      <button type="button" id="apply-settings">適用</button>
+      <div class="settings-actions-right">
+        <button type="button" id="ok-settings">OK</button>
+        <button type="button" id="cancel-settings">キャンセル</button>
+        <button type="button" id="apply-settings">適用</button>
+      </div>
     </div>
   </aside>
 
