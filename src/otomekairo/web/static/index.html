@@ -294,19 +294,12 @@
               </div>
             </fieldset>
 
-            <fieldset class="settings-group">
-              <legend>音声起動ワード</legend>
-              <div class="form-grid">
-                <label class="wide-label">音声起動ワード（1行1件）<textarea id="stt-wake-words" rows="3"></textarea></label>
-              </div>
-              <p class="field-hint">通常入力では文字起こしの先頭がいずれかの音声起動ワードと一致した場合に起動します。空欄では常時有効です。</p>
-            </fieldset>
           </section>
 
           <section class="tab-page" data-page="conversation">
             <fieldset class="settings-group">
               <legend>呼ばれ方</legend>
-              <label>会話入力で使う共通の呼ばれ方
+              <label>会話入力で使用する呼ばれ方
                 <select id="settings-conversation-display-name-select"></select>
               </label>
               <div class="conversation-display-name-list" id="conversation-display-name-list"></div>
@@ -336,22 +329,28 @@
               </div>
             </fieldset>
             <fieldset class="settings-group">
-              <legend>マイク・話者識別</legend>
-              <p class="field-hint">Web入力sessionがない通常時のマイクと話者識別を設定します。</p>
+              <legend>音声起動ワード</legend>
               <div class="form-grid">
-                <label>通常入力元
+                <label class="wide-label">音声起動ワード（1行1件）<textarea id="stt-wake-words" rows="3"></textarea></label>
+              </div>
+              <p class="field-hint">通常の音声入力では、文字起こしの先頭がいずれかの音声起動ワードと一致すると会話入力になります。空欄ではすべての発話が会話入力になります。</p>
+            </fieldset>
+            <fieldset class="settings-group">
+              <legend>マイク・話者識別</legend>
+              <p class="field-hint">会話欄で音声入力を開始していない間に使用するマイクと、話者識別を設定します。</p>
+              <div class="form-grid">
+                <label>使用するマイク
                   <select id="microphone-input-source">
                     <option value="local_microphone">OtomeKairo端末のマイク</option>
                     <option value="console_microphone">CocoroConsole端末のマイク</option>
                   </select>
                 </label>
-                <label>ローカルマイクdevice
+                <label>OtomeKairo側のマイク
                   <select id="local-input-device">
                     <option value="">未選択</option>
                   </select>
                 </label>
-                <label>CocoroConsole client ID<input id="microphone-console-client-id" spellcheck="false" disabled></label>
-                <label>CocoroConsoleマイクdevice<input id="microphone-console-device" disabled></label>
+                <label>CocoroConsole側のマイク<input id="microphone-console-device" disabled></label>
               </div>
               <div class="range-field">
                 <label for="vad-probability-threshold">VADしきい値</label>
@@ -366,10 +365,10 @@
                   <button type="button" id="start-speaker-enrollment">3発話で登録</button>
                 </div>
                 <div class="speaker-enrollment-state">
-                  <span id="speaker-enrollment-status">登録待機中</span>
+                  <span id="speaker-enrollment-status">会話欄で音声入力を開始してください</span>
                   <button type="button" class="plain-button" id="cancel-speaker-enrollment" disabled>登録を中止</button>
                 </div>
-                <p class="field-hint">入力欄で音声入力を開始してから登録を開始し、2秒以上の発話を3回行います。</p>
+                <p class="field-hint">会話欄で音声入力を開始してから登録を開始し、2秒以上の発話を3回行います。</p>
               </div>
               <div class="range-field">
                 <label for="speaker-recognition-threshold">識別しきい値</label>

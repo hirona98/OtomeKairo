@@ -924,7 +924,7 @@ function audioPauseLabel(reason) {
     speaker_enrollment_required: "話者登録待ち",
     microphone_device_unavailable: "マイク利用不可",
     response_client_unavailable: "イベント接続待ち",
-    audio_runtime_unavailable: "音声runtime利用不可",
+    audio_runtime_unavailable: "音声処理利用不可",
     settings_reloaded: "設定更新",
   }[reason] || "一時停止";
 }
@@ -1130,7 +1130,7 @@ async function startWebMicrophone() {
           device_id_present: typeof settings.deviceId === "string" && settings.deviceId.length > 0,
         },
       }));
-      setWebMicrophoneStatus("リース待ち", "processing");
+      setWebMicrophoneStatus("入力準備中", "processing");
     });
     socket.addEventListener("message", (event) => {
       if (typeof event.data !== "string") {
@@ -1139,7 +1139,7 @@ async function startWebMicrophone() {
       try {
         handleWebAudioControl(socket, JSON.parse(event.data));
       } catch {
-        showNotice("音声streamから不正な制御messageを受信しました。", true);
+        showNotice("音声入力から不正な制御情報を受信しました。", true);
         stopWebMicrophone({ sendStop: false });
       }
     });
@@ -1327,7 +1327,7 @@ async function sendMessage(event) {
   clearAttachment();
   state.sending = true;
   element("send-message").disabled = true;
-  setStatus("状態: 対話入力処理中", "processing");
+  setStatus("状態: 会話入力処理中", "processing");
   try {
     const result = await apiRequest("/ui/api/conversation", {
       method: "POST",
@@ -1764,7 +1764,6 @@ function renderTtsPanel(engine) {
 function renderMicrophoneSettings() {
   const microphone = state.avatarSpeech.microphone_settings;
   element("microphone-input-source").value = microphone.input_source;
-  element("microphone-console-client-id").value = microphone.console?.client_id || "未設定";
   element("microphone-console-device").value = microphone.console?.input_device?.name || "未設定";
   renderLocalInputDevices(microphone.local_input_device);
   element("vad-probability-threshold").value = microphone.vad_probability_threshold;
@@ -2021,6 +2020,7 @@ function renderSpeakerEnrollment() {
   const availableDefinitions = state.conversationDisplayNames.filter(
     (definition) => !assignedIds.has(definition.conversation_display_name_id),
   );
+  const hasInputLease = webMicrophoneHasLease();
   setSelectOptions(
     element("speaker-enrollment-display-name-id"),
     availableDefinitions,
@@ -2028,11 +2028,17 @@ function renderSpeakerEnrollment() {
     element("speaker-enrollment-display-name-id").value,
   );
   startButton.disabled = Boolean(enrollment)
-    || !webMicrophoneHasLease()
+    || !hasInputLease
     || availableDefinitions.length === 0;
   cancelButton.disabled = !enrollment;
   if (!enrollment) {
-    element("speaker-enrollment-status").textContent = "登録待機中";
+    let status = "話者登録を開始できます";
+    if (availableDefinitions.length === 0) {
+      status = "新規登録できる未割当の呼ばれ方がありません";
+    } else if (!hasInputLease) {
+      status = "会話欄で音声入力を開始してください";
+    }
+    element("speaker-enrollment-status").textContent = status;
     renderSpeakerList();
     return;
   }
@@ -2045,7 +2051,7 @@ function renderSpeakerEnrollment() {
 
 async function startSpeakerEnrollment(personRef = null) {
   if (!webMicrophoneHasLease()) {
-    showNotice("入力欄で音声入力を開始してから話者登録を開始してください。", true);
+    showNotice("会話欄で音声入力を開始してから話者登録を開始してください。", true);
     return;
   }
   const body = personRef
