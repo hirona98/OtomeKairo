@@ -40,6 +40,6 @@
 - Gitのユーザ名とメールアドレスを変更しない
 
 
-## 関連プロジェクトの場所
+## 関連プロジェクトの場所（一部環境のみ）
   CocoroConsole: /mnt/d/AliceEncoder/PartnerAI/CocoroAI/CocoroConsole/
   CocoroShell: /mnt/d/AliceEncoder/PartnerAI/CocoroAI/CocoroShell/
