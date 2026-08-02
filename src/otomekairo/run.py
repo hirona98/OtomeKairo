@@ -14,7 +14,7 @@ from otomekairo.service.common import configure_debug_log_file, debug_log
 # メイン
 def main() -> None:
     # 環境
-    host = os.environ.get("OTOMEKAIRO_HOST", "127.0.0.1")
+    host = os.environ.get("OTOMEKAIRO_HOST", "0.0.0.0")
     port = int(os.environ.get("OTOMEKAIRO_PORT", "55601"))
     cert_file = os.environ.get("OTOMEKAIRO_TLS_CERT_FILE")
     key_file = os.environ.get("OTOMEKAIRO_TLS_KEY_FILE")

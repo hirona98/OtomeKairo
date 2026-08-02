@@ -34,19 +34,26 @@ CocoroAIのコアとして動作する。
 - `var/otomekairo/` をデータ保存先にして HTTPS サーバを起動する
 - `PYTHONPATH=src` を付けて `.venv` の Python からサーバを起動する
 - 既定ポート `55601` を使う
+- `0.0.0.0:55601` で listen する
 
 データはデフォルトで `var/otomekairo/` に保存する。
 デバッグログは `var/otomekairo/server.log` に保存する。
 ログは既定で 5MiB を超えるとローテーションし、`server.log` 本体と 3 世代を合わせて最大約 20MiB 保持する。
 
 ブラウザ UI は同じ HTTPS サーバから配信する。
-開発環境では次へアクセスする。
+同じ PC の開発環境では次へアクセスする。
 ブラウザ UI は token 入力なしで同じサーバのチャット API と設定 API を呼び出す。
 設定画面では、アバターごとの STT / TTS とマイク・話者識別のしきい値を編集できる。
 現段階では音声処理を実行せず、話者登録操作は無効表示にする。
 
 ```text
 https://127.0.0.1:55601/ui/
+```
+
+LAN 内の別 PC からは次へアクセスする。
+
+```text
+https://<このPCのIPアドレス>:55601/ui/
 ```
 
 ## daemon 実行
@@ -102,7 +109,7 @@ Tapo C220 connector、Tapo C220 watcher、MCP client connector は起動時に O
 camera source または MCP server が未登録の場合、該当 process は起動しない。
 Tapo C220 watcher は `camera_source.watcher.enabled=true` のときだけ起動する。
 connector と watcher を有効にする前に、ブラウザ UI、CocoroConsole、設定 API のいずれかで camera source と MCP server を登録する。
-初回登録がまだの場合は、daemon 有効化前に `OTOMEKAIRO_HOST=0.0.0.0 ./scripts/run_dev_server.sh` で server だけを起動して設定する。
+初回登録がまだの場合は、daemon 有効化前に `./scripts/run_dev_server.sh` で server だけを起動して設定する。
 
 ## LLM 接続
 

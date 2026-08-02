@@ -14,7 +14,7 @@
       "console": "integratedTerminal",
       "env": {
         "PYTHONPATH": "${workspaceFolder}/src",
-        "OTOMEKAIRO_HOST": "127.0.0.1",
+        "OTOMEKAIRO_HOST": "0.0.0.0",
         "OTOMEKAIRO_PORT": "55601",
         "OTOMEKAIRO_TLS_CERT_FILE": "${workspaceFolder}/var/dev-tls/cert.pem",
         "OTOMEKAIRO_TLS_KEY_FILE": "${workspaceFolder}/var/dev-tls/key.pem",
