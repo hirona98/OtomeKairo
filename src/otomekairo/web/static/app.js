@@ -2681,180 +2681,313 @@ function syncAllForms() {
   syncMcp();
 }
 
-function addAvatar() {
+// 選択切替や追加前に、現在フォームの値を下書きへ戻す。
+function withSyncedCollection(run) {
   syncAllForms();
-  const source = arrayById(state.avatarSpeech.avatars, "avatar_id", state.selectedAvatarId)
-    || state.avatarSpeech.avatars[0];
-  const avatar = clone(source);
-  avatar.avatar_id = `avatar:${idSuffix()}`;
-  avatar.display_name = "新規アバター";
-  state.avatarSpeech.avatars.push(avatar);
-  state.selectedAvatarId = avatar.avatar_id;
-  state.avatarSpeech.selected_avatar_id = avatar.avatar_id;
-  renderAvatar();
+  return run();
+}
+
+// 既存項目を clone して新規 ID / 表示名を付け、コレクションへ追加する。
+function addClonedCollectionItem({
+  items,
+  idKey,
+  selectedId,
+  setSelectedId,
+  idPrefix,
+  displayName,
+  afterClone,
+  render,
+}) {
+  withSyncedCollection(() => {
+    const source = arrayById(items, idKey, selectedId) || items[0];
+    if (!source) {
+      return;
+    }
+    const item = clone(source);
+    item[idKey] = `${idPrefix}:${idSuffix()}`;
+    item.display_name = typeof displayName === "function"
+      ? displayName(source, items)
+      : displayName;
+    if (afterClone) {
+      afterClone(item, source);
+    }
+    items.push(item);
+    setSelectedId(item[idKey]);
+    render();
+  });
+}
+
+function duplicateClonedCollectionItem({
+  items,
+  idKey,
+  selectedId,
+  setSelectedId,
+  idPrefix,
+  nameBuilder,
+  emptyMessage,
+  afterClone,
+  render,
+}) {
+  withSyncedCollection(() => {
+    const source = arrayById(items, idKey, selectedId);
+    if (!source) {
+      if (emptyMessage) {
+        showNotice(emptyMessage, true);
+      }
+      return;
+    }
+    const item = clone(source);
+    item[idKey] = `${idPrefix}:${idSuffix()}`;
+    item.display_name = nameBuilder(source, items);
+    if (afterClone) {
+      afterClone(item, source);
+    }
+    items.push(item);
+    setSelectedId(item[idKey]);
+    render();
+  });
+}
+
+function deleteCollectionItem({
+  items,
+  idKey,
+  selectedId,
+  setSelectedId,
+  minCount = 1,
+  lastItemMessage,
+  afterDelete,
+  render,
+}) {
+  if (items.length <= minCount) {
+    showNotice(lastItemMessage, true);
+    return;
+  }
+  const removedId = selectedId;
+  removeById(items, idKey, removedId);
+  setSelectedId(items[0]?.[idKey] || "");
+  if (afterDelete) {
+    afterDelete(removedId);
+  }
+  render();
+}
+
+// select 切替: 現在値を保存してから選択を差し替え、再描画する。
+function bindCollectionSelect(selectId, { sync, setSelected, render }) {
+  element(selectId).addEventListener("change", () => {
+    sync();
+    setSelected(element(selectId).value);
+    render();
+  });
+}
+
+function setSelectedAvatarId(avatarId) {
+  state.selectedAvatarId = avatarId;
+  state.avatarSpeech.selected_avatar_id = avatarId;
+}
+
+function addAvatar() {
+  addClonedCollectionItem({
+    items: state.avatarSpeech.avatars,
+    idKey: "avatar_id",
+    selectedId: state.selectedAvatarId,
+    setSelectedId: setSelectedAvatarId,
+    idPrefix: "avatar",
+    displayName: "新規アバター",
+    render: renderAvatar,
+  });
 }
 
 function duplicateAvatar() {
-  syncAllForms();
-  const avatar = clone(arrayById(state.avatarSpeech.avatars, "avatar_id", state.selectedAvatarId));
-  avatar.avatar_id = `avatar:${idSuffix()}`;
-  avatar.display_name = `${avatar.display_name || "アバター"}_copy`;
-  state.avatarSpeech.avatars.push(avatar);
-  state.selectedAvatarId = avatar.avatar_id;
-  state.avatarSpeech.selected_avatar_id = avatar.avatar_id;
-  renderAvatar();
+  duplicateClonedCollectionItem({
+    items: state.avatarSpeech.avatars,
+    idKey: "avatar_id",
+    selectedId: state.selectedAvatarId,
+    setSelectedId: setSelectedAvatarId,
+    idPrefix: "avatar",
+    nameBuilder: (source) => `${source.display_name || "アバター"}_copy`,
+    render: renderAvatar,
+  });
 }
 
 function deleteAvatar() {
-  if (state.avatarSpeech.avatars.length <= 1) {
-    showNotice("最後のアバターは削除できません。", true);
-    return;
-  }
-  removeById(state.avatarSpeech.avatars, "avatar_id", state.selectedAvatarId);
-  state.selectedAvatarId = state.avatarSpeech.avatars[0].avatar_id;
-  state.avatarSpeech.selected_avatar_id = state.selectedAvatarId;
-  renderAvatar();
+  deleteCollectionItem({
+    items: state.avatarSpeech.avatars,
+    idKey: "avatar_id",
+    selectedId: state.selectedAvatarId,
+    setSelectedId: setSelectedAvatarId,
+    lastItemMessage: "最後のアバターは削除できません。",
+    render: renderAvatar,
+  });
 }
 
 function addPersona() {
-  syncAllForms();
-  const base = clone(arrayById(state.editor.personas, "persona_id", state.selectedPersonaId) || state.editor.personas[0]);
-  base.persona_id = `persona:${idSuffix()}`;
-  base.display_name = "新規人格設定";
-  state.editor.personas.push(base);
-  state.selectedPersonaId = base.persona_id;
-  renderSettings();
+  addClonedCollectionItem({
+    items: state.editor.personas,
+    idKey: "persona_id",
+    selectedId: state.selectedPersonaId,
+    setSelectedId: (id) => {
+      state.selectedPersonaId = id;
+    },
+    idPrefix: "persona",
+    displayName: "新規人格設定",
+    render: renderSettings,
+  });
 }
 
 function duplicatePersona() {
-  syncAllForms();
-  const base = clone(arrayById(state.editor.personas, "persona_id", state.selectedPersonaId));
-  base.persona_id = `persona:${idSuffix()}`;
-  base.display_name = `${base.display_name || "人格設定"} Copy`;
-  state.editor.personas.push(base);
-  state.selectedPersonaId = base.persona_id;
-  renderSettings();
+  duplicateClonedCollectionItem({
+    items: state.editor.personas,
+    idKey: "persona_id",
+    selectedId: state.selectedPersonaId,
+    setSelectedId: (id) => {
+      state.selectedPersonaId = id;
+    },
+    idPrefix: "persona",
+    nameBuilder: (source) => `${source.display_name || "人格設定"} Copy`,
+    render: renderSettings,
+  });
 }
 
 function deletePersona() {
-  if (state.editor.personas.length <= 1) {
-    showNotice("最後の人格設定は削除できません。", true);
-    return;
-  }
-  removeById(state.editor.personas, "persona_id", state.selectedPersonaId);
-  state.selectedPersonaId = state.editor.personas[0].persona_id;
-  state.editor.current.selected_persona_id = state.selectedPersonaId;
-  renderSettings();
+  deleteCollectionItem({
+    items: state.editor.personas,
+    idKey: "persona_id",
+    selectedId: state.selectedPersonaId,
+    setSelectedId: (id) => {
+      state.selectedPersonaId = id;
+      state.editor.current.selected_persona_id = id;
+    },
+    lastItemMessage: "最後の人格設定は削除できません。",
+    render: renderSettings,
+  });
 }
 
 function addModel() {
-  syncAllForms();
-  const base = clone(arrayById(state.editor.model_presets, "model_preset_id", state.selectedModelPresetId) || state.editor.model_presets[0]);
-  base.model_preset_id = `model_preset:${idSuffix()}`;
-  base.display_name = "新規モデルプリセット";
-  state.editor.model_presets.push(base);
-  state.selectedModelPresetId = base.model_preset_id;
-  renderSettings();
+  addClonedCollectionItem({
+    items: state.editor.model_presets,
+    idKey: "model_preset_id",
+    selectedId: state.selectedModelPresetId,
+    setSelectedId: (id) => {
+      state.selectedModelPresetId = id;
+    },
+    idPrefix: "model_preset",
+    displayName: "新規モデルプリセット",
+    render: renderSettings,
+  });
 }
 
 function duplicateModel() {
-  syncAllForms();
-  const base = clone(arrayById(state.editor.model_presets, "model_preset_id", state.selectedModelPresetId));
-  base.model_preset_id = `model_preset:${idSuffix()}`;
-  base.display_name = `${base.display_name || "モデルプリセット"} Copy`;
-  state.editor.model_presets.push(base);
-  state.selectedModelPresetId = base.model_preset_id;
-  renderSettings();
+  duplicateClonedCollectionItem({
+    items: state.editor.model_presets,
+    idKey: "model_preset_id",
+    selectedId: state.selectedModelPresetId,
+    setSelectedId: (id) => {
+      state.selectedModelPresetId = id;
+    },
+    idPrefix: "model_preset",
+    nameBuilder: (source) => `${source.display_name || "モデルプリセット"} Copy`,
+    render: renderSettings,
+  });
 }
 
 function deleteModel() {
-  if (state.editor.model_presets.length <= 1) {
-    showNotice("最後のモデルプリセットは削除できません。", true);
-    return;
-  }
-  removeById(state.editor.model_presets, "model_preset_id", state.selectedModelPresetId);
-  state.selectedModelPresetId = state.editor.model_presets[0].model_preset_id;
-  state.editor.current.selected_model_preset_id = state.selectedModelPresetId;
-  renderSettings();
+  deleteCollectionItem({
+    items: state.editor.model_presets,
+    idKey: "model_preset_id",
+    selectedId: state.selectedModelPresetId,
+    setSelectedId: (id) => {
+      state.selectedModelPresetId = id;
+      state.editor.current.selected_model_preset_id = id;
+    },
+    lastItemMessage: "最後のモデルプリセットは削除できません。",
+    render: renderSettings,
+  });
 }
 
-function addMemory() {
-  syncAllForms();
-  const base = clone(arrayById(state.editor.memory_sets, "memory_set_id", state.selectedMemorySetId) || state.editor.memory_sets[0]);
-  base.memory_set_id = `memory_set:${idSuffix()}`;
-  base.display_name = uniqueDisplayName(
-    state.editor.memory_sets.map((item) => item.display_name),
-    "新規記憶集合",
-  );
-  state.editor.memory_sets.push(base);
-  state.memoryDraftMeta[base.memory_set_id] = {
-    serverBacked: false,
-    cloneSourceMemorySetId: null,
-  };
-  state.selectedMemorySetId = base.memory_set_id;
-  renderSettings();
-}
-
-function cloneMemoryData() {
-  syncAllForms();
-  const source = arrayById(state.editor.memory_sets, "memory_set_id", state.selectedMemorySetId);
-  if (!source) {
-    showNotice("複製する記憶集合を選択してください。", true);
-    return;
-  }
-  const cloneSourceMemorySetId = resolveCloneSourceMemorySetId(source);
-  if (!cloneSourceMemorySetId) {
-    showNotice("未保存の記憶集合は複製できません。先に適用するか、設定の複製を使ってください。", true);
-    return;
-  }
-  const base = clone(source);
-  base.memory_set_id = `memory_set:${idSuffix()}`;
-  base.display_name = uniqueDisplayName(
-    state.editor.memory_sets.map((item) => item.display_name),
-    `${source.display_name || "記憶集合"} (記憶複製)`,
-  );
-  state.editor.memory_sets.push(base);
-  state.memoryDraftMeta[base.memory_set_id] = {
+function markMemoryDraft(item, { cloneSourceMemorySetId = null } = {}) {
+  state.memoryDraftMeta[item.memory_set_id] = {
     serverBacked: false,
     cloneSourceMemorySetId,
   };
-  state.selectedMemorySetId = base.memory_set_id;
-  renderSettings();
+}
+
+function addMemory() {
+  addClonedCollectionItem({
+    items: state.editor.memory_sets,
+    idKey: "memory_set_id",
+    selectedId: state.selectedMemorySetId,
+    setSelectedId: (id) => {
+      state.selectedMemorySetId = id;
+    },
+    idPrefix: "memory_set",
+    displayName: (_source, items) => uniqueDisplayName(
+      items.map((item) => item.display_name),
+      "新規記憶集合",
+    ),
+    afterClone: (item) => markMemoryDraft(item),
+    render: renderSettings,
+  });
+}
+
+function cloneMemoryData() {
+  withSyncedCollection(() => {
+    const source = arrayById(state.editor.memory_sets, "memory_set_id", state.selectedMemorySetId);
+    if (!source) {
+      showNotice("複製する記憶集合を選択してください。", true);
+      return;
+    }
+    const cloneSourceMemorySetId = resolveCloneSourceMemorySetId(source);
+    if (!cloneSourceMemorySetId) {
+      showNotice("未保存の記憶集合は複製できません。先に適用するか、設定の複製を使ってください。", true);
+      return;
+    }
+    const item = clone(source);
+    item.memory_set_id = `memory_set:${idSuffix()}`;
+    item.display_name = uniqueDisplayName(
+      state.editor.memory_sets.map((entry) => entry.display_name),
+      `${source.display_name || "記憶集合"} (記憶複製)`,
+    );
+    markMemoryDraft(item, { cloneSourceMemorySetId });
+    state.editor.memory_sets.push(item);
+    state.selectedMemorySetId = item.memory_set_id;
+    renderSettings();
+  });
 }
 
 function duplicateMemory() {
-  syncAllForms();
-  const source = arrayById(state.editor.memory_sets, "memory_set_id", state.selectedMemorySetId);
-  if (!source) {
-    showNotice("設定を複製する記憶集合を選択してください。", true);
-    return;
-  }
-  const base = clone(source);
-  base.memory_set_id = `memory_set:${idSuffix()}`;
-  base.display_name = uniqueDisplayName(
-    state.editor.memory_sets.map((item) => item.display_name),
-    `${source.display_name || "記憶集合"} (設定コピー)`,
-  );
-  state.editor.memory_sets.push(base);
-  state.memoryDraftMeta[base.memory_set_id] = {
-    serverBacked: false,
-    cloneSourceMemorySetId: null,
-  };
-  state.selectedMemorySetId = base.memory_set_id;
-  renderSettings();
+  duplicateClonedCollectionItem({
+    items: state.editor.memory_sets,
+    idKey: "memory_set_id",
+    selectedId: state.selectedMemorySetId,
+    setSelectedId: (id) => {
+      state.selectedMemorySetId = id;
+    },
+    idPrefix: "memory_set",
+    emptyMessage: "設定を複製する記憶集合を選択してください。",
+    nameBuilder: (source, items) => uniqueDisplayName(
+      items.map((item) => item.display_name),
+      `${source.display_name || "記憶集合"} (設定コピー)`,
+    ),
+    afterClone: (item) => markMemoryDraft(item),
+    render: renderSettings,
+  });
 }
 
 function deleteMemory() {
-  if (state.editor.memory_sets.length <= 1) {
-    showNotice("最後の記憶セットは削除できません。", true);
-    return;
-  }
-  const removedId = state.selectedMemorySetId;
-  removeById(state.editor.memory_sets, "memory_set_id", removedId);
-  delete state.memoryDraftMeta[removedId];
-  state.selectedMemorySetId = state.editor.memory_sets[0].memory_set_id;
-  state.editor.current.selected_memory_set_id = state.selectedMemorySetId;
-  renderSettings();
+  deleteCollectionItem({
+    items: state.editor.memory_sets,
+    idKey: "memory_set_id",
+    selectedId: state.selectedMemorySetId,
+    setSelectedId: (id) => {
+      state.selectedMemorySetId = id;
+      state.editor.current.selected_memory_set_id = id;
+    },
+    lastItemMessage: "最後の記憶セットは削除できません。",
+    afterDelete: (removedId) => {
+      delete state.memoryDraftMeta[removedId];
+    },
+    render: renderSettings,
+  });
 }
 
 async function loadLicenseText() {
@@ -3020,11 +3153,10 @@ function bindEvents() {
     switchTab(element("settings-page-select").value);
   });
 
-  element("avatar-select").addEventListener("change", () => {
-    syncAvatar();
-    state.selectedAvatarId = element("avatar-select").value;
-    state.avatarSpeech.selected_avatar_id = state.selectedAvatarId;
-    renderAvatar();
+  bindCollectionSelect("avatar-select", {
+    sync: syncAvatar,
+    setSelected: setSelectedAvatarId,
+    render: renderAvatar,
   });
   element("tts-engine").addEventListener("change", () => {
     renderTtsPanel(element("tts-engine").value);
@@ -3070,66 +3202,104 @@ function bindEvents() {
     "click",
     deleteConversationDisplayName,
   );
-  element("persona-select").addEventListener("change", () => {
-    syncPersona();
-    state.selectedPersonaId = element("persona-select").value;
-    renderPersona();
+  bindCollectionSelect("persona-select", {
+    sync: syncPersona,
+    setSelected: (id) => {
+      state.selectedPersonaId = id;
+    },
+    render: renderPersona,
   });
-  element("model-select").addEventListener("change", () => {
-    syncModel();
-    state.selectedModelPresetId = element("model-select").value;
-    renderModel();
+  bindCollectionSelect("model-select", {
+    sync: syncModel,
+    setSelected: (id) => {
+      state.selectedModelPresetId = id;
+    },
+    render: renderModel,
   });
-  element("memory-select").addEventListener("change", () => {
-    syncMemory();
-    state.selectedMemorySetId = element("memory-select").value;
-    renderMemory();
+  bindCollectionSelect("memory-select", {
+    sync: syncMemory,
+    setSelected: (id) => {
+      state.selectedMemorySetId = id;
+    },
+    render: renderMemory,
   });
-  element("camera-select").addEventListener("change", () => {
-    syncCamera();
-    state.selectedCameraId = element("camera-select").value;
-    state.selectedWatcherSourceId = state.selectedCameraId;
-    renderCamera();
-    renderWatcher();
+  bindCollectionSelect("camera-select", {
+    sync: syncCamera,
+    setSelected: (id) => {
+      state.selectedCameraId = id;
+      state.selectedWatcherSourceId = id;
+    },
+    render: () => {
+      renderCamera();
+      renderWatcher();
+    },
   });
   element("camera-display-name").addEventListener("input", updateCameraGeneratedIds);
-  element("watcher-select").addEventListener("change", () => {
-    syncWatcher();
-    state.selectedWatcherSourceId = element("watcher-select").value;
-    renderWatcher();
+  bindCollectionSelect("watcher-select", {
+    sync: syncWatcher,
+    setSelected: (id) => {
+      state.selectedWatcherSourceId = id;
+    },
+    render: renderWatcher,
   });
-  element("mcp-select").addEventListener("change", () => {
-    syncMcp();
-    state.selectedMcpId = element("mcp-select").value;
-    renderMcp();
+  bindCollectionSelect("mcp-select", {
+    sync: syncMcp,
+    setSelected: (id) => {
+      state.selectedMcpId = id;
+    },
+    render: renderMcp,
   });
 
-  document.querySelector("[data-action='add-avatar']").addEventListener("click", addAvatar);
-  document.querySelector("[data-action='duplicate-avatar']").addEventListener("click", duplicateAvatar);
-  document.querySelector("[data-action='delete-avatar']").addEventListener("click", deleteAvatar);
-  element("copy-stt-api-key").addEventListener("click", () => copyApiKey("stt-api-key", "STT APIキー"));
-  element("paste-stt-api-key").addEventListener("click", () => pasteApiKey("stt-api-key", "STT APIキー"));
-  element("copy-aivis-api-key").addEventListener("click", () => copyApiKey("aivis-api-key", "Aivis Cloud APIキー"));
-  element("paste-aivis-api-key").addEventListener("click", () => pasteApiKey("aivis-api-key", "Aivis Cloud APIキー"));
-  document.querySelector("[data-action='add-persona']").addEventListener("click", addPersona);
-  document.querySelector("[data-action='duplicate-persona']").addEventListener("click", duplicatePersona);
-  document.querySelector("[data-action='delete-persona']").addEventListener("click", deletePersona);
-  document.querySelector("[data-action='add-model']").addEventListener("click", addModel);
-  document.querySelector("[data-action='duplicate-model']").addEventListener("click", duplicateModel);
-  document.querySelector("[data-action='delete-model']").addEventListener("click", deleteModel);
-  element("copy-model-api-key").addEventListener("click", () => copyApiKey("model-api-key", "モデルのAPIキー"));
-  element("paste-model-api-key").addEventListener("click", () => pasteApiKey("model-api-key", "モデルのAPIキー"));
-  document.querySelector("[data-action='add-memory']").addEventListener("click", addMemory);
-  document.querySelector("[data-action='clone-memory']").addEventListener("click", cloneMemoryData);
-  document.querySelector("[data-action='duplicate-memory']").addEventListener("click", duplicateMemory);
-  document.querySelector("[data-action='delete-memory']").addEventListener("click", deleteMemory);
-  element("copy-memory-api-key").addEventListener("click", () => copyApiKey("memory-api-key", "記憶セットのAPIキー"));
-  element("paste-memory-api-key").addEventListener("click", () => pasteApiKey("memory-api-key", "記憶セットのAPIキー"));
-  element("paste-llm-api-key-to-memory").addEventListener("click", pasteLlmApiKeyToMemory);
-  document.querySelector("[data-action='add-camera']").addEventListener("click", addCamera);
-  document.querySelector("[data-action='delete-camera']").addEventListener("click", deleteCamera);
-  document.querySelector("[data-action='add-mcp']").addEventListener("click", addMcp);
-  document.querySelector("[data-action='delete-mcp']").addEventListener("click", deleteMcp);
+  // 設定パネル内のコレクション操作と秘密入力欄を委譲で共通処理する。
+  const settingsActions = {
+    "add-avatar": addAvatar,
+    "duplicate-avatar": duplicateAvatar,
+    "delete-avatar": deleteAvatar,
+    "add-persona": addPersona,
+    "duplicate-persona": duplicatePersona,
+    "delete-persona": deletePersona,
+    "add-model": addModel,
+    "duplicate-model": duplicateModel,
+    "delete-model": deleteModel,
+    "add-memory": addMemory,
+    "clone-memory": cloneMemoryData,
+    "duplicate-memory": duplicateMemory,
+    "delete-memory": deleteMemory,
+    "add-camera": addCamera,
+    "delete-camera": deleteCamera,
+    "add-mcp": addMcp,
+    "delete-mcp": deleteMcp,
+  };
+  element("settings-panel").addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) {
+      return;
+    }
+
+    const actionButton = target.closest("[data-action]");
+    if (actionButton && !actionButton.disabled) {
+      const handler = settingsActions[actionButton.dataset.action];
+      if (handler) {
+        handler();
+        return;
+      }
+    }
+
+    const secretButton = target.closest("[data-secret-action]");
+    if (!secretButton || secretButton.disabled) {
+      return;
+    }
+    const secretAction = secretButton.dataset.secretAction;
+    const inputId = secretButton.dataset.secretInput;
+    const label = secretButton.dataset.secretLabel || "APIキー";
+    if (secretAction === "copy") {
+      copyApiKey(inputId, label);
+    } else if (secretAction === "paste") {
+      pasteApiKey(inputId, label);
+    } else if (secretAction === "paste-from-llm") {
+      pasteLlmApiKeyToMemory();
+    }
+  });
 
   window.addEventListener("beforeunload", () => {
     state.unloading = true;

@@ -778,39 +778,29 @@ p {
   justify-self: start;
 }
 
-.model-selector-row select {
-  flex: 0 1 500px;
-}
-
-.model-preset-name-row {
-  max-width: 680px;
-}
-
-.model-settings-list,
-.console-settings-list {
+/* 設定フォームの共通行。label 幅は全設定ページで揃える。 */
+.settings-list {
   display: grid;
   gap: 10px;
 }
 
-.model-setting-row,
-.console-setting-row {
+.setting-row {
   display: grid;
-  grid-template-columns: var(--console-setting-label-width, 150px) minmax(0, 1fr);
+  grid-template-columns: var(--setting-label-width, 170px) minmax(0, 1fr);
   align-items: center;
   gap: 10px;
 }
 
-.model-setting-row {
-  --console-setting-label-width: 180px;
-}
-
-.model-setting-row > label,
-.console-setting-row > label {
+.setting-row > label {
   color: var(--muted);
 }
 
-.console-setting-row-top {
+.setting-row-top {
   align-items: start;
+}
+
+.setting-row-name {
+  max-width: 680px;
 }
 
 .console-control-with-hint {
@@ -834,10 +824,6 @@ p {
 
 .desktop-pattern-field {
   margin-top: 5px;
-}
-
-.watcher-settings-list {
-  --console-setting-label-width: 170px;
 }
 
 .console-info-box {
@@ -876,12 +862,13 @@ p {
   white-space: pre-wrap;
 }
 
-.model-api-key-controls input {
-  flex: 0 1 220px;
+/* パスワード入力 + コピー / 貼り付けボタンの共通列。 */
+.secret-field-controls input {
+  flex: 1 1 160px;
   min-width: 120px;
 }
 
-.model-api-key-controls button {
+.secret-field-controls button {
   white-space: nowrap;
 }
 
@@ -1072,7 +1059,7 @@ input[type="checkbox"]:disabled {
 
 .selector-row select {
   min-width: 0;
-  flex: 1;
+  flex: 1 1 240px;
 }
 
 .settings-group {
@@ -1095,22 +1082,11 @@ input[type="checkbox"]:disabled {
   gap: 10px;
 }
 
-.memory-selector-row select {
-  flex: 0 1 360px;
-}
-
 .inline-control-row {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-}
-
-.api-key-field input {
-  flex: 0 0 90px;
-}
-
-.api-key-field button {
-  white-space: nowrap;
+  min-width: 0;
 }
 
 .conversation-display-name-manage {
@@ -1136,7 +1112,7 @@ input[type="checkbox"]:disabled {
 }
 
 .field-hint-indent {
-  margin-left: 150px;
+  margin-left: var(--setting-label-width, 170px);
 }
 
 .capability-columns {
@@ -1278,16 +1254,11 @@ input[type="checkbox"]:disabled {
     flex-wrap: wrap;
   }
 
-  .model-setting-row,
-  .console-setting-row {
+  .setting-row {
     grid-template-columns: 1fr;
   }
 
-  .model-api-key-controls input {
-    flex: 1 1 100%;
-  }
-
-  .api-key-field input {
+  .secret-field-controls input {
     flex: 1 1 100%;
   }
 
@@ -1318,9 +1289,5 @@ input[type="checkbox"]:disabled {
 
   .field-hint-indent {
     margin-left: 0;
-  }
-
-  .memory-selector-row select {
-    flex-basis: 100%;
   }
 }
