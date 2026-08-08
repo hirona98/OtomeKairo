@@ -61,14 +61,14 @@ OtomeKairo設定の `selected_conversation_display_name_id` から解決した�
 
 設定編集の役割は次のように分ける。
 
-- Web UI: 人格（本文・表現補助・音声起動ワード）、モデル、記憶、会話入力（呼ばれ方・STT 詳細）、定期思考（思考前観測を含む）、Watcher、デスクトップ取得方針、カメラ接続、MCP、API説明、アバター音声を含む本体設定
+- Web UI: 人格（本文・表現補助・音声起動ワード）、モデル、記憶、会話入力（呼ばれ方・STT 詳細）、定期思考（思考前観測を含む）、Watcher、デスクトップ取得方針、カメラ接続、MCP、API説明、アバター音声を含む本体設定。表示・VRM・モーションは最終接続端末の現在値を読み取り専用で表示する
 - CocoroConsole: 表示、アバター（プリセットと VRM）、モーション、マイク（入力元と Console デバイス）、ライセンス。メイン画面に STT / TTS / デスクトップウォッチの運用トグルを持つ。音声合成と音声起動ワードは Web UI で編集する
 
-`表示` と `モーション` はナビ上に置くが、Web UI に編集欄は設けず CocoroConsole での編集を案内する。
+`表示` と `モーション` とアバターの VRM は、OtomeKairo が保持する `console_client_settings` の現在値を Web UI に disabled で表示する。編集は CocoroConsole から端末設定 API へ保存する。
 `定期思考` は判断機会の有効化・間隔・発話頻度に加え、思考前のデスクトップ観測とカメラ観測の on/off を持つ。カメラの host や account など接続定義は `接続 → カメラ` に置く。
 ブラウザ UI は `/ui/api/docs` を通じて `GET /api/docs` と同じAPI説明を表示し、`console_access_token` をブラウザへ返さない。
 デスクトップ取得は最後に接続したCocoroConsole端末設定を編集する。
-モデル指定値とVRM表示設定はWeb UIへ現在値を無効表示し、表示設定とモーション設定はWeb UIへ編集欄を設けない。
+モデル指定値、VRM、表示、モーションは Web UI へ現在値を無効表示する。
 VRM、表示、モーションの通常編集はCocoroConsoleから端末設定APIへ保存する。
 Web UI のアバター複製では、最終接続端末の `avatar_presentations` も同じ内容で複製し、設定保存時に `PATCH /ui/api/config/console-clients/{client_id}` へ含めて永続化する。
 最後に接続した端末が存在しない場合、端末依存の設定欄を無効にし、VRM 表示設定の複製対象も持たない。

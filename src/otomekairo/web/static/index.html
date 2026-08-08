@@ -173,9 +173,163 @@
         <div class="settings-body">
           <section class="tab-page" data-page="display">
             <p class="console-info-box">
-              表示設定（最前面表示、アバター位置、画質、吹き出しなど）は CocoroConsole で編集します。
-              Web UI では編集欄を設けません。
+              表示設定の正本は OtomeKairo が保持します。編集は CocoroConsole で行い、Web UI では現在値の参照のみです。
             </p>
+            <p id="display-console-unavailable" class="field-hint" hidden>最終接続の CocoroConsole 端末がありません。接続後に現在値を表示します。</p>
+            <fieldset class="settings-group" data-console-setting data-always-disabled disabled>
+              <legend>端末</legend>
+              <div class="settings-list">
+                <div class="setting-row">
+                  <label for="display-client-id">client_id:</label>
+                  <input id="display-client-id" disabled>
+                </div>
+                <div class="setting-row">
+                  <label for="display-console-api-port">Console API port:</label>
+                  <input id="display-console-api-port" type="number" disabled>
+                </div>
+                <div class="setting-row">
+                  <label for="display-cocoro-shell-port">CocoroShell port:</label>
+                  <input id="display-cocoro-shell-port" type="number" disabled>
+                </div>
+              </div>
+            </fieldset>
+            <fieldset class="settings-group" data-console-setting data-always-disabled disabled>
+              <legend>ウィンドウと位置</legend>
+              <div class="settings-list">
+                <label class="checkbox-field">起動時にアバター位置を復元する
+                  <input id="display-restore-window-position" type="checkbox" disabled>
+                </label>
+                <label class="checkbox-field">最前面に表示
+                  <input id="display-topmost" type="checkbox" disabled>
+                </label>
+                <label class="checkbox-field">カーソルから逃げる（Shiftキー押下中は無効）
+                  <input id="display-escape-cursor" type="checkbox" disabled>
+                </label>
+                <div class="setting-row">
+                  <label for="display-avatar-position-x">アバター位置 X:</label>
+                  <input id="display-avatar-position-x" type="number" step="any" disabled>
+                </div>
+                <div class="setting-row">
+                  <label for="display-avatar-position-y">アバター位置 Y:</label>
+                  <input id="display-avatar-position-y" type="number" step="any" disabled>
+                </div>
+                <label class="checkbox-field">右ドラッグで触ったときに仮想キー入力する
+                  <input id="display-touch-virtual-key-enabled" type="checkbox" disabled>
+                </label>
+                <div class="setting-row">
+                  <label for="display-virtual-key">仮想キー:</label>
+                  <input id="display-virtual-key" disabled>
+                </div>
+                <label class="checkbox-field">何もない場所に自動移動する（不安定）
+                  <input id="display-auto-move" type="checkbox" disabled>
+                </label>
+              </div>
+            </fieldset>
+            <fieldset class="settings-group" data-console-setting data-always-disabled disabled>
+              <legend>移動先座標設定（最大10箇所）</legend>
+              <p class="field-hint">指定しない場合は水平方向の反対側になります。</p>
+              <div id="display-escape-positions" class="display-escape-positions"></div>
+            </fieldset>
+            <fieldset class="settings-group" data-console-setting data-always-disabled disabled>
+              <legend>アバターサイズ</legend>
+              <div class="settings-list">
+                <div class="setting-row">
+                  <label for="display-avatar-window-size">サイズ:</label>
+                  <input id="display-avatar-window-size" type="number" min="0" disabled>
+                </div>
+              </div>
+            </fieldset>
+            <fieldset class="settings-group" data-console-setting data-always-disabled disabled>
+              <legend>画質設定</legend>
+              <div class="settings-list">
+                <label class="checkbox-field">Ambient Occlusion
+                  <input id="display-ambient-occlusion" type="checkbox" disabled>
+                </label>
+                <div class="setting-row">
+                  <label for="display-msaa-level">アンチエイリアシング（MSAA）:</label>
+                  <select id="display-msaa-level" disabled>
+                    <option value="0">Disable</option>
+                    <option value="2">2x</option>
+                    <option value="4">4x</option>
+                    <option value="8">8x</option>
+                  </select>
+                </div>
+                <div class="setting-row">
+                  <label for="display-avatar-shadow-mode">アバターの影:</label>
+                  <select id="display-avatar-shadow-mode" disabled>
+                    <option value="0">Disable</option>
+                    <option value="1">Hard Shadow</option>
+                    <option value="2">Soft Shadow</option>
+                  </select>
+                </div>
+                <div class="setting-row">
+                  <label for="display-avatar-shadow-resolution">アバターの影の解像度:</label>
+                  <select id="display-avatar-shadow-resolution" disabled>
+                    <option value="0">Low</option>
+                    <option value="1">Medium</option>
+                    <option value="2">High</option>
+                    <option value="3">Very High</option>
+                  </select>
+                </div>
+                <div class="setting-row">
+                  <label for="display-background-shadow-mode">背景の影:</label>
+                  <select id="display-background-shadow-mode" disabled>
+                    <option value="0">Disable</option>
+                    <option value="1">Hard Shadow</option>
+                    <option value="2">Soft Shadow</option>
+                  </select>
+                </div>
+                <div class="setting-row">
+                  <label for="display-background-shadow-resolution">背景の影の解像度:</label>
+                  <select id="display-background-shadow-resolution" disabled>
+                    <option value="0">Low</option>
+                    <option value="1">Medium</option>
+                    <option value="2">High</option>
+                    <option value="3">Very High</option>
+                  </select>
+                </div>
+              </div>
+            </fieldset>
+            <fieldset class="settings-group" data-console-setting data-always-disabled disabled>
+              <legend>吹き出し設定</legend>
+              <div class="settings-list">
+                <label class="checkbox-field">発話時メッセージウィンドウを表示する
+                  <input id="display-show-message-window" type="checkbox" disabled>
+                </label>
+                <div class="setting-row">
+                  <label for="display-message-max-count">最大メッセージ数:</label>
+                  <input id="display-message-max-count" type="number" disabled>
+                </div>
+                <div class="setting-row">
+                  <label for="display-message-max-chars">最大合計文字数:</label>
+                  <input id="display-message-max-chars" type="number" disabled>
+                </div>
+                <div class="setting-row">
+                  <label for="display-message-min-size">最小ウィンドウサイズ:</label>
+                  <input id="display-message-min-size" type="number" step="any" disabled>
+                </div>
+                <div class="setting-row">
+                  <label for="display-message-max-size">最大ウィンドウサイズ:</label>
+                  <input id="display-message-max-size" type="number" step="any" disabled>
+                </div>
+                <div class="setting-row">
+                  <label for="display-message-font-size">フォントサイズ:</label>
+                  <input id="display-message-font-size" type="number" step="any" disabled>
+                </div>
+                <div class="setting-row">
+                  <label for="display-message-horizontal-offset">水平オフセット:</label>
+                  <input id="display-message-horizontal-offset" type="number" step="any" disabled>
+                </div>
+                <div class="setting-row">
+                  <label for="display-message-vertical-offset">垂直オフセット:</label>
+                  <input id="display-message-vertical-offset" type="number" step="any" disabled>
+                </div>
+              </div>
+            </fieldset>
+            <fieldset class="settings-group" data-console-setting data-always-disabled disabled>
+              <legend>ウィンドウ配置</legend>
+              <div id="display-window-placements" class="display-window-placements"></div>
+            </fieldset>
           </section>
 
           <section class="tab-page active" data-page="avatar">
@@ -319,9 +473,38 @@
 
           <section class="tab-page" data-page="motion">
             <p class="console-info-box">
-              モーション設定は CocoroConsole で編集します。
-              Web UI では編集欄を設けません。
+              モーション設定の正本は OtomeKairo が保持します。編集は CocoroConsole で行い、Web UI では現在値の参照のみです。
             </p>
+            <p id="motion-console-unavailable" class="field-hint" hidden>最終接続の CocoroConsole 端末がありません。接続後に現在値を表示します。</p>
+            <fieldset class="settings-group" data-console-setting data-always-disabled disabled>
+              <legend>アニメーションセット</legend>
+              <div class="settings-list">
+                <div class="setting-row">
+                  <label for="motion-set-select">選択中セット:</label>
+                  <select id="motion-set-select" disabled></select>
+                </div>
+                <div class="setting-row">
+                  <label for="motion-set-display-name">プリセット名:</label>
+                  <input id="motion-set-display-name" disabled>
+                </div>
+                <div class="setting-row">
+                  <label for="motion-set-id">animation_set_id:</label>
+                  <input id="motion-set-id" disabled>
+                </div>
+                <div class="setting-row">
+                  <label for="motion-loop-standing">立ち姿勢ループ回数:</label>
+                  <input id="motion-loop-standing" type="number" disabled>
+                </div>
+                <div class="setting-row">
+                  <label for="motion-loop-sitting">座り姿勢ループ回数:</label>
+                  <input id="motion-loop-sitting" type="number" disabled>
+                </div>
+              </div>
+            </fieldset>
+            <fieldset class="settings-group" data-console-setting data-always-disabled disabled>
+              <legend>アニメーション一覧</legend>
+              <div id="motion-animation-list" class="motion-animation-list"></div>
+            </fieldset>
           </section>
 
           <section class="tab-page" data-page="conversation">

@@ -1175,6 +1175,40 @@ input[type="checkbox"]:disabled {
   gap: 6px;
 }
 
+.display-escape-positions {
+  display: grid;
+  gap: 6px;
+}
+
+.display-escape-position-row {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.display-window-placements {
+  display: grid;
+  gap: 6px;
+}
+
+.motion-animation-list {
+  display: grid;
+  gap: 10px;
+}
+
+.motion-animation-group {
+  border: 1px solid #d0d0d0;
+  border-radius: 5px;
+  padding: 8px 10px;
+  background: #fafafa;
+}
+
+.motion-animation-group summary {
+  cursor: default;
+  font-weight: 600;
+}
+
 .settings-actions {
   display: flex;
   align-items: center;
