@@ -44,6 +44,7 @@ API 仕様は次のように分ける。
 
 `GET /ui/` とその静的 asset は、同一 HTTPS server から配信するブラウザ UI である。
 `/ui/` は API wire 契約の正本ではなく、既存 `/api/...` endpoint を呼び出す client 実装として扱う。
+設定パネルの見た目とフォームマークアップ規約は [../integration/WebUI設定フォーム規約.md](../integration/WebUI設定フォーム規約.md) を正とする。
 `GET /` は `/ui/` へリダイレクトする。
 `/ui/api/...` はブラウザ UI 専用の同一 server 内部呼び出し面であり、外部接点向け API として扱わない。
 ブラウザ UI は `/ui/api/conversation` を通じて既存の会話入力処理を呼び出す。

@@ -1929,7 +1929,7 @@ function renderApiDocumentation() {
   const sections = state.apiDocs?.sections || [];
   const documents = sections.map((section) => {
     const details = document.createElement("details");
-    details.className = "api-doc-section";
+    details.className = "advanced-settings";
 
     const summary = document.createElement("summary");
     summary.textContent = section.title || section.section_id;
@@ -2217,9 +2217,10 @@ function renderWindowPlacements(placements) {
     const row = document.createElement("div");
     row.className = "setting-row";
     const label = document.createElement("label");
-    label.textContent = key;
+    label.textContent = `${key}:`;
     const value = document.createElement("input");
     value.disabled = true;
+    value.className = "field-width-long";
     value.value = `left=${placement?.left ?? "—"}, top=${placement?.top ?? "—"}`;
     row.append(label, value);
     return row;
@@ -2264,8 +2265,9 @@ function renderMotionAnimations(animations) {
     groups.get(type).push(animation);
   }
   const sections = [...groups.entries()].map(([type, items]) => {
+    // 設定画面の展開パネルは advanced-settings に統一する。
     const details = document.createElement("details");
-    details.className = "motion-animation-group";
+    details.className = "advanced-settings";
     details.open = type === 0;
     const summary = document.createElement("summary");
     summary.textContent = MOTION_ANIMATION_TYPE_LABELS[type] || `animation_type ${type}`;

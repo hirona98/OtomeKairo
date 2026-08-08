@@ -21,7 +21,7 @@ OtomeKairo は、人格設定と記憶を基盤に、その時点で成立する
 | [design/llm/](design/llm/) | LLM を使う判断と補助処理の契約 |
 | [design/capability/](design/capability/) | capability manifest、視覚機能、能力由来の source pack |
 | [design/audio/](design/audio/) | 音声入力、VAD、STT、音声起動ワード、話者識別、音声人物 |
-| [design/integration/](design/integration/) | 外部接点、権限境界、connector 配置、OtomeKairo / CocoroConsole / CocoroShell の関係 |
+| [design/integration/](design/integration/) | 外部接点、権限境界、connector 配置、OtomeKairo / CocoroConsole / CocoroShell の関係、ブラウザ UI 設定フォーム規約 |
 | [design/api/](design/api/) | HTTP / WebSocket の path、method、認証、request / response、error code |
 | [design/memory/](design/memory/) | 記憶 subsystem の内部構造、想起、更新、管理境界 |
 | [design/verification/](design/verification/) | 検証層、通常検証、重い検証、合否基準 |
@@ -34,6 +34,7 @@ OtomeKairo は、人格設定と記憶を基盤に、その時点で成立する
 - HTTP / WebSocket の path、method、認証、request / response、error code は `design/api/` に置く
 - 記憶 subsystem の内部契約は `design/memory/` に置く
 - 感情モデルは [design/runtime/感情モデル.md](design/runtime/感情モデル.md) を正本とし、memory 文書はそこへリンクする
+- ブラウザ UI 設定パネルの見た目とフォームマークアップ規約は [design/integration/WebUI設定フォーム規約.md](design/integration/WebUI設定フォーム規約.md) を正本とする
 - 例示 JSON は shape を示す例とし、意味規則は対応する設計文書に置く
 
 同じ仕様を複数の docs に正本として書かない。
