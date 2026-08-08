@@ -22,6 +22,8 @@ CocoroAIのコアとして動作する。
 
 このスクリプトは `.venv` を作成し、`pyproject.toml` に定義した依存関係をインストールする。
 開発環境で `./scripts/run_dev_server.sh` を使う場合は、このセットアップを先に実行する。
+VSCode の F5 も起動前に同じ系統の準備を行うが、既に入っている editable パッケージは再 install しない。
+依存定義を変えた直後に確実に入れ直す場合は `OTOMEKAIRO_FORCE_PIP_INSTALL=1` を付けて prepare / setup を再実行する。
 
 ```bash
 ./scripts/run_dev_server.sh

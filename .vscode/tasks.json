@@ -44,6 +44,7 @@
     },
     {
       // F5 起動前に server、connector、watcher の実行環境を準備する。
+      // 各 venv は独立しているので並列でよい。ensure 側が不要な pip を省略する。
       "label": "otomekairo: prepare full debug env",
       "dependsOn": [
         "otomekairo: prepare debug env",
@@ -51,7 +52,7 @@
         "tapo_c220: prepare debug env",
         "tapo_c220_watcher: prepare debug env"
       ],
-      "dependsOrder": "sequence",
+      "dependsOrder": "parallel",
       "problemMatcher": []
     }
   ]

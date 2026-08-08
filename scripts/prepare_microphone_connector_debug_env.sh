@@ -8,16 +8,10 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CONNECTOR_DIR="${REPO_ROOT}/connectors/microphone"
 VENV_DIR="${CONNECTOR_DIR}/.venv"
 
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 が見つかりません。" >&2
-  exit 1
-fi
-
-if [[ ! -d "${VENV_DIR}" ]]; then
-  python3 -m venv "${VENV_DIR}"
-fi
-
-"${VENV_DIR}/bin/python" -m pip install -e "${CONNECTOR_DIR}"
+"${SCRIPT_DIR}/ensure_editable_install.sh" \
+  "${VENV_DIR}" \
+  "${CONNECTOR_DIR}" \
+  "otomekairo_microphone_connector"
 
 echo "microphone connector デバッグ用の準備が完了しました。"
 echo "Python: ${VENV_DIR}/bin/python"

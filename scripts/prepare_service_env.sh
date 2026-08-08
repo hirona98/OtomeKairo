@@ -19,37 +19,29 @@ DATA_DIR="${REPO_ROOT}/var/otomekairo"
 CERT_FILE="${TLS_DIR}/cert.pem"
 KEY_FILE="${TLS_DIR}/key.pem"
 
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 が見つかりません。" >&2
-  exit 1
-fi
-
 if ! command -v openssl >/dev/null 2>&1; then
   echo "openssl が見つかりません。" >&2
   exit 1
 fi
 
+# server / connector / watcher の venv は必要なときだけ pip する
 "${SCRIPT_DIR}/setup_venv.sh"
-
-if [[ ! -d "${MICROPHONE_VENV_DIR}" ]]; then
-  python3 -m venv "${MICROPHONE_VENV_DIR}"
-fi
-"${MICROPHONE_VENV_DIR}/bin/python" -m pip install -e "${MICROPHONE_CONNECTOR_DIR}"
-
-if [[ ! -d "${TAPO_VENV_DIR}" ]]; then
-  python3 -m venv "${TAPO_VENV_DIR}"
-fi
-"${TAPO_VENV_DIR}/bin/python" -m pip install -e "${TAPO_CONNECTOR_DIR}"
-
-if [[ ! -d "${TAPO_WATCHER_VENV_DIR}" ]]; then
-  python3 -m venv "${TAPO_WATCHER_VENV_DIR}"
-fi
-"${TAPO_WATCHER_VENV_DIR}/bin/python" -m pip install -e "${TAPO_WATCHER_DIR}"
-
-if [[ ! -d "${MCP_VENV_DIR}" ]]; then
-  python3 -m venv "${MCP_VENV_DIR}"
-fi
-"${MCP_VENV_DIR}/bin/python" -m pip install -e "${MCP_CONNECTOR_DIR}"
+"${SCRIPT_DIR}/ensure_editable_install.sh" \
+  "${MICROPHONE_VENV_DIR}" \
+  "${MICROPHONE_CONNECTOR_DIR}" \
+  "otomekairo_microphone_connector"
+"${SCRIPT_DIR}/ensure_editable_install.sh" \
+  "${TAPO_VENV_DIR}" \
+  "${TAPO_CONNECTOR_DIR}" \
+  "otomekairo_tapo_c220_connector"
+"${SCRIPT_DIR}/ensure_editable_install.sh" \
+  "${TAPO_WATCHER_VENV_DIR}" \
+  "${TAPO_WATCHER_DIR}" \
+  "otomekairo_tapo_c220_watcher"
+"${SCRIPT_DIR}/ensure_editable_install.sh" \
+  "${MCP_VENV_DIR}" \
+  "${MCP_CONNECTOR_DIR}" \
+  "otomekairo_mcp_client_connector"
 
 mkdir -p "${TLS_DIR}"
 mkdir -p "${DATA_DIR}"
