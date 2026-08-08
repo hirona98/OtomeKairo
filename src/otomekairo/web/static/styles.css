@@ -186,7 +186,8 @@ p {
 
 .workspace-layout {
   display: grid;
-  grid-template-columns: minmax(300px, 34vw) minmax(0, 1fr);
+  /* 現在の個パネルをブラウザ幅の約 6 割にする。 */
+  grid-template-columns: minmax(320px, 60vw) minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
   padding: 0;
@@ -234,44 +235,53 @@ p {
   font-size: 10px;
 }
 
-.dashboard-overview {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+.dashboard-headline {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border: 1px solid #c5d4f0;
+  border-radius: 8px;
+  background: #eef4ff;
+  color: #2a3f66;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.dashboard-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   margin-bottom: 10px;
 }
 
-.dashboard-metric {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-  padding: 9px 10px;
+.dashboard-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 8px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 999px;
   background: #ffffff;
-}
-
-.dashboard-metric-value {
-  overflow: hidden;
-  color: var(--text);
-  font-size: 16px;
-  font-weight: 700;
+  color: var(--muted);
+  font-size: 11px;
   line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.dashboard-metric-value.ok {
+.dashboard-chip.ok {
+  border-color: #b7dfc2;
+  background: #eefaf1;
   color: var(--ok);
 }
 
-.dashboard-metric-value.error {
+.dashboard-chip.error {
+  border-color: #f0c2c2;
+  background: #fff1f1;
   color: var(--danger);
 }
 
-.dashboard-metric-label {
-  color: var(--muted);
-  font-size: 10px;
+.dashboard-chip.waiting {
+  border-color: #e6d4a8;
+  background: #fff8ea;
+  color: #8a6418;
 }
 
 .dashboard-section {

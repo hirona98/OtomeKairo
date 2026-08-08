@@ -33,6 +33,7 @@ const state = {
   dashboard: {
     currentState: null,
     cycleSummaries: [],
+    memorySnapshot: null,
   },
   dashboardRefreshing: false,
   dashboardTimer: null,
@@ -396,12 +397,6 @@ function formatScore(value) {
   return typeof value === "number" && Number.isFinite(value) ? value.toFixed(2) : "—";
 }
 
-function setDashboardMetric(id, value, kind = "") {
-  const metric = element(id);
-  metric.textContent = value;
-  metric.className = `dashboard-metric-value ${kind}`.trim();
-}
-
 // inspection の正本 shape を表示専用の小さなカードへ投影する。
 function showDashboardEmpty(container, text) {
   const empty = document.createElement("div");
@@ -450,6 +445,13 @@ function createDashboardItem({
   return item;
 }
 
+function createDashboardChip(text, kind = "") {
+  const chip = document.createElement("span");
+  chip.className = `dashboard-chip ${kind}`.trim();
+  chip.textContent = text;
+  return chip;
+}
+
 function runBadgeKind(status) {
   if (status === "completed") {
     return "ok";
@@ -463,27 +465,175 @@ function runBadgeKind(status) {
   return "";
 }
 
-function renderDashboardOverview() {
-  const snapshot = state.dashboard.currentState || {};
-  const runtime = snapshot.runtime_summary || {};
-  const current = snapshot.current_state || {};
-  const capabilities = snapshot.capability_inspection?.capabilities || [];
-  const foregroundWorldStates = current.foreground_world_states || [];
-  const runtimeReady = runtime.connection_state === "ready";
-  const nonTerminalRunCount = (
-    (runtime.active_autonomous_run_count || 0)
-    + (runtime.paused_autonomous_run_count || 0)
-  );
-  const availableCapabilities = capabilities.filter((capability) => capability.available === true);
+function createRunAction(label, action, runId, { danger = false } = {}) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  button.dataset.runAction = action;
+  button.dataset.runId = runId;
+  if (danger) {
+    button.className = "danger-button";
+  }
+  return button;
+}
 
-  setDashboardMetric(
-    "dashboard-runtime-state",
-    runtimeReady ? "稼働中" : displayValue(runtime.connection_state),
-    runtimeReady ? "ok" : "error",
+function dashboardSnapshotParts() {
+  const snapshot = state.dashboard.currentState || {};
+  return {
+    snapshot,
+    runtime: snapshot.runtime_summary || {},
+    detail: snapshot.runtime_detail || {},
+    current: snapshot.current_state || {},
+    capabilities: snapshot.capability_inspection?.capabilities || [],
+  };
+}
+
+function formatVadLine(vad) {
+  if (!vad || typeof vad !== "object") {
+    return "";
+  }
+  return [
+    `valence ${formatScore(vad.v)}`,
+    `arousal ${formatScore(vad.a)}`,
+    `dominance ${formatScore(vad.d)}`,
+  ].join(" · ");
+}
+
+// 構造化済みの説明があれば使い、無ければ空。VAD からの感情語推測はしない。
+function moodMeaningText(mood) {
+  if (!mood || typeof mood !== "object") {
+    return "";
+  }
+  return displayValue(
+    mood.summary_text || mood.label || mood.mood_label || mood.description,
+    "",
   );
-  setDashboardMetric("dashboard-run-count", String(nonTerminalRunCount));
-  setDashboardMetric("dashboard-capability-count", `${availableCapabilities.length}/${capabilities.length}`);
-  setDashboardMetric("dashboard-foreground-count", String(foregroundWorldStates.length));
+}
+
+function primaryActivityLabel(current) {
+  for (const activityContext of current.activity_contexts || []) {
+    const activity = activityContext.current_activity;
+    if (!activity) {
+      continue;
+    }
+    const label = displayValue(activity.label || activity.reason_summary, "");
+    if (label) {
+      return label;
+    }
+  }
+  return "";
+}
+
+function primaryWorldStateLabel(current) {
+  for (const worldState of current.foreground_world_states || []) {
+    const summary = displayValue(worldState.summary_text, "");
+    if (summary) {
+      return summary;
+    }
+  }
+  return "";
+}
+
+function nonTerminalRuns(current, runtime) {
+  const runs = current.autonomous_runs || [];
+  const live = runs.filter((run) => !["completed", "cancelled"].includes(run.status));
+  if (live.length) {
+    return live;
+  }
+  const count = (runtime.active_autonomous_run_count || 0) + (runtime.paused_autonomous_run_count || 0);
+  return count > 0 ? runs.slice(0, count) : [];
+}
+
+function buildDashboardHeadline({ runtime, detail, current }) {
+  const runtimeReady = runtime.connection_state === "ready";
+  const parts = [];
+  if (!runtimeReady) {
+    parts.push(`注意: ${displayValue(runtime.connection_state, "未接続")}`);
+  } else {
+    parts.push("稼働中");
+  }
+
+  const pendingRequests = detail.pending_capability_requests || [];
+  const ongoing = current.ongoing_action;
+  if (ongoing) {
+    const goal = displayValue(ongoing.goal_summary || ongoing.step_summary, "");
+    if (ongoing.status === "failed") {
+      parts.push(goal ? `継続行動失敗 · ${goal}` : "継続行動失敗");
+    } else {
+      parts.push(goal ? `継続中 · ${goal}` : "継続行動中");
+    }
+  } else if (pendingRequests.length) {
+    const pending = pendingRequests[0];
+    const summary = displayValue(
+      pending.goal_summary || pending.capability_id || pending.request_id,
+      "能力結果待ち",
+    );
+    parts.push(`結果待ち · ${summary}`);
+  } else {
+    const liveRuns = (current.autonomous_runs || []).filter(
+      (run) => !["completed", "cancelled"].includes(run.status),
+    );
+    if (liveRuns.length) {
+      const run = liveRuns[0];
+      parts.push(displayValue(run.objective_summary || run.current_step_summary, "自律実行中"));
+    } else {
+      const activity = primaryActivityLabel(current);
+      const world = primaryWorldStateLabel(current);
+      if (activity) {
+        parts.push(`活動: ${activity}`);
+      } else if (world) {
+        parts.push(`前景: ${world}`);
+      } else {
+        parts.push("静か");
+      }
+    }
+  }
+
+  const unavailable = (state.dashboard.currentState?.capability_inspection?.capabilities || [])
+    .filter((capability) => capability.available !== true)
+    .slice(0, 1);
+  if (unavailable.length && runtimeReady) {
+    const capability = unavailable[0];
+    const reason = CAPABILITY_REASON_LABELS[capability.unavailable_reason]
+      || displayValue(capability.unavailable_reason, "利用不可");
+    if (["no_binding", "no_vision_source", "camera_source_disabled"].includes(capability.unavailable_reason)) {
+      parts.push(`${capability.capability_id}: ${reason}`);
+    }
+  }
+
+  return parts.filter(Boolean).join(" · ");
+}
+
+function renderDashboardHeader() {
+  const { snapshot, runtime, detail, current, capabilities } = dashboardSnapshotParts();
+  element("dashboard-headline").textContent = buildDashboardHeadline({ runtime, detail, current });
+
+  const chips = element("dashboard-chips");
+  const runtimeReady = runtime.connection_state === "ready";
+  const liveRuns = nonTerminalRuns(current, runtime);
+  const pendingCount = (detail.pending_capability_requests || []).length;
+  const availableCount = capabilities.filter((capability) => capability.available === true).length;
+  const failedRecent = (state.dashboard.cycleSummaries || []).some((cycle) => cycle.failed === true);
+
+  const nodes = [
+    createDashboardChip(runtimeReady ? "稼働" : displayValue(runtime.connection_state, "未接続"), runtimeReady ? "ok" : "error"),
+  ];
+  if (current.ongoing_action) {
+    nodes.push(createDashboardChip("継続行動", current.ongoing_action.status === "failed" ? "error" : "waiting"));
+  } else if (pendingCount) {
+    nodes.push(createDashboardChip(`結果待ち ${pendingCount}`, "waiting"));
+  } else {
+    nodes.push(createDashboardChip("静か"));
+  }
+  nodes.push(createDashboardChip(`自律 ${liveRuns.length || runtime.active_autonomous_run_count || 0}`));
+  if (capabilities.length) {
+    nodes.push(createDashboardChip(`能力 ${availableCount}/${capabilities.length}`));
+  }
+  if (failedRecent) {
+    nodes.push(createDashboardChip("直近に失敗あり", "error"));
+  }
+  chips.replaceChildren(...nodes);
+
   element("dashboard-generated-at").textContent = `更新 ${formatDateTime(snapshot.generated_at)}`;
   if (state.identity) {
     element("server-summary").textContent = [
@@ -493,48 +643,160 @@ function renderDashboardOverview() {
   }
 }
 
-function renderDashboardCurrentState() {
-  const container = element("dashboard-current-state");
-  const runtime = state.dashboard.currentState?.runtime_summary || {};
-  const current = state.dashboard.currentState?.current_state || {};
-  const items = [
-    createDashboardItem({
-      title: "Runtime",
-      badge: runtime.connection_state === "ready" ? "稼働中" : displayValue(runtime.connection_state),
-      badgeKind: runtime.connection_state === "ready" ? "ok" : "error",
-      body: [
-        `定期思考 ${runtime.background_thinking_scheduler_active ? "稼働" : "停止"}`,
-        `自律実行 ${runtime.autonomous_run_scheduler_active ? "稼働" : "停止"}`,
-      ].join(" · "),
-      meta: `記憶job待ち ${runtime.pending_memory_job_count || 0}`,
-    }),
-  ];
-  const ongoingAction = current.ongoing_action;
-  if (ongoingAction) {
+function renderDashboardActive() {
+  const container = element("dashboard-active");
+  const { detail, current } = dashboardSnapshotParts();
+  const items = [];
+
+  const ongoing = current.ongoing_action;
+  if (ongoing) {
     items.push(createDashboardItem({
       title: "継続行動",
-      badge: displayValue(ongoingAction.status),
-      badgeKind: ongoingAction.status === "failed" ? "error" : "waiting",
-      body: displayValue(ongoingAction.goal_summary || ongoingAction.step_summary),
+      badge: displayValue(ongoing.status),
+      badgeKind: ongoing.status === "failed" ? "error" : "waiting",
+      body: displayValue(ongoing.goal_summary || ongoing.step_summary),
       meta: [
-        ongoingAction.step_summary,
-        ongoingAction.last_capability_id,
-        formatDateTime(ongoingAction.updated_at),
+        ongoing.step_summary && ongoing.goal_summary ? ongoing.step_summary : "",
+        ongoing.last_capability_id,
+        formatDateTime(ongoing.updated_at),
       ].filter(Boolean).join(" · "),
+    }));
+  }
+
+  for (const request of (detail.pending_capability_requests || []).slice(0, 6)) {
+    items.push(createDashboardItem({
+      title: "能力結果待ち",
+      badge: "待ち",
+      badgeKind: "waiting",
+      body: displayValue(
+        request.goal_summary || request.summary_text || request.capability_id,
+        request.request_id,
+      ),
+      meta: [
+        request.capability_id,
+        request.target_client_id,
+        formatDateTime(request.created_at),
+      ].filter(Boolean).join(" · "),
+    }));
+  }
+
+  for (const intent of (current.pending_intent_candidates || []).slice(0, 6)) {
+    items.push(createDashboardItem({
+      title: `保留意図 · ${displayValue(intent.intent_kind, "未分類")}`,
+      badge: "保留",
+      badgeKind: "waiting",
+      body: displayValue(intent.intent_summary || intent.reason_summary),
+      meta: [
+        intent.reason_summary && intent.intent_summary ? intent.reason_summary : "",
+        intent.not_before ? `開始 ${formatDateTime(intent.not_before)}` : "",
+        intent.expires_at ? `期限 ${formatDateTime(intent.expires_at)}` : "",
+      ].filter(Boolean).join(" · "),
+    }));
+  }
+
+  const runs = (current.autonomous_runs || []).slice(0, 12);
+  for (const run of runs) {
+    const status = displayValue(run.status);
+    const terminal = ["completed", "cancelled"].includes(status);
+    if (terminal) {
+      continue;
+    }
+    const item = createDashboardItem({
+      title: displayValue(run.objective_summary, run.run_id),
+      badge: RUN_STATUS_LABELS[status] || status,
+      badgeKind: runBadgeKind(status),
+      body: displayValue(run.current_step_summary || run.history_summary),
+      meta: [
+        run.next_run_at ? `次回 ${formatDateTime(run.next_run_at)}` : "",
+        run.pause_reason ? `理由 ${run.pause_reason}` : "",
+        `更新 ${formatDateTime(run.updated_at)}`,
+      ].filter(Boolean).join(" · "),
+    });
+    const actions = document.createElement("div");
+    actions.className = "dashboard-item-actions";
+    if (status === "paused") {
+      actions.append(createRunAction("再開", "resume", run.run_id));
+    } else {
+      actions.append(createRunAction("一時停止", "pause", run.run_id));
+    }
+    actions.append(createRunAction("取消", "cancel", run.run_id, { danger: true }));
+    item.append(actions);
+    items.push(item);
+  }
+
+  if (!items.length) {
+    showDashboardEmpty(container, "いま進行中の行動はありません。");
+    return;
+  }
+  container.replaceChildren(...items);
+}
+
+function renderDashboardInner() {
+  const container = element("dashboard-inner");
+  const { current } = dashboardSnapshotParts();
+  const items = [];
+
+  for (const drive of (current.drive_states || []).slice(0, 5)) {
+    items.push(createDashboardItem({
+      title: `動機 · ${displayValue(drive.drive_kind, "未分類")}`,
+      body: displayValue(drive.summary_text),
+      meta: `salience ${formatScore(drive.salience)} · 更新 ${formatDateTime(drive.updated_at)}`,
     }));
   }
 
   const mood = current.mood_state;
   const currentVad = mood?.current_vad;
-  if (currentVad) {
+  if (mood && currentVad) {
+    const meaning = moodMeaningText(mood);
+    const vadLine = formatVadLine(currentVad);
+    // 意味テキストがあれば主表示し、VAD 生値は常に併記する。
     items.push(createDashboardItem({
-      title: "気分状態",
-      body: `valence ${formatScore(currentVad.v)} · arousal ${formatScore(currentVad.a)} · dominance ${formatScore(currentVad.d)}`,
-      meta: `更新 ${formatDateTime(mood.updated_at)}`,
+      title: "気分",
+      body: meaning || vadLine,
+      meta: [
+        meaning ? vadLine : "",
+        `更新 ${formatDateTime(mood.updated_at)}`,
+      ].filter(Boolean).join(" · "),
     }));
   }
 
-  for (const activityContext of (current.activity_contexts || []).slice(0, 3)) {
+  for (const affect of (current.affect_states || []).slice(0, 4)) {
+    items.push(createDashboardItem({
+      title: `感情 · ${displayValue(affect.affect_label, "affect")}`,
+      body: displayValue(affect.summary_text),
+      meta: [
+        [affect.target_scope_type, affect.target_scope_key].filter(Boolean).join(":"),
+        `更新 ${formatDateTime(affect.updated_at || affect.observed_at)}`,
+      ].filter(Boolean).join(" · "),
+    }));
+  }
+
+  if (!items.length) {
+    showDashboardEmpty(container, "前景の動機・気分はまだありません。");
+    return;
+  }
+  container.replaceChildren(...items);
+}
+
+function renderDashboardWorld() {
+  const container = element("dashboard-world");
+  const { detail, current } = dashboardSnapshotParts();
+  const items = [];
+
+  for (const worldState of (current.foreground_world_states || []).slice(0, 6)) {
+    const scope = [worldState.scope_type, worldState.scope_key].filter(Boolean).join(":");
+    items.push(createDashboardItem({
+      title: `前景 · ${displayValue(worldState.state_type, "world_state")}`,
+      body: displayValue(worldState.summary_text),
+      meta: [
+        scope,
+        `salience ${formatScore(worldState.salience)}`,
+        formatDateTime(worldState.updated_at || worldState.observed_at),
+      ].filter(Boolean).join(" · "),
+    }));
+  }
+
+  for (const activityContext of (current.activity_contexts || []).slice(0, 4)) {
     const activity = activityContext.current_activity;
     if (!activity) {
       continue;
@@ -550,107 +812,95 @@ function renderDashboardCurrentState() {
     }));
   }
 
-  for (const drive of (current.drive_states || []).slice(0, 3)) {
-    items.push(createDashboardItem({
-      title: `動機 · ${displayValue(drive.drive_kind, "未分類")}`,
-      body: displayValue(drive.summary_text),
-      meta: `salience ${formatScore(drive.salience)} · 更新 ${formatDateTime(drive.updated_at)}`,
-    }));
-  }
-
-  for (const worldState of (current.foreground_world_states || []).slice(0, 5)) {
-    const scope = [worldState.scope_type, worldState.scope_key].filter(Boolean).join(":");
-    items.push(createDashboardItem({
-      title: `前景 · ${displayValue(worldState.state_type, "world_state")}`,
-      body: displayValue(worldState.summary_text),
-      meta: [
-        scope,
-        `salience ${formatScore(worldState.salience)}`,
-        formatDateTime(worldState.updated_at || worldState.observed_at),
-      ].filter(Boolean).join(" · "),
-    }));
-  }
-
-  container.replaceChildren(...items);
-}
-
-function createRunAction(label, action, runId, { danger = false } = {}) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.textContent = label;
-  button.dataset.runAction = action;
-  button.dataset.runId = runId;
-  if (danger) {
-    button.className = "danger-button";
-  }
-  return button;
-}
-
-function renderDashboardRuns() {
-  const container = element("dashboard-runs");
-  const runs = state.dashboard.currentState?.current_state?.autonomous_runs || [];
-  if (!runs.length) {
-    showDashboardEmpty(container, "自律実行はありません。");
-    return;
-  }
-
-  const items = runs.slice(0, 12).map((run) => {
-    const status = displayValue(run.status);
-    const item = createDashboardItem({
-      title: displayValue(run.objective_summary, run.run_id),
-      badge: RUN_STATUS_LABELS[status] || status,
-      badgeKind: runBadgeKind(status),
-      body: displayValue(run.current_step_summary || run.history_summary),
-      meta: [
-        run.next_run_at ? `次回 ${formatDateTime(run.next_run_at)}` : "",
-        `更新 ${formatDateTime(run.updated_at)}`,
-      ].filter(Boolean).join(" · "),
-    });
-    const terminal = ["completed", "cancelled"].includes(status);
-    if (!terminal) {
-      const actions = document.createElement("div");
-      actions.className = "dashboard-item-actions";
-      if (status === "paused") {
-        actions.append(createRunAction("再開", "resume", run.run_id));
-      } else {
-        actions.append(createRunAction("一時停止", "pause", run.run_id));
-      }
-      actions.append(createRunAction("取消", "cancel", run.run_id, { danger: true }));
-      item.append(actions);
+  for (const observation of (detail.wake_policy_observations || []).slice(0, 6)) {
+    if (!observation.enabled && !observation.last_summary && !observation.last_status) {
+      continue;
     }
-    return item;
-  });
+    items.push(createDashboardItem({
+      title: `観測 · ${displayValue(observation.observation_id, observation.capability_id)}`,
+      badge: observation.enabled ? displayValue(observation.last_status, "有効") : "無効",
+      badgeKind: observation.last_status === "failed" || observation.last_error ? "error" : "",
+      body: displayValue(observation.last_summary || observation.last_error, "まだ観測結果がありません"),
+      meta: [
+        observation.vision_source_id,
+        observation.last_run_at ? `最終 ${formatDateTime(observation.last_run_at)}` : "",
+      ].filter(Boolean).join(" · "),
+    }));
+  }
+
+  for (const relation of (current.relation_index || []).slice(0, 6)) {
+    items.push(createDashboardItem({
+      title: `関係 · ${displayValue(relation.relation_predicate, "relation")}`,
+      body: displayValue(relation.representative_summary),
+      meta: [
+        `${displayValue(relation.source_ref)} → ${displayValue(relation.target_ref)}`,
+        relation.derived_status,
+        `salience ${formatScore(relation.salience)}`,
+      ].filter(Boolean).join(" · "),
+    }));
+  }
+
+  if (!items.length) {
+    showDashboardEmpty(container, "前景の外界状態はまだありません。");
+    return;
+  }
   container.replaceChildren(...items);
 }
 
-function renderDashboardCapabilities() {
-  const container = element("dashboard-capabilities");
-  const capabilities = state.dashboard.currentState?.capability_inspection?.capabilities || [];
-  if (!capabilities.length) {
-    showDashboardEmpty(container, "能力情報はありません。");
-    return;
+function renderDashboardMemory() {
+  const container = element("dashboard-memory");
+  const snapshot = state.dashboard.memorySnapshot;
+  const { current } = dashboardSnapshotParts();
+  const items = [];
+
+  // Phase 1 では memory-snapshot API 前でも、current-state 由来の記憶索引を見せる。
+  for (const relation of (current.relation_index || []).slice(0, 4)) {
+    items.push(createDashboardItem({
+      title: `関係索引 · ${displayValue(relation.relation_predicate)}`,
+      body: displayValue(relation.representative_summary),
+      meta: `${displayValue(relation.source_ref)} → ${displayValue(relation.target_ref)}`,
+    }));
+  }
+  for (const entity of (current.entity_registry || []).slice(0, 4)) {
+    items.push(createDashboardItem({
+      title: `対象 · ${displayValue(entity.display_name, entity.entity_ref)}`,
+      body: displayValue(entity.entity_type),
+      meta: [
+        entity.entity_ref,
+        `salience ${formatScore(entity.salience)}`,
+        formatDateTime(entity.last_seen_at),
+      ].filter(Boolean).join(" · "),
+    }));
   }
 
-  const items = capabilities.map((capability) => {
-    const available = capability.available === true;
-    const reason = capability.unavailable_reason;
-    const bindingCount = capability.binding?.eligible_client_count || 0;
-    const sourceCount = capability.vision_sources?.filter((source) => source.available === true).length || 0;
-    const toolCount = capability.mcp_servers
-      ?.reduce((count, server) => count + (server.tools?.length || 0), 0) || 0;
-    return createDashboardItem({
-      title: capability.capability_id,
-      badge: available ? "利用可能" : (CAPABILITY_REASON_LABELS[reason] || displayValue(reason, "利用不可")),
-      badgeKind: available ? "ok" : "error",
-      body: displayValue(capability.kind),
-      meta: [
-        `接続 ${bindingCount}`,
-        sourceCount ? `source ${sourceCount}` : "",
-        toolCount ? `tool ${toolCount}` : "",
-        capability.state?.busy ? "実行中" : "",
-      ].filter(Boolean).join(" · "),
-    });
-  });
+  if (snapshot) {
+    for (const unit of (snapshot.memory_units || []).slice(0, 12)) {
+      items.push(createDashboardItem({
+        title: `理解 · ${displayValue(unit.memory_type, "memory_unit")}`,
+        body: displayValue(unit.summary_text),
+        meta: [
+          unit.status,
+          `salience ${formatScore(unit.salience)}`,
+          formatDateTime(unit.updated_at || unit.last_confirmed_at || unit.formed_at),
+        ].filter(Boolean).join(" · "),
+      }));
+    }
+    for (const episode of (snapshot.episodes || []).slice(0, 8)) {
+      items.push(createDashboardItem({
+        title: `経験 · ${displayValue(episode.episode_type, "episode")}`,
+        body: displayValue(episode.summary_text || episode.outcome_text),
+        meta: [
+          `salience ${formatScore(episode.salience)}`,
+          formatDateTime(episode.formed_at || episode.started_at),
+        ].filter(Boolean).join(" · "),
+      }));
+    }
+  }
+
+  if (!items.length) {
+    showDashboardEmpty(container, "表示できる記憶要約はまだありません。");
+    return;
+  }
   container.replaceChildren(...items);
 }
 
@@ -658,7 +908,7 @@ function renderDashboardCycles() {
   const container = element("dashboard-cycles");
   const cycles = state.dashboard.cycleSummaries || [];
   if (!cycles.length) {
-    showDashboardEmpty(container, "記録済みサイクルはありません。");
+    showDashboardEmpty(container, "記録済みの判断はまだありません。");
     return;
   }
 
@@ -671,7 +921,7 @@ function renderDashboardCycles() {
       title: trigger,
       badge: failed ? "失敗" : result,
       badgeKind: failed ? "error" : "ok",
-      body: cycle.cycle_id,
+      body: failed ? "この判断は失敗として記録されています。" : `${trigger} → ${result}`,
       meta: [
         formatDateTime(cycle.started_at),
         duration,
@@ -682,12 +932,80 @@ function renderDashboardCycles() {
   container.replaceChildren(...items);
 }
 
+function renderDashboardHealth() {
+  const container = element("dashboard-health");
+  const { runtime, detail, capabilities } = dashboardSnapshotParts();
+  const items = [];
+
+  items.push(createDashboardItem({
+    title: "Runtime",
+    badge: runtime.connection_state === "ready" ? "稼働中" : displayValue(runtime.connection_state),
+    badgeKind: runtime.connection_state === "ready" ? "ok" : "error",
+    body: [
+      `定期思考 ${runtime.background_thinking_scheduler_active ? "稼働" : "停止"}`,
+      `自律実行scheduler ${runtime.autonomous_run_scheduler_active ? "稼働" : "停止"}`,
+      `記憶worker ${runtime.memory_job_worker_active ? "稼働" : "停止"}`,
+      `視覚日次 ${runtime.visual_daily_worker_active ? "稼働" : "停止"}`,
+    ].join(" · "),
+    meta: [
+      `記憶job待ち ${runtime.pending_memory_job_count || 0}`,
+      runtime.memory_job_in_progress ? "記憶処理中" : "",
+      runtime.visual_daily_in_progress ? "視覚日次処理中" : "",
+    ].filter(Boolean).join(" · "),
+  }));
+
+  const audio = detail.audio_runtime_state;
+  if (audio && typeof audio === "object") {
+    items.push(createDashboardItem({
+      title: "音声入力",
+      badge: audio.available === true ? "利用可能" : displayValue(audio.unavailable_reason, "利用不可"),
+      badgeKind: audio.available === true ? "ok" : "error",
+      body: [
+        `設定 ${displayValue(audio.configured_source)}`,
+        `実効 ${displayValue(audio.effective_source || audio.active_source)}`,
+        audio.mode ? `mode ${audio.mode}` : "",
+      ].filter(Boolean).join(" · "),
+      meta: [
+        audio.selected_device?.name,
+        audio.vad?.speaking ? "発話中" : "",
+        typeof audio.vad?.probability === "number" ? `VAD ${formatScore(audio.vad.probability)}` : "",
+        audio.paused_reason ? `pause ${audio.paused_reason}` : "",
+      ].filter(Boolean).join(" · "),
+    }));
+  }
+
+  for (const capability of capabilities) {
+    const available = capability.available === true;
+    const reason = capability.unavailable_reason;
+    const bindingCount = capability.binding?.eligible_client_count || 0;
+    const sourceCount = capability.vision_sources?.filter((source) => source.available === true).length || 0;
+    const toolCount = capability.mcp_servers
+      ?.reduce((count, server) => count + (server.tools?.length || 0), 0) || 0;
+    items.push(createDashboardItem({
+      title: capability.capability_id,
+      badge: available ? "利用可能" : (CAPABILITY_REASON_LABELS[reason] || displayValue(reason, "利用不可")),
+      badgeKind: available ? "ok" : "error",
+      body: displayValue(capability.kind),
+      meta: [
+        `接続 ${bindingCount}`,
+        sourceCount ? `source ${sourceCount}` : "",
+        toolCount ? `tool ${toolCount}` : "",
+        capability.state?.busy ? "実行中" : "",
+      ].filter(Boolean).join(" · "),
+    }));
+  }
+
+  container.replaceChildren(...items);
+}
+
 function renderDashboard() {
-  renderDashboardOverview();
-  renderDashboardCurrentState();
-  renderDashboardRuns();
-  renderDashboardCapabilities();
+  renderDashboardHeader();
+  renderDashboardActive();
+  renderDashboardInner();
+  renderDashboardWorld();
+  renderDashboardMemory();
   renderDashboardCycles();
+  renderDashboardHealth();
 }
 
 async function refreshDashboard({ silent = false } = {}) {
@@ -705,7 +1023,7 @@ async function refreshDashboard({ silent = false } = {}) {
     state.dashboard.cycleSummaries = cycles.cycle_summaries || [];
     renderDashboard();
     if (!silent) {
-      showNotice("運用ダッシュボードを更新しました。");
+      showNotice("現在の個を更新しました。");
     }
   } catch (error) {
     element("dashboard-generated-at").textContent = "更新失敗";
@@ -3091,7 +3409,7 @@ function switchTab(tab) {
 function bindEvents() {
   element("toggle-dashboard").addEventListener("click", toggleDashboard);
   element("refresh-dashboard").addEventListener("click", () => refreshDashboard({ silent: false }));
-  element("dashboard-runs").addEventListener("click", (event) => {
+  element("dashboard-active").addEventListener("click", (event) => {
     const button = event.target instanceof Element
       ? event.target.closest("[data-run-action]")
       : null;

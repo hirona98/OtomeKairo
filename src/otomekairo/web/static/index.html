@@ -16,14 +16,14 @@
         <div id="server-summary">現在の個を読み込み中</div>
       </div>
       <div class="topbar-actions">
-        <button type="button" class="icon-button dashboard-toggle" id="toggle-dashboard" title="運用ダッシュボード"
-          aria-expanded="true">運用</button>
+        <button type="button" class="icon-button dashboard-toggle" id="toggle-dashboard" title="現在の個"
+          aria-expanded="true">個</button>
         <button type="button" class="icon-button" id="open-settings" title="設定">⚙</button>
       </div>
     </header>
 
     <main class="workspace-layout" id="workspace-layout">
-      <aside class="dashboard-panel" id="dashboard-panel" aria-label="運用ダッシュボード">
+      <aside class="dashboard-panel" id="dashboard-panel" aria-label="現在の個">
         <div class="dashboard-header">
           <div>
             <h2>現在の個</h2>
@@ -32,43 +32,37 @@
           <button type="button" class="plain-button" id="refresh-dashboard">更新</button>
         </div>
 
-        <div class="dashboard-overview" aria-label="稼働概要">
-          <div class="dashboard-metric">
-            <span class="dashboard-metric-value" id="dashboard-runtime-state">--</span>
-            <span class="dashboard-metric-label">runtime</span>
-          </div>
-          <div class="dashboard-metric">
-            <span class="dashboard-metric-value" id="dashboard-run-count">--</span>
-            <span class="dashboard-metric-label">自律実行</span>
-          </div>
-          <div class="dashboard-metric">
-            <span class="dashboard-metric-value" id="dashboard-capability-count">--</span>
-            <span class="dashboard-metric-label">利用可能能力</span>
-          </div>
-          <div class="dashboard-metric">
-            <span class="dashboard-metric-value" id="dashboard-foreground-count">--</span>
-            <span class="dashboard-metric-label">前景状態</span>
-          </div>
-        </div>
+        <div class="dashboard-headline" id="dashboard-headline">読み込み中…</div>
+        <div class="dashboard-chips" id="dashboard-chips" aria-label="状態チップ"></div>
 
         <details class="dashboard-section" open>
-          <summary>現在状態</summary>
-          <div class="dashboard-list" id="dashboard-current-state"></div>
+          <summary>いま動いていること</summary>
+          <div class="dashboard-list" id="dashboard-active"></div>
         </details>
 
         <details class="dashboard-section" open>
-          <summary>自律実行</summary>
-          <div class="dashboard-list" id="dashboard-runs"></div>
+          <summary>いま気にかけていること</summary>
+          <div class="dashboard-list" id="dashboard-inner"></div>
+        </details>
+
+        <details class="dashboard-section" open>
+          <summary>いま見えている世界</summary>
+          <div class="dashboard-list" id="dashboard-world"></div>
+        </details>
+
+        <details class="dashboard-section" open>
+          <summary>記憶</summary>
+          <div class="dashboard-list" id="dashboard-memory"></div>
+        </details>
+
+        <details class="dashboard-section" open>
+          <summary>直近の判断</summary>
+          <div class="dashboard-list cycle-timeline" id="dashboard-cycles"></div>
         </details>
 
         <details class="dashboard-section">
-          <summary>能力</summary>
-          <div class="dashboard-list" id="dashboard-capabilities"></div>
-        </details>
-
-        <details class="dashboard-section" open>
-          <summary>最近のサイクル</summary>
-          <div class="dashboard-list cycle-timeline" id="dashboard-cycles"></div>
+          <summary>接続と能力・健全性</summary>
+          <div class="dashboard-list" id="dashboard-health"></div>
         </details>
       </aside>
 
