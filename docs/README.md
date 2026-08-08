@@ -21,7 +21,7 @@ OtomeKairo は、人格設定と記憶を基盤に、その時点で成立する
 | [design/llm/](design/llm/) | LLM を使う判断と補助処理の契約 |
 | [design/capability/](design/capability/) | capability manifest、視覚機能、能力由来の source pack |
 | [design/audio/](design/audio/) | 音声入力、VAD、STT、音声起動ワード、話者識別、音声人物 |
-| [design/integration/](design/integration/) | 外部接点、権限境界、connector 配置 |
+| [design/integration/](design/integration/) | 外部接点、権限境界、connector 配置、OtomeKairo / CocoroConsole / CocoroShell の関係 |
 | [design/api/](design/api/) | HTTP / WebSocket の path、method、認証、request / response、error code |
 | [design/memory/](design/memory/) | 記憶 subsystem の内部構造、想起、更新、管理境界 |
 | [design/verification/](design/verification/) | 検証層、通常検証、重い検証、合否基準 |
@@ -45,9 +45,10 @@ OtomeKairo は、人格設定と記憶を基盤に、その時点で成立する
 ### 全体像
 
 1. [design/foundation/アーキテクチャ.md](design/foundation/アーキテクチャ.md)
-2. [design/foundation/人格と記憶.md](design/foundation/人格と記憶.md)
-3. [design/runtime/判断と行動.md](design/runtime/判断と行動.md)
-4. [design/runtime/状態モデル.md](design/runtime/状態モデル.md)
+2. [design/integration/OtomeKairoとCocoroConsoleとCocoroShell.md](design/integration/OtomeKairoとCocoroConsoleとCocoroShell.md)
+3. [design/foundation/人格と記憶.md](design/foundation/人格と記憶.md)
+4. [design/runtime/判断と行動.md](design/runtime/判断と行動.md)
+5. [design/runtime/状態モデル.md](design/runtime/状態モデル.md)
 
 ### 判断と状態
 
@@ -69,12 +70,13 @@ OtomeKairo は、人格設定と記憶を基盤に、その時点で成立する
 
 ### API と接続
 
-1. [design/integration/外部接点とAPI概念.md](design/integration/外部接点とAPI概念.md)
-2. [design/integration/接続と権限境界.md](design/integration/接続と権限境界.md)
-3. [design/api/README.md](design/api/README.md)
-4. [design/audio/音声入力と話者識別.md](design/audio/音声入力と話者識別.md)
-5. [design/capability/capability_manifest.md](design/capability/capability_manifest.md)
-6. [design/integration/外部接続connector配置方針.md](design/integration/外部接続connector配置方針.md)
+1. [design/integration/OtomeKairoとCocoroConsoleとCocoroShell.md](design/integration/OtomeKairoとCocoroConsoleとCocoroShell.md)
+2. [design/integration/外部接点とAPI概念.md](design/integration/外部接点とAPI概念.md)
+3. [design/integration/接続と権限境界.md](design/integration/接続と権限境界.md)
+4. [design/api/README.md](design/api/README.md)
+5. [design/audio/音声入力と話者識別.md](design/audio/音声入力と話者識別.md)
+6. [design/capability/capability_manifest.md](design/capability/capability_manifest.md)
+7. [design/integration/外部接続connector配置方針.md](design/integration/外部接続connector配置方針.md)
 
 ### LLM 境界
 
