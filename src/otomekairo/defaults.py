@@ -60,7 +60,6 @@ def build_default_console_client_settings(client_id: str) -> dict:
         "process": {
             "console_api_port": 55600,
             "cocoro_shell_port": 55605,
-            "conversation_input_enabled": True,
         },
         "display": {
             "restore_window_position": False,

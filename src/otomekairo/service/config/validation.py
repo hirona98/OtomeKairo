@@ -62,7 +62,7 @@ class ServiceConfigValidationMixin:
             raise ServiceError(400, "invalid_console_process_settings", "process must be an object.")
         self._validate_exact_fields(
             definition,
-            {"console_api_port", "cocoro_shell_port", "conversation_input_enabled"},
+            {"console_api_port", "cocoro_shell_port"},
             "console_process_settings",
         )
         for field_name in ("console_api_port", "cocoro_shell_port"):
@@ -78,12 +78,6 @@ class ServiceConfigValidationMixin:
                 400,
                 "invalid_console_process_settings",
                 "process ports must be different.",
-            )
-        if not isinstance(definition.get("conversation_input_enabled"), bool):
-            raise ServiceError(
-                400,
-                "invalid_console_process_settings",
-                "process.conversation_input_enabled must be a boolean.",
             )
 
     def _validate_console_display_settings(self, definition: Any) -> None:

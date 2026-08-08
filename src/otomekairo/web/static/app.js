@@ -2111,9 +2111,6 @@ function renderConsoleClientSettings() {
   document.querySelectorAll("[data-console-setting]").forEach((fieldset) => {
     fieldset.disabled = fieldset.hasAttribute("data-always-disabled") || !available;
   });
-  element("model-conversation-input-enabled").disabled = !available;
-  element("model-conversation-input-enabled").checked =
-    available && state.consoleClient.settings.process.conversation_input_enabled === true;
   element("current-wake-desktop-observation").disabled = !available;
   if (!available) {
     renderAvatarPresentation();
@@ -2132,9 +2129,10 @@ function syncConsoleClientSettings() {
     return;
   }
   const settings = state.consoleClient.settings;
+  // process は port 群だけを正本にする。旧 conversation_input_enabled を残さない。
   settings.process = {
-    ...settings.process,
-    conversation_input_enabled: boolValue("model-conversation-input-enabled"),
+    console_api_port: settings.process.console_api_port,
+    cocoro_shell_port: settings.process.cocoro_shell_port,
   };
   // CocoroConsoleに表示しない取得方式の設定値は変更せず保持する。
   settings.desktop_capture = {

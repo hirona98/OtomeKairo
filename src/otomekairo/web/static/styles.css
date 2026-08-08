@@ -822,10 +822,6 @@ p {
   align-content: start;
 }
 
-.model-use-field {
-  justify-self: start;
-}
-
 /* 設定フォームの共通行。label 幅は全設定ページで揃える。 */
 .settings-list {
   display: grid;
