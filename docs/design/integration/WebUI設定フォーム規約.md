@@ -13,6 +13,8 @@ API wire、認可、設定の意味境界は [../api/README.md](../api/README.md
 - チャット本文・composer
 - 内部状態ダッシュボード（`dashboard-panel`）
 
+通常画面の見た目規約は [WebUI通常画面規約.md](WebUI通常画面規約.md) を正とする。
+
 ## コンポーネント階層
 
 ```

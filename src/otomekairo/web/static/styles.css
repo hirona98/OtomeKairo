@@ -16,6 +16,19 @@
   --danger-hover: #f44336;
   --danger-pressed: #c62828;
   --ok: #137333;
+  /* セマンティック面。chip / badge / status / info 枠で共有する。 */
+  --ok-border: #b7dfc2;
+  --ok-bg: #eefaf1;
+  --error-border: #f0c2c2;
+  --error-bg: #fff1f1;
+  --waiting: #7a5200;
+  --waiting-border: #e6d4a8;
+  --waiting-bg: #fff8ea;
+  --info-border: #b9ccf3;
+  --info-bg: #eef4ff;
+  --info-text: #2a3f66;
+  --dashboard-bg: #f5f7fb;
+  --item-line: #e8edf4;
   --space-1: 4px;
   --space-2: 6px;
   --space-3: 8px;
@@ -181,7 +194,8 @@ p {
   min-height: 30px;
   padding: 0;
   border-color: rgba(255, 255, 255, 0.7);
-  background: rgba(255, 255, 255, 0.14);
+  /* 通常時の塗りはヘッダと同じ色にする。 */
+  background: var(--accent);
   font-size: var(--font-nav-category);
   line-height: 1;
 }
@@ -217,29 +231,29 @@ p {
 .dashboard-panel {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   min-width: 0;
   min-height: 0;
-  padding: 6px;
+  padding: var(--space-2);
   overflow-y: auto;
   border-right: 1px solid var(--line);
-  background: #f5f7fb;
+  background: var(--dashboard-bg);
   overscroll-behavior: contain;
 }
 
 .dashboard-header {
   position: sticky;
-  top: -6px;
+  top: calc(-1 * var(--space-2));
   z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
   flex: 0 0 auto;
-  margin: -6px -6px 0;
-  padding: 6px 8px;
+  margin: calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) 0;
+  padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--line);
-  background: rgba(245, 247, 251, 0.96);
+  background: color-mix(in srgb, var(--dashboard-bg) 96%, transparent);
 }
 
 .dashboard-updated {
@@ -248,22 +262,27 @@ p {
   line-height: 1.2;
 }
 
+/* 情報枠。console-info-box と同じ info トークンを使う。 */
+.dashboard-headline,
+.console-info-box {
+  border: 1px solid var(--info-border);
+  border-radius: 6px;
+  background: var(--info-bg);
+  color: var(--info-text);
+  line-height: 1.35;
+}
+
 .dashboard-headline {
   flex: 0 0 auto;
   margin: 0;
-  padding: 6px 8px;
-  border: 1px solid #c5d4f0;
-  border-radius: 6px;
-  background: #eef4ff;
-  color: #2a3f66;
+  padding: var(--space-2) var(--space-3);
   font-size: var(--font-body);
-  line-height: 1.35;
 }
 
 .dashboard-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--space-1);
   flex: 0 0 auto;
   margin: 0;
 }
@@ -282,28 +301,28 @@ p {
 }
 
 .dashboard-chip.ok {
-  border-color: #b7dfc2;
-  background: #eefaf1;
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
   color: var(--ok);
 }
 
 .dashboard-chip.error {
-  border-color: #f0c2c2;
-  background: #fff1f1;
+  border-color: var(--error-border);
+  background: var(--error-bg);
   color: var(--danger);
 }
 
 .dashboard-chip.waiting {
-  border-color: #e6d4a8;
-  background: #fff8ea;
-  color: #8a6418;
+  border-color: var(--waiting-border);
+  background: var(--waiting-bg);
+  color: var(--waiting);
 }
 
 /* セクションを横並びにし、幅の空きを埋める。 */
 .dashboard-body {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px;
+  gap: var(--space-1);
   align-items: start;
   flex: 0 0 auto;
 }
@@ -350,16 +369,16 @@ p {
 
 .dashboard-list-dense .dashboard-item {
   height: 100%;
-  border-right: 1px solid #e8edf4;
-  border-bottom: 1px solid #e8edf4;
+  border-right: 1px solid var(--item-line);
+  border-bottom: 1px solid var(--item-line);
 }
 
 .dashboard-list-dense .dashboard-item:last-child {
-  border-bottom: 1px solid #e8edf4;
+  border-bottom: 1px solid var(--item-line);
 }
 
 .dashboard-empty {
-  padding: 6px 8px;
+  padding: var(--space-2) var(--space-3);
   color: var(--muted);
   font-size: var(--font-micro);
   line-height: 1.3;
@@ -369,8 +388,8 @@ p {
   display: grid;
   gap: 2px;
   min-width: 0;
-  padding: 5px 8px;
-  border-bottom: 1px solid #e8edf4;
+  padding: 5px var(--space-3);
+  border-bottom: 1px solid var(--item-line);
 }
 
 .dashboard-item:last-child {
@@ -381,7 +400,7 @@ p {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: var(--space-2);
   min-width: 0;
 }
 
@@ -407,18 +426,18 @@ p {
 }
 
 .dashboard-badge.ok {
-  background: #e7f4eb;
+  background: var(--ok-bg);
   color: var(--ok);
 }
 
 .dashboard-badge.error {
-  background: #fce8e6;
+  background: var(--error-bg);
   color: var(--danger);
 }
 
 .dashboard-badge.waiting {
-  background: #fff4d6;
-  color: #7a5200;
+  background: var(--waiting-bg);
+  color: var(--waiting);
 }
 
 .dashboard-item-body {
@@ -442,7 +461,7 @@ p {
 .dashboard-item-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--space-1);
   margin-top: 1px;
 }
 
@@ -507,9 +526,9 @@ p {
 .messages {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-4);
   min-height: 0;
-  padding: 14px 14px 8px;
+  padding: var(--space-6) var(--space-6) var(--space-3);
   overscroll-behavior: contain;
   overflow-y: auto;
 }
@@ -577,21 +596,67 @@ p {
 .composer {
   display: grid;
   gap: var(--space-3);
-  padding: 10px 12px;
+  padding: var(--space-4) var(--space-5);
   border-top: 1px solid var(--line);
   background: #ffffff;
 }
 
+/* ツールバー行。視覚ラベルは付けず、select は aria-label で補う。 */
 .web-microphone-controls {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto auto minmax(80px, auto);
-  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-3);
 }
 
-.web-microphone-controls .status {
-  align-self: center;
-  white-space: nowrap;
+.web-microphone-controls > select {
+  flex: 1 1 160px;
+  min-width: min(100%, 140px);
+  max-width: var(--field-width-medium);
+}
+
+.web-microphone-controls > select[hidden] {
+  display: none;
+}
+
+.web-microphone-controls > button {
+  flex: 0 0 auto;
+}
+
+/* 音声入力トグル。OFF は画像ボタンと同系統だがアイコンは muted で薄く。ON は accent。 */
+.mic-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height);
+  min-width: var(--control-height);
+  padding: 0;
+  border-color: var(--line);
+  background: #ffffff;
+  color: var(--muted);
+  line-height: 0;
+}
+
+.mic-toggle:where(:not(:disabled)):hover {
+  background: #eef3fb;
+  color: var(--muted);
+}
+
+.mic-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.mic-toggle[aria-pressed="true"]:where(:not(:disabled)):hover {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+  color: #ffffff;
+}
+
+.mic-toggle-icon {
+  display: block;
+  flex: 0 0 auto;
 }
 
 #message-input {
@@ -612,6 +677,8 @@ p {
   justify-content: stretch;
 }
 
+/* 副ボタン。file-button は plain と同系統。 */
+.plain-button,
 .file-button {
   display: inline-flex;
   align-items: center;
@@ -624,6 +691,11 @@ p {
   color: var(--text);
   cursor: pointer;
   font-size: var(--font-body);
+}
+
+.plain-button:hover,
+.file-button:hover {
+  background: #eef3fb;
 }
 
 .composer-actions .file-button,
@@ -659,22 +731,12 @@ p {
   object-fit: cover;
 }
 
-.plain-button {
-  border-color: var(--line);
-  background: #ffffff;
-  color: var(--text);
-}
-
-.plain-button:hover {
-  background: #eef3fb;
-}
-
 .statusbar {
   display: flex;
   align-items: center;
   gap: var(--space-4);
   min-height: 28px;
-  padding: 5px 10px;
+  padding: 5px var(--space-4);
   border-top: 1px solid var(--line);
   background: #ffffff;
   color: var(--muted);
@@ -686,7 +748,7 @@ p {
 }
 
 .status.processing {
-  color: #7a5200;
+  color: var(--waiting);
 }
 
 .status.error {
@@ -902,11 +964,7 @@ p {
 }
 
 .console-info-box {
-  padding: 12px;
-  border: 1px solid #b9ccf3;
-  border-radius: 4px;
-  background: #eef4ff;
-  color: #334a72;
+  padding: var(--space-5);
   font-size: var(--label-size);
   line-height: 1.5;
 }
@@ -1059,9 +1117,8 @@ p {
   font-size: var(--label-size);
 }
 
-/* 上ラベル積み上げ。設定行では使わず、composer など設定外のみ。 */
-.stack-label,
-.web-microphone-controls > label {
+/* 上ラベル積み上げ。設定の setting-row では使わない。 */
+.stack-label {
   display: grid;
   gap: 4px;
   color: var(--muted);
@@ -1071,9 +1128,6 @@ p {
 .stack-label input,
 .stack-label select,
 .stack-label textarea,
-.web-microphone-controls > label input,
-.web-microphone-controls > label select,
-.web-microphone-controls > label textarea,
 .settings-mobile-navigation select {
   color: var(--text);
   font-size: var(--field-size);
@@ -1358,8 +1412,9 @@ input[type="checkbox"]:disabled {
     flex-basis: 100%;
   }
 
-  .web-microphone-controls {
-    grid-template-columns: 1fr;
+  .web-microphone-controls > select {
+    flex: 1 1 100%;
+    max-width: none;
   }
 
   .speaker-row {

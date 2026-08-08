@@ -1209,7 +1209,9 @@ function websocketUrl(path) {
 
 function setWebMicrophoneStatus(text, kind = "") {
   const status = element("web-microphone-status");
-  status.textContent = text;
+  // statusbar 向けに接頭辞を揃え、呼び出し側は本文だけ渡す。
+  const body = String(text || "").replace(/^音声:\s*/, "");
+  status.textContent = body ? `音声: ${body}` : "音声: 停止中";
   status.className = `status ${kind}`.trim();
 }
 
@@ -1235,12 +1237,15 @@ function renderWebMicrophoneControls() {
   const source = element("web-input-source").value;
   const usesWebDevice = source === "web_microphone";
   element("web-input-source").disabled = busy;
-  element("web-microphone-device-field").hidden = !usesWebDevice;
+  element("web-microphone-device").hidden = !usesWebDevice;
   element("web-microphone-device").disabled = busy || !usesWebDevice;
   element("refresh-web-microphones").disabled = busy || !usesWebDevice;
+  // アイコントグル。文言は title / aria で伝え、見た目は aria-pressed で切り替える。
   const button = element("toggle-web-microphone");
-  button.textContent = running ? "音声入力を停止" : "音声入力を開始";
   button.disabled = state.webAudio.starting || state.webAudio.stopping;
+  button.setAttribute("aria-pressed", running ? "true" : "false");
+  button.title = running ? "音声入力を停止" : "音声入力を開始";
+  button.setAttribute("aria-label", running ? "音声入力を停止" : "音声入力を開始");
   if (!running && !state.webAudio.starting && !state.webAudio.stopping) {
     setWebMicrophoneStatus("停止中");
   }

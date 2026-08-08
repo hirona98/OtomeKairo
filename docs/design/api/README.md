@@ -45,6 +45,7 @@ API 仕様は次のように分ける。
 `GET /ui/` とその静的 asset は、同一 HTTPS server から配信するブラウザ UI である。
 `/ui/` は API wire 契約の正本ではなく、既存 `/api/...` endpoint を呼び出す client 実装として扱う。
 設定パネルの見た目とフォームマークアップ規約は [../integration/WebUI設定フォーム規約.md](../integration/WebUI設定フォーム規約.md) を正とする。
+通常画面の見た目規約は [../integration/WebUI通常画面規約.md](../integration/WebUI通常画面規約.md) を正とする。
 `GET /` は `/ui/` へリダイレクトする。
 `/ui/api/...` はブラウザ UI 専用の同一 server 内部呼び出し面であり、外部接点向け API として扱わない。
 ブラウザ UI は `/ui/api/conversation` を通じて既存の会話入力処理を呼び出す。
@@ -75,7 +76,7 @@ Web UI のアバター複製では、最終接続端末の `avatar_presentations
 最後に接続した端末が存在しない場合、端末依存の設定欄を無効にし、VRM 表示設定の複製対象も持たない。
 記憶の `記憶複製` は client 下書きとして保持し、適用時に `POST /ui/api/config/memory-sets/clone` を呼んでから `editor-state` を保存する。
 ブラウザ UI は `/ui/api/config/avatar-speech/editor-state` を通じて、アバターごとの STT / TTS と通常のマイク入力元を編集する。
-ブラウザ UI は入力欄でローカルマイクまたはWebマイクを選択し、Webマイク選択時だけ `/ui/api/audio/stream` へ取得音声を送る。
+ブラウザ UI は入力欄でローカルマイクまたはWebマイクを選択し、マイクアイコンのトグルで音声入力を開始/停止する。Webマイク選択時だけ `/ui/api/audio/stream` へ取得音声を送る。音声状態は statusbar に表示する。
 ブラウザ UI はVAD、STT、音声起動ワード判定、話者識別を実行しない。
 ブラウザ UI は `/ui/api/audio/...` を通じて input device 確認と話者管理を行う。
 ブラウザ UI は TTS providerへ接続せず、OtomeKairoから受信した`assistant_audio`のWAVをブラウザ音声出力で直接再生する。
