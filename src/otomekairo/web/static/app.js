@@ -840,6 +840,20 @@ function renderDashboardWorld() {
     }));
   }
 
+  const visualDaily = current.visual_daily_summary;
+  if (visualDaily && typeof visualDaily === "object") {
+    items.push(createDashboardItem({
+      title: "視覚日次",
+      body: [
+        visualDaily.latest_local_date ? `日付 ${visualDaily.latest_local_date}` : "",
+        `記録 ${visualDaily.record_count || 0}`,
+        `群 ${visualDaily.group_count || 0}`,
+        `記憶候補 ${visualDaily.memory_candidate_count || 0}`,
+      ].filter(Boolean).join(" · "),
+      meta: displayValue(visualDaily.latest_digest_id, ""),
+    }));
+  }
+
   if (!items.length) {
     showDashboardEmpty(container, "前景の外界状態はまだありません。");
     return;
