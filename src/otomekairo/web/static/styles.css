@@ -142,15 +142,15 @@ p {
 }
 
 .brand-block h1 {
-  font-size: var(--title-size);
+  font-size: 20px;
   font-weight: 700;
   line-height: 1.15;
 }
 
-#server-summary {
-  margin-top: 2px;
-  color: rgba(255, 255, 255, 0.84);
-  font-size: 11px;
+.brand-suffix {
+  font-size: 0.6em;
+  font-weight: 600;
+  opacity: 0.9;
 }
 
 .topbar-actions,
@@ -186,7 +186,7 @@ p {
 
 .workspace-layout {
   display: grid;
-  /* 現在の個を広めに取り、内部は多列で幅を埋める。 */
+  /* 内部状態パネルを広めに取り、内部は多列で幅を埋める。 */
   grid-template-columns: minmax(360px, 1.35fr) minmax(280px, 1fr);
   min-height: 0;
   overflow: hidden;
@@ -229,13 +229,7 @@ p {
   background: rgba(245, 247, 251, 0.96);
 }
 
-.dashboard-header h2 {
-  font-size: 13px;
-  line-height: 1.2;
-}
-
 .dashboard-updated {
-  margin-top: 1px;
   color: var(--muted);
   font-size: 10px;
   line-height: 1.2;

@@ -1,11 +1,9 @@
 const state = {
-  identity: null,
   clientId: "",
   conversationPersonRef: "",
   conversationInteractionRef: "",
   conversationDisplayName: "",
   conversationDisplayNames: [],
-  selectedPersonaDisplayName: "",
   editor: null,
   avatarSpeech: null,
   consoleClient: null,
@@ -251,8 +249,6 @@ async function loadConversationConfig() {
       config.settings_snapshot.selected_conversation_display_name_id,
     );
     state.conversationDisplayName = selectedDisplayName?.display_name || "";
-    state.selectedPersonaDisplayName =
-      config.selected_persona?.display_name || "";
   } catch (error) {
     showNotice(error.message, true);
   }
@@ -333,8 +329,7 @@ function formatEnv(value) {
 
 async function loadIdentity() {
   try {
-    state.identity = await apiRequest("/ui/api/bootstrap/server-identity");
-    element("server-summary").textContent = state.identity.server_display_name || state.identity.server_id || "OtomeKairo";
+    await apiRequest("/ui/api/bootstrap/server-identity");
     setStatus("接続済み");
   } catch (error) {
     setStatus("接続失敗", "error");
@@ -635,12 +630,6 @@ function renderDashboardHeader() {
   chips.replaceChildren(...nodes);
 
   element("dashboard-generated-at").textContent = `更新 ${formatDateTime(snapshot.generated_at)}`;
-  if (state.identity) {
-    element("server-summary").textContent = [
-      state.identity.server_display_name || state.identity.server_id,
-      state.selectedPersonaDisplayName,
-    ].filter(Boolean).join(" · ");
-  }
 }
 
 function renderDashboardActive() {
@@ -1033,13 +1022,13 @@ async function refreshDashboard({ silent = false } = {}) {
     ]);
     state.dashboard.currentState = currentState;
     state.dashboard.cycleSummaries = cycles.cycle_summaries || [];
-    // 記憶 snapshot は補助面なので失敗しても他の現在の個表示は続ける。
+    // 記憶 snapshot は補助面なので失敗しても他の内部状態表示は続ける。
     if (memorySnapshot) {
       state.dashboard.memorySnapshot = memorySnapshot;
     }
     renderDashboard();
     if (!silent) {
-      showNotice("現在の個を更新しました。");
+      showNotice("内部状態を更新しました。");
     }
   } catch (error) {
     element("dashboard-generated-at").textContent = "更新失敗";
@@ -1908,12 +1897,6 @@ async function saveSettings({ closeAfterSave = false } = {}) {
       state.editor.current.selected_conversation_display_name_id,
     );
     state.conversationDisplayName = selectedDisplayName?.display_name || "";
-    const selectedPersona = arrayById(
-      state.editor.personas,
-      "persona_id",
-      state.editor.current.selected_persona_id,
-    );
-    state.selectedPersonaDisplayName = selectedPersona?.display_name || "";
     renderSettings();
     await loadStatus({ silent: true });
     await refreshDashboard({ silent: true });

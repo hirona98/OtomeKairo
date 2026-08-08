@@ -12,21 +12,19 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="brand-block">
-        <h1>CocoroAI</h1>
-        <div id="server-summary">現在の個を読み込み中</div>
+        <h1>CocoroAI<span class="brand-suffix"> - OtomeKairo Inside -</span></h1>
       </div>
       <div class="topbar-actions">
-        <button type="button" class="icon-button dashboard-toggle" id="toggle-dashboard" title="現在の個"
-          aria-expanded="true">個</button>
+        <button type="button" class="icon-button dashboard-toggle" id="toggle-dashboard" title="内部状態"
+          aria-expanded="true">内部状態</button>
         <button type="button" class="icon-button" id="open-settings" title="設定">⚙</button>
       </div>
     </header>
 
     <main class="workspace-layout" id="workspace-layout">
-      <aside class="dashboard-panel" id="dashboard-panel" aria-label="現在の個">
+      <aside class="dashboard-panel" id="dashboard-panel" aria-label="内部状態">
         <div class="dashboard-header">
           <div>
-            <h2>現在の個</h2>
             <div id="dashboard-generated-at" class="dashboard-updated">未取得</div>
           </div>
           <button type="button" class="plain-button" id="refresh-dashboard">更新</button>
@@ -128,7 +126,7 @@
         <optgroup label="入力">
           <option value="conversation">会話入力</option>
         </optgroup>
-        <optgroup label="個">
+        <optgroup label="人格と記憶">
           <option value="persona">人格設定</option>
           <option value="model">モデル</option>
           <option value="memory">記憶</option>
@@ -159,7 +157,7 @@
         <button type="button" class="settings-nav-button" data-tab="motion">モーション</button>
         <div class="settings-navigation-category">入力</div>
         <button type="button" class="settings-nav-button" data-tab="conversation">会話入力</button>
-        <div class="settings-navigation-category">個</div>
+        <div class="settings-navigation-category">人格と記憶</div>
         <button type="button" class="settings-nav-button" data-tab="persona">人格設定</button>
         <button type="button" class="settings-nav-button" data-tab="model">モデル</button>
         <button type="button" class="settings-nav-button" data-tab="memory">記憶</button>

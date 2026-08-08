@@ -73,8 +73,8 @@ Web UI のアバター複製では、最終接続端末の `avatar_presentations
 ブラウザ UI は TTS providerへ接続せず、OtomeKairoから受信した`assistant_audio`のWAVをブラウザ音声出力で直接再生する。
 ブラウザの直接会話入力はOtomeKairoの選択中 `conversation_display_name` 定義の表示名を
 `participants[].display_name` に使用し、呼び名をブラウザstorageへ保存しない。
-ブラウザ UI は現在の個パネルを常設し、`/ui/api/inspection/current-state`、`/ui/api/inspection/cycle-summaries`、`/ui/api/inspection/memory-snapshot` を 5 秒周期で読み取る。
-現在の個パネルは、いま動いていること、内面（動機・気分・感情）、外界前景、記憶要約、直近の判断、接続と能力・健全性を表示する。
+ブラウザ UI は「内部状態」パネルを常設し、`/ui/api/inspection/current-state`、`/ui/api/inspection/cycle-summaries`、`/ui/api/inspection/memory-snapshot` を 5 秒周期で読み取る。
+「内部状態」パネルは設計語の現在の個に対応する UI 表示であり、パネル見出しは置かず、いま動いていること、内面（動機・気分・感情）、外界前景、記憶要約、直近の判断、接続と能力・健全性を表示する。
 気分は意味表示と VAD 生値を併記する。記憶は読み取り専用の要約表示であり、行単位の編集面ではない。
 自律実行の pause / resume / cancel は `/ui/api/autonomous-runs/{run_id}/{operation}` を通じて既存の autonomous run 操作を呼び出す。
 ブラウザ UI は対話入力と同じ session-scoped `client_id` で `/ui/api/events/stream` へ接続し、`conversation_input`、`assistant_message`、`assistant_audio`、`audio_runtime_state` を受信する。
