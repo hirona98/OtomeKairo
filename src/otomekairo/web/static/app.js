@@ -1882,9 +1882,11 @@ async function saveSettings({ closeAfterSave = false } = {}) {
     });
     let consoleClient = state.consoleClient;
     if (consoleClient) {
+      // アバター複製で増やした VRM 表示設定を、音声設定保存後に端末設定へ反映する。
       const consoleSettingsPatch = {
         process: consoleClient.settings.process,
         desktop_capture: consoleClient.settings.desktop_capture,
+        avatar_presentations: consoleClient.settings.avatar_presentations,
       };
       consoleClient = await apiRequest(
         `/ui/api/config/console-clients/${encodeURIComponent(consoleClient.client_id)}`,
@@ -3119,16 +3121,35 @@ function setSelectedAvatarId(avatarId) {
   state.avatarSpeech.selected_avatar_id = avatarId;
 }
 
-function addAvatar() {
-  addClonedCollectionItem({
-    items: state.avatarSpeech.avatars,
-    idKey: "avatar_id",
-    selectedId: state.selectedAvatarId,
-    setSelectedId: setSelectedAvatarId,
-    idPrefix: "avatar",
-    displayName: "新規アバター",
-    render: renderAvatar,
-  });
+// VRM 表示設定は端末設定側の avatar_presentations に avatar_id 参照で載る。
+// アバター複製時は、編集対象（最終接続）端末の presentation も同じ内容で複製する。
+function copyAvatarPresentation(sourceAvatarId, newAvatarId) {
+  const presentations = state.consoleClient?.settings?.avatar_presentations;
+  if (!Array.isArray(presentations) || !sourceAvatarId || !newAvatarId) {
+    return;
+  }
+  if (arrayById(presentations, "avatar_id", newAvatarId)) {
+    return;
+  }
+  const source = arrayById(presentations, "avatar_id", sourceAvatarId);
+  if (!source) {
+    return;
+  }
+  const copied = clone(source);
+  copied.avatar_id = newAvatarId;
+  presentations.push(copied);
+}
+
+// 削除したアバターの presentation を下書きから外し、保存時の参照検証エラーを防ぐ。
+function removeAvatarPresentation(avatarId) {
+  const presentations = state.consoleClient?.settings?.avatar_presentations;
+  if (!Array.isArray(presentations) || !avatarId) {
+    return;
+  }
+  const index = presentations.findIndex((entry) => entry.avatar_id === avatarId);
+  if (index >= 0) {
+    presentations.splice(index, 1);
+  }
 }
 
 function duplicateAvatar() {
@@ -3139,6 +3160,9 @@ function duplicateAvatar() {
     setSelectedId: setSelectedAvatarId,
     idPrefix: "avatar",
     nameBuilder: (source) => `${source.display_name || "アバター"}_copy`,
+    afterClone: (item, source) => {
+      copyAvatarPresentation(source.avatar_id, item.avatar_id);
+    },
     render: renderAvatar,
   });
 }
@@ -3150,6 +3174,9 @@ function deleteAvatar() {
     selectedId: state.selectedAvatarId,
     setSelectedId: setSelectedAvatarId,
     lastItemMessage: "最後のアバターは削除できません。",
+    afterDelete: (removedId) => {
+      removeAvatarPresentation(removedId);
+    },
     render: renderAvatar,
   });
 }
@@ -3586,7 +3613,6 @@ function bindEvents() {
 
   // 設定パネル内のコレクション操作と秘密入力欄を委譲で共通処理する。
   const settingsActions = {
-    "add-avatar": addAvatar,
     "duplicate-avatar": duplicateAvatar,
     "delete-avatar": deleteAvatar,
     "add-persona": addPersona,

@@ -49,15 +49,22 @@ API 仕様は次のように分ける。
 ブラウザ UI は `/ui/api/conversation` を通じて既存の会話入力処理を呼び出す。
 ブラウザ UI はブラウザstorageへ永続化した `person_ref / interaction_ref` と、
 OtomeKairo設定の `selected_conversation_display_name_id` から解決した表示名を `interaction_context` として送る。
-ブラウザ UI は CocoroConsole と同じ責務カテゴリと項目順の左ナビゲーションを持ち、`/ui/api/config/...` を通じて既存設定操作を呼び出す。
+ブラウザ UI は `/ui/api/config/...` を通じて既存設定操作を呼び出す。
 ナビ項目は `表示`、`アバター`、`モーション`、`会話入力`、`人格設定`、`モデル`、`記憶`、`定期思考`、`デスクトップ`、`カメラ`、`Watcher`、`ツール（MCP）`、`API説明`、`ライセンス` とする。
+
+設定編集の役割は次のように分ける。
+
+- Web UI: 人格、モデル、記憶、会話入力（呼ばれ方・STT 詳細）、定期思考、デスクトップ取得方針、カメラ、Watcher、MCP、API説明、ライセンス、アバター音声を含む本体設定
+- CocoroConsole: 表示、アバター（プリセットと VRM）、モーション、マイク（入力元と Console デバイス）、ライセンス。メイン画面に STT / TTS / デスクトップウォッチの運用トグルを持つ。音声合成と音声起動ワードは Web UI で編集する
+
 `表示` と `モーション` はナビ上に置くが、Web UI に編集欄は設けず CocoroConsole での編集を案内する。
 `ライセンス` は OtomeKairo の LICENSE 本文を読み取り専用で表示する。
 ブラウザ UI は `/ui/api/docs` を通じて `GET /api/docs` と同じAPI説明を表示し、`console_access_token` をブラウザへ返さない。
 デスクトップ取得は最後に接続したCocoroConsole端末設定を編集する。
 モデル指定値とVRM表示設定はWeb UIへ現在値を無効表示し、表示設定とモーション設定はWeb UIへ編集欄を設けない。
-VRM、表示、モーションはCocoroConsoleから端末設定APIへ保存する。
-最後に接続した端末が存在しない場合、端末依存の設定欄を無効にする。
+VRM、表示、モーションの通常編集はCocoroConsoleから端末設定APIへ保存する。
+Web UI のアバター複製では、最終接続端末の `avatar_presentations` も同じ内容で複製し、設定保存時に `PATCH /ui/api/config/console-clients/{client_id}` へ含めて永続化する。
+最後に接続した端末が存在しない場合、端末依存の設定欄を無効にし、VRM 表示設定の複製対象も持たない。
 記憶の `記憶複製` は client 下書きとして保持し、適用時に `POST /ui/api/config/memory-sets/clone` を呼んでから `editor-state` を保存する。
 ブラウザ UI は `/ui/api/config/avatar-speech/editor-state` を通じて、アバターごとの STT / TTS と通常のマイク入力元を編集する。
 ブラウザ UI は入力欄でローカルマイクまたはWebマイクを選択し、Webマイク選択時だけ `/ui/api/audio/stream` へ取得音声を送る。

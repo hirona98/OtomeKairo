@@ -15,9 +15,9 @@ OtomeKairo server 本体へ C220 固有依存を入れない。
 ## 設定
 
 OtomeKairo 側に `camera_source` を登録する。
-通常は CocoroConsole の camera source 設定画面から登録する。
+通常は OtomeKairo WebUI のカメラ設定画面から登録する。
 API で登録する場合は `PUT /api/config/camera-sources/editor-state` を使う。
-CocoroConsole では有効/無効、識別名、IP address または hostname、camera account だけを設定する。
+WebUI では有効/無効、識別名、IP address または hostname、camera account だけを設定する。
 `vision_source_id` と `watcher.watcher_id` は OtomeKairo が `display_name` から生成する。
 RTSP / ONVIF / PTZ の詳細値は connector 実装の既定値として扱う。
 
@@ -87,7 +87,7 @@ OTOMEKAIRO_ACCESS_TOKEN=...
 ```
 
 F5 debug の connector は `https://127.0.0.1:55601` の server 起動を待ってから runtime config を取得する。
-camera source は CocoroConsole の camera source 設定画面で登録し、`enabled=true`、`connector_kind=tapo_c220`、`client_id=tapo-c220-connector-main` にする。
+camera source は OtomeKairo WebUI のカメラ設定画面で登録し、`enabled=true`、`connector_kind=tapo_c220`、`client_id=tapo-c220-connector-main` にする。
 
 server のローカル開発 TLS 証明書を使う場合、`server.tls_verify=false` のまま使う。
 実運用の信頼済み証明書を使う場合、`server.tls_verify=true` にする。
