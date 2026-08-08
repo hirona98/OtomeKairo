@@ -35,35 +35,37 @@
         <div class="dashboard-headline" id="dashboard-headline">読み込み中…</div>
         <div class="dashboard-chips" id="dashboard-chips" aria-label="状態チップ"></div>
 
-        <details class="dashboard-section" open>
-          <summary>いま動いていること</summary>
-          <div class="dashboard-list" id="dashboard-active"></div>
-        </details>
+        <div class="dashboard-body">
+          <details class="dashboard-section" open>
+            <summary>いま動いていること</summary>
+            <div class="dashboard-list" id="dashboard-active"></div>
+          </details>
 
-        <details class="dashboard-section" open>
-          <summary>いま気にかけていること</summary>
-          <div class="dashboard-list" id="dashboard-inner"></div>
-        </details>
+          <details class="dashboard-section" open>
+            <summary>いま気にかけていること</summary>
+            <div class="dashboard-list" id="dashboard-inner"></div>
+          </details>
 
-        <details class="dashboard-section" open>
-          <summary>いま見えている世界</summary>
-          <div class="dashboard-list" id="dashboard-world"></div>
-        </details>
+          <details class="dashboard-section dashboard-section-wide" open>
+            <summary>いま見えている世界</summary>
+            <div class="dashboard-list dashboard-list-dense" id="dashboard-world"></div>
+          </details>
 
-        <details class="dashboard-section" open>
-          <summary>記憶</summary>
-          <div class="dashboard-list" id="dashboard-memory"></div>
-        </details>
+          <details class="dashboard-section dashboard-section-wide" open>
+            <summary>記憶</summary>
+            <div class="dashboard-list dashboard-list-dense" id="dashboard-memory"></div>
+          </details>
 
-        <details class="dashboard-section" open>
-          <summary>直近の判断</summary>
-          <div class="dashboard-list cycle-timeline" id="dashboard-cycles"></div>
-        </details>
+          <details class="dashboard-section dashboard-section-wide" open>
+            <summary>直近の判断</summary>
+            <div class="dashboard-list cycle-timeline" id="dashboard-cycles"></div>
+          </details>
 
-        <details class="dashboard-section">
-          <summary>接続と能力・健全性</summary>
-          <div class="dashboard-list" id="dashboard-health"></div>
-        </details>
+          <details class="dashboard-section dashboard-section-wide">
+            <summary>接続と能力・健全性</summary>
+            <div class="dashboard-list dashboard-list-dense" id="dashboard-health"></div>
+          </details>
+        </div>
       </aside>
 
       <section class="chat-panel" aria-label="チャット">

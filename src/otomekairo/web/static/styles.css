@@ -186,8 +186,8 @@ p {
 
 .workspace-layout {
   display: grid;
-  /* 現在の個パネルをブラウザ幅の約 6 割にする。 */
-  grid-template-columns: minmax(320px, 60vw) minmax(0, 1fr);
+  /* 現在の個を広めに取り、内部は多列で幅を埋める。 */
+  grid-template-columns: minmax(360px, 1.35fr) minmax(280px, 1fr);
   min-height: 0;
   overflow: hidden;
   padding: 0;
@@ -202,9 +202,12 @@ p {
 }
 
 .dashboard-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   min-width: 0;
   min-height: 0;
-  padding: 12px;
+  padding: 6px;
   overflow-y: auto;
   border-right: 1px solid var(--line);
   background: #f5f7fb;
@@ -213,57 +216,62 @@ p {
 
 .dashboard-header {
   position: sticky;
-  top: -12px;
+  top: -6px;
   z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-4);
-  margin: -12px -12px 10px;
-  padding: 10px 12px;
+  gap: var(--space-3);
+  flex: 0 0 auto;
+  margin: -6px -6px 0;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--line);
   background: rgba(245, 247, 251, 0.96);
 }
 
 .dashboard-header h2 {
-  font-size: 15px;
+  font-size: 13px;
+  line-height: 1.2;
 }
 
 .dashboard-updated {
-  margin-top: 2px;
+  margin-top: 1px;
   color: var(--muted);
   font-size: 10px;
+  line-height: 1.2;
 }
 
 .dashboard-headline {
-  margin: 0 0 8px;
-  padding: 10px 12px;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 6px 8px;
   border: 1px solid #c5d4f0;
-  border-radius: 8px;
+  border-radius: 6px;
   background: #eef4ff;
   color: #2a3f66;
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .dashboard-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 10px;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin: 0;
 }
 
 .dashboard-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 24px;
-  padding: 2px 8px;
+  min-height: 20px;
+  padding: 1px 6px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: #ffffff;
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.2;
+  font-size: 10px;
+  line-height: 1.15;
 }
 
 .dashboard-chip.ok {
@@ -284,19 +292,34 @@ p {
   color: #8a6418;
 }
 
+/* セクションを横並びにし、幅の空きを埋める。 */
+.dashboard-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  align-items: start;
+  flex: 0 0 auto;
+}
+
 .dashboard-section {
-  margin: 0 0 8px;
+  min-width: 0;
+  margin: 0;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 6px;
   background: #ffffff;
 }
 
+.dashboard-section-wide {
+  grid-column: 1 / -1;
+}
+
 .dashboard-section > summary {
-  padding: 9px 10px;
+  padding: 5px 8px;
   cursor: pointer;
   color: var(--text);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
+  line-height: 1.25;
   list-style-position: inside;
 }
 
@@ -309,17 +332,37 @@ p {
   gap: 0;
 }
 
+/* 横断セクション内の項目は多列で詰める。auto-fit で余り列を畳む。 */
+.dashboard-list-dense {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+}
+
+.dashboard-list-dense .dashboard-empty {
+  grid-column: 1 / -1;
+}
+
+.dashboard-list-dense .dashboard-item {
+  height: 100%;
+  border-right: 1px solid #e8edf4;
+  border-bottom: 1px solid #e8edf4;
+}
+
+.dashboard-list-dense .dashboard-item:last-child {
+  border-bottom: 1px solid #e8edf4;
+}
+
 .dashboard-empty {
-  padding: 12px;
+  padding: 6px 8px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
+  line-height: 1.3;
 }
 
 .dashboard-item {
   display: grid;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
-  padding: 9px 10px;
+  padding: 5px 8px;
   border-bottom: 1px solid #e8edf4;
 }
 
@@ -331,7 +374,7 @@ p {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -339,20 +382,21 @@ p {
   min-width: 0;
   overflow: hidden;
   color: var(--text);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 650;
+  line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .dashboard-badge {
   flex: 0 0 auto;
-  padding: 2px 6px;
+  padding: 0 5px;
   border-radius: 999px;
   background: #edf1f7;
   color: var(--muted);
-  font-size: 10px;
-  line-height: 1.4;
+  font-size: 9px;
+  line-height: 1.5;
 }
 
 .dashboard-badge.ok {
@@ -374,8 +418,8 @@ p {
   display: -webkit-box;
   overflow: hidden;
   color: var(--text);
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: 10px;
+  line-height: 1.35;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
@@ -383,21 +427,21 @@ p {
 
 .dashboard-item-meta {
   color: var(--muted);
-  font-size: 10px;
-  line-height: 1.4;
+  font-size: 9px;
+  line-height: 1.3;
   overflow-wrap: anywhere;
 }
 
 .dashboard-item-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 2px;
+  gap: 4px;
+  margin-top: 1px;
 }
 
 .dashboard-item-actions button {
-  min-height: 24px;
-  padding: 3px 8px;
+  min-height: 20px;
+  padding: 1px 6px;
   font-size: 10px;
 }
 
@@ -427,15 +471,15 @@ p {
 
 .cycle-timeline .dashboard-item {
   position: relative;
-  padding-left: 20px;
+  padding-left: 16px;
 }
 
 .cycle-timeline .dashboard-item::before {
   position: absolute;
-  top: 14px;
-  left: 9px;
-  width: 6px;
-  height: 6px;
+  top: 9px;
+  left: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: var(--accent);
   content: "";
@@ -1209,6 +1253,23 @@ input[type="checkbox"]:disabled {
   .dashboard-panel {
     border-right: 0;
     border-bottom: 1px solid var(--line);
+  }
+
+  /* 狭い画面ではセクションを縦積みに戻す。 */
+  .dashboard-body {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-section-wide {
+    grid-column: auto;
+  }
+
+  .dashboard-list-dense {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-list-dense .dashboard-item {
+    border-right: 0;
   }
 
   .messages {
