@@ -853,7 +853,28 @@ function renderDashboardMemory() {
   const { current } = dashboardSnapshotParts();
   const items = [];
 
-  // Phase 1 では memory-snapshot API 前でも、current-state 由来の記憶索引を見せる。
+  // 継続理解・経験を先に出し、関係索引と対象は補助情報として続ける。
+  for (const unit of (snapshot?.memory_units || []).slice(0, 12)) {
+    items.push(createDashboardItem({
+      title: `理解 · ${displayValue(unit.memory_type, "memory_unit")}`,
+      body: displayValue(unit.summary_text),
+      meta: [
+        unit.status,
+        `salience ${formatScore(unit.salience)}`,
+        formatDateTime(unit.updated_at || unit.last_confirmed_at || unit.formed_at),
+      ].filter(Boolean).join(" · "),
+    }));
+  }
+  for (const episode of (snapshot?.episodes || []).slice(0, 8)) {
+    items.push(createDashboardItem({
+      title: `経験 · ${displayValue(episode.episode_type, "episode")}`,
+      body: displayValue(episode.summary_text || episode.outcome_text),
+      meta: [
+        `salience ${formatScore(episode.salience)}`,
+        formatDateTime(episode.formed_at || episode.started_at),
+      ].filter(Boolean).join(" · "),
+    }));
+  }
   for (const relation of (current.relation_index || []).slice(0, 4)) {
     items.push(createDashboardItem({
       title: `関係索引 · ${displayValue(relation.relation_predicate)}`,
@@ -871,30 +892,6 @@ function renderDashboardMemory() {
         formatDateTime(entity.last_seen_at),
       ].filter(Boolean).join(" · "),
     }));
-  }
-
-  if (snapshot) {
-    for (const unit of (snapshot.memory_units || []).slice(0, 12)) {
-      items.push(createDashboardItem({
-        title: `理解 · ${displayValue(unit.memory_type, "memory_unit")}`,
-        body: displayValue(unit.summary_text),
-        meta: [
-          unit.status,
-          `salience ${formatScore(unit.salience)}`,
-          formatDateTime(unit.updated_at || unit.last_confirmed_at || unit.formed_at),
-        ].filter(Boolean).join(" · "),
-      }));
-    }
-    for (const episode of (snapshot.episodes || []).slice(0, 8)) {
-      items.push(createDashboardItem({
-        title: `経験 · ${displayValue(episode.episode_type, "episode")}`,
-        body: displayValue(episode.summary_text || episode.outcome_text),
-        meta: [
-          `salience ${formatScore(episode.salience)}`,
-          formatDateTime(episode.formed_at || episode.started_at),
-        ].filter(Boolean).join(" · "),
-      }));
-    }
   }
 
   if (!items.length) {
@@ -1015,12 +1012,17 @@ async function refreshDashboard({ silent = false } = {}) {
   state.dashboardRefreshing = true;
   element("refresh-dashboard").disabled = true;
   try {
-    const [currentState, cycles] = await Promise.all([
+    const [currentState, cycles, memorySnapshot] = await Promise.all([
       apiRequest("/ui/api/inspection/current-state"),
       apiRequest("/ui/api/inspection/cycle-summaries"),
+      apiRequest("/ui/api/inspection/memory-snapshot").catch(() => null),
     ]);
     state.dashboard.currentState = currentState;
     state.dashboard.cycleSummaries = cycles.cycle_summaries || [];
+    // 記憶 snapshot は補助面なので失敗しても他の現在の個表示は続ける。
+    if (memorySnapshot) {
+      state.dashboard.memorySnapshot = memorySnapshot;
+    }
     renderDashboard();
     if (!silent) {
       showNotice("現在の個を更新しました。");

@@ -66,9 +66,10 @@ VRM、表示、モーションはCocoroConsoleから端末設定APIへ保存す�
 ブラウザ UI は TTS providerへ接続せず、OtomeKairoから受信した`assistant_audio`のWAVをブラウザ音声出力で直接再生する。
 ブラウザの直接会話入力はOtomeKairoの選択中 `conversation_display_name` 定義の表示名を
 `participants[].display_name` に使用し、呼び名をブラウザstorageへ保存しない。
-ブラウザ UI は運用ダッシュボードを常設し、`/ui/api/inspection/current-state` と `/ui/api/inspection/cycle-summaries` を 5 秒周期で読み取る。
-運用ダッシュボードは現在状態、自律実行、capability availability、最近の cycle timeline を表示する。
-運用ダッシュボードの pause / resume / cancel は `/ui/api/autonomous-runs/{run_id}/{operation}` を通じて既存の autonomous run 操作を呼び出す。
+ブラウザ UI は現在の個パネルを常設し、`/ui/api/inspection/current-state`、`/ui/api/inspection/cycle-summaries`、`/ui/api/inspection/memory-snapshot` を 5 秒周期で読み取る。
+現在の個パネルは、いま動いていること、内面（動機・気分・感情）、外界前景、記憶要約、直近の判断、接続と能力・健全性を表示する。
+気分は意味表示と VAD 生値を併記する。記憶は読み取り専用の要約表示であり、行単位の編集面ではない。
+自律実行の pause / resume / cancel は `/ui/api/autonomous-runs/{run_id}/{operation}` を通じて既存の autonomous run 操作を呼び出す。
 ブラウザ UI は対話入力と同じ session-scoped `client_id` で `/ui/api/events/stream` へ接続し、`conversation_input`、`assistant_message`、`assistant_audio`、`audio_runtime_state` を受信する。
 `/ui/api/events/stream` は server が保持する `console_access_token` で認可し、token をブラウザへ返さない。
 `/ui/api/events/stream` は `Origin` と `Host` が一致する同一 origin の接続だけを受理する。

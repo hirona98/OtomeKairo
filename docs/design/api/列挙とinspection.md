@@ -235,6 +235,57 @@ query は `limit` と `local_date` だけを受け付ける。
 response は `daily_visual_digests` の compact 表示に限り、`group_summaries[].summary_text` は短縮した値だけを返す。
 inspection の短縮表示は表示専用であり、LLM 入力、検索 index、永続正本には使わない。
 
+### `GET /api/inspection/memory-snapshot`
+
+- 認証: 必要
+- 役割: 選択中 `memory_set` の継続理解（`memory_units`）と経験（`episodes`）を、人間向け compact 要約として返す
+- この response は読み取り専用の inspection 表示であり、記憶の編集面ではない
+- embedding、raw event payload、evidence ID 列、秘密値は返さない
+- query:
+  - `unit_limit`（省略時 `12`、上限 `30`）
+  - `episode_limit`（省略時 `8`、上限 `20`）
+- `memory_units` は salience 降順
+- `episodes` は open loop と salience を踏まえた recall 向け順
+
+response:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "generated_at": "2026-03-31T09:00:00+09:00",
+    "memory_set_id": "memory_set:default",
+    "memory_units": [
+      {
+        "memory_unit_id": "memory_unit:...",
+        "memory_type": "person_model",
+        "summary_text": "田中さんとは落ち着いた距離感で話している。",
+        "status": "active",
+        "salience": 0.82,
+        "confidence": 0.7,
+        "scope_type": "person",
+        "scope_key": "person:tanaka",
+        "formed_at": "2026-03-30T12:00:00+09:00",
+        "last_confirmed_at": "2026-03-31T08:00:00+09:00",
+        "updated_at": "2026-03-31T08:00:00+09:00"
+      }
+    ],
+    "episodes": [
+      {
+        "episode_id": "episode:...",
+        "episode_type": "interaction",
+        "summary_text": "作業の合間に近況を聞かれた。",
+        "outcome_text": "次も様子を見ることにした。",
+        "salience": 0.6,
+        "formed_at": "2026-03-31T08:50:00+09:00",
+        "primary_scope_type": "person",
+        "primary_scope_key": "person:tanaka"
+      }
+    ]
+  }
+}
+```
+
 ### `GET /api/inspection/capabilities`
 
 - 認証: 必要

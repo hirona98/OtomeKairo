@@ -594,6 +594,18 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             if method == "GET" and parsed.path == "/api/inspection/current-state":
                 self._write_success(HTTPStatus.OK, self.server.service.get_current_state_inspection(token))
                 return
+            if method == "GET" and parsed.path == "/api/inspection/memory-snapshot":
+                unit_limit = int(query.get("unit_limit", ["12"])[0])
+                episode_limit = int(query.get("episode_limit", ["8"])[0])
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.get_memory_snapshot_inspection(
+                        token,
+                        unit_limit=max(unit_limit, 1),
+                        episode_limit=max(episode_limit, 1),
+                    ),
+                )
+                return
             if method == "GET" and parsed.path == "/api/inspection/capabilities":
                 self._write_success(HTTPStatus.OK, self.server.service.get_capability_inspection(token))
                 return
@@ -1068,6 +1080,9 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             return
         if method == "GET" and path == "/ui/api/inspection/current-state":
             self._write_success(HTTPStatus.OK, self.server.service.get_current_state_inspection(token))
+            return
+        if method == "GET" and path == "/ui/api/inspection/memory-snapshot":
+            self._write_success(HTTPStatus.OK, self.server.service.get_memory_snapshot_inspection(token))
             return
         if method == "GET" and path == "/ui/api/inspection/cycle-summaries":
             self._write_success(HTTPStatus.OK, self.server.service.list_cycle_summaries(token, limit=20))
