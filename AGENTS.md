@@ -41,6 +41,6 @@
 
 
 ## 関連プロジェクトの場所（一部環境のみ）
-  CocoroConsole: /mnt/d/AliceEncoder/PartnerAI/CocoroAI/CocoroConsole/
-  CocoroConsole(ビルド不可): ../CocoroConsole/
+  CocoroConsole（優先）: /mnt/d/AliceEncoder/PartnerAI/CocoroAI/CocoroConsole/
+  CocoroConsole（ビルド不可）: ../CocoroConsole/
   CocoroShell: /mnt/d/AliceEncoder/PartnerAI/CocoroAI/CocoroShell/
