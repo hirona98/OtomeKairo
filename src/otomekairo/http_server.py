@@ -51,7 +51,6 @@ WEB_STATIC_FILES = {
         "max-age=60",
     ),
     "/ui/styles.css": ("styles.css", "text/css; charset=utf-8", "max-age=60"),
-    "/ui/LICENSE.txt": ("LICENSE.txt", "text/plain; charset=utf-8", "max-age=300"),
 }
 
 

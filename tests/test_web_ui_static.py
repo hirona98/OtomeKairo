@@ -46,7 +46,6 @@ class WebUiHttpBoundaryTests(unittest.TestCase):
             ("/ui/app.js", "text/javascript"),
             ("/ui/audio-worklet.js", "text/javascript"),
             ("/ui/styles.css", "text/css"),
-            ("/ui/LICENSE.txt", "text/plain"),
         ):
             status, headers, body = self.request(path)
             self.assertEqual(status, 200)

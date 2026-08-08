@@ -133,18 +133,15 @@
         </optgroup>
         <optgroup label="自律動作">
           <option value="system">定期思考</option>
-        </optgroup>
-        <optgroup label="観測と監視">
-          <option value="desktop">デスクトップ</option>
-          <option value="camera">カメラ</option>
           <option value="watcher">Watcher</option>
         </optgroup>
-        <optgroup label="外部連携">
-          <option value="mcp">ツール（MCP）</option>
-          <option value="api">API説明</option>
+        <optgroup label="接続">
+          <option value="desktop">デスクトップ</option>
+          <option value="camera">カメラ</option>
+          <option value="mcp">MCP</option>
         </optgroup>
         <optgroup label="情報">
-          <option value="license">ライセンス</option>
+          <option value="api">API説明</option>
         </optgroup>
       </select>
     </label>
@@ -163,15 +160,13 @@
         <button type="button" class="settings-nav-button" data-tab="memory">記憶</button>
         <div class="settings-navigation-category">自律動作</div>
         <button type="button" class="settings-nav-button" data-tab="system">定期思考</button>
-        <div class="settings-navigation-category">観測と監視</div>
+        <button type="button" class="settings-nav-button" data-tab="watcher">Watcher</button>
+        <div class="settings-navigation-category">接続</div>
         <button type="button" class="settings-nav-button" data-tab="desktop">デスクトップ</button>
         <button type="button" class="settings-nav-button" data-tab="camera">カメラ</button>
-        <button type="button" class="settings-nav-button" data-tab="watcher">Watcher</button>
-        <div class="settings-navigation-category">外部連携</div>
-        <button type="button" class="settings-nav-button" data-tab="mcp">ツール（MCP）</button>
-        <button type="button" class="settings-nav-button" data-tab="api">API説明</button>
+        <button type="button" class="settings-nav-button" data-tab="mcp">MCP</button>
         <div class="settings-navigation-category">情報</div>
-        <button type="button" class="settings-nav-button" data-tab="license">ライセンス</button>
+        <button type="button" class="settings-nav-button" data-tab="api">API説明</button>
       </nav>
 
       <div class="settings-content">
@@ -608,9 +603,6 @@
                     <span>秒</span>
                   </div>
                 </div>
-                <label class="checkbox-field">思考前にデスクトップを観測する
-                  <input id="current-wake-desktop-observation" type="checkbox">
-                </label>
                 <div class="setting-row">
                   <label for="current-thinking-level">発話頻度:</label>
                   <div class="inline-suffix-control">
@@ -618,6 +610,22 @@
                     <span>1控えめ / 5標準 / 10多め</span>
                   </div>
                 </div>
+              </div>
+            </fieldset>
+            <fieldset class="settings-group">
+              <legend>デスクトップの観測</legend>
+              <div class="settings-list">
+                <p class="field-hint">定期思考の前にデスクトップを観測するかを設定します。取得の除外条件は「接続 → デスクトップ」で設定します。</p>
+                <label class="checkbox-field">思考前にデスクトップを観測する
+                  <input id="current-wake-desktop-observation" type="checkbox">
+                </label>
+              </div>
+            </fieldset>
+            <fieldset class="settings-group">
+              <legend>カメラの観測</legend>
+              <div class="settings-list">
+                <p class="field-hint">定期思考の前に観測するカメラを選びます。接続情報の登録は「接続 → カメラ」で行います。</p>
+                <div id="wake-camera-observations" class="wake-camera-observations"></div>
               </div>
             </fieldset>
           </section>
@@ -631,9 +639,6 @@
                 <button type="button" data-action="add-camera">追加</button>
                 <button type="button" class="danger-button" data-action="delete-camera">削除</button>
               </div>
-              <label class="checkbox-field">定期思考でこのカメラを観測する
-                <input id="camera-enabled" type="checkbox">
-              </label>
               <div class="settings-list">
                 <div class="setting-row setting-row-top">
                   <label for="camera-display-name">表示名:</label>
@@ -676,7 +681,7 @@
 
           <section class="tab-page" data-page="mcp">
             <fieldset class="settings-group capability-group">
-              <legend>MCPツール</legend>
+              <legend>MCP</legend>
               <div class="field-caption">登録済みMCP server:</div>
               <div class="selector-row">
                 <select id="mcp-select"></select>
@@ -799,12 +804,6 @@
               <p class="field-hint">外部から呼び出すアドレスは <code id="api-doc-base-url"></code> です。</p>
               <div id="api-doc-sections" class="api-doc-sections"></div>
             </fieldset>
-          </section>
-
-          <section class="tab-page" data-page="license">
-            <div class="license-panel">
-              <pre id="license-text" class="license-text">ライセンスを読み込み中…</pre>
-            </div>
           </section>
         </div>
       </div>

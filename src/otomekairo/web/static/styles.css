@@ -1170,23 +1170,9 @@ input[type="checkbox"]:disabled {
   gap: 8px;
 }
 
-.license-panel {
-  min-height: 0;
-  border: 1px solid #cccccc;
-  border-radius: 5px;
-  background: #ffffff;
-}
-
-.license-text {
-  margin: 0;
-  max-height: calc(100vh - 220px);
-  padding: 12px;
-  overflow: auto;
-  color: var(--text);
-  font-family: Consolas, "Courier New", monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
+.wake-camera-observations {
+  display: grid;
+  gap: 6px;
 }
 
 .settings-actions {

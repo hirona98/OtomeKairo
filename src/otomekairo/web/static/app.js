@@ -23,8 +23,6 @@ const state = {
   selectedCameraId: "",
   selectedWatcherSourceId: "",
   selectedMcpId: "",
-  licenseText: "",
-  licenseLoaded: false,
   attachment: null,
   settingsOpen: false,
   sending: false,
@@ -1922,7 +1920,6 @@ function renderSettings() {
   renderMemory();
   renderCapabilities();
   renderApiDocumentation();
-  loadLicenseText();
 }
 
 function renderApiDocumentation() {
@@ -2823,7 +2820,6 @@ function renderCamera() {
   setSelectOptions(element("camera-select"), state.camera.camera_sources, "vision_source_id", state.selectedCameraId);
   const camera = arrayById(state.camera.camera_sources, "vision_source_id", state.selectedCameraId);
   const connection = camera?.connection || {};
-  element("camera-enabled").checked = camera?.enabled === true;
   element("camera-display-name").value = camera?.display_name || "";
   element("camera-host").value = connection.host || "";
   element("camera-username").value = connection.camera_username || "";
@@ -2832,6 +2828,67 @@ function renderCamera() {
   element("camera-client-id").value = camera?.client_id || "tapo-c220-connector-main";
   element("camera-vision-source-id").value = camera?.vision_source_id || "";
   element("camera-watcher-id").value = cameraWatcher(camera).watcher_id;
+  // 接続側の表示名変更を定期思考の観測一覧へ反映する。
+  renderCameraObservations();
+}
+
+// 定期思考で観測するカメラの一覧を描画する。接続定義は接続タブ側で編集する。
+function renderCameraObservations() {
+  const container = element("wake-camera-observations");
+  if (!container) {
+    return;
+  }
+  const cameras = state.camera?.camera_sources || [];
+  if (!cameras.length) {
+    const empty = document.createElement("p");
+    empty.className = "field-hint";
+    empty.textContent = "登録済みカメラがありません。「接続 → カメラ」で登録してください。";
+    container.replaceChildren(empty);
+    return;
+  }
+  const labels = cameras.map((camera, index) => {
+    const label = document.createElement("label");
+    label.className = "checkbox-field";
+    const displayName = camera.display_name || camera.vision_source_id || "カメラ";
+    label.append(document.createTextNode(`${displayName} を観測する`));
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    // 表示名変更で vision_source_id が変わっても、描画順で同期できるよう index も持つ。
+    input.dataset.cameraIndex = String(index);
+    input.dataset.visionSourceId = camera.vision_source_id || "";
+    input.checked = camera.enabled === true;
+    label.append(input);
+    return label;
+  });
+  container.replaceChildren(...labels);
+}
+
+// 定期思考タブのカメラ観測チェックを camera_source.enabled へ反映する。
+function syncCameraObservations() {
+  const container = element("wake-camera-observations");
+  if (!container || !state.camera?.camera_sources) {
+    return;
+  }
+  const checkboxes = [...container.querySelectorAll("input[type='checkbox'][data-camera-index]")];
+  if (!checkboxes.length) {
+    return;
+  }
+  const cameras = state.camera.camera_sources;
+  // 一覧は render 時の camera_sources 順と対応させる。ID 再生成後も enabled を落とさない。
+  if (checkboxes.length === cameras.length) {
+    cameras.forEach((camera, index) => {
+      camera.enabled = checkboxes[index].checked;
+    });
+    return;
+  }
+  const enabledById = new Map(
+    checkboxes.map((input) => [input.dataset.visionSourceId, input.checked]),
+  );
+  for (const camera of cameras) {
+    if (enabledById.has(camera.vision_source_id)) {
+      camera.enabled = enabledById.get(camera.vision_source_id) === true;
+    }
+  }
 }
 
 function updateCameraGeneratedIds() {
@@ -2850,12 +2907,13 @@ function updateCameraGeneratedIds() {
 }
 
 function syncCamera() {
+  // 定期思考向けの観測有効フラグは接続フォームではなく観測一覧から同期する。
+  syncCameraObservations();
   const camera = arrayById(state.camera.camera_sources, "vision_source_id", state.selectedCameraId);
   if (!camera) {
     return;
   }
   const previousVisionSourceId = camera.vision_source_id;
-  camera.enabled = boolValue("camera-enabled");
   camera.display_name = textValue("camera-display-name");
   camera.vision_source_id = defaultVisionSourceId(camera);
   camera.connector_kind = textValue("camera-connector-kind");
@@ -3330,28 +3388,6 @@ function deleteMemory() {
     },
     render: renderSettings,
   });
-}
-
-async function loadLicenseText() {
-  const licenseElement = element("license-text");
-  if (!licenseElement) {
-    return;
-  }
-  if (state.licenseLoaded) {
-    licenseElement.textContent = state.licenseText;
-    return;
-  }
-  try {
-    const response = await fetch("/ui/LICENSE.txt", { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    state.licenseText = await response.text();
-    state.licenseLoaded = true;
-    licenseElement.textContent = state.licenseText;
-  } catch (error) {
-    licenseElement.textContent = `ライセンスの読み込みに失敗しました: ${error.message}`;
-  }
 }
 
 function addCamera() {
