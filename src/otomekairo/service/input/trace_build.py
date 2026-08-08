@@ -297,8 +297,27 @@ class ServiceInputTraceBuildMixin:
         trigger_kind: str,
         result_kind: str,
         failed: bool,
+        input_text: str = "",
+        decision: dict[str, Any] | None = None,
+        speech_payload: dict[str, Any] | None = None,
+        pending_intent_summary: dict[str, Any] | None = None,
+        capability_request_summary: dict[str, Any] | None = None,
+        failure_reason: str | None = None,
     ) -> dict[str, Any]:
-        return {
+        # 一覧俯瞰用の短い意味要約。長い機械 ID は載せず、入力・結果・判断理由に寄せる。
+        input_summary = self._clamp(input_text.strip() if isinstance(input_text, str) else "", limit=160)
+        outcome_summary = self._build_cycle_outcome_summary(
+            decision=decision,
+            speech_payload=speech_payload,
+            pending_intent_summary=pending_intent_summary,
+            capability_request_summary=capability_request_summary,
+            failure_reason=failure_reason,
+        )
+        reason_summary = self._build_cycle_reason_summary(
+            decision=decision,
+            failure_reason=failure_reason,
+        )
+        payload: dict[str, Any] = {
             "cycle_id": cycle_id,
             "server_id": state["server_id"],
             "trigger_kind": trigger_kind,
@@ -310,6 +329,61 @@ class ServiceInputTraceBuildMixin:
             "result_kind": result_kind,
             "failed": failed,
         }
+        if input_summary is not None:
+            payload["input_summary"] = input_summary
+        if outcome_summary is not None:
+            payload["outcome_summary"] = outcome_summary
+        if reason_summary is not None:
+            payload["reason_summary"] = reason_summary
+        return payload
+
+    def _build_cycle_outcome_summary(
+        self,
+        *,
+        decision: dict[str, Any] | None,
+        speech_payload: dict[str, Any] | None,
+        pending_intent_summary: dict[str, Any] | None,
+        capability_request_summary: dict[str, Any] | None,
+        failure_reason: str | None,
+    ) -> str | None:
+        # 外に出た結果の短い一覧向け本文。判断理由は reason_summary 側に分ける。
+        if isinstance(speech_payload, dict):
+            speech_text = speech_payload.get("speech_text")
+            if isinstance(speech_text, str) and speech_text.strip():
+                return self._clamp(speech_text.strip(), limit=160)
+        if isinstance(failure_reason, str) and failure_reason.strip():
+            return self._clamp(failure_reason.strip(), limit=160)
+        if isinstance(pending_intent_summary, dict):
+            for key in ("intent_summary", "summary_text"):
+                value = pending_intent_summary.get(key)
+                if isinstance(value, str) and value.strip():
+                    return self._clamp(value.strip(), limit=160)
+        if isinstance(capability_request_summary, dict):
+            for key in ("goal_summary", "summary_text", "capability_id"):
+                value = capability_request_summary.get(key)
+                if isinstance(value, str) and value.strip():
+                    return self._clamp(value.strip(), limit=160)
+        # noop などで外向き本文が無いときだけ、結果欄に理由を載せる。
+        if isinstance(decision, dict) and decision.get("kind") == "noop":
+            reason = decision.get("reason_summary")
+            if isinstance(reason, str) and reason.strip():
+                return self._clamp(reason.strip(), limit=160)
+        return None
+
+    def _build_cycle_reason_summary(
+        self,
+        *,
+        decision: dict[str, Any] | None,
+        failure_reason: str | None,
+    ) -> str | None:
+        # なぜその結果にしたかの短い一覧向け本文。
+        if isinstance(decision, dict):
+            reason = decision.get("reason_summary")
+            if isinstance(reason, str) and reason.strip():
+                return self._clamp(reason.strip(), limit=160)
+        if isinstance(failure_reason, str) and failure_reason.strip():
+            return self._clamp(failure_reason.strip(), limit=160)
+        return None
 
     def _build_cycle_trace(
         self,

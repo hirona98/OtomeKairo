@@ -255,6 +255,15 @@ class ServiceInputTracePersistMixin:
             trigger_kind=trigger_kind,
             result_kind=result_kind,
             failed=False,
+            input_text=input_text,
+            decision=decision,
+            speech_payload=speech_payload,
+            pending_intent_summary=pending_intent_summary,
+            capability_request_summary=(
+                followup_capability_request_summary
+                if trigger_kind == "capability_result"
+                else capability_request_summary
+            ),
         )
         cycle_trace = self._build_cycle_trace(
             cycle_id=cycle_id,
@@ -415,6 +424,13 @@ class ServiceInputTracePersistMixin:
             trigger_kind=trigger_kind,
             result_kind="internal_failure",
             failed=True,
+            input_text=input_text,
+            failure_reason=failure_reason,
+            capability_request_summary=(
+                followup_capability_request_summary
+                if trigger_kind == "capability_result"
+                else capability_request_summary
+            ),
         )
         cycle_trace = self._build_cycle_trace(
             cycle_id=cycle_id,

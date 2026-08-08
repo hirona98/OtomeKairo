@@ -504,12 +504,20 @@ response:
         "started_at": "2026-03-31T09:00:00+09:00",
         "finished_at": "2026-03-31T09:00:00+09:00",
         "result_kind": "speech",
-        "failed": false
+        "failed": false,
+        "input_summary": "君はどう？",
+        "outcome_summary": "私は特に変わったこともなく、こうして落ち着いてお話しできていることが何よりです。",
+        "reason_summary": "マスターから自身の近況を改めて問われており、対話の流れとして誠実かつ簡潔に自身の平穏な状態を伝えるのが適切である。"
       }
     ]
   }
 }
 ```
+
+`input_summary` は入力やきっかけの短い本文、`outcome_summary` は発話本文・能力要求・失敗理由などの短い結果本文、`reason_summary` はなぜその結果にしたかの短い判断理由である。
+一覧から「何を受けて何をし、なぜそうしたか」を読むための俯瞰用 field であり、長い機械 ID や raw payload は含めない。
+`outcome_summary` と `reason_summary` は分けて返す。発話がある場合も `reason_summary` を落とさない。
+意味と含有方針は [../runtime/デバッグ可能性.md](../runtime/デバッグ可能性.md) の `cycle_summary` を正とする。
 
 ### `GET /api/inspection/cycles/{cycle_id}`
 

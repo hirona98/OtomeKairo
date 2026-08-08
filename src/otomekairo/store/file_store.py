@@ -335,20 +335,52 @@ class SQLiteMemoryStore(
             )
 
     def list_cycle_summaries(self, limit: int) -> list[dict[str, Any]]:
-        # クエリ
+        # 一覧俯瞰用に、入力・結果・判断理由を trace から投影して載せる。
+        # 保存済み cycle_summary に無い過去行でも、trace があれば同じ shape で返す。
         with self._memory_db() as conn:
             rows = conn.execute(
                 """
-                SELECT payload_json
-                FROM cycle_summaries
-                ORDER BY started_at DESC, rowid DESC
+                SELECT
+                    s.payload_json AS summary_json,
+                    json_extract(t.payload_json, '$.input_trace.input_summary') AS input_summary,
+                    COALESCE(
+                        json_extract(t.payload_json, '$.result_trace.speech_summary'),
+                        json_extract(t.payload_json, '$.result_trace.internal_failure_summary'),
+                        json_extract(t.payload_json, '$.result_trace.pending_intent_summary.intent_summary'),
+                        json_extract(t.payload_json, '$.result_trace.pending_intent_summary.summary_text'),
+                        json_extract(t.payload_json, '$.result_trace.capability_request_summary.goal_summary'),
+                        json_extract(t.payload_json, '$.result_trace.capability_request_summary.summary_text'),
+                        json_extract(t.payload_json, '$.result_trace.capability_request_summary.capability_id'),
+                        json_extract(t.payload_json, '$.result_trace.noop_reason_summary')
+                    ) AS outcome_summary,
+                    COALESCE(
+                        json_extract(t.payload_json, '$.decision_trace.reason_summary'),
+                        json_extract(t.payload_json, '$.result_trace.trigger_compact_summary.decision_summary.reason_summary'),
+                        json_extract(t.payload_json, '$.result_trace.noop_reason_summary'),
+                        json_extract(t.payload_json, '$.result_trace.internal_failure_summary')
+                    ) AS reason_summary
+                FROM cycle_summaries AS s
+                LEFT JOIN cycle_traces AS t ON t.cycle_id = s.cycle_id
+                ORDER BY s.started_at DESC, s.rowid DESC
                 LIMIT ?
                 """,
                 (limit,),
             ).fetchall()
 
-        # 結果
-        return [json.loads(row["payload_json"]) for row in rows]
+        summaries: list[dict[str, Any]] = []
+        for row in rows:
+            summary = json.loads(row["summary_json"])
+            if not isinstance(summary, dict):
+                continue
+            # 一覧 shape は保存済み要約を正とし、俯瞰用本文は trace 投影で揃える。
+            if isinstance(row["input_summary"], str) and row["input_summary"].strip():
+                summary["input_summary"] = row["input_summary"].strip()
+            if isinstance(row["outcome_summary"], str) and row["outcome_summary"].strip():
+                summary["outcome_summary"] = row["outcome_summary"].strip()
+            if isinstance(row["reason_summary"], str) and row["reason_summary"].strip():
+                summary["reason_summary"] = row["reason_summary"].strip()
+            summaries.append(summary)
+        return summaries
 
     def get_cycle_trace(self, cycle_id: str) -> dict[str, Any] | None:
         # クエリ

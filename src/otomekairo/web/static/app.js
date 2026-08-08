@@ -359,6 +359,46 @@ function displayValue(value, fallback = "—") {
   return fallback;
 }
 
+// 表示しても意味が取りづらい機械参照を落とす（UUID・prefix:hex など閉じた ID パターン）。
+function isOpaqueRef(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const text = value.trim();
+  if (!text) {
+    return false;
+  }
+  if (/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(text)) {
+    return true;
+  }
+  if (/[0-9a-f]{16,}/i.test(text)) {
+    return true;
+  }
+  // person:web:… / cycle:… / request:… など typed ref に長い hex 断片が付くもの
+  if (
+    /^(person|entity|cycle|run|request|relation_index|memory_set|event|digest|memory_unit|episode|client|observation)[:/]/i.test(text)
+    && /[0-9a-f]{8,}/i.test(text)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+// opaque な参照は空にし、人間可読な文字列だけ返す。
+function humanDisplayValue(value, fallback = "") {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value !== "string" || !value.trim()) {
+    return fallback;
+  }
+  const text = value.trim();
+  if (isOpaqueRef(text)) {
+    return fallback;
+  }
+  return text;
+}
+
 function formatDateTime(value) {
   if (typeof value !== "string" || !value.trim()) {
     return "—";
@@ -644,7 +684,7 @@ function renderDashboardActive() {
       body: displayValue(ongoing.goal_summary || ongoing.step_summary),
       meta: [
         ongoing.step_summary && ongoing.goal_summary ? ongoing.step_summary : "",
-        ongoing.last_capability_id,
+        humanDisplayValue(ongoing.last_capability_id),
         formatDateTime(ongoing.updated_at),
       ].filter(Boolean).join(" · "),
     }));
@@ -656,12 +696,12 @@ function renderDashboardActive() {
       badge: "待ち",
       badgeKind: "waiting",
       body: displayValue(
-        request.goal_summary || request.summary_text || request.capability_id,
-        request.request_id,
+        request.goal_summary || request.summary_text || humanDisplayValue(request.capability_id),
+        "能力結果待ち",
       ),
       meta: [
-        request.capability_id,
-        request.target_client_id,
+        humanDisplayValue(request.capability_id),
+        humanDisplayValue(request.target_client_id),
         formatDateTime(request.created_at),
       ].filter(Boolean).join(" · "),
     }));
@@ -689,7 +729,7 @@ function renderDashboardActive() {
       continue;
     }
     const item = createDashboardItem({
-      title: displayValue(run.objective_summary, run.run_id),
+      title: displayValue(run.objective_summary, "自律実行"),
       badge: RUN_STATUS_LABELS[status] || status,
       badgeKind: runBadgeKind(status),
       body: displayValue(run.current_step_summary || run.history_summary),
@@ -748,11 +788,14 @@ function renderDashboardInner() {
   }
 
   for (const affect of (current.affect_states || []).slice(0, 4)) {
+    const scopeType = humanDisplayValue(affect.target_scope_type);
+    const scopeKey = humanDisplayValue(affect.target_scope_key);
+    const scope = [scopeType, scopeKey].filter(Boolean).join(":");
     items.push(createDashboardItem({
       title: `感情 · ${displayValue(affect.affect_label, "affect")}`,
       body: displayValue(affect.summary_text),
       meta: [
-        [affect.target_scope_type, affect.target_scope_key].filter(Boolean).join(":"),
+        scope,
         `更新 ${formatDateTime(affect.updated_at || affect.observed_at)}`,
       ].filter(Boolean).join(" · "),
     }));
@@ -771,7 +814,10 @@ function renderDashboardWorld() {
   const items = [];
 
   for (const worldState of (current.foreground_world_states || []).slice(0, 6)) {
-    const scope = [worldState.scope_type, worldState.scope_key].filter(Boolean).join(":");
+    // scope_key が長い機械参照のときは type だけ残す。
+    const scopeType = humanDisplayValue(worldState.scope_type);
+    const scopeKey = humanDisplayValue(worldState.scope_key);
+    const scope = [scopeType, scopeKey].filter(Boolean).join(":");
     items.push(createDashboardItem({
       title: `前景 · ${displayValue(worldState.state_type, "world_state")}`,
       body: displayValue(worldState.summary_text),
@@ -788,11 +834,12 @@ function renderDashboardWorld() {
     if (!activity) {
       continue;
     }
+    const targetLabel = humanDisplayValue(activity.target);
     items.push(createDashboardItem({
-      title: `活動 · ${displayValue(activity.actor, "主体")}`,
+      title: `活動 · ${displayValue(humanDisplayValue(activity.actor), "主体")}`,
       body: displayValue(activity.label || activity.reason_summary),
       meta: [
-        activity.target ? `対象 ${activity.target}` : "",
+        targetLabel ? `対象 ${targetLabel}` : "",
         activity.duration_label,
         activity.age_label,
       ].filter(Boolean).join(" · "),
@@ -804,23 +851,26 @@ function renderDashboardWorld() {
       continue;
     }
     items.push(createDashboardItem({
-      title: `観測 · ${displayValue(observation.observation_id, observation.capability_id)}`,
+      title: `観測 · ${displayValue(
+        humanDisplayValue(observation.observation_id) || humanDisplayValue(observation.capability_id),
+        "観測",
+      )}`,
       badge: observation.enabled ? displayValue(observation.last_status, "有効") : "無効",
       badgeKind: observation.last_status === "failed" || observation.last_error ? "error" : "",
       body: displayValue(observation.last_summary || observation.last_error, "まだ観測結果がありません"),
       meta: [
-        observation.vision_source_id,
+        humanDisplayValue(observation.vision_source_id),
         observation.last_run_at ? `最終 ${formatDateTime(observation.last_run_at)}` : "",
       ].filter(Boolean).join(" · "),
     }));
   }
 
   for (const relation of (current.relation_index || []).slice(0, 6)) {
+    // source_ref / target_ref は長い機械 ID になりやすく、UI では出さない。
     items.push(createDashboardItem({
       title: `関係 · ${displayValue(relation.relation_predicate, "relation")}`,
       body: displayValue(relation.representative_summary),
       meta: [
-        `${displayValue(relation.source_ref)} → ${displayValue(relation.target_ref)}`,
         relation.derived_status,
         `salience ${formatScore(relation.salience)}`,
       ].filter(Boolean).join(" · "),
@@ -837,7 +887,7 @@ function renderDashboardWorld() {
         `群 ${visualDaily.group_count || 0}`,
         `記憶候補 ${visualDaily.memory_candidate_count || 0}`,
       ].filter(Boolean).join(" · "),
-      meta: displayValue(visualDaily.latest_digest_id, ""),
+      meta: "",
     }));
   }
 
@@ -877,18 +927,22 @@ function renderDashboardMemory() {
     }));
   }
   for (const relation of (current.relation_index || []).slice(0, 4)) {
+    // source_ref / target_ref は長い機械 ID になりやすく、UI では出さない。
     items.push(createDashboardItem({
       title: `関係索引 · ${displayValue(relation.relation_predicate)}`,
       body: displayValue(relation.representative_summary),
-      meta: `${displayValue(relation.source_ref)} → ${displayValue(relation.target_ref)}`,
+      meta: [
+        relation.derived_status,
+        `salience ${formatScore(relation.salience)}`,
+      ].filter(Boolean).join(" · "),
     }));
   }
   for (const entity of (current.entity_registry || []).slice(0, 4)) {
+    const name = humanDisplayValue(entity.display_name) || humanDisplayValue(entity.entity_type, "対象");
     items.push(createDashboardItem({
-      title: `対象 · ${displayValue(entity.display_name, entity.entity_ref)}`,
-      body: displayValue(entity.entity_type),
+      title: `対象 · ${name}`,
+      body: humanDisplayValue(entity.entity_type),
       meta: [
-        entity.entity_ref,
         `salience ${formatScore(entity.salience)}`,
         formatDateTime(entity.last_seen_at),
       ].filter(Boolean).join(" · "),
@@ -910,20 +964,28 @@ function renderDashboardCycles() {
     return;
   }
 
+  // 俯瞰用に入力・結果・判断理由を出す。日時は一覧では出さない。
   const items = cycles.map((cycle) => {
     const trigger = TRIGGER_KIND_LABELS[cycle.trigger_kind] || displayValue(cycle.trigger_kind);
     const result = RESULT_KIND_LABELS[cycle.result_kind] || displayValue(cycle.result_kind);
     const failed = cycle.failed === true;
-    const duration = formatDuration(cycle.started_at, cycle.finished_at);
+    const inputSummary = humanDisplayValue(cycle.input_summary);
+    const outcomeSummary = humanDisplayValue(cycle.outcome_summary);
+    const reasonSummary = humanDisplayValue(cycle.reason_summary);
+    const lines = [];
+    if (inputSummary && outcomeSummary) {
+      lines.push(`${inputSummary} → ${outcomeSummary}`);
+    } else if (inputSummary || outcomeSummary) {
+      lines.push(inputSummary || outcomeSummary);
+    }
+    if (reasonSummary) {
+      lines.push(`理由: ${reasonSummary}`);
+    }
     return createDashboardItem({
       title: trigger,
       badge: failed ? "失敗" : result,
       badgeKind: failed ? "error" : "ok",
-      body: failed ? "この判断は失敗として記録されています。" : `${trigger} → ${result}`,
-      meta: [
-        formatDateTime(cycle.started_at),
-        duration,
-      ].filter(Boolean).join(" · "),
+      body: lines.join("\n"),
       itemKind: failed ? "failed" : "",
     });
   });

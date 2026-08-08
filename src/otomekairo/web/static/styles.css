@@ -229,6 +229,9 @@ p {
 }
 
 .dashboard-panel {
+  /* 内部状態パネルだけ、高密度用 micro / secondary を 1 段だけ大きくする。 */
+  --font-secondary: 12px;
+  --font-micro: 11px;
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
@@ -495,9 +498,18 @@ p {
   background: var(--danger-hover);
 }
 
+/* 直近の判断は入力→結果と理由を詰めて表示する。 */
 .cycle-timeline .dashboard-item {
   position: relative;
+  gap: 1px;
+  padding-top: 4px;
+  padding-bottom: 4px;
   padding-left: 16px;
+}
+
+.cycle-timeline .dashboard-item-body {
+  white-space: pre-line;
+  -webkit-line-clamp: 4;
 }
 
 .cycle-timeline .dashboard-item::before {
