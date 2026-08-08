@@ -288,9 +288,52 @@ TTS の配送先が接続されていない場合と queue が満杯の場合も
 ### `POST /api/wake`
 
 - 認証: 必要
-- 役割: API起床要求を受け、wake 1 サイクルを実行する
+- 役割: 外部接点から API起床要求を受け、即時に wake 1 サイクルを実行する
 
-request:
+この endpoint は会話入力ではない。発話命令でもない。
+server に自律判断の機会だけを与え、判断結果として `speech / noop / capability_request` などが返りうる。
+定期思考（`wake_policy`）とは別経路であり、間隔 due 判定も思考前観測も使わない。
+
+request の field はすべて任意である。空 object `{}` でも受理する。
+
+#### request サンプル1: 簡易起床
+
+手動実行や Console など、「いま一度判断してほしい」だけを伝える場合。
+
+```json
+{
+  "client_context": {
+    "source": "CocoroConsole",
+    "client_id": "console-...",
+    "active_app": "Slack",
+    "window_title": "general | Slack",
+    "locale": "ja-JP"
+  }
+}
+```
+
+#### request サンプル2: 参照付き起床
+
+watcher など外部監視が変化を検知し、画像やテキストの参照を判断材料として渡す場合。
+snapshot 本体は body に埋め込まず、`reference.uri` で渡す。
+
+```json
+{
+  "client_context": {
+    "source": "tapo_c220_watcher",
+    "client_id": "watcher-C220",
+    "locale": "ja-JP"
+  },
+  "reference": {
+    "uri": "/tmp/otomekairo-watch/camera/latest.jpg",
+    "label": "部屋カメラの変化",
+    "reason_summary": "軽量CVが前回との差分を検出した。",
+    "content_hint": "image"
+  }
+}
+```
+
+対象人物と会話が確定している場合だけ、どちらのサンプルにも `interaction_context` を追加できる。
 
 ```json
 {
@@ -306,20 +349,16 @@ request:
   "client_context": {
     "source": "CocoroConsole",
     "client_id": "console-...",
-    "active_app": "Slack",
-    "window_title": "general | Slack",
     "locale": "ja-JP"
-  },
-  "reference": {
-    "uri": "/tmp/otomekairo-watch/camera/latest.jpg",
-    "label": "部屋カメラの変化",
-    "reason_summary": "軽量CVが前回との差分を検出した。",
-    "content_hint": "auto"
   }
 }
 ```
 
+#### request field
+
 - `client_context` は object とする。値がないときは省略する
+- wake でも `client_context` の `source / active_app / window_title / locale` を起床入力の整形に使う
+- wake でも `client_context` の `social_context_summary / environment_summary / location_summary / external_service_summary / body_state_summary / device_state_summary / schedule_summary` があれば、`world_state` source pack の補助文脈へ使う
 - `interaction_context` は任意とし、wake の論理的な対象人物と会話が確定している場合に渡す
 - `interaction_context` を渡す場合、`participants[].display_name` は必須の非空呼び名とする
 - wake の `interaction_context.speaker_ref` は省略する。指定する場合は `participants` に含める
@@ -333,8 +372,6 @@ request:
 - server は `reference` の PNG、JPEG、GIF、WebP 画像を visual observation として判断へ渡し、視覚記録と `world_state` の候補へ使う
 - server は `reference` の UTF-8 テキストをその wake サイクルの判断入力へ一時的に渡す
 - server は `reference` の raw text と raw image を cycle trace の `client_context` へ保存しない。trace には `uri / label / reason_summary / content_kind / media_type / byte_count / resolved_at` を保存し、画像理解に成功した場合は `visual_summary_text` も保存する
-- wake でも `client_context` の `source / active_app / window_title / locale` を起床入力の整形に使う
-- wake でも `client_context` の `social_context_summary / environment_summary / location_summary / external_service_summary / body_state_summary / device_state_summary / schedule_summary` があれば、`world_state` source pack の補助文脈へ使う
 
 response:
 
@@ -364,7 +401,11 @@ capability 実行を開始した場合は、`POST /api/conversation` と同じ `
 内部で `decision.kind=autonomous_run` が選ばれた場合も、server は response の `result_kind` として `autonomous_run` を返さない。
 外向き発話がない wake で run だけを開始または待機した場合は `result_kind=noop` とし、`autonomous_run` 要約を返す。
 
-API起床は少なくとも次の挙動を持つ。
+`result_kind=noop`、`result_kind=capability_request`、`result_kind=internal_failure` のとき、`speech` は `null` を返す。
+`capability_request` が無い結果では、`capability_request` は `null` を返す。
+`autonomous_run` が無い結果では、`autonomous_run` は `null` を返す。
+
+#### API起床の挙動
 
 - API起床は `wake_policy.mode` と `wake_policy.interval_seconds` による due 判定を使わず即時に wake 1 サイクルを実行する
 - API起床は `wake_policy.observations` を実行しない
@@ -373,27 +414,26 @@ API起床は少なくとも次の挙動を持つ。
 - `reference` のテキストが 64 KiB を超える場合、server は `413 wake_reference_too_large` を返す
 - `reference.uri` を読み取れない場合、server は `502 wake_reference_unavailable` を返す
 - `reference` の内容が画像または UTF-8 テキストとして扱えない場合、server は `415 unsupported_wake_reference_content` を返す
-- server は wake 入力を `current_input.sender_kind=system`、`source_kind=wake` として shared pipeline に渡し、`interaction_context` がある場合は参加人物参照を `response_target_refs` に使う
-- server 内の定期思考スケジューラは `current_input.sender_kind=system`、`source_kind=background_thinking`、空の `response_target_refs` として shared pipeline に渡す
-- server 内の定期思考スケジューラだけが `wake_policy.mode`、`wake_policy.interval_seconds`、`wake_policy.observations` を使う
-- 定期思考で `mode=interval` かつ `wake_policy.observations` がある場合、enabled observation を順番に取得し、成功結果をその回の判断へ進む前景シグナルとして扱い、visual capture は `visual_observation` の構造化出力で `change_state` を受け取り、視覚記録と `world_state` を整理してから wake 判断を 1 回だけ行う
-- 思考前観測が `failure_code=source_unavailable` の失敗だけで終わった場合、server は interval を消費せず短い再試行待ちにする。失敗コードの正本は [../capability/視覚機能.md](../capability/視覚機能.md) とする
-- 思考前観測 の同期 capability request は内部観測として扱い、`ongoing_action` を作らない
+- server は wake 入力を `current_input.sender_kind=system`、`source_kind=wake` として shared pipeline に渡す
+- `interaction_context` がある場合は参加人物参照を `response_target_refs` に使い、無い場合は空配列とする
+- 再評価時刻に達した保留意図があれば再評価し、必要なら `speech` を返す
 - capability request は dispatch 時点の `current_input` を request record の `source_current_input` に保存し、capability result の `response_target_refs` は `source_current_input.response_target_refs` を引き継ぐ
 - `source_current_input.response_target_refs=空配列` の capability result は内部観測結果として扱い、実効判断を `noop` に正規化し、assistant message を送信しない
 - `source_current_input.response_target_refs=<current person_ref>` の capability request は request record に外向き応答先 client を内部保存し、follow-up capability request へ引き継ぐ
 - capability result follow-up の assistant message は、capability result を返した client ではなく request record の外向き応答先 client へ送る
-- `wake / background_thinking` の判断で `camera.ptz` を dispatch した場合も同じ `source_current_input` を保存し、result follow-up から同じ camera source の `vision.capture` を内部観測として発行できる
-- visual observation は wake 判断へ渡し、`change_state=first_seen / changed` は wake 判断の `visual_observation` 前景候補として扱う。発話可否は観測差分だけで決めず、`speech / noop / pending_intent` の意味判断で比較する
+- `wake` の判断で `camera.ptz` を dispatch した場合も同じ `source_current_input` を保存し、result follow-up から同じ camera source の `vision.capture` を内部観測として発行できる
+- `reference` 由来の visual observation は wake 判断へ渡す。`change_state=first_seen / changed` は前景候補として扱い、発話可否は観測差分だけで決めず `speech / noop / pending_intent` の意味判断で比較する
 - visual observation の意味変化は `visual_observation` の `change_state / change_basis / change_reason_summary` を正とする。signature は runtime 追跡用の診断値として扱う
-- visual observation は wake 判断へ渡す。LLM は change_state、drive_state、world_state、同一観測の反復有無、直近で触れた内容、進行中コミットメントを合わせて `speech / noop / pending_intent` を選ぶ
-- 再評価時刻に達した保留意図があれば再評価し、必要なら `speech`
+
+#### 定期思考との関係
 
 server 内の定期思考スケジューラも、同じ wake 1 サイクルを内部的に使う。
+ただし次の点で API起床と分ける。
 
-`result_kind=noop`、`result_kind=capability_request`、`result_kind=internal_failure` のとき、`speech` は `null` を返す。
-`capability_request` が無い結果では、`capability_request` は `null` を返す。
-`autonomous_run` が無い結果では、`autonomous_run` は `null` を返す。
+- 定期思考だけが `wake_policy.mode`、`wake_policy.interval_seconds`、`wake_policy.observations` を使う
+- 定期思考は `current_input.sender_kind=system`、`source_kind=background_thinking`、空の `response_target_refs` として shared pipeline に渡す
+- 思考前観測、interval 消費、再試行待ちの正本は [状態と設定.md](状態と設定.md) の `wake_policy` と [../runtime/自律initiative_loop.md](../runtime/自律initiative_loop.md) とする
+- visual observation の判断への渡し方の詳細は [../runtime/判断と行動.md](../runtime/判断と行動.md) と [../capability/視覚機能.md](../capability/視覚機能.md) を正とする
 
 主な失敗:
 
