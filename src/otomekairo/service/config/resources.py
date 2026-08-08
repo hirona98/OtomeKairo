@@ -261,9 +261,7 @@ class ServiceConfigResourcesMixin:
                 and presentation.get("avatar_id") in normalized_avatars
             ]
         self.store.write_state(state)
-        audio_runtime = getattr(self, "_audio_runtime", None)
-        if audio_runtime is not None:
-            audio_runtime.reload_settings()
+        self._reload_audio_runtime_settings()
         self._append_avatar_speech_editor_state_audit_event(state=state, operation="write")
         return self._build_avatar_speech_editor_state(state)
 
@@ -514,6 +512,9 @@ class ServiceConfigResourcesMixin:
                 next_wake_policy=state["wake_policy"],
                 current_time=self._now_iso(),
             )
+        # 選択中人格が変わると音声起動ワードも変わる。
+        if "selected_persona_id" in payload:
+            self._reload_audio_runtime_settings()
         return self.get_config(token=state["console_access_token"])
 
     def select_persona(self, token: str | None, persona_id: str) -> dict[str, Any]:
@@ -1017,8 +1018,15 @@ class ServiceConfigResourcesMixin:
             next_wake_policy=state["wake_policy"],
             current_time=self._now_iso(),
         )
+        # 人格設定の音声起動ワード変更を音声 runtime へ反映する。
+        self._reload_audio_runtime_settings()
         self._append_editor_state_audit_event(state=state, operation="write")
         return self._build_editor_state(state)
+
+    def _reload_audio_runtime_settings(self) -> None:
+        audio_runtime = getattr(self, "_audio_runtime", None)
+        if audio_runtime is not None:
+            audio_runtime.reload_settings()
 
     def _build_settings_snapshot(self, state: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -1166,6 +1174,9 @@ class ServiceConfigResourcesMixin:
         self.store.write_state(state)
         if entry_id == state[selected_id_key]:
             self._clear_pending_intent_candidates()
+            # 選択中人格の音声起動ワード更新を音声 runtime へ反映する。
+            if entries_key == "personas":
+                self._reload_audio_runtime_settings()
 
         # 応答
         entry = state[entries_key][entry_id]

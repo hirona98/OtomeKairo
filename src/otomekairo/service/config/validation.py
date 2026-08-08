@@ -361,12 +361,6 @@ class ServiceConfigValidationMixin:
             profile_id = normalized_stt.get("profile_id")
             if isinstance(profile_id, str):
                 normalized_stt["profile_id"] = profile_id.strip()
-            wake_words = normalized_stt.get("wake_words")
-            if isinstance(wake_words, list):
-                normalized_stt["wake_words"] = [
-                    item.strip() if isinstance(item, str) else item
-                    for item in wake_words
-                ]
             normalized["stt"] = normalized_stt
         return normalized
 
@@ -508,37 +502,13 @@ class ServiceConfigValidationMixin:
             raise ServiceError(400, "invalid_stt_settings", "avatar.stt must be an object.")
         self._validate_exact_fields(
             definition,
-            {"enabled", "engine", "wake_words", "profile_id", "api_key"},
+            {"enabled", "engine", "profile_id", "api_key"},
             "avatar.stt",
         )
         if not isinstance(definition.get("enabled"), bool):
             raise ServiceError(400, "invalid_stt_settings", "avatar.stt.enabled must be a boolean.")
         if definition.get("engine") != "amivoice":
             raise ServiceError(400, "unsupported_stt_engine", "avatar.stt.engine must be amivoice.")
-        wake_words = definition.get("wake_words")
-        if not isinstance(wake_words, list):
-            raise ServiceError(
-                400, "invalid_stt_settings", "avatar.stt.wake_words must be an array."
-            )
-        seen_wake_words: set[str] = set()
-        for wake_word in wake_words:
-            if (
-                not isinstance(wake_word, str)
-                or not wake_word
-                or wake_word != wake_word.strip()
-            ):
-                raise ServiceError(
-                    400,
-                    "invalid_stt_settings",
-                    "avatar.stt.wake_words must contain trimmed non-empty strings.",
-                )
-            if wake_word in seen_wake_words:
-                raise ServiceError(
-                    400,
-                    "invalid_stt_settings",
-                    "avatar.stt.wake_words must not contain duplicates.",
-                )
-            seen_wake_words.add(wake_word)
         profile_id = definition.get("profile_id")
         if not isinstance(profile_id, str):
             raise ServiceError(400, "invalid_stt_settings", "avatar.stt.profile_id must be a string.")
@@ -553,6 +523,33 @@ class ServiceConfigValidationMixin:
             )
         if not isinstance(definition.get("api_key"), str):
             raise ServiceError(400, "invalid_stt_settings", "avatar.stt.api_key must be a string.")
+
+    def _validate_wake_words(self, wake_words: Any, *, field_name: str) -> None:
+        if not isinstance(wake_words, list):
+            raise ServiceError(
+                400,
+                "invalid_wake_words",
+                f"{field_name} must be an array.",
+            )
+        seen_wake_words: set[str] = set()
+        for wake_word in wake_words:
+            if (
+                not isinstance(wake_word, str)
+                or not wake_word
+                or wake_word != wake_word.strip()
+            ):
+                raise ServiceError(
+                    400,
+                    "invalid_wake_words",
+                    f"{field_name} must contain trimmed non-empty strings.",
+                )
+            if wake_word in seen_wake_words:
+                raise ServiceError(
+                    400,
+                    "invalid_wake_words",
+                    f"{field_name} must not contain duplicates.",
+                )
+            seen_wake_words.add(wake_word)
 
     def _validate_tts_definition(self, definition: Any) -> None:
         if not isinstance(definition, dict):
@@ -900,6 +897,7 @@ class ServiceConfigValidationMixin:
                 "initiative_baseline",
                 "persona_prompt",
                 "expression_addon",
+                "wake_words",
             }
         )
         if unsupported_fields:
@@ -924,6 +922,7 @@ class ServiceConfigValidationMixin:
         expression_addon = definition.get("expression_addon")
         if expression_addon is not None and not isinstance(expression_addon, str):
             raise ServiceError(400, "invalid_expression_addon", "expression_addon must be a string.")
+        self._validate_wake_words(definition.get("wake_words"), field_name="persona.wake_words")
 
     def _validate_camera_source_definition(self, vision_source_id: str, definition: dict[str, Any]) -> None:
         if not isinstance(definition, dict):
@@ -1196,6 +1195,12 @@ class ServiceConfigValidationMixin:
             if not isinstance(value, str):
                 continue
             normalized[field_name] = value.strip()
+        wake_words = normalized.get("wake_words")
+        if isinstance(wake_words, list):
+            normalized["wake_words"] = [
+                item.strip() if isinstance(item, str) else item
+                for item in wake_words
+            ]
         return normalized
 
     def _validate_memory_set_definition(self, memory_set_id: Any, definition: dict[str, Any]) -> None:

@@ -1142,7 +1142,7 @@ class AudioRuntime:
             matched, matched_wake_word = self._wake_accepts(
                 explicit_input=item.explicit_input,
                 transcript=stt_result.text,
-                wake_words=settings["stt"]["wake_words"],
+                wake_words=settings["wake_words"],
             )
             if not matched:
                 result_code = "wake_word_not_matched"
@@ -1900,10 +1900,14 @@ class AudioRuntime:
     def _read_audio_settings(self) -> dict[str, Any]:
         state = self._service.store.read_state()
         selected_avatar = state["avatars"][state["selected_avatar_id"]]
+        selected_persona = state["personas"][state["selected_persona_id"]]
         return {
             "selected_avatar_id": state["selected_avatar_id"],
+            "selected_persona_id": state["selected_persona_id"],
             "microphone_settings": deepcopy(state["microphone_settings"]),
             "stt": deepcopy(selected_avatar["stt"]),
+            # 音声起動ワードは選択中人格設定の運用値。
+            "wake_words": list(selected_persona["wake_words"]),
         }
 
     def _ensure_threads_locked(self) -> None:

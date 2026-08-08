@@ -1991,7 +1991,6 @@ function renderAvatar() {
   renderAvatarPresentation();
   element("stt-enabled").checked = stt.enabled;
   element("stt-engine").value = stt.engine;
-  element("stt-wake-words").value = stt.wake_words.join("\n");
   element("stt-profile-id").value = stt.profile_id;
   element("stt-api-key").value = stt.api_key;
   element("tts-enabled").checked = tts.enabled;
@@ -2051,7 +2050,6 @@ function syncAvatar() {
   avatar.display_name = textValue("avatar-display-name");
   avatar.stt.enabled = boolValue("stt-enabled");
   avatar.stt.engine = textValue("stt-engine");
-  avatar.stt.wake_words = parseLines(textValue("stt-wake-words"));
   avatar.stt.profile_id = textValue("stt-profile-id");
   avatar.stt.api_key = textValue("stt-api-key");
   avatar.tts.enabled = boolValue("tts-enabled");
@@ -2723,6 +2721,7 @@ function renderPersona() {
   element("persona-display-name").value = persona.display_name || "";
   element("persona-prompt").value = persona.persona_prompt || "";
   element("persona-expression-addon").value = persona.expression_addon || "";
+  element("persona-wake-words").value = (persona.wake_words || []).join("\n");
 }
 
 function syncPersona() {
@@ -2733,6 +2732,7 @@ function syncPersona() {
   persona.display_name = textValue("persona-display-name");
   persona.persona_prompt = textValue("persona-prompt");
   persona.expression_addon = textValue("persona-expression-addon");
+  persona.wake_words = parseLines(textValue("persona-wake-words"));
 }
 
 function renderModel() {

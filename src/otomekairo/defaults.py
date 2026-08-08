@@ -156,6 +156,7 @@ def build_default_state() -> dict:
                 "initiative_baseline": DEFAULT_PERSONA_INITIATIVE_BASELINE,
                 "persona_prompt": DEFAULT_PERSONA_PROMPT,
                 "expression_addon": DEFAULT_PERSONA_EXPRESSION_ADDON,
+                "wake_words": [],
             }
         },
         "memory_sets": {
@@ -237,7 +238,6 @@ def build_default_avatar() -> dict:
         "stt": {
             "enabled": False,
             "engine": "amivoice",
-            "wake_words": [],
             "profile_id": "",
             "api_key": "",
         },

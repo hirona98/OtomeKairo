@@ -380,18 +380,6 @@
               </div>
             </fieldset>
             <fieldset class="settings-group">
-              <legend>音声起動ワード</legend>
-              <div class="settings-list">
-                <div class="setting-row setting-row-top">
-                  <label for="stt-wake-words">音声起動ワード:</label>
-                  <div class="console-control-with-hint">
-                    <textarea id="stt-wake-words" rows="3"></textarea>
-                    <span class="field-hint">1行1件。通常の音声入力では、文字起こしの先頭がいずれかの音声起動ワードと一致すると会話入力になります。空欄ではすべての発話が会話入力になります。</span>
-                  </div>
-                </div>
-              </div>
-            </fieldset>
-            <fieldset class="settings-group">
               <legend>マイク・話者識別</legend>
               <div class="settings-list">
                 <div class="setting-row">
@@ -482,6 +470,18 @@
               <p class="field-hint">会話時の表現生成でだけ使う補助指示を入れます。表情指定や出力補助に使えます。</p>
               <textarea id="persona-expression-addon" rows="8"></textarea>
             </div>
+            <fieldset class="settings-group">
+              <legend>音声起動ワード</legend>
+              <div class="settings-list">
+                <div class="setting-row setting-row-top">
+                  <label for="persona-wake-words">音声起動ワード:</label>
+                  <div class="console-control-with-hint">
+                    <textarea id="persona-wake-words" rows="3"></textarea>
+                    <span class="field-hint">1行1件。通常の音声入力では、文字起こしの先頭がいずれかの音声起動ワードと一致すると会話入力になります。空欄ではすべての発話が会話入力になります。選択中の人格設定に保存します。</span>
+                  </div>
+                </div>
+              </div>
+            </fieldset>
           </section>
 
           <section class="tab-page model-settings-page" data-page="model">

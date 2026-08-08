@@ -64,7 +64,11 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(avatar["stt"]["engine"], "amivoice")
-        self.assertEqual(avatar["stt"]["wake_words"], [])
+        self.assertEqual(
+            set(avatar["stt"]),
+            {"enabled", "engine", "profile_id", "api_key"},
+        )
+        self.assertNotIn("wake_words", avatar["stt"])
         self.assertNotIn("language", avatar["stt"])
         self.assertIn("assist_text", avatar["tts"]["style_bert_vits2_config"])
         self.assertEqual(
@@ -125,6 +129,18 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
             service.store.events[-2]["kind"],
             "avatar_speech_editor_state_write",
         )
+
+    def test_avatar_stt_rejects_wake_words_field(self) -> None:
+        # 音声起動ワードは persona.wake_words。avatar.stt への残存は未対応として拒否する。
+        service = DummyService()
+        definition = service.get_avatar_speech_editor_state("token")
+        definition["avatars"][0]["stt"]["wake_words"] = ["hello"]
+
+        with self.assertRaises(ServiceError) as raised:
+            service.replace_avatar_speech_editor_state("token", definition)
+
+        self.assertEqual(raised.exception.error_code, "invalid_avatar_stt_fields")
+        self.assertIn("wake_words", raised.exception.message)
 
     def test_local_microphone_accepts_console_without_windows_device(self) -> None:
         # ローカルマイクの応答先はWindows入力deviceと独立して保存する。
