@@ -58,12 +58,17 @@ API wire、認可、設定の意味境界は [../api/README.md](../api/README.md
 
 | クラス | 用途 | 値 |
 | --- | --- | --- |
+| `.field-width-peek` | APIキーなど、値は保持したまま先頭だけ見せたい入力 | `width: var(--field-width-peek)`（約 4.5em） |
 | `.field-width-short` | 整数、秒、ポート、次元、閾値 | `width: var(--field-width-short)`（96px） |
 | `.field-width-medium` | プリセット名、表示名、短い ID | `max-width: var(--field-width-medium)`（320px） |
 | `.field-width-long` | モデル名、ホスト、コマンド | `max-width: var(--field-width-long)`（480px） |
-| `.field-width-full` | URL、API キー、パス、textarea、広い select | 右列 100%（既定） |
+| `.field-width-full` | URL、パス、textarea、広い select | 右列 100%（既定） |
 
 `.inline-suffix-control` 内の数値入力は short 相当とする。
+
+APIキー入力は `type="password"` で伏せず、通常のテキスト入力 + `.field-width-peek` にする。
+値そのものは切り捨てず、横幅だけで先頭付近だけが見えるようにする。
+
 
 ## 展開パネル
 

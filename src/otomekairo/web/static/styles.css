@@ -40,6 +40,7 @@
   --title-size: var(--font-heading);
   --setting-label-width: 170px;
   /* 入力幅トークン。field-width-* クラスで付与する。 */
+  --field-width-peek: 4.5em;
   --field-width-short: 96px;
   --field-width-medium: 320px;
   --field-width-long: 480px;
@@ -852,6 +853,13 @@ p {
 }
 
 /* 入力幅。未指定は右列いっぱい（full）。 */
+.field-width-peek {
+  /* APIキーなど、値全体を伏せず先頭だけが見える幅。値そのものは切り捨てない。 */
+  width: var(--field-width-peek) !important;
+  max-width: 100%;
+  flex: 0 0 var(--field-width-peek);
+}
+
 .field-width-short {
   width: var(--field-width-short) !important;
   max-width: 100%;
@@ -921,12 +929,7 @@ p {
   white-space: pre-wrap;
 }
 
-/* パスワード入力 + コピー / 貼り付けボタンの共通列。 */
-.secret-field-controls input {
-  flex: 1 1 160px;
-  min-width: 120px;
-}
-
+/* 秘密値入力 + コピー / 貼り付けボタンの共通列。幅は入力側の field-width-* を優先する。 */
 .secret-field-controls button {
   white-space: nowrap;
 }
@@ -1326,6 +1329,13 @@ input[type="checkbox"]:disabled {
     flex: 1 1 auto;
   }
 
+  /* APIキーの peek 幅は狭い画面でも先頭だけ見える幅を維持する。 */
+  .field-width-peek {
+    width: var(--field-width-peek) !important;
+    max-width: 100%;
+    flex: 0 0 var(--field-width-peek);
+  }
+
   .range-field output {
     text-align: left;
   }
@@ -1337,10 +1347,6 @@ input[type="checkbox"]:disabled {
 
   .setting-row {
     grid-template-columns: 1fr;
-  }
-
-  .secret-field-controls input {
-    flex: 1 1 100%;
   }
 
   .selector-row {
