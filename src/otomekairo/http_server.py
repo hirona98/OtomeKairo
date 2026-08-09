@@ -70,10 +70,34 @@ class OtomeKairoHttpServer(ThreadingHTTPServer):
     # ソケット再利用
     allow_reuse_address = True
 
-    def __init__(self, server_address: tuple[str, int], service: OtomeKairoService) -> None:
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        service: OtomeKairoService,
+        *,
+        tls_context: ssl.SSLContext | None = None,
+    ) -> None:
         # 基底初期化
         super().__init__(server_address, OtomeKairoHandler)
         self.service = service
+        self.tls_context = tls_context
+
+    def process_request_thread(self, request, client_address) -> None:
+        # TLS handshake は accept loop ではなく接続ごとの thread で行う。
+        # ポート検出など TLS を開始しない TCP 接続が、他の接続受付を止めるのを防ぐ。
+        if self.tls_context is None:
+            super().process_request_thread(request, client_address)
+            return
+
+        try:
+            request.settimeout(10)
+            tls_request = self.tls_context.wrap_socket(request, server_side=True)
+            tls_request.settimeout(None)
+        except (OSError, ssl.SSLError):
+            self.shutdown_request(request)
+            return
+
+        super().process_request_thread(tls_request, client_address)
 
 
 # ハンドラー

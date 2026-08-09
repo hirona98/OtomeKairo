@@ -66,12 +66,16 @@ def main() -> None:
         backup_count=log_backup_count,
     )
 
+    # TLSコンテキスト
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(certfile=cert_file, keyfile=key_file)
+
     # サービス
     debug_log("Run", f"starting host={host} port={port} data_dir={root_dir}")
     debug_log("Run", f"tls cert={cert_file} key={key_file}")
     service = OtomeKairoService(root_dir=root_dir)
     try:
-        server = OtomeKairoHttpServer((host, port), service)
+        server = OtomeKairoHttpServer((host, port), service, tls_context=context)
     except OSError as exc:
         if exc.errno == errno.EADDRINUSE:
             message = _port_in_use_hint(host, port)
@@ -79,13 +83,6 @@ def main() -> None:
             print(message, file=sys.stderr)
             raise SystemExit(2) from None
         raise
-
-
-    # TLSコンテキスト
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(certfile=cert_file, keyfile=key_file)
-    server.socket = context.wrap_socket(server.socket, server_side=True)
-
     # スケジューラー開始
     debug_log("Run", "starting background workers")
     service.start_background_memory_postprocess_worker()
