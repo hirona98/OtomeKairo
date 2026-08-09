@@ -52,6 +52,7 @@ const state = {
     paused: true,
     starting: false,
     stopping: false,
+    sttToggling: false,
     startSequence: 0,
   },
   unloading: false,
@@ -1325,24 +1326,34 @@ function setWebMicrophoneStatus(text, kind = "") {
 }
 
 function webMicrophoneHasLease() {
-  if (!state.webAudio.inputSessionId) {
-    return false;
-  }
-  if (state.webAudio.inputSource !== "web_microphone") {
+  // 話者登録は active な音声リースがあれば開始できる（STT 無効でも可）。
+  // Web マイクは当該タブの capture session、local/console は connector 側リースを見る。
+  if (state.webAudio.inputSessionId && state.webAudio.inputSource === "web_microphone") {
     return (
-      state.audioRuntime?.active_source === state.webAudio.inputSource
-      && state.audioRuntime?.response_client_id === state.clientId
+      state.webAudio.socket?.readyState === WebSocket.OPEN
+      && Number.isInteger(state.webAudio.leaseGeneration)
     );
   }
+  const runtime = state.audioRuntime;
+  if (!runtime?.active_source) {
+    return false;
+  }
+  // stt_disabled 中でも登録開始で pause が解除される。
   return (
-    state.webAudio.socket?.readyState === WebSocket.OPEN
-    && Number.isInteger(state.webAudio.leaseGeneration)
+    runtime.paused_reason === null
+    || runtime.paused_reason === "stt_disabled"
+    || runtime.mode === "enrollment"
   );
 }
 
 function renderWebMicrophoneControls() {
+  const sttEnabled = state.audioRuntime?.stt_enabled === true;
   const running = Boolean(state.webAudio.inputSessionId);
-  const busy = running || state.webAudio.starting || state.webAudio.stopping;
+  const busy = (
+    state.webAudio.starting
+    || state.webAudio.stopping
+    || state.webAudio.sttToggling
+  );
   const source = state.audioRuntime?.configured_source || "";
   const usesWebDevice = source === "web_microphone";
   element("web-input-source-label").textContent = source
@@ -1350,18 +1361,34 @@ function renderWebMicrophoneControls() {
     : "入力元: 読み込み中";
   element("web-microphone-device").hidden = !usesWebDevice;
   element("web-microphone-device").disabled = busy || !usesWebDevice;
-  // アイコントグル。文言は title / aria で伝え、見た目は aria-pressed で切り替える。
+  // 共通運用トグル。aria-pressed は stt.enabled を示す。
   const button = element("toggle-web-microphone");
-  button.disabled = (
-    state.webAudio.starting
-    || state.webAudio.stopping
-    || (!running && !source)
+  button.disabled = busy || !source;
+  button.setAttribute("aria-pressed", sttEnabled ? "true" : "false");
+  button.title = sttEnabled
+    ? "マイク（音声認識）をOFF"
+    : "マイク（音声認識）をON";
+  button.setAttribute(
+    "aria-label",
+    sttEnabled ? "マイク（音声認識）をOFF" : "マイク（音声認識）をON",
   );
-  button.setAttribute("aria-pressed", running ? "true" : "false");
-  button.title = running ? "音声入力を停止" : "音声入力を開始";
-  button.setAttribute("aria-label", running ? "音声入力を停止" : "音声入力を開始");
-  if (!running && !state.webAudio.starting && !state.webAudio.stopping) {
-    setWebMicrophoneStatus("停止中");
+  if (!busy && !running) {
+    if (!source) {
+      setWebMicrophoneStatus("停止中");
+    } else if (!sttEnabled) {
+      setWebMicrophoneStatus("STT無効");
+    } else if (usesWebDevice) {
+      setWebMicrophoneStatus("ブラウザ入力待ち");
+    } else if (state.audioRuntime?.paused_reason) {
+      setWebMicrophoneStatus(
+        audioPauseLabel(state.audioRuntime.paused_reason),
+        "processing",
+      );
+    } else {
+      setWebMicrophoneStatus(
+        state.audioRuntime?.mode === "enrollment" ? "話者登録中" : "待機中",
+      );
+    }
   }
   if (state.settingsOpen) {
     renderSpeakerEnrollment();
@@ -1482,6 +1509,75 @@ function handleWebAudioControl(socket, payload) {
   }
 }
 
+async function setSttEnabled(enabled) {
+  const result = await apiRequest("/ui/api/audio/stt-enabled", {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  });
+  if (state.audioRuntime) {
+    state.audioRuntime.stt_enabled = result.enabled === true;
+  }
+  if (state.avatarSpeech?.selected_avatar) {
+    state.avatarSpeech.selected_avatar.stt = {
+      ...state.avatarSpeech.selected_avatar.stt,
+      enabled: result.enabled === true,
+    };
+  }
+  const sttCheckbox = document.getElementById("stt-enabled");
+  if (sttCheckbox) {
+    sttCheckbox.checked = result.enabled === true;
+  }
+  return result;
+}
+
+async function toggleWebMicrophone() {
+  if (
+    state.webAudio.starting
+    || state.webAudio.stopping
+    || state.webAudio.sttToggling
+  ) {
+    return;
+  }
+  const source = state.audioRuntime?.configured_source || "";
+  if (!Object.hasOwn(MICROPHONE_SOURCE_LABELS, source)) {
+    showNotice("保存済みのマイク入力元を取得できません。", true);
+    return;
+  }
+  const sttEnabled = state.audioRuntime?.stt_enabled === true;
+  const usesWebDevice = source === "web_microphone";
+  const hasSession = Boolean(state.webAudio.inputSessionId);
+
+  state.webAudio.sttToggling = true;
+  renderWebMicrophoneControls();
+  try {
+    if (!sttEnabled) {
+      // 共通運用: STT を ON にする。Web マイク時だけこのタブで capture を始める。
+      await setSttEnabled(true);
+      if (usesWebDevice) {
+        await startWebMicrophone();
+      } else {
+        renderWebMicrophoneControls();
+      }
+      return;
+    }
+    if (usesWebDevice && !hasSession) {
+      // 他接点で STT だけ ON の場合、このタブは capture を開始する。
+      await startWebMicrophone();
+      return;
+    }
+    // STT OFF。Web session は server 側でも終了するが、capture は先に解放する。
+    await stopWebMicrophone();
+    await setSttEnabled(false);
+    renderWebMicrophoneControls();
+  } catch (error) {
+    showNotice(`マイク切替に失敗しました: ${error.message}`, true);
+    renderWebMicrophoneControls();
+  } finally {
+    state.webAudio.sttToggling = false;
+    renderWebMicrophoneControls();
+  }
+}
+
 async function startWebMicrophone() {
   if (state.webAudio.inputSessionId || state.webAudio.starting) {
     return;
@@ -1491,12 +1587,12 @@ async function startWebMicrophone() {
     return;
   }
   const inputSource = state.audioRuntime?.configured_source || "";
-  if (!Object.hasOwn(MICROPHONE_SOURCE_LABELS, inputSource)) {
-    showNotice("保存済みのマイク入力元を取得できません。", true);
+  if (inputSource !== "web_microphone") {
+    showNotice("ブラウザマイク入力元のときだけWeb取得を開始します。", true);
     return;
   }
   const deviceId = element("web-microphone-device").value;
-  if (inputSource === "web_microphone" && !deviceId) {
+  if (!deviceId) {
     showNotice("使用するWebマイクを選択してください。", true);
     return;
   }
@@ -1507,25 +1603,6 @@ async function startWebMicrophone() {
   renderWebMicrophoneControls();
   setWebMicrophoneStatus("開始中", "processing");
   try {
-    if (inputSource !== "web_microphone") {
-      const inputSession = await apiRequest("/ui/api/audio/input-sessions", {
-        method: "POST",
-        body: JSON.stringify({
-          owner_client_id: state.clientId,
-        }),
-      });
-      state.webAudio.inputSessionId = inputSession.input_session_id;
-      state.webAudio.inputSource = inputSession.input_source;
-      state.webAudio.starting = false;
-      state.webAudio.paused = true;
-      setWebMicrophoneStatus(
-        `${MICROPHONE_SOURCE_LABELS[state.webAudio.inputSource]}マイク接続待ち`,
-        "processing",
-      );
-      renderWebMicrophoneControls();
-      return;
-    }
-
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         deviceId: { exact: deviceId },
@@ -1725,6 +1802,11 @@ async function stopWebMicrophone({ sendStop = true } = {}) {
 function updateAudioRuntimeState(runtimeState) {
   const hadEnrollment = Boolean(state.audioRuntime?.enrollment || state.activeEnrollment);
   state.audioRuntime = clone(runtimeState);
+  const sttCheckbox = document.getElementById("stt-enabled");
+  if (sttCheckbox && !state.settingsOpen) {
+    // 設定パネル編集中は下書きを壊さない。通常画面では runtime を正本にする。
+    sttCheckbox.checked = runtimeState.stt_enabled === true;
+  }
   renderWebMicrophoneControls();
   renderAudioMeters();
   if (runtimeState.enrollment) {
@@ -1738,27 +1820,14 @@ function updateAudioRuntimeState(runtimeState) {
   }
   if (
     state.webAudio.inputSessionId
-    && runtimeState.response_client_id !== state.clientId
+    && (
+      runtimeState.stt_enabled !== true
+      || runtimeState.response_client_id !== state.clientId
+      || runtimeState.configured_source !== "web_microphone"
+    )
   ) {
-    // server側で設定変更または切断によりsessionが終了した状態を反映する。
+    // STT OFF・session 失効・入力元変更ではブラウザ capture を解放する。
     stopWebMicrophone({ sendStop: false });
-  } else if (
-    state.webAudio.inputSessionId
-    && state.webAudio.inputSource !== "web_microphone"
-  ) {
-    const ownsInput = (
-      runtimeState.active_source === state.webAudio.inputSource
-      && runtimeState.response_client_id === state.clientId
-    );
-    state.webAudio.paused = !ownsInput || runtimeState.paused_reason !== null;
-    setWebMicrophoneStatus(
-      ownsInput
-        ? (runtimeState.paused_reason
-          ? audioPauseLabel(runtimeState.paused_reason)
-          : runtimeState.mode === "enrollment" ? "話者登録中" : "入力中")
-        : `${MICROPHONE_SOURCE_LABELS[state.webAudio.inputSource]}マイク接続待ち`,
-      state.webAudio.paused ? "processing" : "",
-    );
   }
   renderSpeakerEnrollment();
 }
@@ -2999,7 +3068,7 @@ function renderSpeakerEnrollment() {
     if (availableDefinitions.length === 0) {
       status = "新規登録できる未割当の呼ばれ方がありません";
     } else if (!hasInputLease) {
-      status = "会話欄で音声入力を開始してください";
+      status = "音声入力が有効になってから話者登録を開始してください";
     }
     element("speaker-enrollment-status").textContent = status;
     renderSpeakerList();
@@ -3014,7 +3083,7 @@ function renderSpeakerEnrollment() {
 
 async function startSpeakerEnrollment(personRef = null) {
   if (!webMicrophoneHasLease()) {
-    showNotice("会話欄で音声入力を開始してから話者登録を開始してください。", true);
+    showNotice("音声入力が有効になってから話者登録を開始してください。", true);
     return;
   }
   const body = personRef
@@ -4037,11 +4106,7 @@ function bindEvents() {
     }
   });
   element("toggle-web-microphone").addEventListener("click", () => {
-    if (state.webAudio.inputSessionId) {
-      stopWebMicrophone();
-    } else {
-      startWebMicrophone();
-    }
+    toggleWebMicrophone();
   });
 
   element("open-settings").addEventListener("click", openSettings);
