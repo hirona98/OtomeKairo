@@ -445,9 +445,16 @@ function createDashboardItem({
   body = "",
   meta = "",
   itemKind = "",
+  href = "",
 }) {
-  const item = document.createElement("article");
+  // 判断一覧など、詳細画面へ辿れる項目はリンクにする。
+  const item = document.createElement(href ? "a" : "article");
   item.className = `dashboard-item ${itemKind}`.trim();
+  if (href) {
+    item.href = href;
+    item.target = "_blank";
+    item.rel = "noopener noreferrer";
+  }
 
   const heading = document.createElement("div");
   heading.className = "dashboard-item-heading";
@@ -981,12 +988,14 @@ function renderDashboardCycles() {
     if (reasonSummary) {
       lines.push(`理由: ${reasonSummary}`);
     }
+    const cycleId = typeof cycle.cycle_id === "string" ? cycle.cycle_id : "";
     return createDashboardItem({
       title: trigger,
       badge: failed ? "失敗" : result,
       badgeKind: failed ? "error" : "ok",
       body: lines.join("\n"),
       itemKind: failed ? "failed" : "",
+      href: cycleId ? `/ui/cycles?cycle_id=${encodeURIComponent(cycleId)}` : "",
     });
   });
   container.replaceChildren(...items);
@@ -1125,10 +1134,22 @@ async function controlAutonomousRun(action, runId, button) {
   }
 }
 
+function setDashboardVisible(visible) {
+  // いまパネルの表示を明示的に切り替える。
+  const workspace = element("workspace-layout");
+  workspace.classList.toggle("dashboard-hidden", !visible);
+}
+
 function toggleDashboard() {
   const workspace = element("workspace-layout");
-  const hidden = workspace.classList.toggle("dashboard-hidden");
-  element("toggle-dashboard").setAttribute("aria-expanded", String(!hidden));
+  setDashboardVisible(workspace.classList.contains("dashboard-hidden"));
+}
+
+function setConfirmMenuOpen(open) {
+  const popup = element("confirm-menu-popup");
+  const toggle = element("confirm-menu-toggle");
+  popup.hidden = !open;
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
 }
 
 function setEventStreamStatus(text, kind = "") {
@@ -1698,7 +1719,7 @@ function updateAudioRuntimeState(runtimeState) {
   renderSpeakerEnrollment();
 }
 
-function addMessage(kind, text, images = [], sourceLabel = "") {
+function addMessage(kind, text, images = [], sourceLabel = "", options = {}) {
   const wrapper = document.createElement("article");
   wrapper.className = `message ${kind}`;
 
@@ -1711,6 +1732,15 @@ function addMessage(kind, text, images = [], sourceLabel = "") {
     img.src = image.data || image;
     img.alt = "送信画像";
     bubble.append(img);
+  }
+  if (options.cycleId) {
+    const link = document.createElement("a");
+    link.className = "message-cycle-link";
+    link.href = `/ui/cycles?cycle_id=${encodeURIComponent(options.cycleId)}`;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "判断で開く";
+    bubble.append(document.createElement("br"), link);
   }
 
   const meta = document.createElement("div");
@@ -1737,9 +1767,13 @@ function resultText(result) {
     return { kind: "system", text: "応答はありません。" };
   }
   if (result?.result_kind === "internal_failure") {
+    const cycleId = typeof result.cycle_id === "string" ? result.cycle_id : "";
     return {
       kind: "system",
-      text: `応答の生成に失敗しました。サーバーログを確認してください。cycle: ${result.cycle_id || "不明"}`,
+      text: cycleId
+        ? `応答の生成に失敗しました。「判断」で cycle を確認するか、「ログ」を見てください。\ncycle: ${cycleId}`
+        : "応答の生成に失敗しました。「判断」または「ログ」を確認してください。",
+      cycleId,
     };
   }
   return { kind: "system", text: "予期しない処理結果を受信しました。" };
@@ -1791,7 +1825,7 @@ async function sendMessage(event) {
       }),
     });
     const rendered = resultText(result);
-    addMessage(rendered.kind, rendered.text);
+    addMessage(rendered.kind, rendered.text, [], "", { cycleId: rendered.cycleId || "" });
     await loadStatus({ silent: true });
     await refreshDashboard({ silent: true });
   } catch (error) {
@@ -3704,7 +3738,24 @@ function switchTab(tab) {
 }
 
 function bindEvents() {
-  element("toggle-dashboard").addEventListener("click", toggleDashboard);
+  element("confirm-menu-toggle").addEventListener("click", (event) => {
+    event.stopPropagation();
+    const open = element("confirm-menu-popup").hidden;
+    setConfirmMenuOpen(open);
+  });
+  element("confirm-now").addEventListener("click", () => {
+    setDashboardVisible(true);
+    setConfirmMenuOpen(false);
+    refreshDashboard({ silent: true });
+  });
+  element("confirm-cycles").addEventListener("click", () => setConfirmMenuOpen(false));
+  element("confirm-logs").addEventListener("click", () => setConfirmMenuOpen(false));
+  document.addEventListener("click", (event) => {
+    const menu = element("confirm-menu");
+    if (!menu.contains(event.target)) {
+      setConfirmMenuOpen(false);
+    }
+  });
   element("refresh-dashboard").addEventListener("click", () => refreshDashboard({ silent: false }));
   element("dashboard-active").addEventListener("click", (event) => {
     const button = event.target instanceof Element

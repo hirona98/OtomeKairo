@@ -15,22 +15,41 @@
         <h1>CocoroAI<span class="brand-suffix"> - OtomeKairo Inside -</span></h1>
       </div>
       <div class="topbar-actions">
-        <a class="icon-button dashboard-toggle" id="open-logs" href="/ui/logs" target="_blank"
-          rel="noopener noreferrer" title="ログ">ログ</a>
-        <button type="button" class="icon-button dashboard-toggle" id="toggle-dashboard" title="内部状態"
-          aria-expanded="true">内部状態</button>
+        <div class="confirm-menu" id="confirm-menu">
+          <button type="button" class="icon-button dashboard-toggle" id="confirm-menu-toggle"
+            aria-haspopup="true" aria-expanded="false" title="確認">確認</button>
+          <div class="confirm-menu-popup" id="confirm-menu-popup" hidden role="menu" aria-label="確認メニュー">
+            <button type="button" class="confirm-menu-item" id="confirm-now" role="menuitem"
+              title="いまどうなってる？">いま
+              <span class="confirm-menu-hint">現在の個の要約</span>
+            </button>
+            <a class="confirm-menu-item" id="confirm-cycles" href="/ui/cycles" target="_blank"
+              rel="noopener noreferrer" role="menuitem" title="さっきなぜそうした？">判断
+              <span class="confirm-menu-hint">1回の判断の根拠</span>
+            </a>
+            <a class="confirm-menu-item" id="confirm-logs" href="/ui/logs" target="_blank"
+              rel="noopener noreferrer" role="menuitem" title="裏で何が流れている？">ログ
+              <span class="confirm-menu-hint">運用ログの流れ</span>
+            </a>
+          </div>
+        </div>
         <button type="button" class="icon-button" id="open-settings" title="設定">⚙</button>
       </div>
     </header>
 
     <main class="workspace-layout" id="workspace-layout">
-      <aside class="dashboard-panel" id="dashboard-panel" aria-label="内部状態">
+      <aside class="dashboard-panel" id="dashboard-panel" aria-label="いま">
         <div class="dashboard-header">
           <div>
+            <div class="dashboard-title">いま</div>
             <div id="dashboard-generated-at" class="dashboard-updated">未取得</div>
           </div>
           <button type="button" class="plain-button" id="refresh-dashboard">更新</button>
         </div>
+
+        <p class="dashboard-role-note">
+          現在の個の要約。直近判断は要約だけ。詳細は「判断」へ。
+        </p>
 
         <div class="dashboard-headline" id="dashboard-headline">読み込み中…</div>
         <div class="dashboard-chips" id="dashboard-chips" aria-label="状態チップ"></div>
