@@ -1409,7 +1409,7 @@ function renderWebMicrophoneControls() {
 async function refreshWebMicrophoneDevices({ requestPermission = false } = {}) {
   if (!navigator.mediaDevices?.enumerateDevices) {
     showNotice("このブラウザではマイク入力を使用できません。", true);
-    return;
+    return false;
   }
   let permissionStream = null;
   try {
@@ -1440,11 +1440,21 @@ async function refreshWebMicrophoneDevices({ requestPermission = false } = {}) {
     select.value = devices.some((device) => device.deviceId === storedDeviceId)
       ? storedDeviceId
       : "";
+    return true;
   } catch (error) {
     showNotice(`マイク一覧を取得できません: ${error.message}`, true);
+    return false;
   } finally {
     permissionStream?.getTracks().forEach((track) => track.stop());
   }
+}
+
+async function handleMicrophoneInputSourceChange() {
+  // ブラウザ入力を選んだユーザー操作だけを、初回権限取得の入口にする。
+  if (element("microphone-input-source").value !== "web_microphone") {
+    return;
+  }
+  await refreshWebMicrophoneDevices({ requestPermission: true });
 }
 
 function audioPauseLabel(reason) {
@@ -1640,10 +1650,18 @@ async function startWebMicrophone() {
     showNotice("ブラウザマイク入力元のときだけWeb取得を開始します。", true);
     return;
   }
-  const deviceId = element("web-microphone-device").value;
+  let deviceId = element("web-microphone-device").value;
   if (!deviceId) {
-    showNotice("使用するWebマイクを選択してください。", true);
-    return;
+    // 未許可ではdevice IDを列挙できないbrowserがあるため、開始操作から許可を取得する。
+    const refreshed = await refreshWebMicrophoneDevices({ requestPermission: true });
+    if (!refreshed) {
+      return;
+    }
+    deviceId = element("web-microphone-device").value;
+    if (!deviceId) {
+      showNotice("使用するWebマイクを選択してください。", true);
+      return;
+    }
   }
 
   const startSequence = state.webAudio.startSequence + 1;
@@ -4189,6 +4207,9 @@ function bindEvents() {
   });
   element("tts-engine").addEventListener("change", () => {
     renderTtsPanel(element("tts-engine").value);
+  });
+  element("microphone-input-source").addEventListener("change", () => {
+    handleMicrophoneInputSourceChange();
   });
   element("vad-probability-threshold").addEventListener("input", updateMicrophoneSettingLabels);
   element("speaker-recognition-threshold").addEventListener("input", updateMicrophoneSettingLabels);
