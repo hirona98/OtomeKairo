@@ -330,12 +330,17 @@ class AudioRuntime:
                 "configured_source": microphone["input_source"],
                 "effective_source": self._effective_source_locked(),
                 "stt_enabled": bool(self._settings["stt"]["enabled"]),
+                "tts_enabled": self._tts_enabled_from_store(),
                 "selected_avatar_id": self._settings["selected_avatar_id"],
                 "local_input_device": deepcopy(
                     microphone["local_input_device"]
                 ),
                 "console": deepcopy(microphone["console"]),
             }
+
+    def publish_state(self, *, force: bool = True) -> None:
+        # 設定変更など lease を壊さない経路から snapshot を配る。
+        self._publish_state(force=force)
 
     def start_web_input_session(
         self,
@@ -619,6 +624,7 @@ class AudioRuntime:
                 ]["input_source"],
                 "effective_source": self._effective_source_locked(),
                 "stt_enabled": bool(self._settings["stt"]["enabled"]),
+                "tts_enabled": self._tts_enabled_from_store(),
                 "selected_avatar_id": self._settings["selected_avatar_id"],
                 "response_client_id": self._effective_response_client_id_locked(),
                 "selected_device": deepcopy(
@@ -1926,6 +1932,12 @@ class AudioRuntime:
             # 音声起動ワードは選択中人格設定の運用値。
             "wake_words": list(selected_persona["wake_words"]),
         }
+
+    def _tts_enabled_from_store(self) -> bool:
+        # TTS は reserve 時に store を正本とする。snapshot も同じ正本を読む。
+        state = self._service.store.read_state()
+        selected_avatar = state["avatars"][state["selected_avatar_id"]]
+        return bool(selected_avatar["tts"]["enabled"])
 
     def _ensure_threads_locked(self) -> None:
         if self._worker_thread is not None:

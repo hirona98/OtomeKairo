@@ -195,6 +195,50 @@ response:
 意味規則は [../audio/音声入力と話者識別.md](../audio/音声入力と話者識別.md) を正とする。
 アバター音声 bundle 全体の編集は [状態と設定.md](状態と設定.md) を正とする。
 
+## TTS 運用トグル API
+
+### `GET /api/audio/tts-enabled`
+
+- 認証: 必要
+- 利用主体: CocoroConsole、Stream Deck、その他運用 client
+- 役割: 選択中アバターの `tts.enabled` を返す
+
+### `PUT /api/audio/tts-enabled`
+
+- 認証: 必要
+- 利用主体: CocoroConsole、Stream Deck、その他運用 client
+- 役割: 選択中アバターの `tts.enabled` だけを更新する
+- request body は `enabled` だけを持つ
+- 他の avatar field、microphone_settings、avatars 一覧は変更しない
+- 値が変わらない保存でも成功 response を返す
+- 値が変わった保存では音声入力 runtime の lease を破棄せず、`audio_runtime_state` を force 配信する
+- write を認証済み設定編集操作として audit に残す
+- response body に秘密値を含めない
+
+request:
+
+```json
+{
+  "enabled": true
+}
+```
+
+response:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "enabled": true,
+    "selected_avatar_id": "avatar:default"
+  }
+}
+```
+
+`GET /ui/api/audio/tts-enabled` と `PUT /ui/api/audio/tts-enabled` は同じ処理を呼び出す。
+`tts.enabled=false` では発話本文は成功し、`audio_delivery.status=disabled` とする。
+アバター音声 bundle 全体の編集は [状態と設定.md](状態と設定.md) を正とする。
+
 ## 実効入力状態 API
 
 ### `GET /api/audio/input-state`
@@ -212,6 +256,7 @@ response:
     "configured_source": "local_microphone",
     "effective_source": "local_microphone",
     "stt_enabled": true,
+    "tts_enabled": true,
     "selected_avatar_id": "avatar:default",
     "local_input_device": {
       "host_api": "ALSA",
@@ -227,6 +272,7 @@ response:
 
 `console.input_device` は Windows input endpoint が未選択の場合に `null` とする。
 `stt_enabled` は選択中アバターの保存済み `stt.enabled` である。
+`tts_enabled` は選択中アバターの保存済み `tts.enabled` である。
 このresponseの `effective_source` は process-local な実効値を含み、入力元設定の正本として保存しない。
 
 ## 音声stream data/control
@@ -515,6 +561,7 @@ request body は不要とする。
 | `400` | `invalid_audio_frame` | PCM frame の長さまたは形式が不正 |
 | `400` | `invalid_audio_control` | control message が不正 |
 | `400` | `invalid_stt_enabled` | `stt-enabled` request が不正 |
+| `400` | `invalid_tts_enabled` | `tts-enabled` request が不正 |
 | `400` | `invalid_speaker_enrollment` | 話者登録 request が不正 |
 | `400` | `invalid_conversation_display_name_assignment` | 呼ばれ方定義の割当 request が不正 |
 | `401` | `invalid_token` | connector 認証が不正 |

@@ -132,6 +132,7 @@ response:
         "configured_source": "local_microphone",
         "effective_source": "local_microphone",
         "stt_enabled": true,
+        "tts_enabled": true,
         "selected_avatar_id": "avatar:default",
         "response_client_id": "console-main",
         "selected_device": {

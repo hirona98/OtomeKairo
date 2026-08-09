@@ -66,6 +66,16 @@ class ServiceAudioMixin:
     ) -> dict[str, Any]:
         return self.replace_stt_enabled(token, payload)
 
+    def get_audio_tts_enabled(self, token: str | None) -> dict[str, Any]:
+        return self.get_tts_enabled(token)
+
+    def replace_audio_tts_enabled(
+        self,
+        token: str | None,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.replace_tts_enabled(token, payload)
+
     def start_web_audio_input_session(
         self,
         token: str | None,

@@ -293,6 +293,21 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                     ),
                 )
                 return
+            if method == "GET" and parsed.path == "/api/audio/tts-enabled":
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.get_audio_tts_enabled(token),
+                )
+                return
+            if method == "PUT" and parsed.path == "/api/audio/tts-enabled":
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.replace_audio_tts_enabled(
+                        token,
+                        self._read_json_body(),
+                    ),
+                )
+                return
             if method == "GET" and parsed.path == "/api/audio/input-devices":
                 self._write_success(
                     HTTPStatus.OK,
@@ -986,6 +1001,21 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             self._write_success(
                 HTTPStatus.OK,
                 self.server.service.replace_audio_stt_enabled(
+                    token,
+                    self._read_json_body(),
+                ),
+            )
+            return
+        if method == "GET" and path == "/ui/api/audio/tts-enabled":
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.get_audio_tts_enabled(token),
+            )
+            return
+        if method == "PUT" and path == "/ui/api/audio/tts-enabled":
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.replace_audio_tts_enabled(
                     token,
                     self._read_json_body(),
                 ),

@@ -1802,10 +1802,16 @@ async function stopWebMicrophone({ sendStop = true } = {}) {
 function updateAudioRuntimeState(runtimeState) {
   const hadEnrollment = Boolean(state.audioRuntime?.enrollment || state.activeEnrollment);
   state.audioRuntime = clone(runtimeState);
-  const sttCheckbox = document.getElementById("stt-enabled");
-  if (sttCheckbox && !state.settingsOpen) {
+  if (!state.settingsOpen) {
     // 設定パネル編集中は下書きを壊さない。通常画面では runtime を正本にする。
-    sttCheckbox.checked = runtimeState.stt_enabled === true;
+    const sttCheckbox = document.getElementById("stt-enabled");
+    if (sttCheckbox) {
+      sttCheckbox.checked = runtimeState.stt_enabled === true;
+    }
+    const ttsCheckbox = document.getElementById("tts-enabled");
+    if (ttsCheckbox) {
+      ttsCheckbox.checked = runtimeState.tts_enabled === true;
+    }
   }
   renderWebMicrophoneControls();
   renderAudioMeters();
