@@ -1349,6 +1349,7 @@ function webMicrophoneHasLease() {
 
 function renderWebMicrophoneControls() {
   const sttEnabled = state.audioRuntime?.stt_enabled === true;
+  const ttsEnabled = state.audioRuntime?.tts_enabled === true;
   const running = Boolean(state.webAudio.inputSessionId);
   const busy = (
     state.webAudio.starting
@@ -1372,6 +1373,15 @@ function renderWebMicrophoneControls() {
   button.setAttribute(
     "aria-label",
     sttEnabled ? "マイク（音声認識）をOFF" : "マイク（音声認識）をON",
+  );
+  // TTS 運用トグル。入力元の有無に依存せず選択中アバターの tts.enabled を示す。
+  const ttsButton = element("toggle-web-tts");
+  ttsButton.disabled = state.webAudio.ttsToggling;
+  ttsButton.setAttribute("aria-pressed", ttsEnabled ? "true" : "false");
+  ttsButton.title = ttsEnabled ? "音声合成をOFF" : "音声合成をON";
+  ttsButton.setAttribute(
+    "aria-label",
+    ttsEnabled ? "音声合成をOFF" : "音声合成をON",
   );
   if (!busy && !running) {
     if (!source) {
@@ -1529,6 +1539,44 @@ async function setSttEnabled(enabled) {
     sttCheckbox.checked = result.enabled === true;
   }
   return result;
+}
+
+async function setTtsEnabled(enabled) {
+  const result = await apiRequest("/ui/api/audio/tts-enabled", {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  });
+  if (state.audioRuntime) {
+    state.audioRuntime.tts_enabled = result.enabled === true;
+  }
+  if (state.avatarSpeech?.selected_avatar) {
+    state.avatarSpeech.selected_avatar.tts = {
+      ...state.avatarSpeech.selected_avatar.tts,
+      enabled: result.enabled === true,
+    };
+  }
+  const ttsCheckbox = document.getElementById("tts-enabled");
+  if (ttsCheckbox) {
+    ttsCheckbox.checked = result.enabled === true;
+  }
+  return result;
+}
+
+async function toggleWebTts() {
+  if (state.webAudio.ttsToggling) {
+    return;
+  }
+  const current = state.audioRuntime?.tts_enabled === true;
+  state.webAudio.ttsToggling = true;
+  renderWebMicrophoneControls();
+  try {
+    await setTtsEnabled(!current);
+  } catch (error) {
+    showNotice(`音声合成の切替に失敗しました: ${error.message}`, true);
+  } finally {
+    state.webAudio.ttsToggling = false;
+    renderWebMicrophoneControls();
+  }
 }
 
 async function toggleWebMicrophone() {
@@ -4114,6 +4162,9 @@ function bindEvents() {
   });
   element("toggle-web-microphone").addEventListener("click", () => {
     toggleWebMicrophone();
+  });
+  element("toggle-web-tts").addEventListener("click", () => {
+    toggleWebTts();
   });
 
   element("open-settings").addEventListener("click", openSettings);
