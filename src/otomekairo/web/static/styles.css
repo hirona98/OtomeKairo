@@ -773,11 +773,11 @@ a.dashboard-item:hover {
   flex: 0 0 auto;
 }
 
-/* 音声観測メータ。サーバ audio_runtime_state を表示するだけ。 */
+/* 音声観測メータ。サーバ audio_runtime_state を表示するだけ。行間は控えめに詰める。 */
 .audio-meters {
   display: grid;
-  gap: var(--space-2);
-  padding: var(--space-2) 0 0;
+  gap: var(--space-1);
+  padding: var(--space-1) 0 0;
 }
 
 .audio-meters-settings {
