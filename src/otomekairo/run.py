@@ -2,13 +2,46 @@ from __future__ import annotations
 
 import errno
 import os
+import re
+import shutil
 import ssl
+import subprocess
 import sys
 from pathlib import Path
 
 from otomekairo.http_server import OtomeKairoHttpServer
 from otomekairo.service.app import OtomeKairoService
 from otomekairo.service.common import configure_debug_log_file, debug_log
+
+
+def _port_in_use_hint(host: str, port: int) -> str:
+    # bind 失敗時に、誰が掴んでいるかと対処手順をまとめて出す。
+    holders: list[str] = []
+    if shutil.which("ss"):
+        try:
+            completed = subprocess.run(
+                ["ss", "-tlnp"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            for line in completed.stdout.splitlines():
+                if re.search(rf":{port}\b", line):
+                    holders.append(line.strip())
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+    holder_text = "\n".join(f"  {line}" for line in holders) if holders else "  (LISTEN プロセスを特定できませんでした)"
+    return (
+        f"OtomeKairo server cannot listen on {host}:{port}: address is already in use.\n"
+        f"LISTEN holders:\n{holder_text}\n"
+        "対処:\n"
+        f"  1) ./scripts/free_server_port.sh {port}\n"
+        f"  2) それでも残る場合: ./scripts/free_server_port.sh {port} --force\n"
+        "  3) WSL2 でプロセスが無いのに失敗する場合: Windows 側で wsl --shutdown\n"
+        f"  4) 別ポート: OTOMEKAIRO_PORT=<空きポート> を指定\n"
+    )
 
 
 # メイン
@@ -41,14 +74,12 @@ def main() -> None:
         server = OtomeKairoHttpServer((host, port), service)
     except OSError as exc:
         if exc.errno == errno.EADDRINUSE:
-            message = (
-                f"OtomeKairo server cannot listen on {host}:{port}: address is already in use. "
-                "Stop the existing server process or set OTOMEKAIRO_PORT to another port."
-            )
-            debug_log("Run", message)
+            message = _port_in_use_hint(host, port)
+            debug_log("Run", message.replace("\n", " | "))
             print(message, file=sys.stderr)
             raise SystemExit(2) from None
         raise
+
 
     # TLSコンテキスト
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

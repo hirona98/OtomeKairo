@@ -28,13 +28,15 @@ fi
 mkdir -p "${TLS_DIR}"
 mkdir -p "${DATA_DIR}"
 
-# ポート確認
-if command -v ss >/dev/null 2>&1; then
-  if ss -ltn | grep -q ":${OTOMEKAIRO_PORT:-${DEFAULT_PORT}}\\b"; then
-    echo "ポート ${OTOMEKAIRO_PORT:-${DEFAULT_PORT}} は使用中です。既存プロセスを止めるか、OTOMEKAIRO_PORT を変更してください。" >&2
-    exit 1
-  fi
+# 前回起動が残っていると Address already in use になるため、起動前に解放を試みる。
+SERVER_PORT="${OTOMEKAIRO_PORT:-${DEFAULT_PORT}}"
+if ! "${SCRIPT_DIR}/free_server_port.sh" "${SERVER_PORT}"; then
+  echo "ポート ${SERVER_PORT} を解放できませんでした。" >&2
+  echo "  ./scripts/free_server_port.sh ${SERVER_PORT} --force" >&2
+  echo "それでもダメで WSL2 の場合: Windows 側で wsl --shutdown" >&2
+  exit 1
 fi
+
 
 # 開発用証明書
 if [[ ! -f "${CERT_FILE}" || ! -f "${KEY_FILE}" ]]; then

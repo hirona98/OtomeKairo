@@ -37,6 +37,11 @@ VSCode の F5 も起動前に同じ系統の準備を行うが、既に入って
 - `PYTHONPATH=src` を付けて `.venv` の Python からサーバを起動する
 - 既定ポート `55601` を使う
 - `0.0.0.0:55601` で listen する
+- 起動前に前回の `otomekairo.run` が残っていれば `scripts/free_server_port.sh` で解放する
+- `Address already in use` が続くとき（特に WSL2）は次を順に試す
+  1. `./scripts/free_server_port.sh 55601`
+  2. `./scripts/free_server_port.sh 55601 --force`
+  3. Windows 側で `wsl --shutdown`（PC 再起動より軽い）
 
 データはデフォルトで `var/otomekairo/` に保存する。
 デバッグログは `var/otomekairo/server.log` に保存する。
