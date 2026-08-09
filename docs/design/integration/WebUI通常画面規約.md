@@ -62,6 +62,15 @@ chip、badge、`.status.processing` / `.status.error` は上記を共有する�
 - 行レイアウトは flex + wrap とし、非表示コントロールが空列を残さない
 - 音声の開始/停止は `.mic-toggle`（マイクアイコン、`aria-pressed`）
 - 音声状態（停止中・入力中など）は composer 内ではなく statusbar の `#web-microphone-status` に出す
+- マイク操作行の直下に音声観測行（`.audio-meters`）を置く
+  - 入力レベル（`vad.dbfs`）
+  - VAD しきい値超過（`vad.probability` と threshold の比較。`vad.speaking` は区間中バッジ）
+  - 識別しきい値超過（直近発話の `top1_similarity` / `threshold_met`。連続更新ではない）
+  - データは `audio_runtime_state` を使い、ブラウザ側で VAD / 話者識別を再計算しない
+  - バー表示スケールは直近ピークやしきい値に依存させず固定する
+    - 入力レベル: -60 dBFS を 0%、**-12 dBFS を 100%**（超過は clip。数値テキストは実 dBFS）
+    - VAD probability / 識別 similarity: **0.0 を 0%、1.0 を 100%**（しきい値はマーカーのみ）
+  - 数値列・バッジ列は固定幅とし、表示内容の有無や桁変化でバー（track）幅を変えない
 - テキスト送信まわり: 主操作は既定 `button`（送信）、副操作は `.plain-button`、ファイル選択は `.file-button`
 
 ## ボタン

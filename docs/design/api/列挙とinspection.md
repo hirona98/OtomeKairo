@@ -213,7 +213,9 @@ response:
 `runtime_detail.audio_runtime_state` は音声 model、connector、入力リース、VAD、発話キュー、話者登録、直近発話結果の process-local snapshot を返す。
 音声 runtime state の意味と必須情報は [../audio/音声入力と話者識別.md](../audio/音声入力と話者識別.md) を正とする。
 `last_utterance_result` は直近 1 件だけを持ち、文字起こし、音声、表示名、embedding を含めない。
-話者識別不成立では `top1 / top2` に候補の `person_ref / similarity` を含める。
+通常発話の `last_utterance_result` は `top1_similarity` / `top2_similarity` / `threshold_met` を持つ。
+`threshold_met` は処理時の `speaker_recognition_threshold` に対する top1 超過だけを表し、最終受理判定とは独立する。
+話者識別不成立では `speaker_candidates` に top1 / top2 の `person_ref / similarity` を含める。
 過去の発話結果一覧は返さない。
 `runtime_detail.autonomous_runs` と `current_state.autonomous_runs` は `run_id / status / objective_summary / current_step_summary / history_summary / next_run_at / waiting_request_id / pause_reason / created_at / updated_at / completed_at` の要約を返す。
 `runtime_detail.wake_policy_observations` は現在設定されている `wake_policy.observations` と process-local の直近実行結果を照合した snapshot である。

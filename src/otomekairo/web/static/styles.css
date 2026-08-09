@@ -773,6 +773,128 @@ a.dashboard-item:hover {
   flex: 0 0 auto;
 }
 
+/* 音声観測メータ。サーバ audio_runtime_state を表示するだけ。 */
+.audio-meters {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2) 0 0;
+}
+
+.audio-meters-settings {
+  margin: var(--space-2) 0 var(--space-2) var(--setting-label-width, 170px);
+  padding: var(--space-3);
+  border: 1px solid var(--info-border);
+  border-radius: 6px;
+  background: var(--info-bg);
+}
+
+/* value / badge は固定幅。内容の有無や桁変化で track（バー）幅を変えない。 */
+.audio-meter-row {
+  display: grid;
+  grid-template-columns: 5.5em minmax(0, 1fr) 12em 9em;
+  gap: var(--space-2);
+  align-items: center;
+  min-height: 18px;
+  font-size: var(--font-secondary);
+  color: var(--muted);
+}
+
+.audio-meter-label {
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.audio-meter-track {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--item-line);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.audio-meter-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 80ms linear;
+}
+
+.audio-meter-row[data-active="true"] .audio-meter-fill {
+  background: var(--ok);
+}
+
+.audio-meter-row[data-active="false"] .audio-meter-fill {
+  background: var(--accent);
+}
+
+.audio-meter-row[data-empty="true"] .audio-meter-fill {
+  width: 0% !important;
+  background: var(--item-line);
+}
+
+.audio-meter-threshold {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--waiting);
+  pointer-events: none;
+}
+
+.audio-meter-value {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.audio-meter-badge {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: var(--font-micro);
+  line-height: 1.5;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 空でも列幅を潰さず、見た目だけ消す。 */
+.audio-meter-badge:empty {
+  visibility: hidden;
+  border-color: transparent;
+  background: transparent;
+}
+
+.audio-meter-badge.ok {
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.audio-meter-badge.waiting {
+  border-color: var(--waiting-border);
+  background: var(--waiting-bg);
+  color: var(--waiting);
+}
+
+.audio-meter-badge.muted {
+  border-color: var(--line);
+  background: #ffffff;
+  color: var(--muted);
+}
+
 #message-input {
   min-height: 60px;
   max-height: 150px;
@@ -1487,6 +1609,23 @@ input[type="checkbox"]:disabled {
   .range-field,
   .speaker-registration-row {
     grid-template-columns: 1fr;
+  }
+
+  /* 上段 track は label 以外フル幅のまま。下段だけ value/badge を固定幅で並べる。 */
+  .audio-meter-row {
+    grid-template-columns: 4.5em minmax(0, 1fr) 12em 9em;
+    grid-template-areas:
+      "label track track track"
+      ". value value badge";
+  }
+
+  .audio-meter-label { grid-area: label; }
+  .audio-meter-track { grid-area: track; }
+  .audio-meter-value { grid-area: value; text-align: right; }
+  .audio-meter-badge { grid-area: badge; }
+
+  .audio-meters-settings {
+    margin-left: 0;
   }
 
   .field-width-short,

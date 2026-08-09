@@ -108,6 +108,35 @@
               </svg>
             </button>
           </div>
+          <!-- サーバ受理済み音声の観測。VAD/識別は client で再計算しない。 -->
+          <div class="audio-meters" id="audio-meters" aria-live="polite">
+            <div class="audio-meter-row" data-meter="level">
+              <span class="audio-meter-label">入力</span>
+              <div class="audio-meter-track" aria-hidden="true">
+                <div class="audio-meter-fill" id="audio-meter-level-fill"></div>
+              </div>
+              <span class="audio-meter-value" id="audio-meter-level-value">—</span>
+              <span class="audio-meter-badge" id="audio-meter-level-badge"></span>
+            </div>
+            <div class="audio-meter-row" data-meter="vad">
+              <span class="audio-meter-label">VAD</span>
+              <div class="audio-meter-track" aria-hidden="true">
+                <div class="audio-meter-fill" id="audio-meter-vad-fill"></div>
+                <div class="audio-meter-threshold" id="audio-meter-vad-threshold"></div>
+              </div>
+              <span class="audio-meter-value" id="audio-meter-vad-value">—</span>
+              <span class="audio-meter-badge" id="audio-meter-vad-badge"></span>
+            </div>
+            <div class="audio-meter-row" data-meter="speaker">
+              <span class="audio-meter-label">識別（直近）</span>
+              <div class="audio-meter-track" aria-hidden="true">
+                <div class="audio-meter-fill" id="audio-meter-speaker-fill"></div>
+                <div class="audio-meter-threshold" id="audio-meter-speaker-threshold"></div>
+              </div>
+              <span class="audio-meter-value" id="audio-meter-speaker-value">—</span>
+              <span class="audio-meter-badge" id="audio-meter-speaker-badge"></span>
+            </div>
+          </div>
           <div class="attachment-preview" id="attachment-preview" hidden>
             <img id="attachment-image" alt="添付画像プレビュー">
             <button type="button" class="plain-button" id="remove-attachment">削除</button>
@@ -753,7 +782,26 @@
                   <input id="vad-probability-threshold" type="range" min="0.1" max="0.9" step="0.05">
                   <output id="vad-probability-threshold-value"></output>
                 </div>
-                <p class="field-hint field-hint-indent">値を下げると音声を拾いやすくなり、環境音による誤検出も増えます。</p>
+                <div class="audio-meters audio-meters-settings" id="settings-audio-meters-vad" aria-live="polite">
+                  <div class="audio-meter-row" data-meter="level">
+                    <span class="audio-meter-label">入力</span>
+                    <div class="audio-meter-track" aria-hidden="true">
+                      <div class="audio-meter-fill" id="settings-meter-level-fill"></div>
+                    </div>
+                    <span class="audio-meter-value" id="settings-meter-level-value">—</span>
+                    <span class="audio-meter-badge" id="settings-meter-level-badge"></span>
+                  </div>
+                  <div class="audio-meter-row" data-meter="vad">
+                    <span class="audio-meter-label">VAD</span>
+                    <div class="audio-meter-track" aria-hidden="true">
+                      <div class="audio-meter-fill" id="settings-meter-vad-fill"></div>
+                      <div class="audio-meter-threshold" id="settings-meter-vad-threshold"></div>
+                    </div>
+                    <span class="audio-meter-value" id="settings-meter-vad-value">—</span>
+                    <span class="audio-meter-badge" id="settings-meter-vad-badge"></span>
+                  </div>
+                </div>
+                <p class="field-hint field-hint-indent">値を下げると音声を拾いやすくなり、環境音による誤検出も増えます。スライダは未保存値でも上のVADバーに反映します。</p>
               </div>
               <div class="speaker-enrollment">
                 <div class="setting-row setting-row-top">
@@ -775,6 +823,18 @@
                   <input id="speaker-recognition-threshold" type="range" min="0.1" max="0.9" step="0.05">
                   <output id="speaker-recognition-threshold-value"></output>
                 </div>
+                <div class="audio-meters audio-meters-settings" id="settings-audio-meters-speaker" aria-live="polite">
+                  <div class="audio-meter-row" data-meter="speaker">
+                    <span class="audio-meter-label">識別（直近）</span>
+                    <div class="audio-meter-track" aria-hidden="true">
+                      <div class="audio-meter-fill" id="settings-meter-speaker-fill"></div>
+                      <div class="audio-meter-threshold" id="settings-meter-speaker-threshold"></div>
+                    </div>
+                    <span class="audio-meter-value" id="settings-meter-speaker-value">—</span>
+                    <span class="audio-meter-badge" id="settings-meter-speaker-badge"></span>
+                  </div>
+                </div>
+                <p class="field-hint field-hint-indent">識別メータは直近1発話の結果です。しきい値超過と最終受理は別判定です。</p>
               </div>
             </fieldset>
           </section>

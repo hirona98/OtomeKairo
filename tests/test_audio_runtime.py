@@ -3,8 +3,13 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from otomekairo.audio.runtime import AUDIO_FORMAT
-from otomekairo.audio.segmenter import AudioSegmenter, FRAME_BYTES
+from otomekairo.audio.models import SpeakerIdentification
+from otomekairo.audio.runtime import AUDIO_FORMAT, QueuedUtterance
+from otomekairo.audio.segmenter import (
+    AudioSegmenter,
+    FRAME_BYTES,
+    SegmentedUtterance,
+)
 from otomekairo.service.app import OtomeKairoService
 
 
@@ -367,6 +372,87 @@ class AudioRuntimeControlTests(unittest.TestCase):
                 self.assertEqual(
                     service._audio_runtime.snapshot()["response_client_id"],
                     "web-audio-test",
+                )
+            finally:
+                service.close_audio_runtime()
+
+    def test_last_utterance_result_exposes_threshold_met(self) -> None:
+        # 識別 similarity としきい値超過を result_code に依存せず返す。
+        with TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            try:
+                state = service.store.read_state()
+                state["microphone_settings"][
+                    "speaker_recognition_threshold"
+                ] = 0.6
+                service.store.write_state(state)
+                service._audio_runtime.reload_settings()
+
+                item = QueuedUtterance(
+                    utterance_seq=1,
+                    source="local_microphone",
+                    response_client_id="console-main",
+                    lease_generation=1,
+                    settings_generation=1,
+                    work_generation=1,
+                    explicit_input=False,
+                    utterance=SegmentedUtterance(
+                        amivoice_pcm16le=b"\x00\x00" * 8000,
+                        speaker_pcm16le=b"\x00\x00" * 8000,
+                        voiced_samples=8000,
+                        forced_split=False,
+                    ),
+                )
+                accepted = service._audio_runtime._build_last_result(
+                    item=item,
+                    result_code="accepted",
+                    stt_ms=10.0,
+                    speaker_ms=5.0,
+                    stt_error=None,
+                    identification=SpeakerIdentification(
+                        person_ref="person:voice:test",
+                        accepted=True,
+                        top1_person_ref="person:voice:test",
+                        top1_similarity=0.72,
+                        top2_person_ref=None,
+                        top2_similarity=None,
+                    ),
+                )
+                self.assertEqual(accepted["top1_similarity"], 0.72)
+                self.assertIsNone(accepted["top2_similarity"])
+                self.assertTrue(accepted["threshold_met"])
+                self.assertNotIn("speaker_candidates", accepted)
+
+                unidentified = service._audio_runtime._build_last_result(
+                    item=item,
+                    result_code="speaker_unidentified",
+                    stt_ms=10.0,
+                    speaker_ms=5.0,
+                    stt_error=None,
+                    identification=SpeakerIdentification(
+                        person_ref=None,
+                        accepted=False,
+                        top1_person_ref="person:voice:a",
+                        top1_similarity=0.55,
+                        top2_person_ref="person:voice:b",
+                        top2_similarity=0.5,
+                    ),
+                )
+                self.assertEqual(unidentified["top1_similarity"], 0.55)
+                self.assertEqual(unidentified["top2_similarity"], 0.5)
+                self.assertFalse(unidentified["threshold_met"])
+                self.assertEqual(
+                    unidentified["speaker_candidates"],
+                    [
+                        {
+                            "person_ref": "person:voice:a",
+                            "similarity": 0.55,
+                        },
+                        {
+                            "person_ref": "person:voice:b",
+                            "similarity": 0.5,
+                        },
+                    ],
                 )
             finally:
                 service.close_audio_runtime()

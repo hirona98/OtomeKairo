@@ -106,6 +106,11 @@ const MICROPHONE_SOURCE_LABELS = {
   console_microphone: "CocoroConsole",
   web_microphone: "ブラウザ",
 };
+// 音声メータの表示スケール。直近ピークやしきい値では正規化しない。
+const AUDIO_METER_LEVEL_MIN_DBFS = -60;
+const AUDIO_METER_LEVEL_MAX_DBFS = -12; // バー満杯（上限固定）
+const AUDIO_METER_UNIT_MIN = 0;
+const AUDIO_METER_UNIT_MAX = 1; // VAD probability / speaker similarity
 
 function element(id) {
   return document.getElementById(id);
@@ -1030,6 +1035,7 @@ function renderDashboardHealth() {
 
   const audio = detail.audio_runtime_state;
   if (audio && typeof audio === "object") {
+    const last = audio.last_utterance_result;
     items.push(createDashboardItem({
       title: "音声入力",
       badge: audio.available === true ? "利用可能" : displayValue(audio.unavailable_reason, "利用不可"),
@@ -1041,8 +1047,14 @@ function renderDashboardHealth() {
       ].filter(Boolean).join(" · "),
       meta: [
         audio.selected_device?.name,
-        audio.vad?.speaking ? "発話中" : "",
+        typeof audio.vad?.dbfs === "number" && Number.isFinite(audio.vad.dbfs)
+          ? `${audio.vad.dbfs.toFixed(1)} dBFS`
+          : "",
+        audio.vad?.speaking ? "区間中" : "",
         typeof audio.vad?.probability === "number" ? `VAD ${formatScore(audio.vad.probability)}` : "",
+        last && typeof last.top1_similarity === "number"
+          ? `識別 ${formatScore(last.top1_similarity)}${last.threshold_met ? " 超過" : " 未満"}`
+          : "",
         audio.paused_reason ? `pause ${audio.paused_reason}` : "",
       ].filter(Boolean).join(" · "),
     }));
@@ -1099,6 +1111,13 @@ async function refreshDashboard({ silent = false } = {}) {
     // 記憶 snapshot は補助面なので失敗しても他の「いま」表示は続ける。
     if (memorySnapshot) {
       state.dashboard.memorySnapshot = memorySnapshot;
+    }
+    // イベント未受信時の初期表示用。連続更新は audio_runtime_state event が担う。
+    const audioSnapshot = currentState?.runtime_detail?.audio_runtime_state;
+    if (audioSnapshot && typeof audioSnapshot === "object") {
+      state.audioRuntime = clone(audioSnapshot);
+      renderWebMicrophoneControls();
+      renderAudioMeters();
     }
     renderDashboard();
     if (!silent) {
@@ -1709,6 +1728,7 @@ function updateAudioRuntimeState(runtimeState) {
   const hadEnrollment = Boolean(state.audioRuntime?.enrollment || state.activeEnrollment);
   state.audioRuntime = clone(runtimeState);
   renderWebMicrophoneControls();
+  renderAudioMeters();
   if (runtimeState.enrollment) {
     state.activeEnrollment = {
       ...state.activeEnrollment,
@@ -1743,6 +1763,192 @@ function updateAudioRuntimeState(runtimeState) {
     );
   }
   renderSpeakerEnrollment();
+}
+
+// 設定スライダは未保存値も thr マーカーに使う。それ以外は保存済み設定。
+function currentVadThreshold() {
+  const slider = element("vad-probability-threshold");
+  if (slider && state.settingsOpen) {
+    return numberValue("vad-probability-threshold", 0.5);
+  }
+  const saved = state.avatarSpeech?.microphone_settings?.vad_probability_threshold;
+  return typeof saved === "number" ? saved : 0.5;
+}
+
+function currentSpeakerThreshold() {
+  const slider = element("speaker-recognition-threshold");
+  if (slider && state.settingsOpen) {
+    return numberValue("speaker-recognition-threshold", 0.6);
+  }
+  const saved = state.avatarSpeech?.microphone_settings?.speaker_recognition_threshold;
+  return typeof saved === "number" ? saved : 0.6;
+}
+
+function clampMeterRatio(ratio) {
+  return Math.min(1, Math.max(0, ratio));
+}
+
+function dbfsToRatio(dbfs) {
+  // 固定レンジ: MIN..MAX dBFS。無音 null は 0。MAX 超過は 100% clip。
+  if (typeof dbfs !== "number" || !Number.isFinite(dbfs)) {
+    return 0;
+  }
+  const span = AUDIO_METER_LEVEL_MAX_DBFS - AUDIO_METER_LEVEL_MIN_DBFS;
+  if (span <= 0) {
+    return 0;
+  }
+  return clampMeterRatio((dbfs - AUDIO_METER_LEVEL_MIN_DBFS) / span);
+}
+
+// VAD probability / speaker similarity を 0..1 固定スケールへ写像する。
+function unitMeterRatio(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return 0;
+  }
+  const span = AUDIO_METER_UNIT_MAX - AUDIO_METER_UNIT_MIN;
+  if (span <= 0) {
+    return 0;
+  }
+  return clampMeterRatio((value - AUDIO_METER_UNIT_MIN) / span);
+}
+
+function setMeterThreshold(markerId, ratio) {
+  const marker = element(markerId);
+  if (!marker) {
+    return;
+  }
+  marker.style.left = `${(clampMeterRatio(ratio) * 100).toFixed(1)}%`;
+}
+
+function setMeterFill(fillId, ratio, row, { active = null, empty = false } = {}) {
+  const fill = element(fillId);
+  if (!fill || !row) {
+    return;
+  }
+  const clamped = empty ? 0 : clampMeterRatio(ratio);
+  fill.style.width = `${(clamped * 100).toFixed(1)}%`;
+  row.dataset.empty = empty ? "true" : "false";
+  if (active === null) {
+    delete row.dataset.active;
+  } else {
+    row.dataset.active = active ? "true" : "false";
+  }
+}
+
+function setMeterBadge(badgeId, text, kind = "") {
+  const badge = element(badgeId);
+  if (!badge) {
+    return;
+  }
+  badge.textContent = text || "";
+  badge.className = `audio-meter-badge${kind ? ` ${kind}` : ""}`;
+}
+
+function resultCodeLabel(code) {
+  const labels = {
+    accepted: "受理",
+    speaker_unidentified: "識別不可",
+    wake_word_not_matched: "起動語不一致",
+    stt_transient_error: "STT失敗",
+    stt_configuration_error: "STT設定",
+    speaker_processing_error: "識別処理失敗",
+    enrollment_sample_accepted: "登録サンプル",
+    enrollment_completed: "登録完了",
+    enrollment_sample_too_short: "短すぎ",
+    internal_error: "内部エラー",
+  };
+  return labels[code] || code || "";
+}
+
+function renderAudioMeters() {
+  const runtime = state.audioRuntime;
+  const vad = runtime?.vad || {};
+  const last = runtime?.last_utterance_result || null;
+  const available = runtime?.available === true;
+  const hasActiveSource = Boolean(runtime?.active_source);
+  const liveReady = available && hasActiveSource;
+  const vadThreshold = currentVadThreshold();
+  const speakerThreshold = currentSpeakerThreshold();
+
+  // --- 入力レベル ---
+  const levelRows = document.querySelectorAll('.audio-meter-row[data-meter="level"]');
+  const dbfs = vad.dbfs;
+  const hasLevel = liveReady && typeof dbfs === "number" && Number.isFinite(dbfs);
+  const levelText = hasLevel ? `${dbfs.toFixed(1)} dBFS` : (liveReady ? "silence" : "—");
+  for (const row of levelRows) {
+    const isSettings = row.closest(".audio-meters-settings");
+    const fillId = isSettings ? "settings-meter-level-fill" : "audio-meter-level-fill";
+    const valueId = isSettings ? "settings-meter-level-value" : "audio-meter-level-value";
+    const badgeId = isSettings ? "settings-meter-level-badge" : "audio-meter-level-badge";
+    setMeterFill(fillId, dbfsToRatio(dbfs), row, { empty: !hasLevel });
+    element(valueId).textContent = levelText;
+    setMeterBadge(badgeId, "", "");
+  }
+
+  // --- VAD（しきい値超過は probability 比較。speaking は区間中） ---
+  const vadRows = document.querySelectorAll('.audio-meter-row[data-meter="vad"]');
+  const probability = vad.probability;
+  const hasProbability = liveReady && typeof probability === "number" && Number.isFinite(probability);
+  const vadExceeded = hasProbability && probability >= vadThreshold;
+  const vadValueText = hasProbability
+    ? `P ${probability.toFixed(2)} / ${vadThreshold.toFixed(2)}`
+    : "—";
+  let vadBadgeText = "";
+  let vadBadgeKind = "";
+  if (hasProbability) {
+    vadBadgeText = vadExceeded ? "超過" : "未満";
+    vadBadgeKind = vadExceeded ? "ok" : "muted";
+    if (vad.speaking) {
+      vadBadgeText = `${vadBadgeText} · 区間中`;
+    }
+  }
+  for (const row of vadRows) {
+    const isSettings = row.closest(".audio-meters-settings");
+    const fillId = isSettings ? "settings-meter-vad-fill" : "audio-meter-vad-fill";
+    const thrId = isSettings ? "settings-meter-vad-threshold" : "audio-meter-vad-threshold";
+    const valueId = isSettings ? "settings-meter-vad-value" : "audio-meter-vad-value";
+    const badgeId = isSettings ? "settings-meter-vad-badge" : "audio-meter-vad-badge";
+    setMeterFill(fillId, hasProbability ? unitMeterRatio(probability) : 0, row, {
+      active: hasProbability ? vadExceeded : null,
+      empty: !hasProbability,
+    });
+    setMeterThreshold(thrId, unitMeterRatio(vadThreshold));
+    element(valueId).textContent = vadValueText;
+    setMeterBadge(badgeId, vadBadgeText, vadBadgeKind);
+  }
+
+  // --- 識別（直近発話。連続更新ではない） ---
+  const speakerRows = document.querySelectorAll('.audio-meter-row[data-meter="speaker"]');
+  const top1 = typeof last?.top1_similarity === "number" ? last.top1_similarity : null;
+  const hasSpeaker = top1 !== null && Number.isFinite(top1);
+  // threshold_met はサーバ処理時のしきい値。表示マーカーは現在スライダも示す。
+  const thresholdMet = last?.threshold_met === true;
+  const speakerValueText = hasSpeaker
+    ? `sim ${top1.toFixed(2)} / thr ${speakerThreshold.toFixed(2)}`
+    : "—";
+  let speakerBadgeText = "";
+  let speakerBadgeKind = "";
+  if (hasSpeaker) {
+    speakerBadgeText = thresholdMet ? "超過" : "未満";
+    speakerBadgeKind = thresholdMet ? "ok" : "muted";
+    if (last?.result_code) {
+      speakerBadgeText = `${speakerBadgeText} · ${resultCodeLabel(last.result_code)}`;
+    }
+  }
+  for (const row of speakerRows) {
+    const isSettings = row.closest(".audio-meters-settings");
+    const fillId = isSettings ? "settings-meter-speaker-fill" : "audio-meter-speaker-fill";
+    const thrId = isSettings ? "settings-meter-speaker-threshold" : "audio-meter-speaker-threshold";
+    const valueId = isSettings ? "settings-meter-speaker-value" : "audio-meter-speaker-value";
+    const badgeId = isSettings ? "settings-meter-speaker-badge" : "audio-meter-speaker-badge";
+    setMeterFill(fillId, hasSpeaker ? unitMeterRatio(top1) : 0, row, {
+      active: hasSpeaker ? thresholdMet : null,
+      empty: !hasSpeaker,
+    });
+    setMeterThreshold(thrId, unitMeterRatio(speakerThreshold));
+    element(valueId).textContent = speakerValueText;
+    setMeterBadge(badgeId, speakerBadgeText, speakerBadgeKind);
+  }
 }
 
 function addMessage(kind, text, images = [], sourceLabel = "", options = {}) {
@@ -2471,6 +2677,8 @@ function updateMicrophoneSettingLabels() {
     numberValue("vad-probability-threshold", 0.5).toFixed(2);
   element("speaker-recognition-threshold-value").textContent =
     numberValue("speaker-recognition-threshold", 0.6).toFixed(2);
+  // しきい値スライダ操作中は未保存値を thr マーカーへ即時反映する。
+  renderAudioMeters();
 }
 
 function renderLocalInputDevices(selectedDevice) {
@@ -3864,6 +4072,7 @@ function bindEvents() {
   });
   element("vad-probability-threshold").addEventListener("input", updateMicrophoneSettingLabels);
   element("speaker-recognition-threshold").addEventListener("input", updateMicrophoneSettingLabels);
+  renderAudioMeters();
   element("start-speaker-enrollment").addEventListener("click", () => {
     startSpeakerEnrollment();
   });

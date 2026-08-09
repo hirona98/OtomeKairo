@@ -1545,6 +1545,17 @@ class AudioRuntime:
         stt_error: AmiVoiceError | None,
         identification: SpeakerIdentification,
     ) -> dict[str, Any]:
+        # しきい値超過は最終受理（margin 条件を含む）と独立して返す。
+        threshold = float(
+            self._settings["microphone_settings"][
+                "speaker_recognition_threshold"
+            ]
+        )
+        top1_similarity = identification.top1_similarity
+        top2_similarity = identification.top2_similarity
+        threshold_met = (
+            top1_similarity is not None and top1_similarity >= threshold
+        )
         result: dict[str, Any] = {
             "utterance_seq": item.utterance_seq,
             "source": item.source,
@@ -1559,6 +1570,9 @@ class AudioRuntime:
                 if stt_error is not None
                 else ""
             ),
+            "top1_similarity": top1_similarity,
+            "top2_similarity": top2_similarity,
+            "threshold_met": threshold_met,
         }
         if result_code == "speaker_unidentified":
             result["speaker_candidates"] = [
