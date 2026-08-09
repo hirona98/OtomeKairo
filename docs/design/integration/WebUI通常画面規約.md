@@ -6,15 +6,16 @@ API wire、認可、内部状態の表示内容の意味は [../api/README.md](.
 
 ## 対象
 
-- topbar
-- 内部状態パネル（`dashboard-panel`）
+- topbar（確認メニューを含む）
+- いまパネル（`dashboard-panel`。旧称・内部状態）
 - チャット（`chat-panel` / messages / bubble）
 - composer（マイク入力・テキスト・画像送信）
 - statusbar
 - notice（一時通知）
 
 設定パネルのフォーム行・fieldset 規約は対象外（色・フォントなどのトークンは共有する）。
-ログ専用画面（`/ui/logs`）は対象外とする。色トークンは共有してよいが、表形式の高密度ログ表示として別レイアウトを持つ。
+ログ専用画面（`/ui/logs`）と判断専用画面（`/ui/cycles`）は対象外とする。色トークンは共有してよいが、専用レイアウトを持つ。
+確認面の役割分担（いま / 判断 / ログ）は [../runtime/デバッグ可能性.md](../runtime/デバッグ可能性.md) を正とする。
 
 
 ## 領域と密度
@@ -22,7 +23,7 @@ API wire、認可、内部状態の表示内容の意味は [../api/README.md](.
 | 領域 | 基本フォント | 備考 |
 | --- | --- | --- |
 | topbar | `--font-title` / body | ブランドと操作 |
-| 内部状態 | `--font-secondary` / `--font-micro` | inspection 用の高密度。body に無理に揃えない |
+| いま | `--font-secondary` / `--font-micro` | 現在の個の高密度要約。body に無理に揃えない |
 | チャット本文 | `--font-body` | meta は secondary |
 | composer | `--font-body` | 操作帯 |
 | statusbar | `--font-secondary` | 接続状態 |

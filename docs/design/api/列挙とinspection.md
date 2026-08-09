@@ -487,8 +487,10 @@ response:
 
 - 認証: 必要
 - 役割: 最近の `cycle_summary` 一覧を返す
-- `limit` は省略時 `20`
+- `limit` は省略時 `20`、サーバは `1` 以上 `100` 以下に clamp する
 - `started_at` / `finished_at` は OtomeKairo のローカルタイムゾーンに属する offset 付き timestamp で返す
+- ブラウザ UI は同一処理を `GET /ui/api/inspection/cycle-summaries` 経由で呼ぶ
+- `GET /ui/api/inspection/cycle-summaries` は server が保持する `console_access_token` で認可し、token をブラウザへ返さない
 
 response:
 
@@ -524,6 +526,8 @@ response:
 - 認証: 必要
 - 役割: 指定した `cycle_id` の段階トレースを返す
 - 含まれる timestamp 系フィールドは OtomeKairo のローカルタイムゾーンに属する offset 付き timestamp で返す
+- ブラウザ UI の判断画面は同一 wire を `GET /ui/api/inspection/cycles/{cycle_id}` 経由で読む
+- `GET /ui/api/inspection/cycles/{cycle_id}` は server が保持する `console_access_token` で認可し、token をブラウザへ返さない
 
 response:
 
@@ -570,9 +574,11 @@ exact answer 系の cycle では、`recall_trace` に `answer_contract`、`evide
 ### `GET /api/inspection/cycles/{cycle_id}/cognitive-context`
 
 - 認証: 必要
-- 役割: 指定した `cycle_id` の前景化と派生 cognitive view を `CocoroConsole` のデバッグ表示向けに返す
+- 役割: 指定した `cycle_id` の前景化と派生 cognitive view を判断詳細表示向けに返す
 - この endpoint は `cycle_trace.decision_trace` から inspection 用の派生 view だけを取り出す
 - 返却内容は正本状態ではない
+- ブラウザ UI は同一 wire を `GET /ui/api/inspection/cycles/{cycle_id}/cognitive-context` 経由で読む
+- `GET /ui/api/inspection/cycles/{cycle_id}/cognitive-context` は server が保持する `console_access_token` で認可し、token をブラウザへ返さない
 
 response:
 

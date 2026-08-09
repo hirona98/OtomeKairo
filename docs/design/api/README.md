@@ -52,11 +52,17 @@ API 仕様は次のように分ける。
 ブラウザ UI はブラウザstorageへ永続化した `person_ref / interaction_ref` と、
 OtomeKairo設定の `selected_conversation_display_name_id` から解決した表示名を `interaction_context` として送る。
 ブラウザ UI は `/ui/api/config/...` を通じて既存設定操作を呼び出す。
-`GET /ui/logs` は会話 UI とは別のログ専用画面であり、`debug_log` を `GET /ui/api/logs/stream` 経由でリアルタイム購読する。
-`GET /ui/api/logs/stream` は server が保持する `console_access_token` で認可し、token をブラウザへ返さない。
-`GET /ui/api/logs/stream` は `Origin` と `Host` が一致する同一 origin の接続だけを受理する。
-ログ画面の wire は `GET /api/logs/stream` と同じであり、正本は [列挙とinspection.md](列挙とinspection.md) とする。
-メイン画面 topbar からログ画面を新しいタブで開ける。
+確認系 UI は次の 3 つに揃える（見方の正本は [../runtime/デバッグ可能性.md](../runtime/デバッグ可能性.md)）。
+
+- **いま**: メイン画面左パネル。`/ui/api/inspection/current-state` などの要約
+- **判断**: `GET /ui/cycles`。`/ui/api/inspection/cycle-summaries` と `/ui/api/inspection/cycles/{cycle_id}` および `cognitive-context`
+- **ログ**: `GET /ui/logs`。`/ui/api/logs/stream` で `debug_log` を live 購読
+
+`GET /ui/logs` と `GET /ui/cycles` は会話 UI とは別の専用画面である。
+`/ui/api/logs/stream` と `/ui/api/inspection/cycles/...` は server が保持する `console_access_token` で認可し、token をブラウザへ返さない。
+`/ui/api/logs/stream` は `Origin` と `Host` が一致する同一 origin の接続だけを受理する。
+ログの wire は `GET /api/logs/stream`、判断詳細の wire は `GET /api/inspection/cycles/...` と同じであり、正本は [列挙とinspection.md](列挙とinspection.md) とする。
+メイン画面 topbar の「確認」メニューから、いま / 判断 / ログへ辿れる。
 ナビは次の分類とする。
 
 - 表現: `表示`、`アバター`、`モーション`
