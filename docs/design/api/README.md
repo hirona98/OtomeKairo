@@ -22,6 +22,7 @@ API 仕様は次のように分ける。
 - [audio_stream.md](audio_stream.md)
   - microphone connector、CocoroConsole、Web microphone の PCM stream
   - Web 入力 session と実効入力状態
+  - STT 運用トグル（`stt-enabled`）
   - input device catalog
   - 話者登録と話者管理
 - [状態と設定.md](状態と設定.md)
@@ -75,7 +76,7 @@ OtomeKairo設定の `selected_conversation_display_name_id` から解決した�
 設定編集の役割は次のように分ける。
 
 - Web UI: 人格（本文・表現補助・音声起動ワード）、モデル、記憶、会話入力（呼ばれ方・STT 詳細）、定期思考（思考前観測を含む）、Watcher、デスクトップ取得方針、カメラ接続、MCP、API説明、アバター音声を含む本体設定。表示・VRM・モーションは最終接続端末の現在値を読み取り専用で表示する
-- CocoroConsole: 表示、アバター（プリセットと VRM）、モーション、マイク（入力元と Console デバイス）、ライセンス。メイン画面に STT / TTS / デスクトップウォッチの運用トグルを持つ。音声合成と音声起動ワードは Web UI で編集する
+- CocoroConsole: 表示、アバター（プリセットと VRM）、モーション、マイク（入力元と Console デバイス）、ライセンス。メイン画面のマイクボタンは選択中アバターの `stt.enabled` 運用トグルであり、TTS / デスクトップウォッチの運用トグルと並べる。音声合成と音声起動ワードは Web UI で編集する
 
 `表示` と `モーション` とアバターの VRM は、OtomeKairo が保持する `console_client_settings` の現在値を Web UI に disabled で表示する。編集は CocoroConsole から端末設定 API へ保存する。
 `定期思考` は判断機会の有効化・間隔・発話頻度に加え、思考前のデスクトップ観測とカメラ観測の on/off を持つ。カメラの host や account など接続定義は `接続 → カメラ` に置く。
@@ -87,7 +88,7 @@ Web UI のアバター複製では、最終接続端末の `avatar_presentations
 最後に接続した端末が存在しない場合、端末依存の設定欄を無効にし、VRM 表示設定の複製対象も持たない。
 記憶の `記憶複製` は client 下書きとして保持し、適用時に `POST /ui/api/config/memory-sets/clone` を呼んでから `editor-state` を保存する。
 ブラウザ UI は `/ui/api/config/avatar-speech/editor-state` を通じて、アバターごとの STT / TTS と保存するマイク入力元を編集する。
-ブラウザ UI は保存済み入力元を通常画面へ表示し、マイクアイコンのトグルでWeb入力sessionを開始/停止する。ブラウザマイク選択時だけ `/ui/api/audio/stream` へ取得音声を送る。音声状態は statusbar に表示する。
+ブラウザ UI は保存済み入力元を通常画面へ表示し、マイクアイコンで選択中アバターの `stt.enabled` をトグルする。表示の正本は `audio_runtime_state.stt_enabled` とする。`input_source=web_microphone` のときだけ STT ON に合わせて Web 入力 session とブラウザ capture を開始し、STT OFF または session 終了で capture を止める。`local_microphone` / `console_microphone` では STT トグルのみ行い、応答先の Web 入力 session は mic 操作に混ぜない。音声状態は statusbar に表示する。
 ブラウザ UI はVAD、STT、音声起動ワード判定、話者識別を実行しない。
 ブラウザ UI は `/ui/api/audio/...` を通じて input device 確認と話者管理を行う。
 ブラウザ UI は TTS providerへ接続せず、OtomeKairoから受信した`assistant_audio`のWAVをブラウザ音声出力で直接再生する。

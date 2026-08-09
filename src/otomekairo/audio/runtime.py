@@ -329,6 +329,8 @@ class AudioRuntime:
             return {
                 "configured_source": microphone["input_source"],
                 "effective_source": self._effective_source_locked(),
+                "stt_enabled": bool(self._settings["stt"]["enabled"]),
+                "selected_avatar_id": self._settings["selected_avatar_id"],
                 "local_input_device": deepcopy(
                     microphone["local_input_device"]
                 ),
@@ -616,6 +618,8 @@ class AudioRuntime:
                     "microphone_settings"
                 ]["input_source"],
                 "effective_source": self._effective_source_locked(),
+                "stt_enabled": bool(self._settings["stt"]["enabled"]),
+                "selected_avatar_id": self._settings["selected_avatar_id"],
                 "response_client_id": self._effective_response_client_id_locked(),
                 "selected_device": deepcopy(
                     active.device if active is not None else None

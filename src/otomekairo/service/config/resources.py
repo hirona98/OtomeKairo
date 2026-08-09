@@ -207,6 +207,51 @@ class ServiceConfigResourcesMixin:
         self._append_avatar_speech_editor_state_audit_event(state=state, operation="read")
         return self._build_avatar_speech_editor_state(state)
 
+    def get_stt_enabled(self, token: str | None) -> dict[str, Any]:
+        # 運用トグル用。選択中アバターの stt.enabled だけを返す。
+        state = self._require_token(token)
+        selected_avatar_id = state["selected_avatar_id"]
+        return {
+            "enabled": bool(state["avatars"][selected_avatar_id]["stt"]["enabled"]),
+            "selected_avatar_id": selected_avatar_id,
+        }
+
+    def replace_stt_enabled(
+        self,
+        token: str | None,
+        definition: dict[str, Any],
+    ) -> dict[str, Any]:
+        # マイク運用トグルは stt.enabled 1 bit だけを更新する。
+        state = self._require_token(token)
+        if not isinstance(definition, dict) or set(definition) != {"enabled"}:
+            raise ServiceError(
+                400,
+                "invalid_stt_enabled",
+                "stt-enabled request must contain only enabled.",
+            )
+        enabled = definition.get("enabled")
+        if not isinstance(enabled, bool):
+            raise ServiceError(
+                400,
+                "invalid_stt_enabled",
+                "enabled must be a boolean.",
+            )
+        selected_avatar_id = state["selected_avatar_id"]
+        selected_avatar = state["avatars"][selected_avatar_id]
+        previous_enabled = bool(selected_avatar["stt"]["enabled"])
+        if previous_enabled != enabled:
+            selected_avatar["stt"]["enabled"] = enabled
+            self.store.write_state(state)
+            self._reload_audio_runtime_settings()
+            self._append_stt_enabled_audit_event(
+                state=state,
+                enabled=enabled,
+            )
+        return {
+            "enabled": enabled,
+            "selected_avatar_id": selected_avatar_id,
+        }
+
     def replace_avatar_speech_editor_state(
         self,
         token: str | None,
@@ -1319,6 +1364,28 @@ class ServiceConfigResourcesMixin:
                     "selected_model_preset_id": state["selected_model_preset_id"],
                     "selected_avatar_id": state["selected_avatar_id"],
                     "avatar_count": len(state["avatars"]),
+                }
+            ]
+        )
+
+    def _append_stt_enabled_audit_event(
+        self,
+        *,
+        state: dict[str, Any],
+        enabled: bool,
+    ) -> None:
+        # 運用トグルの変更だけを audit に残し、秘密値は含めない。
+        self.store.append_events(
+            events=[
+                {
+                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
+                    "cycle_id": "config:stt-enabled",
+                    "memory_set_id": state["selected_memory_set_id"],
+                    "kind": "stt_enabled_write",
+                    "role": "system",
+                    "created_at": self._now_iso(),
+                    "selected_avatar_id": state["selected_avatar_id"],
+                    "enabled": enabled,
                 }
             ]
         )

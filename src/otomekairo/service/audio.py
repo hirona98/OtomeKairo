@@ -56,6 +56,16 @@ class ServiceAudioMixin:
         self._require_token(token)
         return self._audio_runtime.input_state()
 
+    def get_audio_stt_enabled(self, token: str | None) -> dict[str, Any]:
+        return self.get_stt_enabled(token)
+
+    def replace_audio_stt_enabled(
+        self,
+        token: str | None,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.replace_stt_enabled(token, payload)
+
     def start_web_audio_input_session(
         self,
         token: str | None,

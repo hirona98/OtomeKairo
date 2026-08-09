@@ -149,6 +149,51 @@ response:
 
 owner の event stream 切断、Web audio stream 切断、heartbeat timeout でも同じ終了処理を実行する。
 音声設定変更でもsessionを終了する。
+選択中アバターの `stt.enabled` が false になったときもsessionを終了する。
+
+## STT 運用トグル API
+
+### `GET /api/audio/stt-enabled`
+
+- 認証: 必要
+- 利用主体: CocoroConsole、Stream Deck、その他運用 client
+- 役割: 選択中アバターの `stt.enabled` を返す
+
+### `PUT /api/audio/stt-enabled`
+
+- 認証: 必要
+- 利用主体: CocoroConsole、Stream Deck、その他運用 client
+- 役割: 選択中アバターの `stt.enabled` だけを更新する
+- request body は `enabled` だけを持つ
+- 他の avatar field、microphone_settings、avatars 一覧は変更しない
+- 値が変わらない保存でも成功 response を返す
+- 値が変わった保存では音声 runtime の設定 reload を行い、`audio_runtime_state` を配信する
+- write を認証済み設定編集操作として audit に残す
+- response body に秘密値を含めない
+
+request:
+
+```json
+{
+  "enabled": true
+}
+```
+
+response:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "enabled": true,
+    "selected_avatar_id": "avatar:default"
+  }
+}
+```
+
+`GET /ui/api/audio/stt-enabled` と `PUT /ui/api/audio/stt-enabled` は同じ処理を呼び出す。
+意味規則は [../audio/音声入力と話者識別.md](../audio/音声入力と話者識別.md) を正とする。
+アバター音声 bundle 全体の編集は [状態と設定.md](状態と設定.md) を正とする。
 
 ## 実効入力状態 API
 
@@ -166,6 +211,8 @@ response:
   "data": {
     "configured_source": "local_microphone",
     "effective_source": "local_microphone",
+    "stt_enabled": true,
+    "selected_avatar_id": "avatar:default",
     "local_input_device": {
       "host_api": "ALSA",
       "name": "USB Audio Device"
@@ -179,7 +226,8 @@ response:
 ```
 
 `console.input_device` は Windows input endpoint が未選択の場合に `null` とする。
-このresponseはprocess-localな実効値を含み、設定の正本として保存しない。
+`stt_enabled` は選択中アバターの保存済み `stt.enabled` である。
+このresponseの `effective_source` は process-local な実効値を含み、入力元設定の正本として保存しない。
 
 ## 音声stream data/control
 
@@ -466,6 +514,7 @@ request body は不要とする。
 | `400` | `invalid_audio_start` | `audio_start` の shape または値が不正 |
 | `400` | `invalid_audio_frame` | PCM frame の長さまたは形式が不正 |
 | `400` | `invalid_audio_control` | control message が不正 |
+| `400` | `invalid_stt_enabled` | `stt-enabled` request が不正 |
 | `400` | `invalid_speaker_enrollment` | 話者登録 request が不正 |
 | `400` | `invalid_conversation_display_name_assignment` | 呼ばれ方定義の割当 request が不正 |
 | `401` | `invalid_token` | connector 認証が不正 |

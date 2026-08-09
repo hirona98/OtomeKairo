@@ -44,7 +44,7 @@ flowchart LR
 | 処理 | OtomeKairo | CocoroConsole | CocoroShell |
 | --- | --- | --- | --- |
 | 意味判断・記憶更新 | 担う | しない | しない |
-| STT / 話者識別 / 音声起動ワード | 担う | マイク PCM を送るだけ | しない |
+| STT / 話者識別 / 音声起動ワード | 担う（`stt.enabled` が運用トグルの正本） | マイク PCM を送る。メイン画面マイクボタンは `stt.enabled` を切替 | しない |
 | TTS（音声合成） | 担う | 合成済み WAV を受け取る | 合成しない（再生のみ） |
 | 対話 UI・設定 UI | Web UI も配信 | 端末 UI の中心 | アバター表示 |
 | デスクトップ画面取得 | 要求を出す | `vision.capture` を実行 | しない |
