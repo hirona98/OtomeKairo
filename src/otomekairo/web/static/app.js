@@ -1134,15 +1134,17 @@ async function controlAutonomousRun(action, runId, button) {
   }
 }
 
+function isDashboardVisible() {
+  return !element("workspace-layout").classList.contains("dashboard-hidden");
+}
+
 function setDashboardVisible(visible) {
   // いまパネルの表示を明示的に切り替える。
-  const workspace = element("workspace-layout");
-  workspace.classList.toggle("dashboard-hidden", !visible);
+  element("workspace-layout").classList.toggle("dashboard-hidden", !visible);
 }
 
 function toggleDashboard() {
-  const workspace = element("workspace-layout");
-  setDashboardVisible(workspace.classList.contains("dashboard-hidden"));
+  setDashboardVisible(!isDashboardVisible());
 }
 
 function setConfirmMenuOpen(open) {
@@ -3740,23 +3742,32 @@ function switchTab(tab) {
 function bindEvents() {
   element("confirm-menu-toggle").addEventListener("click", (event) => {
     event.stopPropagation();
-    const open = element("confirm-menu-popup").hidden;
-    setConfirmMenuOpen(open);
+    setConfirmMenuOpen(element("confirm-menu-popup").hidden);
   });
+  // いまはトグル。開いていれば閉じ、閉じていれば開く。
   element("confirm-now").addEventListener("click", () => {
-    setDashboardVisible(true);
+    const nextVisible = !isDashboardVisible();
+    setDashboardVisible(nextVisible);
     setConfirmMenuOpen(false);
-    refreshDashboard({ silent: true });
+    if (nextVisible) {
+      refreshDashboard({ silent: true });
+    }
   });
   element("confirm-cycles").addEventListener("click", () => setConfirmMenuOpen(false));
   element("confirm-logs").addEventListener("click", () => setConfirmMenuOpen(false));
   document.addEventListener("click", (event) => {
     const menu = element("confirm-menu");
-    if (!menu.contains(event.target)) {
+    if (!(event.target instanceof Node) || !menu.contains(event.target)) {
+      setConfirmMenuOpen(false);
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
       setConfirmMenuOpen(false);
     }
   });
   element("refresh-dashboard").addEventListener("click", () => refreshDashboard({ silent: false }));
+  element("close-dashboard").addEventListener("click", () => setDashboardVisible(false));
   element("dashboard-active").addEventListener("click", (event) => {
     const button = event.target instanceof Element
       ? event.target.closest("[data-run-action]")
