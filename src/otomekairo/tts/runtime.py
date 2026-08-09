@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from otomekairo.service.common import debug_log
+from otomekairo.tts.endpoint_health import VoicevoxEndpointHealth
 from otomekairo.tts.provider import TtsProvider, TtsProviderError
 
 
@@ -35,9 +36,26 @@ class TtsDeliveryReservation:
 
 
 class TtsRuntime:
-    def __init__(self, service: Any, provider: TtsProvider | None = None) -> None:
+    def __init__(
+        self,
+        service: Any,
+        provider: TtsProvider | None = None,
+        voicevox_endpoint_health: VoicevoxEndpointHealth | None = None,
+    ) -> None:
         self._service = service
-        self._provider = provider or TtsProvider()
+        # provider 未指定時はヘルス監視付き provider を用意する。
+        self._owns_voicevox_endpoint_health = voicevox_endpoint_health is None and provider is None
+        self._voicevox_endpoint_health = (
+            voicevox_endpoint_health
+            if voicevox_endpoint_health is not None
+            else (VoicevoxEndpointHealth() if provider is None else None)
+        )
+        if provider is not None:
+            self._provider = provider
+        else:
+            self._provider = TtsProvider(
+                voicevox_endpoint_health=self._voicevox_endpoint_health,
+            )
         self._queue: queue.Queue[_TtsDelivery | None] = queue.Queue(
             maxsize=TTS_QUEUE_CAPACITY
         )
@@ -136,6 +154,8 @@ class TtsRuntime:
             pass
         if self._worker.is_alive():
             self._worker.join(timeout=5.0)
+        if self._owns_voicevox_endpoint_health and self._voicevox_endpoint_health is not None:
+            self._voicevox_endpoint_health.close()
 
     def _worker_loop(self) -> None:
         while not self._stop_event.is_set():

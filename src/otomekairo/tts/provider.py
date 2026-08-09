@@ -10,6 +10,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+from otomekairo.tts.endpoint_health import VoicevoxEndpointHealth
+
 
 TTS_REQUEST_TIMEOUT_SECONDS = 60
 TTS_MAX_AUDIO_BYTES = 32 * 1024 * 1024
@@ -35,6 +37,10 @@ def speech_text_for_tts(value: str) -> str:
 
 
 class TtsProvider:
+    def __init__(self, voicevox_endpoint_health: VoicevoxEndpointHealth | None = None) -> None:
+        # runtime から注入する。未指定時は VOICEVOX 選択なし（常に endpoint_url）。
+        self._voicevox_endpoint_health = voicevox_endpoint_health
+
     def synthesize(self, text: str, definition: dict[str, Any]) -> SynthesizedAudio:
         normalized_text = speech_text_for_tts(text)
         if not normalized_text.strip():
@@ -45,9 +51,10 @@ class TtsProvider:
 
         engine = definition.get("engine")
         deadline = time.monotonic() + TTS_REQUEST_TIMEOUT_SECONDS
+        active_voicevox_endpoint: str | None = None
         try:
             if engine == "voicevox":
-                audio = self._synthesize_voicevox(
+                audio, active_voicevox_endpoint = self._synthesize_voicevox(
                     normalized_text,
                     definition["voicevox_config"],
                     deadline,
@@ -72,6 +79,8 @@ class TtsProvider:
         except TtsProviderError:
             raise
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as exc:
+            if active_voicevox_endpoint is not None and self._voicevox_endpoint_health is not None:
+                self._voicevox_endpoint_health.mark_unhealthy(active_voicevox_endpoint)
             raise TtsProviderError(
                 "tts_request_failed",
                 f"TTS provider request failed: {type(exc).__name__}",
@@ -100,54 +109,80 @@ class TtsProvider:
         text: str,
         config: dict[str, Any],
         deadline: float,
-    ) -> bytes:
-        endpoint = self._endpoint(config)
+    ) -> tuple[bytes, str]:
+        primary = config["endpoint_url"]
+        if not isinstance(primary, str) or not primary.strip():
+            raise TtsProviderError(
+                "tts_request_failed",
+                "TTS endpoint URL is not configured.",
+            )
+        if "secondary_endpoint_url" not in config:
+            raise TtsProviderError(
+                "tts_request_failed",
+                "VOICEVOX secondary_endpoint_url is not configured.",
+            )
+        secondary = config["secondary_endpoint_url"]
+        if not isinstance(secondary, str):
+            raise TtsProviderError(
+                "tts_request_failed",
+                "VOICEVOX secondary_endpoint_url must be a string.",
+            )
+        if self._voicevox_endpoint_health is not None:
+            endpoint = self._voicevox_endpoint_health.select_endpoint(primary, secondary)
+        else:
+            endpoint = primary.strip().rstrip("/")
         speaker_id = config["speaker_id"]
-        query_url = self._url(
-            endpoint,
-            "/audio_query",
-            {"speaker": speaker_id, "text": text},
-        )
-        query_bytes = self._request(
-            query_url,
-            method="POST",
-            deadline=deadline,
-        )
-        query = json.loads(query_bytes.decode("utf-8"))
-        if not isinstance(query, dict):
-            raise TtsProviderError(
-                "tts_response_invalid",
-                "VOICEVOX audio_query response must be an object.",
+        try:
+            query_url = self._url(
+                endpoint,
+                "/audio_query",
+                {"speaker": speaker_id, "text": text},
             )
-        replacements = {
-            "speedScale": config["speed_scale"],
-            "pitchScale": config["pitch_scale"],
-            "intonationScale": config["intonation_scale"],
-            "volumeScale": config["volume_scale"],
-            "prePhonemeLength": config["pre_phoneme_length"],
-            "postPhonemeLength": config["post_phoneme_length"],
-            "outputSamplingRate": config["output_sampling_rate"],
-            "outputStereo": config["output_stereo"],
-        }
-        missing = sorted(set(replacements) - set(query))
-        if missing:
-            raise TtsProviderError(
-                "tts_response_invalid",
-                f"VOICEVOX audio_query response is missing fields: {', '.join(missing)}.",
+            query_bytes = self._request(
+                query_url,
+                method="POST",
+                deadline=deadline,
             )
-        query.update(replacements)
-        synthesis_url = self._url(
-            endpoint,
-            "/synthesis",
-            {"speaker": speaker_id},
-        )
-        return self._request(
-            synthesis_url,
-            method="POST",
-            body=json.dumps(query, ensure_ascii=False).encode("utf-8"),
-            content_type="application/json; charset=utf-8",
-            deadline=deadline,
-        )
+            query = json.loads(query_bytes.decode("utf-8"))
+            if not isinstance(query, dict):
+                raise TtsProviderError(
+                    "tts_response_invalid",
+                    "VOICEVOX audio_query response must be an object.",
+                )
+            replacements = {
+                "speedScale": config["speed_scale"],
+                "pitchScale": config["pitch_scale"],
+                "intonationScale": config["intonation_scale"],
+                "volumeScale": config["volume_scale"],
+                "prePhonemeLength": config["pre_phoneme_length"],
+                "postPhonemeLength": config["post_phoneme_length"],
+                "outputSamplingRate": config["output_sampling_rate"],
+                "outputStereo": config["output_stereo"],
+            }
+            missing = sorted(set(replacements) - set(query))
+            if missing:
+                raise TtsProviderError(
+                    "tts_response_invalid",
+                    f"VOICEVOX audio_query response is missing fields: {', '.join(missing)}.",
+                )
+            query.update(replacements)
+            synthesis_url = self._url(
+                endpoint,
+                "/synthesis",
+                {"speaker": speaker_id},
+            )
+            audio = self._request(
+                synthesis_url,
+                method="POST",
+                body=json.dumps(query, ensure_ascii=False).encode("utf-8"),
+                content_type="application/json; charset=utf-8",
+                deadline=deadline,
+            )
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError):
+            if self._voicevox_endpoint_health is not None:
+                self._voicevox_endpoint_health.mark_unhealthy(endpoint)
+            raise
+        return audio, endpoint
 
     def _synthesize_style_bert_vits2(
         self,

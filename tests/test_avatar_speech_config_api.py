@@ -63,6 +63,11 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
                 "aivis_cloud_config",
             },
         )
+        self.assertEqual(
+            avatar["tts"]["voicevox_config"]["secondary_endpoint_url"],
+            "",
+        )
+        self.assertIn("endpoint_url", avatar["tts"]["voicevox_config"])
         self.assertEqual(avatar["stt"]["engine"], "amivoice")
         self.assertEqual(
             set(avatar["stt"]),
@@ -114,6 +119,9 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
         definition["selected_avatar_id"] = avatar["avatar_id"]
         definition["microphone_settings"]["vad_probability_threshold"] = 0.55
         definition["microphone_settings"]["speaker_recognition_threshold"] = 0.65
+        definition["avatars"][0]["tts"]["voicevox_config"][
+            "secondary_endpoint_url"
+        ] = "http://127.0.0.1:50022"
 
         response = service.replace_avatar_speech_editor_state("token", definition)
 
@@ -125,6 +133,10 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
         )
         self.assertEqual(response["avatars"][1]["display_name"], "2番目")
         self.assertEqual(response["avatars"][1]["stt"]["profile_id"], "service_profile-01")
+        self.assertEqual(
+            response["avatars"][0]["tts"]["voicevox_config"]["secondary_endpoint_url"],
+            "http://127.0.0.1:50022",
+        )
         self.assertEqual(
             service.store.events[-2]["kind"],
             "avatar_speech_editor_state_write",
@@ -228,6 +240,32 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
         invalid_profile_id = deepcopy(original)
         invalid_profile_id["avatars"][0]["stt"]["profile_id"] = ":service-profile"
         cases.append(("invalid profile ID", invalid_profile_id, "invalid_stt_settings"))
+
+        duplicate_voicevox_endpoint = deepcopy(original)
+        duplicate_voicevox_endpoint["avatars"][0]["tts"]["voicevox_config"][
+            "secondary_endpoint_url"
+        ] = duplicate_voicevox_endpoint["avatars"][0]["tts"]["voicevox_config"][
+            "endpoint_url"
+        ]
+        cases.append(
+            (
+                "duplicate voicevox endpoints",
+                duplicate_voicevox_endpoint,
+                "invalid_voicevox_config",
+            )
+        )
+
+        missing_secondary = deepcopy(original)
+        del missing_secondary["avatars"][0]["tts"]["voicevox_config"][
+            "secondary_endpoint_url"
+        ]
+        cases.append(
+            (
+                "missing secondary endpoint",
+                missing_secondary,
+                "invalid_voicevox_config_fields",
+            )
+        )
 
         for label, definition, expected_code in cases:
             with self.subTest(label=label):

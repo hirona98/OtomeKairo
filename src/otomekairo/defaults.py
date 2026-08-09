@@ -185,6 +185,7 @@ def build_default_avatar() -> dict:
             "engine": "voicevox",
             "voicevox_config": {
                 "endpoint_url": "http://127.0.0.1:50021",
+                "secondary_endpoint_url": "",
                 "speaker_id": 0,
                 "speed_scale": 1.0,
                 "pitch_scale": 0.0,

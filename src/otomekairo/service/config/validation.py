@@ -574,6 +574,7 @@ class ServiceConfigValidationMixin:
     def _validate_voicevox_config(self, definition: Any) -> None:
         fields = {
             "endpoint_url",
+            "secondary_endpoint_url",
             "speaker_id",
             "speed_scale",
             "pitch_scale",
@@ -588,6 +589,22 @@ class ServiceConfigValidationMixin:
             raise ServiceError(400, "invalid_voicevox_config", "voicevox_config must be an object.")
         self._validate_exact_fields(definition, fields, "voicevox_config")
         self._validate_non_empty_text(definition, "endpoint_url", "voicevox_config")
+        secondary = definition.get("secondary_endpoint_url")
+        if not isinstance(secondary, str):
+            raise ServiceError(
+                400,
+                "invalid_voicevox_config",
+                "voicevox_config.secondary_endpoint_url must be a string.",
+            )
+        if secondary.strip():
+            primary_normalized = definition["endpoint_url"].strip().rstrip("/")
+            secondary_normalized = secondary.strip().rstrip("/")
+            if primary_normalized == secondary_normalized:
+                raise ServiceError(
+                    400,
+                    "invalid_voicevox_config",
+                    "voicevox_config.secondary_endpoint_url must differ from endpoint_url.",
+                )
         self._validate_integer_range(definition, "speaker_id", "voicevox_config", minimum=0)
         self._validate_number_range(definition, "speed_scale", "voicevox_config", minimum=0.5, maximum=2.0)
         self._validate_number_range(definition, "pitch_scale", "voicevox_config", minimum=-0.15, maximum=0.15)

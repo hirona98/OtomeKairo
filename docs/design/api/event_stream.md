@@ -417,6 +417,10 @@ binary message は RIFF/WAVE の PCM 16-bit または IEEE float 32-bit とし�
 音声合成に失敗した場合、server は `status=failed / media_type=null / byte_count=0` の JSON messageだけを送り、`error_code` を `tts_request_failed / tts_response_invalid / tts_response_too_large` のいずれかにする。
 client は `status=succeeded` の `assistant_audio` を受信した場合だけ、直後の binary messageを対応する音声として扱う。
 server は音声合成を timeout 60 秒、FIFO 1 worker、queue 上限32件、WAV上限32 MiBで実行し、再試行とengine fallbackを実行しない。
+VOICEVOX では `voicevox_config.endpoint_url`（優先）と `secondary_endpoint_url`（サブ、空可）を持つ。
+server は両 endpoint の HTTP 応答を 10 秒間隔で監視し、健全な1つを選んで合成する。両方健全なら常に優先を使う。
+1 delivery 内で合成失敗した endpoint を即 unhealthy にし、**同一 delivery ではもう一方へ掛け直さない**。次の delivery または次のプローブ結果で接続先が切り替わる。
+サブが空のときは優先だけを使い、ヘルス監視による切替を行わない。
 TTS入力では発話本文先頭の`[face:Joy] / [face:Angry] / [face:Sorrow] / [face:Fun]`を1個だけ除去し、それ以外の文字、空白、改行を保持する。
 server はTTS入力を文字列長で切り詰めない。
 音声合成失敗は先行する発話本文の成功を取り消さない。

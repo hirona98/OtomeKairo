@@ -451,8 +451,15 @@
               <div class="speech-engine-panel" data-tts-panel="voicevox">
                 <div class="settings-list">
                   <div class="setting-row">
-                    <label for="voicevox-endpoint-url">Endpoint URL:</label>
+                    <label for="voicevox-endpoint-url">優先 Endpoint URL:</label>
                     <input id="voicevox-endpoint-url">
+                  </div>
+                  <div class="setting-row">
+                    <label for="voicevox-secondary-endpoint-url">サブ Endpoint URL:</label>
+                    <div class="console-control-with-hint">
+                      <input id="voicevox-secondary-endpoint-url">
+                      <div class="field-hint">空なら単一接続。動作する方へ接続します。</div>
+                    </div>
                   </div>
                   <div class="setting-row">
                     <label for="voicevox-speaker-id">Speaker ID:</label>

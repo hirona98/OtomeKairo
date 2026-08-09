@@ -2431,6 +2431,7 @@ function renderAvatar() {
   element("tts-enabled").checked = tts.enabled;
   element("tts-engine").value = tts.engine;
   element("voicevox-endpoint-url").value = voicevox.endpoint_url;
+  element("voicevox-secondary-endpoint-url").value = voicevox.secondary_endpoint_url ?? "";
   element("voicevox-speaker-id").value = voicevox.speaker_id;
   element("voicevox-speed-scale").value = voicevox.speed_scale;
   element("voicevox-pitch-scale").value = voicevox.pitch_scale;
@@ -2491,6 +2492,7 @@ function syncAvatar() {
   avatar.tts.engine = textValue("tts-engine");
   avatar.tts.voicevox_config = {
     endpoint_url: textValue("voicevox-endpoint-url"),
+    secondary_endpoint_url: textValue("voicevox-secondary-endpoint-url"),
     speaker_id: intValue("voicevox-speaker-id", 0),
     speed_scale: numberValue("voicevox-speed-scale", 1),
     pitch_scale: numberValue("voicevox-pitch-scale", 0),

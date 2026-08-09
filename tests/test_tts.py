@@ -10,6 +10,7 @@ from types import MethodType
 
 from otomekairo.defaults import build_default_avatar
 from otomekairo.event_stream import ServerWebSocket
+from otomekairo.tts.endpoint_health import VoicevoxEndpointHealth, normalize_endpoint_url
 from otomekairo.tts.provider import (
     SynthesizedAudio,
     TtsProvider,
@@ -31,6 +32,7 @@ def _pcm16_wav(sample_count: int = 8) -> bytes:
 
 class _StaticProvider(TtsProvider):
     def __init__(self, audio: bytes) -> None:
+        super().__init__()
         self.audio = audio
         self.received_text: str | None = None
 
@@ -39,13 +41,15 @@ class _StaticProvider(TtsProvider):
         text: str,
         config: dict,
         deadline: float,
-    ) -> bytes:
+    ) -> tuple[bytes, str]:
         self.received_text = text
-        return self.audio
+        endpoint = config["endpoint_url"].strip().rstrip("/")
+        return self.audio, endpoint
 
 
 class _CapturingProvider(TtsProvider):
-    def __init__(self, audio: bytes) -> None:
+    def __init__(self, audio: bytes, voicevox_endpoint_health=None) -> None:
+        super().__init__(voicevox_endpoint_health=voicevox_endpoint_health)
         self.audio = audio
         self.requests: list[dict] = []
 
@@ -127,7 +131,13 @@ class TtsProviderTests(unittest.TestCase):
         self.assertEqual(speech_text_for_tts("途中[face:Joy]です"), "途中[face:Joy]です")
 
     def test_provider_accepts_only_supported_wav(self) -> None:
-        definition = {"engine": "voicevox", "voicevox_config": {}}
+        definition = {
+            "engine": "voicevox",
+            "voicevox_config": {
+                "endpoint_url": "http://127.0.0.1:50021",
+                "secondary_endpoint_url": "",
+            },
+        }
         provider = _StaticProvider(_pcm16_wav())
 
         synthesized = provider.synthesize("[face:Fun]\nそのまま読む", definition)
@@ -152,6 +162,86 @@ class TtsProviderTests(unittest.TestCase):
         self.assertEqual(query["text"], ["  テスト"])
         synthesis_body = json.loads(provider.requests[1]["body"].decode("utf-8"))
         self.assertEqual(synthesis_body["outputSamplingRate"], 24000)
+
+    def test_voicevox_selects_primary_when_both_healthy(self) -> None:
+        definition = deepcopy(build_default_avatar()["tts"])
+        definition["engine"] = "voicevox"
+        definition["voicevox_config"]["endpoint_url"] = "http://primary.example:50021"
+        definition["voicevox_config"]["secondary_endpoint_url"] = (
+            "http://secondary.example:50021"
+        )
+        health = VoicevoxEndpointHealth(
+            interval_seconds=3600,
+            probe_fn=lambda _url: True,
+        )
+        self.addCleanup(health.close)
+        health.watch(
+            definition["voicevox_config"]["endpoint_url"],
+            definition["voicevox_config"]["secondary_endpoint_url"],
+        )
+        provider = _CapturingProvider(_pcm16_wav(), voicevox_endpoint_health=health)
+
+        provider.synthesize("テスト", definition)
+
+        request_url = provider.requests[0]["url"]
+        self.assertTrue(request_url.startswith("http://primary.example:50021/"))
+
+    def test_voicevox_selects_secondary_when_primary_unhealthy(self) -> None:
+        definition = deepcopy(build_default_avatar()["tts"])
+        definition["engine"] = "voicevox"
+        primary = "http://primary.example:50021"
+        secondary = "http://secondary.example:50021"
+        definition["voicevox_config"]["endpoint_url"] = primary
+        definition["voicevox_config"]["secondary_endpoint_url"] = secondary
+        health = VoicevoxEndpointHealth(
+            interval_seconds=3600,
+            probe_fn=lambda _url: True,
+        )
+        self.addCleanup(health.close)
+        health.watch(primary, secondary)
+        health.mark_unhealthy(primary)
+        provider = _CapturingProvider(_pcm16_wav(), voicevox_endpoint_health=health)
+
+        provider.synthesize("テスト", definition)
+
+        request_url = provider.requests[0]["url"]
+        self.assertTrue(request_url.startswith(f"{normalize_endpoint_url(secondary)}/"))
+
+    def test_voicevox_marks_endpoint_unhealthy_on_request_failure(self) -> None:
+        definition = deepcopy(build_default_avatar()["tts"])
+        definition["engine"] = "voicevox"
+        primary = "http://primary.example:50021"
+        secondary = "http://secondary.example:50021"
+        definition["voicevox_config"]["endpoint_url"] = primary
+        definition["voicevox_config"]["secondary_endpoint_url"] = secondary
+        health = VoicevoxEndpointHealth(
+            interval_seconds=3600,
+            probe_fn=lambda _url: True,
+        )
+        self.addCleanup(health.close)
+
+        class _FailingProvider(TtsProvider):
+            def _request(self, url: str, **kwargs) -> bytes:
+                raise TimeoutError("synthetic timeout")
+
+        provider = _FailingProvider(voicevox_endpoint_health=health)
+        with self.assertRaises(TtsProviderError) as raised:
+            provider.synthesize("テスト", definition)
+        self.assertEqual(raised.exception.error_code, "tts_request_failed")
+        self.assertEqual(
+            health.select_endpoint(primary, secondary),
+            normalize_endpoint_url(secondary),
+        )
+
+    def test_voicevox_rejects_missing_secondary_endpoint_url(self) -> None:
+        definition = deepcopy(build_default_avatar()["tts"])
+        definition["engine"] = "voicevox"
+        del definition["voicevox_config"]["secondary_endpoint_url"]
+        provider = TtsProvider()
+
+        with self.assertRaises(TtsProviderError) as raised:
+            provider.synthesize("テスト", definition)
+        self.assertEqual(raised.exception.error_code, "tts_request_failed")
 
     def test_style_bert_vits2_uses_voice_endpoint(self) -> None:
         definition = deepcopy(build_default_avatar()["tts"])
