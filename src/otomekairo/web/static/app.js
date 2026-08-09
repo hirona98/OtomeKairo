@@ -1350,8 +1350,6 @@ function renderWebMicrophoneControls() {
     : "入力元: 読み込み中";
   element("web-microphone-device").hidden = !usesWebDevice;
   element("web-microphone-device").disabled = busy || !usesWebDevice;
-  element("refresh-web-microphones").hidden = !usesWebDevice;
-  element("refresh-web-microphones").disabled = busy || !usesWebDevice;
   // アイコントグル。文言は title / aria で伝え、見た目は aria-pressed で切り替える。
   const button = element("toggle-web-microphone");
   button.disabled = (
@@ -4037,9 +4035,6 @@ function bindEvents() {
     } else {
       localStorage.removeItem(WEB_MICROPHONE_DEVICE_KEY);
     }
-  });
-  element("refresh-web-microphones").addEventListener("click", () => {
-    refreshWebMicrophoneDevices({ requestPermission: true });
   });
   element("toggle-web-microphone").addEventListener("click", () => {
     if (state.webAudio.inputSessionId) {
