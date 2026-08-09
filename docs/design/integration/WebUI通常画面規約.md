@@ -6,7 +6,7 @@ API wire、認可、内部状態の表示内容の意味は [../api/README.md](.
 
 ## 対象
 
-- topbar（確認メニューを含む）
+- topbar（状態メニューを含む）
 - いまパネル（`dashboard-panel`。旧称・内部状態）
 - チャット（`chat-panel` / messages / bubble）
 - composer（マイク入力・テキスト・画像送信）

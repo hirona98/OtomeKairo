@@ -62,7 +62,7 @@ OtomeKairo設定の `selected_conversation_display_name_id` から解決した�
 `/ui/api/logs/stream` と `/ui/api/inspection/cycles/...` は server が保持する `console_access_token` で認可し、token をブラウザへ返さない。
 `/ui/api/logs/stream` は `Origin` と `Host` が一致する同一 origin の接続だけを受理する。
 ログの wire は `GET /api/logs/stream`、判断詳細の wire は `GET /api/inspection/cycles/...` と同じであり、正本は [列挙とinspection.md](列挙とinspection.md) とする。
-メイン画面 topbar の「確認」メニューから、いま / 判断 / ログへ辿れる。
+メイン画面 topbar の「状態」メニューから、いま / 判断 / ログへ辿れる。
 ナビは次の分類とする。
 
 - 表現: `表示`、`アバター`、`モーション`
