@@ -48,6 +48,9 @@ class WebUiHttpBoundaryTests(unittest.TestCase):
             ("/ui/logs", "text/html"),
             ("/ui/logs.html", "text/html"),
             ("/ui/logs.js", "text/javascript"),
+            ("/ui/cycles", "text/html"),
+            ("/ui/cycles.html", "text/html"),
+            ("/ui/cycles.js", "text/javascript"),
             ("/ui/styles.css", "text/css"),
         ):
             status, headers, body = self.request(path)
@@ -71,6 +74,32 @@ class WebUiHttpBoundaryTests(unittest.TestCase):
         self.assertIn("application/json", headers["Content-Type"])
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["error"]["code"], "bootstrap_required")
+
+    def test_web_ui_cycle_inspection_routes_without_browser_token(self) -> None:
+        # 一覧は token をブラウザへ渡さず読める。
+        status, headers, body = self.request("/ui/api/inspection/cycle-summaries?limit=5")
+        payload = json.loads(body.decode("utf-8"))
+
+        self.assertEqual(status, 200)
+        self.assertIn("application/json", headers["Content-Type"])
+        self.assertTrue(payload["ok"])
+        self.assertIn("cycle_summaries", payload["data"])
+
+        # 存在しない cycle は wire と同じ cycle_not_found。
+        missing_status, _, missing_body = self.request(
+            "/ui/api/inspection/cycles/cycle%3Amissing/cognitive-context"
+        )
+        missing_payload = json.loads(missing_body.decode("utf-8"))
+        self.assertEqual(missing_status, 404)
+        self.assertFalse(missing_payload["ok"])
+        self.assertEqual(missing_payload["error"]["code"], "cycle_not_found")
+
+        missing_trace_status, _, missing_trace_body = self.request(
+            "/ui/api/inspection/cycles/cycle%3Amissing"
+        )
+        missing_trace_payload = json.loads(missing_trace_body.decode("utf-8"))
+        self.assertEqual(missing_trace_status, 404)
+        self.assertEqual(missing_trace_payload["error"]["code"], "cycle_not_found")
 
 
 if __name__ == "__main__":

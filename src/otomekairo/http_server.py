@@ -53,6 +53,9 @@ WEB_STATIC_FILES = {
     "/ui/logs": ("logs.html", "text/html; charset=utf-8", "no-store"),
     "/ui/logs.html": ("logs.html", "text/html; charset=utf-8", "no-store"),
     "/ui/logs.js": ("logs.js", "text/javascript; charset=utf-8", "max-age=60"),
+    "/ui/cycles": ("cycles.html", "text/html; charset=utf-8", "no-store"),
+    "/ui/cycles.html": ("cycles.html", "text/html; charset=utf-8", "no-store"),
+    "/ui/cycles.js": ("cycles.js", "text/javascript; charset=utf-8", "max-age=60"),
     "/ui/styles.css": ("styles.css", "text/css; charset=utf-8", "max-age=60"),
 }
 
@@ -624,10 +627,10 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 )
                 return
             if method == "GET" and parsed.path == "/api/inspection/cycle-summaries":
-                limit = int(query.get("limit", ["20"])[0])
+                limit = self._clamp_inspection_limit(query.get("limit", ["20"])[0], default=20)
                 self._write_success(
                     HTTPStatus.OK,
-                    self.server.service.list_cycle_summaries(token, limit=max(limit, 1)),
+                    self.server.service.list_cycle_summaries(token, limit=limit),
                 )
                 return
             if method == "GET" and parsed.path.startswith("/api/inspection/cycles/") and parsed.path.endswith("/cognitive-context"):
@@ -1091,7 +1094,20 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             self._write_success(HTTPStatus.OK, self.server.service.get_memory_snapshot_inspection(token))
             return
         if method == "GET" and path == "/ui/api/inspection/cycle-summaries":
-            self._write_success(HTTPStatus.OK, self.server.service.list_cycle_summaries(token, limit=20))
+            query = parse_qs(urlparse(self.path).query)
+            limit = self._clamp_inspection_limit(query.get("limit", ["20"])[0], default=20)
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.list_cycle_summaries(token, limit=limit),
+            )
+            return
+        if method == "GET" and path.startswith("/ui/api/inspection/cycles/") and path.endswith("/cognitive-context"):
+            cycle_id = unquote(path.removesuffix("/cognitive-context").rsplit("/", 1)[-1])
+            self._write_success(HTTPStatus.OK, self.server.service.get_cycle_cognitive_context(token, cycle_id))
+            return
+        if method == "GET" and path.startswith("/ui/api/inspection/cycles/"):
+            cycle_id = unquote(path.rsplit("/", 1)[-1])
+            self._write_success(HTTPStatus.OK, self.server.service.get_cycle_trace(token, cycle_id))
             return
         if method == "POST" and path.startswith("/ui/api/autonomous-runs/"):
             path_parts = path.split("/")
@@ -1222,6 +1238,14 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         else:
             raise ServiceError(404, "route_not_found", "The requested route does not exist.")
         self._write_success(HTTPStatus.OK, result)
+
+    def _clamp_inspection_limit(self, raw_value: str | None, *, default: int) -> int:
+        # inspection 一覧の limit を閉じた範囲に固定する。
+        try:
+            value = int(raw_value) if raw_value is not None else default
+        except (TypeError, ValueError):
+            value = default
+        return min(max(value, 1), 100)
 
     def _web_ui_console_token(self) -> str:
         # 初回画面が複数の UI API を並行取得しても token 発行を一度に固定する。
