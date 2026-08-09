@@ -58,7 +58,7 @@ chip、badge、`.status.processing` / `.status.error` は上記を共有する�
 
 マイク操作行はツールバーであり、設定の `setting-row` にはしない。
 
-- 入力元 select・Webマイク select・更新は残す。視覚ラベルは付けず、`aria-label` で補う
+- 保存済み入力元を表示し、ブラウザマイク選択時だけWebマイク select・更新を表示する
 - 行レイアウトは flex + wrap とし、非表示コントロールが空列を残さない
 - 音声の開始/停止は `.mic-toggle`（マイクアイコン、`aria-pressed`）
 - 音声状態（停止中・入力中など）は composer 内ではなく statusbar の `#web-microphone-status` に出す

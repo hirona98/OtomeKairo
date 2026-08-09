@@ -94,10 +94,7 @@
         <div class="messages" id="messages" aria-live="polite"></div>
         <form class="composer" id="composer">
           <div class="web-microphone-controls">
-            <select id="web-input-source" aria-label="入力元" class="field-width-medium">
-              <option value="local_microphone">OtomeKairo端末のマイク</option>
-              <option value="web_microphone">この端末のマイク</option>
-            </select>
+            <span id="web-input-source-label" class="web-input-source-label">入力元: 読み込み中</span>
             <select id="web-microphone-device" aria-label="Webマイク" class="field-width-medium" hidden>
               <option value="">デバイスを選択</option>
             </select>
@@ -733,6 +730,7 @@
                   <select id="microphone-input-source">
                     <option value="local_microphone">OtomeKairo側のマイク</option>
                     <option value="console_microphone">CocoroConsole側のマイク</option>
+                    <option value="web_microphone">ブラウザのマイク</option>
                   </select>
                 </div>
                 <div class="setting-row">
@@ -742,9 +740,14 @@
                   </select>
                 </div>
                 <div class="setting-row">
-                  <label for="microphone-console-device">CocoroConsole:</label>
+                  <label for="microphone-console-client-id">CocoroConsole client:</label>
+                  <input id="microphone-console-client-id" disabled>
+                </div>
+                <div class="setting-row">
+                  <label for="microphone-console-device">CocoroConsole device:</label>
                   <input id="microphone-console-device" disabled>
                 </div>
+                <p class="field-hint field-hint-indent">ブラウザの入力デバイスは通常画面で選択し、このブラウザに保存します。</p>
                 <div class="range-field">
                   <label for="vad-probability-threshold">VADしきい値:</label>
                   <input id="vad-probability-threshold" type="range" min="0.1" max="0.9" step="0.05">

@@ -42,7 +42,7 @@ response:
   "data": {
     "server_id": "server:...",
     "server_display_name": "OtomeKairo",
-    "api_version": "0.7.0",
+    "api_version": "0.8.0",
     "bootstrap_state": "unregistered",
     "console_access_token_issued": false
   }

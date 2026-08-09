@@ -260,6 +260,9 @@ class AudioRuntime:
                 return
             self._settings = new_settings
             self._settings_generation += 1
+            # Web入力sessionは開始時の保存済み入力元に固定するため、
+            # 音声設定が変わった時点で終了し、旧設定の所有権を残さない。
+            self._web_input_session = None
             active = self._active_connection
             if active is not None:
                 active.websocket.send_json(
@@ -336,17 +339,13 @@ class AudioRuntime:
         self,
         payload: dict[str, Any],
     ) -> dict[str, str]:
-        if not isinstance(payload, dict) or set(payload) != {
-            "owner_client_id",
-            "input_source",
-        }:
+        if not isinstance(payload, dict) or set(payload) != {"owner_client_id"}:
             raise ServiceError(
                 400,
                 "invalid_audio_input_session",
                 "Web audio input session fields are invalid.",
             )
         owner_client_id = payload.get("owner_client_id")
-        input_source = payload.get("input_source")
         if not isinstance(owner_client_id, str) or not owner_client_id.strip():
             raise ServiceError(
                 400,
@@ -354,12 +353,6 @@ class AudioRuntime:
                 "owner_client_id is required.",
             )
         owner_client_id = owner_client_id.strip()
-        if input_source not in {"local_microphone", "web_microphone"}:
-            raise ServiceError(
-                400,
-                "invalid_audio_input_session",
-                "input_source is unsupported.",
-            )
         with self._condition:
             if not self._service._event_stream_registry.is_client_connected(
                 owner_client_id
@@ -375,6 +368,8 @@ class AudioRuntime:
                     "audio_input_busy",
                     "Another Web audio input session is active.",
                 )
+            # 入力元の選択は保存設定を唯一の正本にする。
+            input_source = self._settings["microphone_settings"]["input_source"]
             session = {
                 "input_session_id": f"web_audio_input:{uuid.uuid4().hex}",
                 "owner_client_id": owner_client_id,
@@ -1445,7 +1440,11 @@ class AudioRuntime:
     def _effective_response_client_id_locked(self) -> str | None:
         if self._web_input_session is not None:
             return self._web_input_session["owner_client_id"]
-        console = self._settings["microphone_settings"]["console"]
+        microphone = self._settings["microphone_settings"]
+        # ブラウザ入力は明示的なWeb入力sessionだけが応答先を持つ。
+        if microphone["input_source"] == "web_microphone":
+            return None
+        console = microphone["console"]
         if console is None:
             return None
         return console["client_id"]

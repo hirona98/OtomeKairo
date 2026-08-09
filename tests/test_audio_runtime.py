@@ -135,7 +135,14 @@ class AudioRuntimeControlTests(unittest.TestCase):
             try:
                 state = service.store.read_state()
                 state["console_access_token"] = "token"
+                state["microphone_settings"]["input_source"] = "web_microphone"
                 service.store.write_state(state)
+                service._audio_runtime.reload_settings()
+
+                display_name = service.create_conversation_display_name(
+                    "token",
+                    {"display_name": "テスト"},
+                )
 
                 event_socket = FakeWebSocket()
                 event_session_id = service.register_event_stream_connection(
@@ -159,9 +166,9 @@ class AudioRuntimeControlTests(unittest.TestCase):
                     "token",
                     {
                         "owner_client_id": "web-audio-test",
-                        "input_source": "web_microphone",
                     },
                 )
+                self.assertEqual(input_session["input_source"], "web_microphone")
 
                 audio_socket = FakeWebSocket()
                 audio_session_id = service.register_audio_stream_connection(
@@ -203,7 +210,9 @@ class AudioRuntimeControlTests(unittest.TestCase):
                     "token",
                     {
                         "owner_client_id": "web-audio-test",
-                        "display_name": "テスト",
+                        "conversation_display_name_id": display_name[
+                            "conversation_display_name_id"
+                        ],
                     },
                 )
 
@@ -212,6 +221,152 @@ class AudioRuntimeControlTests(unittest.TestCase):
                 self.assertEqual(
                     service._audio_runtime.snapshot()["mode"],
                     "enrollment",
+                )
+            finally:
+                service.close_audio_runtime()
+
+    def test_web_input_session_uses_each_saved_source(self) -> None:
+        # Web入力sessionはrequest値ではなく保存済み入力元からsourceを確定する。
+        with TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            try:
+                state = service.store.read_state()
+                state["console_access_token"] = "token"
+                service.store.write_state(state)
+
+                event_socket = FakeWebSocket()
+                event_session_id = service.register_event_stream_connection(
+                    event_socket
+                )
+                service.handle_event_stream_message(
+                    event_session_id,
+                    {
+                        "type": "hello",
+                        "client_id": "web-audio-test",
+                        "caps": [],
+                        "event_subscriptions": [
+                            "conversation_input",
+                            "assistant_message",
+                            "audio_runtime_state",
+                        ],
+                    },
+                )
+
+                for input_source in (
+                    "local_microphone",
+                    "console_microphone",
+                    "web_microphone",
+                ):
+                    with self.subTest(input_source=input_source):
+                        state = service.store.read_state()
+                        state["microphone_settings"]["input_source"] = input_source
+                        service.store.write_state(state)
+                        service._audio_runtime.reload_settings()
+
+                        session = service.start_web_audio_input_session(
+                            "token",
+                            {"owner_client_id": "web-audio-test"},
+                        )
+
+                        self.assertEqual(session["input_source"], input_source)
+                        self.assertEqual(
+                            service._audio_runtime.snapshot()["response_client_id"],
+                            "web-audio-test",
+                        )
+                        service.stop_web_audio_input_session(
+                            "token",
+                            session["input_session_id"],
+                        )
+
+                state = service.store.read_state()
+                state["microphone_settings"]["input_source"] = "local_microphone"
+                service.store.write_state(state)
+                service._audio_runtime.reload_settings()
+                service.start_web_audio_input_session(
+                    "token",
+                    {"owner_client_id": "web-audio-test"},
+                )
+                state = service.store.read_state()
+                state["microphone_settings"]["vad_probability_threshold"] = 0.55
+                service.store.write_state(state)
+
+                service._audio_runtime.reload_settings()
+
+                self.assertIsNone(service._audio_runtime._web_input_session)
+            finally:
+                service.close_audio_runtime()
+
+    def test_console_microphone_web_session_routes_response_to_browser(self) -> None:
+        # Consoleが取得する音声でもWeb入力session中の応答先はbrowser ownerにする。
+        with TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            try:
+                state = service.store.read_state()
+                state["console_access_token"] = "token"
+                state["microphone_settings"]["input_source"] = "console_microphone"
+                state["microphone_settings"]["console"] = {
+                    "client_id": "console-main",
+                    "input_device": {
+                        "device_id": "console-device",
+                        "name": "Console Microphone",
+                    },
+                }
+                service.store.write_state(state)
+                service._audio_runtime.reload_settings()
+
+                event_socket = FakeWebSocket()
+                event_session_id = service.register_event_stream_connection(
+                    event_socket
+                )
+                service.handle_event_stream_message(
+                    event_session_id,
+                    {
+                        "type": "hello",
+                        "client_id": "web-audio-test",
+                        "caps": [],
+                        "event_subscriptions": [
+                            "conversation_input",
+                            "assistant_message",
+                            "audio_runtime_state",
+                        ],
+                    },
+                )
+                service.start_web_audio_input_session(
+                    "token",
+                    {"owner_client_id": "web-audio-test"},
+                )
+
+                audio_socket = FakeWebSocket()
+                audio_session_id = service.register_audio_stream_connection(
+                    audio_socket,
+                    endpoint_source="console_microphone",
+                )
+                service.handle_audio_stream_message(
+                    audio_session_id,
+                    "text",
+                    json.dumps(
+                        {
+                            "type": "audio_start",
+                            "protocol_version": "2",
+                            "client_id": "console-main",
+                            "input_source": "console_microphone",
+                            "input_session_id": None,
+                            "format": AUDIO_FORMAT,
+                            "device": {
+                                "device_id": "console-device",
+                                "name": "Console Microphone",
+                            },
+                            "capture_settings": {
+                                "source_sample_rate": 48000,
+                            },
+                        }
+                    ).encode("utf-8"),
+                )
+
+                self.assertEqual(audio_socket.sent[0]["type"], "audio_started")
+                self.assertEqual(
+                    service._audio_runtime.snapshot()["response_client_id"],
+                    "web-audio-test",
                 )
             finally:
                 service.close_audio_runtime()

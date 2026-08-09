@@ -414,7 +414,11 @@ class ServiceConfigValidationMixin:
             "microphone_settings",
         )
         input_source = definition.get("input_source")
-        if input_source not in {"local_microphone", "console_microphone"}:
+        if input_source not in {
+            "local_microphone",
+            "console_microphone",
+            "web_microphone",
+        }:
             raise ServiceError(
                 400,
                 "invalid_microphone_settings",

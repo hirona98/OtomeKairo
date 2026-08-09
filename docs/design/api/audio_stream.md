@@ -122,13 +122,12 @@ request:
 
 ```json
 {
-  "owner_client_id": "web-ui:...",
-  "input_source": "local_microphone"
+  "owner_client_id": "web-ui:..."
 }
 ```
 
-`input_source` は `local_microphone / web_microphone` のいずれかにする。
 `owner_client_id` は接続中の event stream client と一致させる。
+入力元は保存済み `microphone_settings.input_source` から確定し、requestでは指定しない。
 
 response:
 
@@ -149,6 +148,7 @@ response:
 - request body は不要とする
 
 owner の event stream 切断、Web audio stream 切断、heartbeat timeout でも同じ終了処理を実行する。
+音声設定変更でもsessionを終了する。
 
 ## 実効入力状態 API
 
@@ -156,7 +156,7 @@ owner の event stream 切断、Web audio stream 切断、heartbeat timeout で�
 
 - 認証: 必要
 - 利用主体: microphone connector、CocoroConsole
-- 役割: DB上の通常入力元とWeb入力sessionを解決した現在の実効入力元を返す
+- 役割: DB上の保存入力元とWeb入力sessionを解決した現在の実効入力元を返す
 
 response:
 

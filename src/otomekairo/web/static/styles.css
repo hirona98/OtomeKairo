@@ -709,12 +709,18 @@ a.dashboard-item:hover {
   background: #ffffff;
 }
 
-/* ツールバー行。視覚ラベルは付けず、select は aria-label で補う。 */
+/* ツールバー行。保存済み入力元を表示し、device select は aria-label で補う。 */
 .web-microphone-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
+}
+
+.web-input-source-label {
+  color: var(--muted);
+  font-size: var(--field-size);
+  white-space: nowrap;
 }
 
 .web-microphone-controls > select {
@@ -2076,4 +2082,3 @@ input[type="checkbox"]:disabled {
     border-bottom: 1px solid var(--line);
   }
 }
-

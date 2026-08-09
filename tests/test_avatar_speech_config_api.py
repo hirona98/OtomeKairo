@@ -161,6 +161,21 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
             },
         )
 
+    def test_web_microphone_is_saved_without_server_device(self) -> None:
+        # ブラウザdeviceはorigin単位で保持し、server設定には入力元だけを保存する。
+        service = DummyService()
+        definition = service.get_avatar_speech_editor_state("token")
+        definition["microphone_settings"]["input_source"] = "web_microphone"
+
+        response = service.replace_avatar_speech_editor_state("token", definition)
+
+        self.assertEqual(
+            response["microphone_settings"]["input_source"],
+            "web_microphone",
+        )
+        self.assertIsNone(response["microphone_settings"]["local_input_device"])
+        self.assertIsNone(response["microphone_settings"]["console"])
+
     def test_invalid_editor_state_does_not_change_saved_state(self) -> None:
         cases: list[tuple[str, object, str]] = []
         service = DummyService()

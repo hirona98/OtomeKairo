@@ -86,8 +86,8 @@ VRM、表示、モーションの通常編集はCocoroConsoleから端末設定A
 Web UI のアバター複製では、最終接続端末の `avatar_presentations` も同じ内容で複製し、設定保存時に `PATCH /ui/api/config/console-clients/{client_id}` へ含めて永続化する。
 最後に接続した端末が存在しない場合、端末依存の設定欄を無効にし、VRM 表示設定の複製対象も持たない。
 記憶の `記憶複製` は client 下書きとして保持し、適用時に `POST /ui/api/config/memory-sets/clone` を呼んでから `editor-state` を保存する。
-ブラウザ UI は `/ui/api/config/avatar-speech/editor-state` を通じて、アバターごとの STT / TTS と通常のマイク入力元を編集する。
-ブラウザ UI は入力欄でローカルマイクまたはWebマイクを選択し、マイクアイコンのトグルで音声入力を開始/停止する。Webマイク選択時だけ `/ui/api/audio/stream` へ取得音声を送る。音声状態は statusbar に表示する。
+ブラウザ UI は `/ui/api/config/avatar-speech/editor-state` を通じて、アバターごとの STT / TTS と保存するマイク入力元を編集する。
+ブラウザ UI は保存済み入力元を通常画面へ表示し、マイクアイコンのトグルでWeb入力sessionを開始/停止する。ブラウザマイク選択時だけ `/ui/api/audio/stream` へ取得音声を送る。音声状態は statusbar に表示する。
 ブラウザ UI はVAD、STT、音声起動ワード判定、話者識別を実行しない。
 ブラウザ UI は `/ui/api/audio/...` を通じて input device 確認と話者管理を行う。
 ブラウザ UI は TTS providerへ接続せず、OtomeKairoから受信した`assistant_audio`のWAVをブラウザ音声出力で直接再生する。
