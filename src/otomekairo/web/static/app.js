@@ -1091,13 +1091,13 @@ async function refreshDashboard({ silent = false } = {}) {
     ]);
     state.dashboard.currentState = currentState;
     state.dashboard.cycleSummaries = cycles.cycle_summaries || [];
-    // 記憶 snapshot は補助面なので失敗しても他の内部状態表示は続ける。
+    // 記憶 snapshot は補助面なので失敗しても他の「いま」表示は続ける。
     if (memorySnapshot) {
       state.dashboard.memorySnapshot = memorySnapshot;
     }
     renderDashboard();
     if (!silent) {
-      showNotice("内部状態を更新しました。");
+      showNotice("いまを更新しました。");
     }
   } catch (error) {
     element("dashboard-generated-at").textContent = "更新失敗";

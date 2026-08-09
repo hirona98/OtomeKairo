@@ -269,7 +269,7 @@ p {
 
 .workspace-layout {
   display: grid;
-  /* 内部状態パネルを広めに取り、内部は多列で幅を埋める。 */
+  /* いまパネルを広めに取り、内部は多列で幅を埋める。 */
   grid-template-columns: minmax(360px, 1.35fr) minmax(280px, 1fr);
   min-height: 0;
   overflow: hidden;
@@ -285,7 +285,7 @@ p {
 }
 
 .dashboard-panel {
-  /* 内部状態パネルだけ、高密度用 micro / secondary を 1 段だけ大きくする。 */
+  /* いまパネルだけ、高密度用 micro / secondary を 1 段だけ大きくする。 */
   --font-secondary: 12px;
   --font-micro: 11px;
   display: flex;
