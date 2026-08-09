@@ -425,7 +425,7 @@ p {
   grid-column: 1 / -1;
 }
 
-.dashboard-section > summary {
+.dashboard-section>summary {
   padding: 5px 8px;
   cursor: pointer;
   color: var(--text);
@@ -435,7 +435,7 @@ p {
   list-style-position: inside;
 }
 
-.dashboard-section[open] > summary {
+.dashboard-section[open]>summary {
   border-bottom: 1px solid var(--line);
 }
 
@@ -723,17 +723,17 @@ a.dashboard-item:hover {
   white-space: nowrap;
 }
 
-.web-microphone-controls > select {
+.web-microphone-controls>select {
   flex: 1 1 160px;
   min-width: min(100%, 140px);
   max-width: var(--field-width-medium);
 }
 
-.web-microphone-controls > select[hidden] {
+.web-microphone-controls>select[hidden] {
   display: none;
 }
 
-.web-microphone-controls > button {
+.web-microphone-controls>button {
   flex: 0 0 auto;
 }
 
@@ -794,7 +794,7 @@ a.dashboard-item:hover {
   grid-template-columns: 5.5em minmax(0, 1fr) 12em 9em;
   gap: var(--space-2);
   align-items: center;
-  min-height: 18px;
+  min-height: 17px;
   font-size: var(--font-secondary);
   color: var(--muted);
 }
@@ -1142,7 +1142,7 @@ a.dashboard-item:hover {
   gap: 10px;
 }
 
-.setting-row > label {
+.setting-row>label {
   color: var(--muted);
 }
 
@@ -1261,7 +1261,7 @@ a.dashboard-item:hover {
   margin-bottom: 10px;
 }
 
-.advanced-settings > .settings-list {
+.advanced-settings>.settings-list {
   margin-top: 0;
 }
 
@@ -1346,8 +1346,8 @@ a.dashboard-item:hover {
 }
 
 /* 設定行内のラベルはテキストのみ。input を label 子にしない。 */
-.setting-row > label,
-.range-field > label {
+.setting-row>label,
+.range-field>label {
   display: block;
   color: var(--muted);
   font-size: var(--label-size);
@@ -1619,10 +1619,22 @@ input[type="checkbox"]:disabled {
       ". value value badge";
   }
 
-  .audio-meter-label { grid-area: label; }
-  .audio-meter-track { grid-area: track; }
-  .audio-meter-value { grid-area: value; text-align: right; }
-  .audio-meter-badge { grid-area: badge; }
+  .audio-meter-label {
+    grid-area: label;
+  }
+
+  .audio-meter-track {
+    grid-area: track;
+  }
+
+  .audio-meter-value {
+    grid-area: value;
+    text-align: right;
+  }
+
+  .audio-meter-badge {
+    grid-area: badge;
+  }
 
   .audio-meters-settings {
     margin-left: 0;
@@ -1665,7 +1677,7 @@ input[type="checkbox"]:disabled {
     flex-basis: 100%;
   }
 
-  .web-microphone-controls > select {
+  .web-microphone-controls>select {
     flex: 1 1 100%;
     max-width: none;
   }
@@ -2158,7 +2170,7 @@ input[type="checkbox"]:disabled {
   padding: 0 10px 8px;
 }
 
-.cycle-stage > summary {
+.cycle-stage>summary {
   cursor: pointer;
   padding: 8px 0;
   font-weight: 650;
@@ -2173,7 +2185,7 @@ input[type="checkbox"]:disabled {
   padding: 0 10px 8px;
 }
 
-.cycle-json-block > summary {
+.cycle-json-block>summary {
   cursor: pointer;
   padding: 8px 0;
   font-weight: 650;
