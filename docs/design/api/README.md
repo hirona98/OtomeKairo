@@ -52,6 +52,11 @@ API 仕様は次のように分ける。
 ブラウザ UI はブラウザstorageへ永続化した `person_ref / interaction_ref` と、
 OtomeKairo設定の `selected_conversation_display_name_id` から解決した表示名を `interaction_context` として送る。
 ブラウザ UI は `/ui/api/config/...` を通じて既存設定操作を呼び出す。
+`GET /ui/logs` は会話 UI とは別のログ専用画面であり、`debug_log` を `GET /ui/api/logs/stream` 経由でリアルタイム購読する。
+`GET /ui/api/logs/stream` は server が保持する `console_access_token` で認可し、token をブラウザへ返さない。
+`GET /ui/api/logs/stream` は `Origin` と `Host` が一致する同一 origin の接続だけを受理する。
+ログ画面の wire は `GET /api/logs/stream` と同じであり、正本は [列挙とinspection.md](列挙とinspection.md) とする。
+メイン画面 topbar からログ画面を新しいタブで開ける。
 ナビは次の分類とする。
 
 - 表現: `表示`、`アバター`、`モーション`

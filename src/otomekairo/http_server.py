@@ -50,6 +50,9 @@ WEB_STATIC_FILES = {
         "text/javascript; charset=utf-8",
         "max-age=60",
     ),
+    "/ui/logs": ("logs.html", "text/html; charset=utf-8", "no-store"),
+    "/ui/logs.html": ("logs.html", "text/html; charset=utf-8", "no-store"),
+    "/ui/logs.js": ("logs.js", "text/javascript; charset=utf-8", "max-age=60"),
     "/ui/styles.css": ("styles.css", "text/css; charset=utf-8", "max-age=60"),
 }
 
@@ -906,10 +909,14 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
     def _handle_web_ui_api(self, method: str, path: str) -> None:
         token = self._web_ui_console_token()
 
-        # ブラウザへ token を渡さず、同一 server 内で event stream を認可する。
+        # ブラウザへ token を渡さず、同一 server 内で event / log stream を認可する。
         if method == "GET" and path == "/ui/api/events/stream":
             self._require_web_ui_websocket_origin()
             self._handle_events_stream(token)
+            return
+        if method == "GET" and path == "/ui/api/logs/stream":
+            self._require_web_ui_websocket_origin(subject="log stream")
+            self._handle_logs_stream(token)
             return
         if method == "GET" and path == "/ui/api/audio/stream":
             self._require_web_ui_websocket_origin(

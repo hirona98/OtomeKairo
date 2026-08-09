@@ -606,7 +606,7 @@ response:
 ### `GET /api/logs/stream`
 
 - 認証: 必要
-- 役割: `CocoroConsole` のログビューアー向けに、`debug_log` の出力を WebSocket で流す
+- 役割: `CocoroConsole` のログビューアーと Web UI ログ画面向けに、`debug_log` の出力を WebSocket で流す
 - client から送る message は不要
 - 接続時には、直近の短いログを replay する
 - `ts` は OtomeKairo のローカルタイムゾーンに属する offset 付き timestamp で返す
@@ -614,6 +614,9 @@ response:
 - 会話本文の抜粋は最初の改行までを流し、それ以降の行を流さない
 - `logs/stream` は `debug_log` の購読先として扱い、標準出力とログファイルに出る `LEVEL / Component / message` と同じ内容を `level / logger / msg` として流す
 - `logs/stream` の `level / logger / msg` にはターミナル表示用の ANSI 色を含めない
+- ブラウザ UI は同一 wire を `GET /ui/api/logs/stream` 経由で購読する
+- `GET /ui/api/logs/stream` は server が保持する `console_access_token` で認可し、token をブラウザへ返さない
+- `GET /ui/api/logs/stream` は `Origin` と `Host` が一致する同一 origin の接続だけを受理する
 
 message shape:
 
