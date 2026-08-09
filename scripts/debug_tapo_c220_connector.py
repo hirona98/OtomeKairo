@@ -87,17 +87,16 @@ def _runtime_config_ready() -> int:
 def _wait_for_runtime_config() -> int:
     # compound debug では server 起動完了直後は runtime config がまだ取得できないことがある。
     deadline = time.monotonic() + 30.0
-    last_status = SKIP
 
     while True:
         status = _runtime_config_ready()
-        if status == START:
-            return START
-        last_status = status
+        # camera source 未登録は正常な「デバッグ対象なし」なので、
+        # 後続の一時的な通信失敗で FATAL に変わる前に正常終了する。
+        if status in (START, SKIP):
+            return status
         if time.monotonic() >= deadline:
             print("Tapo C220 connector debug の runtime config 待機が timeout しました。", file=sys.stderr)
-            # 有効な camera source がない状態はデバッグ対象なしとして正常終了する。
-            return last_status
+            return FATAL
         time.sleep(0.5)
 
 
