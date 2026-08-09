@@ -89,7 +89,7 @@ Web UI のアバター複製では、最終接続端末の `avatar_presentations
 最後に接続した端末が存在しない場合、端末依存の設定欄を無効にし、VRM 表示設定の複製対象も持たない。
 記憶の `記憶複製` は client 下書きとして保持し、適用時に `POST /ui/api/config/memory-sets/clone` を呼んでから `editor-state` を保存する。
 ブラウザ UI は `/ui/api/config/avatar-speech/editor-state` を通じて、アバターごとの STT / TTS と保存するマイク入力元を編集する。
-ブラウザ UI は保存済み入力元を通常画面へ表示し、マイクアイコンで選択中アバターの `stt.enabled` をトグルする。表示の正本は `audio_runtime_state.stt_enabled` とする。`input_source=web_microphone` のときだけ STT ON に合わせて Web 入力 session とブラウザ capture を開始し、STT OFF または session 終了で capture を止める。`local_microphone` / `console_microphone` では STT トグルのみ行い、応答先の Web 入力 session は mic 操作に混ぜない。音声状態は statusbar に表示する。
+ブラウザ UI は保存済み入力元を通常画面へ表示し、マイクアイコンで `stt.enabled`、隣のスピーカーアイコンで `tts.enabled` をトグルする。表示の正本は `audio_runtime_state.stt_enabled` / `tts_enabled` とする。`input_source=web_microphone` のときだけ STT ON に合わせて Web 入力 session とブラウザ capture を開始し、STT OFF または session 終了で capture を止める。`local_microphone` / `console_microphone` では STT トグルのみ行い、応答先の Web 入力 session は mic 操作に混ぜない。音声状態は statusbar に表示する。
 ブラウザ UI はVAD、STT、音声起動ワード判定、話者識別を実行しない。
 ブラウザ UI は `/ui/api/audio/...` を通じて input device 確認と話者管理を行う。
 ブラウザ UI は TTS providerへ接続せず、OtomeKairoから受信した`assistant_audio`のWAVをブラウザ音声出力で直接再生する。

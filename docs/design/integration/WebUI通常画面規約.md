@@ -61,6 +61,7 @@ chip、badge、`.status.processing` / `.status.error` は上記を共有する�
 - 保存済み入力元を表示し、ブラウザマイク選択時だけWebマイク select を表示する
 - 行レイアウトは flex + wrap とし、非表示コントロールが空列を残さない
 - マイク ON/OFF は `.mic-toggle`（マイクアイコン、`aria-pressed`）。正本は選択中アバターの `stt.enabled` であり、`audio_runtime_state.stt_enabled` を表示する
+- その隣に音声合成 ON/OFF の `.mic-toggle`（スピーカーアイコン、`#toggle-web-tts`）。正本は `tts.enabled` であり、`audio_runtime_state.tts_enabled` を表示する
 - `web_microphone` のときだけ STT ON に合わせてブラウザ capture と Web 入力 session を開始する
 - 音声状態（停止中・入力中・STT 無効など）は composer 内ではなく statusbar の `#web-microphone-status` に出す
 - マイク操作行の直下に音声観測行（`.audio-meters`）を置く

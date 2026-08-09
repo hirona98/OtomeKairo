@@ -53,6 +53,7 @@ const state = {
     starting: false,
     stopping: false,
     sttToggling: false,
+    ttsToggling: false,
     startSequence: 0,
   },
   unloading: false,
