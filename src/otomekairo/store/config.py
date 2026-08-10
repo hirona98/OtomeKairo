@@ -364,7 +364,14 @@ class ConfigStore:
 
             self._apply_current_schema(conn)
             if version == 0:
-                self._write_state(conn, build_default_state())
+                # selected_conversation_display_name_id の FK を満たすため、
+                # 呼ばれ方定義を current_config より先に書き込む。
+                state = build_default_state()
+                self._write_conversation_display_names(
+                    conn,
+                    state.get("conversation_display_names", {}),
+                )
+                self._write_state(conn, state)
                 conn.execute(f"PRAGMA user_version = {CURRENT_CONFIG_DB_VERSION}")
                 debug_log("Store", f"config_db initialized user_version={CURRENT_CONFIG_DB_VERSION}")
             else:
@@ -585,6 +592,29 @@ class ConfigStore:
             row["conversation_display_name_id"]: dict(row)
             for row in rows
         }
+
+    def _write_conversation_display_names(
+        self,
+        conn: sqlite3.Connection,
+        entries: dict[str, dict[str, Any]],
+    ) -> None:
+        # 初期 state の呼ばれ方定義を seed する。既存 row は触らない。
+        timestamp = now_iso()
+        for entry_id, entry in entries.items():
+            conn.execute(
+                """
+                INSERT INTO conversation_display_names (
+                    conversation_display_name_id, display_name, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    entry_id,
+                    entry["display_name"],
+                    entry.get("created_at") or timestamp,
+                    entry.get("updated_at") or timestamp,
+                ),
+            )
 
     def _write_payload_table(
         self,

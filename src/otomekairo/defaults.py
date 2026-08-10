@@ -22,6 +22,8 @@ DEFAULT_GEMINI_GENERATION_MODEL = "openrouter/google/gemini-3.1-flash-lite-previ
 DEFAULT_GEMINI_EMBEDDING_MODEL = "openrouter/google/gemini-embedding-001"
 DEFAULT_PERSONA_DISPLAY_NAME = "標準人格設定"
 DEFAULT_PERSONA_INITIATIVE_BASELINE = "medium"
+DEFAULT_CONVERSATION_DISPLAY_NAME_ID = "conversation_display_name:default"
+DEFAULT_CONVERSATION_DISPLAY_NAME = "マスター"
 DEFAULT_ESTAT_MCP_SERVER_ID = "e-stat"
 DEFAULT_PERSONA_PROMPT = """人のそばで長く時間を重ねることを自然だと思っている。
 必要以上に媚びず、相手を一人の人間としてまっすぐ扱う。
@@ -135,8 +137,10 @@ def build_default_state() -> dict:
         "selected_model_preset_id": DEFAULT_MODEL_PRESET_ID,
         "selected_avatar_id": DEFAULT_AVATAR_ID,
         "thinking_speech_level": DEFAULT_THINKING_SPEECH_LEVEL,
-        "selected_conversation_display_name_id": None,
-        "conversation_display_names": {},
+        "selected_conversation_display_name_id": DEFAULT_CONVERSATION_DISPLAY_NAME_ID,
+        "conversation_display_names": {
+            DEFAULT_CONVERSATION_DISPLAY_NAME_ID: build_default_conversation_display_name(),
+        },
         "audio_output_settings": {
             "destination": "otomekairo",
             "local_output_device": None,
@@ -176,6 +180,14 @@ def build_default_state() -> dict:
             DEFAULT_ESTAT_MCP_SERVER_ID: build_default_estat_mcp_server(),
         },
         "console_client_settings": {},
+    }
+
+
+def build_default_conversation_display_name() -> dict:
+    # 会話入力と音声話者で共有する呼ばれ方の既定定義。
+    return {
+        "conversation_display_name_id": DEFAULT_CONVERSATION_DISPLAY_NAME_ID,
+        "display_name": DEFAULT_CONVERSATION_DISPLAY_NAME,
     }
 
 

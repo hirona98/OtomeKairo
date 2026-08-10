@@ -148,7 +148,29 @@ class ServiceConfigResourcesMixin:
         token: str | None,
         conversation_display_name_id: str,
     ) -> dict[str, Any]:
-        self._require_token(token)
+        # 呼ばれ方は常に1件以上を保つ。会話入力の選択中なら残りの1件へ付け替える。
+        state = self._require_token(token)
+        definitions = state["conversation_display_names"]
+        if conversation_display_name_id not in definitions:
+            raise ServiceError(
+                404,
+                "conversation_display_name_not_found",
+                "The conversation display name does not exist.",
+            )
+        if len(definitions) <= 1:
+            raise ServiceError(
+                409,
+                "conversation_display_name_in_use",
+                "The last conversation display name cannot be deleted.",
+            )
+        if state["selected_conversation_display_name_id"] == conversation_display_name_id:
+            replacement_id = next(
+                entry_id
+                for entry_id in definitions
+                if entry_id != conversation_display_name_id
+            )
+            state["selected_conversation_display_name_id"] = replacement_id
+            self.store.write_state(state)
         try:
             definition = self.store.delete_conversation_display_name(
                 conversation_display_name_id
@@ -582,19 +604,16 @@ class ServiceConfigResourcesMixin:
 
         if "selected_conversation_display_name_id" in payload:
             selected_display_name_id = payload["selected_conversation_display_name_id"]
-            if selected_display_name_id is not None and (
+            if (
                 not isinstance(selected_display_name_id, str)
                 or not selected_display_name_id
             ):
                 raise ServiceError(
                     400,
                     "invalid_selected_conversation_display_name_id",
-                    "selected_conversation_display_name_id must be a non-empty string or null.",
+                    "selected_conversation_display_name_id must be a non-empty string.",
                 )
-            if (
-                selected_display_name_id is not None
-                and selected_display_name_id not in state["conversation_display_names"]
-            ):
+            if selected_display_name_id not in state["conversation_display_names"]:
                 raise ServiceError(
                     404,
                     "conversation_display_name_not_found",
@@ -1078,19 +1097,16 @@ class ServiceConfigResourcesMixin:
         self._validate_thinking_speech_level(thinking_speech_level)
         self._validate_wake_policy(current.get("wake_policy"))
         selected_display_name_id = current.get("selected_conversation_display_name_id")
-        if selected_display_name_id is not None and (
+        if (
             not isinstance(selected_display_name_id, str)
             or not selected_display_name_id
         ):
             raise ServiceError(
                 400,
                 "invalid_selected_conversation_display_name_id",
-                "selected_conversation_display_name_id must be a non-empty string or null.",
+                "selected_conversation_display_name_id must be a non-empty string.",
             )
-        if (
-            selected_display_name_id is not None
-            and selected_display_name_id not in state["conversation_display_names"]
-        ):
+        if selected_display_name_id not in state["conversation_display_names"]:
             raise ServiceError(
                 404,
                 "conversation_display_name_not_found",

@@ -2792,7 +2792,7 @@ function conversationDisplayNameErrorMessage(error) {
     return "同じ呼ばれ方が既に登録されています。";
   }
   if (error?.code === "conversation_display_name_in_use") {
-    return "この呼ばれ方は会話入力または音声話者で使われているため削除できません。";
+    return "この呼ばれ方は最後の1件か、音声話者に割り当てられているため削除できません。";
   }
   if (error?.code === "conversation_display_name_not_found") {
     return "指定した呼ばれ方が見つかりません。";
@@ -2806,17 +2806,17 @@ async function refreshConversationDisplayNames(preferredSelectedId = undefined) 
   if (preferredSelectedId !== undefined && state.editor) {
     state.editor.current.selected_conversation_display_name_id = preferredSelectedId;
   }
-  // 選択中の定義が消えている場合は会話入力の選択も外す。
-  if (
-    state.editor
-    && state.editor.current.selected_conversation_display_name_id
-    && !arrayById(
+  // 呼ばれ方は常に1件選択する。選択中が消えた場合は残りの先頭へ寄せる。
+  if (state.editor) {
+    const selectedStillExists = arrayById(
       state.conversationDisplayNames,
       "conversation_display_name_id",
       state.editor.current.selected_conversation_display_name_id,
-    )
-  ) {
-    state.editor.current.selected_conversation_display_name_id = null;
+    );
+    if (!selectedStillExists) {
+      state.editor.current.selected_conversation_display_name_id =
+        state.conversationDisplayNames[0]?.conversation_display_name_id || null;
+    }
   }
   const selectedDisplayName = arrayById(
     state.conversationDisplayNames,
@@ -2836,9 +2836,9 @@ function selectedConversationDisplayNameId() {
 
 function syncConversationDisplayNameEditFromSelection() {
   const conversationDisplayNameId = selectedConversationDisplayNameId();
-  if (state.editor) {
+  if (state.editor && conversationDisplayNameId) {
     state.editor.current.selected_conversation_display_name_id =
-      conversationDisplayNameId || null;
+      conversationDisplayNameId;
   }
   const definition = arrayById(
     state.conversationDisplayNames,
@@ -2906,24 +2906,6 @@ async function updateConversationDisplayName() {
   }
 }
 
-async function clearConversationDisplayNameSelectionIfNeeded(conversationDisplayNameId) {
-  // server の現在選択が対象なら、削除前に選択を外して FK 拒否を避ける。
-  const config = await apiRequest("/ui/api/config");
-  const selectedId = config.settings_snapshot?.selected_conversation_display_name_id || null;
-  if (selectedId !== conversationDisplayNameId) {
-    return false;
-  }
-  await apiRequest("/ui/api/config/current", {
-    method: "PATCH",
-    body: JSON.stringify({ selected_conversation_display_name_id: null }),
-  });
-  if (state.editor) {
-    state.editor.current.selected_conversation_display_name_id = null;
-  }
-  state.conversationDisplayName = "";
-  return true;
-}
-
 async function deleteConversationDisplayName() {
   const conversationDisplayNameId = selectedConversationDisplayNameId();
   const definition = arrayById(
@@ -2939,7 +2921,6 @@ async function deleteConversationDisplayName() {
     return;
   }
   try {
-    await clearConversationDisplayNameSelectionIfNeeded(conversationDisplayNameId);
     try {
       await apiRequest(
         `/ui/api/config/conversation-display-names/${encodeURIComponent(conversationDisplayNameId)}`,
@@ -2948,20 +2929,17 @@ async function deleteConversationDisplayName() {
     } catch (error) {
       if (error.code === "conversation_display_name_in_use") {
         showNotice(
-          "この呼ばれ方は音声話者に割り当てられているため削除できません。先に話者の割当を変更してください。",
+          "この呼ばれ方は最後の1件か、音声話者に割り当てられているため削除できません。",
           true,
         );
         return;
       }
       throw error;
     }
-    const nextSelectedId = (
-      state.editor?.current?.selected_conversation_display_name_id === conversationDisplayNameId
-        ? null
-        : state.editor?.current?.selected_conversation_display_name_id
-    );
     await Promise.all([
-      refreshConversationDisplayNames(nextSelectedId ?? null),
+      refreshConversationDisplayNames(
+        state.editor?.current?.selected_conversation_display_name_id,
+      ),
       refreshSpeakers(),
     ]);
     showNotice(`呼ばれ方「${definition.display_name}」を削除しました。`);
@@ -3180,12 +3158,6 @@ function renderCurrent() {
     "conversation_display_name_id",
     state.editor.current.selected_conversation_display_name_id,
   );
-  const emptyOption = document.createElement("option");
-  emptyOption.value = "";
-  emptyOption.textContent = "未選択";
-  element("settings-conversation-display-name-select").prepend(emptyOption);
-  element("settings-conversation-display-name-select").value =
-    state.editor.current.selected_conversation_display_name_id || "";
   syncConversationDisplayNameEditFromSelection();
   element("current-thinking-level").value = state.editor.current.thinking_speech_level ?? 5;
   element("current-wake-enabled").checked = wakePolicy.mode === "interval";
@@ -3198,8 +3170,12 @@ function syncCurrent() {
   state.editor.current.selected_persona_id = state.selectedPersonaId;
   state.editor.current.selected_memory_set_id = state.selectedMemorySetId;
   state.editor.current.selected_model_preset_id = state.selectedModelPresetId;
-  state.editor.current.selected_conversation_display_name_id =
-    element("settings-conversation-display-name-select").value || null;
+  const selectedConversationDisplayNameIdValue =
+    element("settings-conversation-display-name-select").value;
+  if (selectedConversationDisplayNameIdValue) {
+    state.editor.current.selected_conversation_display_name_id =
+      selectedConversationDisplayNameIdValue;
+  }
   state.editor.current.thinking_speech_level = intValue("current-thinking-level", 5);
   let observations = Array.isArray(state.editor.current.wake_policy?.observations)
     ? state.editor.current.wake_policy.observations
