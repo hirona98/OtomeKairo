@@ -84,6 +84,15 @@ class TtsRuntime:
             return self._terminal_reservation("disabled", None)
 
         destination = state["audio_output_settings"]["destination"]
+        # CocoroConsole が起動していない場合は、発話受付時点でローカル出力へ切り替える。
+        if (
+            destination == "cocoro_console"
+            and self._service._event_stream_registry.subscriber_count(
+                "assistant_audio",
+                client_kind="cocoro_console",
+            ) == 0
+        ):
+            destination = "otomekairo"
         target_client_kind = {
             "otomekairo": "otomekairo_audio",
             "cocoro_console": "cocoro_console",

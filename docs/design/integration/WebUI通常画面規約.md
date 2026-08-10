@@ -96,6 +96,7 @@ chip、badge、`.status.processing` / `.status.error` は上記を共有する�
 バルーン周辺の表示は CocoroConsole と同じ配置にする。
 
 - person の `display_name` はバルーン直上に右寄せで表示する
+- assistant の `persona_display_name` はその発話バルーン直上に左寄せで表示する
 - 時刻は client が表示した時刻を `HH:mm` で表示し、person はバルーン左側、assistant は右側の下端に揃える
 - system / error / noop には表示名や時刻を付けない
 - 入力元や assistant 発話の起点はバルーン周辺に表示しない

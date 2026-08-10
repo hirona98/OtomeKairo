@@ -1287,6 +1287,8 @@ class AudioRuntime:
                 event_data={
                     "cycle_id": response.get("cycle_id"),
                     "source_kind": "conversation",
+                    "persona_id": speech.get("persona_id"),
+                    "persona_display_name": speech.get("persona_display_name"),
                     "interaction_ref": interaction_ref,
                     "recipient_person_refs": [person_ref],
                 },

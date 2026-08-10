@@ -307,22 +307,32 @@ class MultiPersonInteractionTests(unittest.TestCase):
             state["memory_sets"][state["selected_memory_set_id"]]["embedding"]["model"] = "mock"
             service.store.write_state(state)
 
-            result = service.handle_conversation(
-                "test-token",
-                {
-                    "message_id": "chat_message:test-e2e",
-                    "text": "こんにちは",
-                    "interaction_context": {
-                        "interaction_ref": "interaction:e2e",
-                        "speaker_ref": "person:e2e",
-                        "participants": [
-                            {
-                                "person_ref": "person:e2e",
-                                "display_name": "E2E",
-                            }
-                        ],
+            with patch.object(
+                service._event_stream_registry,
+                "send_to_subscribers",
+                return_value=1,
+            ) as send_to_subscribers:
+                result = service.handle_conversation(
+                    "test-token",
+                    {
+                        "message_id": "chat_message:test-e2e",
+                        "text": "こんにちは",
+                        "interaction_context": {
+                            "interaction_ref": "interaction:e2e",
+                            "speaker_ref": "person:e2e",
+                            "participants": [
+                                {
+                                    "person_ref": "person:e2e",
+                                    "display_name": "E2E",
+                                }
+                            ],
+                        },
                     },
-                },
+                )
+            assistant_event = next(
+                call.args[1]
+                for call in send_to_subscribers.call_args_list
+                if call.args[0] == "assistant_message"
             )
             turns = service.store.load_recent_turns(
                 memory_set_id=state["selected_memory_set_id"],
@@ -338,6 +348,19 @@ class MultiPersonInteractionTests(unittest.TestCase):
         self.assertEqual(result["result_kind"], "speech")
         self.assertEqual(result["interaction_ref"], "interaction:e2e")
         self.assertEqual(result["recipient_person_refs"], ["person:e2e"])
+        self.assertEqual(result["speech"]["persona_id"], state["selected_persona_id"])
+        self.assertEqual(
+            result["speech"]["persona_display_name"],
+            state["personas"][state["selected_persona_id"]]["display_name"],
+        )
+        self.assertEqual(
+            assistant_event["data"]["persona_id"],
+            state["selected_persona_id"],
+        )
+        self.assertEqual(
+            assistant_event["data"]["persona_display_name"],
+            state["personas"][state["selected_persona_id"]]["display_name"],
+        )
         self.assertEqual([turn["role"] for turn in turns], ["person", "assistant"])
         self.assertEqual([turn["speaker_ref"] for turn in turns], ["person:e2e", "self"])
         self.assertEqual(episodes[0]["source_interaction_refs"], ["interaction:e2e"])

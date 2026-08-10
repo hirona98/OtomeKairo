@@ -39,6 +39,8 @@ class ServiceSpeechOutputMixin:
             interaction_ref = ""
         if not isinstance(recipient_person_refs, list):
             recipient_person_refs = []
+        persona_id = speech.get("persona_id")
+        persona_display_name = speech.get("persona_display_name")
         reservation = self._reserve_speech_audio(
             cycle_id=str(response.get("cycle_id") or ""),
             source_kind=source_kind,
@@ -55,6 +57,8 @@ class ServiceSpeechOutputMixin:
             event_data={
                 "cycle_id": response.get("cycle_id"),
                 "source_kind": source_kind,
+                "persona_id": persona_id,
+                "persona_display_name": persona_display_name,
                 "interaction_ref": interaction_ref,
                 "recipient_person_refs": recipient_person_refs,
             },
@@ -100,6 +104,11 @@ class ServiceSpeechOutputMixin:
         speech_text: str,
         reservation: TtsDeliveryReservation,
     ) -> bool:
+        # UI は現在設定ではなく、この発話で使った人格を表示する。
+        for field_name in ("persona_id", "persona_display_name"):
+            field_value = event_data.get(field_name)
+            if not isinstance(field_value, str) or not field_value.strip():
+                raise ValueError(f"assistant_message.{field_name} is required.")
         event = {
             "event_id": self._next_stream_event_id(),
             "type": "assistant_message",

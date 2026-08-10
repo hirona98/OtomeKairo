@@ -225,6 +225,8 @@ class ServiceInputPipelineMixin:
         # 結果
         debug_log("Pipeline", f"{cycle_label} done", level="DEBUG")
         return {
+            "persona_id": state["selected_persona_id"],
+            "persona_display_name": persona["display_name"],
             "current_input": current_input.to_prompt_payload(),
             "augmented_query_text": augmented_query_text,
             "recall_hint": recall_hint,

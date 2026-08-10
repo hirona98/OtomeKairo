@@ -801,6 +801,7 @@ class ServiceAutonomousRunMixin:
                 run = self.store.get_autonomous_run(run_id=run_id) or run
                 if emit_speech_event:
                     self._emit_autonomous_run_assistant_message_event(
+                        state=state,
                         run=run,
                         speech_payload=speech_payload,
                     )
@@ -1890,6 +1891,7 @@ class ServiceAutonomousRunMixin:
     def _emit_autonomous_run_assistant_message_event(
         self,
         *,
+        state: dict[str, Any],
         run: dict[str, Any],
         speech_payload: dict[str, Any],
     ) -> None:
@@ -1907,11 +1909,15 @@ class ServiceAutonomousRunMixin:
                 level="DEBUG",
             )
             return
+        persona_id = state["selected_persona_id"]
+        persona = state["personas"][persona_id]
         sent, _ = self._emit_assistant_message_with_audio(
             event_data={
                 "cycle_id": self._autonomous_run_event_cycle_id(run),
                 "source_kind": "autonomous_run",
                 "run_id": run.get("run_id"),
+                "persona_id": persona_id,
+                "persona_display_name": persona["display_name"],
                 "interaction_ref": interaction_ref,
                 "recipient_person_refs": participant_refs,
                 "system_text": "[autonomous_run]",

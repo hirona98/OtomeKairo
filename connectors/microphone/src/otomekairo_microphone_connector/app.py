@@ -486,7 +486,11 @@ class MicrophoneConnector:
                     if selected is not None
                     else None
                 )
-                if output_state["destination"] != "otomekairo" or matched is None:
+                # CocoroConsole 未接続時のローカル出力に備えて待機購読する。
+                if output_state["destination"] not in {
+                    "otomekairo",
+                    "cocoro_console",
+                } or matched is None:
                     time.sleep(CONFIG_POLL_SECONDS)
                     continue
                 self._run_playback_connection(selected, matched["device_index"])
@@ -542,7 +546,10 @@ class MicrophoneConnector:
                         else None
                     )
                     if (
-                        current["destination"] != "otomekairo"
+                        current["destination"] not in {
+                            "otomekairo",
+                            "cocoro_console",
+                        }
                         or current["local_output_device"] != selected_device
                         or current_match is None
                     ):

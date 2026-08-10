@@ -165,7 +165,11 @@ class ServiceInputTracePersistMixin:
                 else []
             ),
             "result_kind": result_kind,
-            "speech": {"text": speech_payload["speech_text"]} if speech_payload else None,
+            "speech": {
+                "text": speech_payload["speech_text"],
+                "persona_id": pipeline["persona_id"],
+                "persona_display_name": pipeline["persona_display_name"],
+            } if speech_payload else None,
             "capability_request": capability_request_summary if isinstance(capability_request_summary, dict) else None,
             "autonomous_run": pipeline.get("autonomous_run_summary")
             if isinstance(pipeline.get("autonomous_run_summary"), dict)

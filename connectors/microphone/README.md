@@ -41,4 +41,4 @@ OtomeKairo serverと同じPCで実行する場合、tokenは`OTOMEKAIRO_DATA_DIR
 ```
 
 connectorは無効設定中も起動を維持し、input / output device catalog と設定変更を監視する。
-選択deviceが消えた場合はOS defaultへ切り替えず、同じALSA host API名とdevice名を5秒間隔で探索する。出力は `destination=otomekairo` かつ保存済み output device が一意に存在するときだけ event stream を購読する。
+選択deviceが消えた場合はOS defaultへ切り替えず、同じALSA host API名とdevice名を5秒間隔で探索する。出力は `destination=otomekairo` または `destination=cocoro_console` で、保存済み output device が一意に存在するときだけ event stream を購読する。`destination=cocoro_console` では、CocoroConsoleが未接続の発話だけOtomeKairoから再生する。

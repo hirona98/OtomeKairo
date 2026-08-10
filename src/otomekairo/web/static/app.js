@@ -1262,8 +1262,17 @@ function connectEventStream() {
     } catch {
       return;
     }
-    if (payload?.type === "assistant_message" && typeof payload.data?.message === "string") {
-      addMessage("assistant", payload.data.message);
+    if (
+      payload?.type === "assistant_message"
+      && typeof payload.data?.message === "string"
+      && typeof payload.data?.persona_display_name === "string"
+    ) {
+      addMessage(
+        "assistant",
+        payload.data.message,
+        [],
+        { displayName: payload.data.persona_display_name },
+      );
       refreshDashboard({ silent: true });
     } else if (payload?.type === "assistant_audio" && payload.data) {
       state.assistantAudio.pendingMetadata = (
@@ -2105,7 +2114,7 @@ function addMessage(kind, text, images = [], options = {}) {
     // CocoroConsole と同じく、表示名は person バルーン直上、時刻はバルーンの外側に置く。
     const content = document.createElement("div");
     content.className = "message-content";
-    if (kind === "person") {
+    if (kind === "person" || kind === "assistant") {
       const displayName = document.createElement("div");
       displayName.className = "message-display-name";
       displayName.textContent = options.displayName;

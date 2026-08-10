@@ -484,6 +484,8 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 "source_kind": "capability_result",
                 "request_id": request_id,
                 "capability_id": capability_id,
+                "persona_id": pipeline["persona_id"],
+                "persona_display_name": pipeline["persona_display_name"],
                 "interaction_ref": interaction_context.interaction_ref,
                 "recipient_person_refs": list(interaction_context.participant_refs),
                 "system_text": f"[capability_result] {capability_id}",

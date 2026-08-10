@@ -717,9 +717,14 @@ a.dashboard-item:hover {
   white-space: nowrap;
 }
 
-.message-display-name {
+.message.person .message-display-name {
   margin: 0 2px 2px 0;
   text-align: right;
+}
+
+.message.assistant .message-display-name {
+  margin: 0 0 2px 2px;
+  text-align: left;
 }
 
 .message-image {

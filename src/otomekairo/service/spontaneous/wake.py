@@ -40,6 +40,8 @@ class ServiceSpontaneousWakeMixin:
                 "cycle_id": cycle_id,
                 "source_kind": trigger_kind,
                 "trigger_kind": trigger_kind,
+                "persona_id": pipeline["persona_id"],
+                "persona_display_name": pipeline["persona_display_name"],
                 "interaction_ref": interaction_context.interaction_ref,
                 "recipient_person_refs": list(interaction_context.participant_refs),
                 "system_text": f"[{trigger_kind}]",

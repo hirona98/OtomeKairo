@@ -72,11 +72,11 @@ class _CapturingProvider(TtsProvider):
 
 
 class _Store:
-    def __init__(self, tts_definition: dict) -> None:
+    def __init__(self, tts_definition: dict, *, destination: str) -> None:
         self._state = {
             "selected_avatar_id": "avatar:test",
             "audio_output_settings": {
-                "destination": "browser",
+                "destination": destination,
                 "local_output_device": None,
             },
             "avatars": {
@@ -91,14 +91,18 @@ class _Store:
 
 
 class _Registry:
-    def __init__(self) -> None:
-        self.accepted = True
+    def __init__(self, *, accepted_client_kinds: set[str]) -> None:
+        self.accepted_client_kinds = set(accepted_client_kinds)
         self.events: list[dict] = []
         self.binary_deliveries: list[tuple[dict, bytes]] = []
+        self.binary_client_kinds: list[str | None] = []
         self.delivered = threading.Event()
 
     def subscriber_count(self, event_type: str, *, client_kind: str | None = None) -> int:
-        return int(self.accepted and event_type == "assistant_audio" and client_kind == "browser")
+        return int(
+            event_type == "assistant_audio"
+            and client_kind in self.accepted_client_kinds
+        )
 
     def send_to_subscribers(self, event_type: str, event: dict, *, client_kind: str | None = None) -> int:
         self.events.append(event)
@@ -114,14 +118,27 @@ class _Registry:
         client_kind: str | None = None,
     ) -> int:
         self.binary_deliveries.append((event, binary))
+        self.binary_client_kinds.append(client_kind)
         self.delivered.set()
-        return 1
+        return int(client_kind in self.accepted_client_kinds)
 
 
 class _Service:
-    def __init__(self, tts_definition: dict) -> None:
-        self.store = _Store(tts_definition)
-        self._event_stream_registry = _Registry()
+    def __init__(
+        self,
+        tts_definition: dict,
+        *,
+        destination: str = "browser",
+        accepted_client_kinds: set[str] | None = None,
+    ) -> None:
+        self.store = _Store(tts_definition, destination=destination)
+        self._event_stream_registry = _Registry(
+            accepted_client_kinds=(
+                {"browser"}
+                if accepted_client_kinds is None
+                else accepted_client_kinds
+            ),
+        )
         self._event_id = 0
 
     def _next_stream_event_id(self) -> int:
@@ -307,6 +324,152 @@ class TtsRuntimeTests(unittest.TestCase):
         self.assertEqual(event["data"]["status"], "succeeded")
         self.assertEqual(event["data"]["byte_count"], len(binary))
         self.assertEqual(event["data"]["media_type"], "audio/wav")
+        self.assertEqual(event["data"]["destination"], "browser")
+        self.assertEqual(
+            service._event_stream_registry.binary_client_kinds,
+            ["browser"],
+        )
+
+    def test_runtime_uses_cocoro_console_when_connected(self) -> None:
+        definition = deepcopy(build_default_avatar()["tts"])
+        definition["enabled"] = True
+        service = _Service(
+            definition,
+            destination="cocoro_console",
+            accepted_client_kinds={"cocoro_console", "otomekairo_audio"},
+        )
+        runtime = TtsRuntime(service, _StaticProvider(_pcm16_wav()))
+        self.addCleanup(runtime.close)
+
+        reservation = runtime.reserve(
+            cycle_id="cycle:test",
+            source_kind="conversation",
+            interaction_ref="interaction:test",
+            recipient_person_refs=["person:test"],
+            speech_text="テスト",
+        )
+        runtime.activate(reservation)
+
+        self.assertEqual(reservation.summary["status"], "queued")
+        self.assertTrue(service._event_stream_registry.delivered.wait(1.0))
+        event, _ = service._event_stream_registry.binary_deliveries[0]
+        self.assertEqual(event["data"]["destination"], "cocoro_console")
+        self.assertEqual(
+            service._event_stream_registry.binary_client_kinds,
+            ["cocoro_console"],
+        )
+
+    def test_runtime_uses_otomekairo_when_cocoro_console_is_not_connected(self) -> None:
+        definition = deepcopy(build_default_avatar()["tts"])
+        definition["enabled"] = True
+        service = _Service(
+            definition,
+            destination="cocoro_console",
+            accepted_client_kinds={"otomekairo_audio"},
+        )
+        runtime = TtsRuntime(service, _StaticProvider(_pcm16_wav()))
+        self.addCleanup(runtime.close)
+
+        reservation = runtime.reserve(
+            cycle_id="cycle:test",
+            source_kind="conversation",
+            interaction_ref="interaction:test",
+            recipient_person_refs=["person:test"],
+            speech_text="テスト",
+        )
+        runtime.activate(reservation)
+
+        self.assertEqual(reservation.summary["status"], "queued")
+        self.assertTrue(service._event_stream_registry.delivered.wait(1.0))
+        event, _ = service._event_stream_registry.binary_deliveries[0]
+        self.assertEqual(event["data"]["destination"], "otomekairo")
+        self.assertEqual(
+            service._event_stream_registry.binary_client_kinds,
+            ["otomekairo_audio"],
+        )
+
+    def test_runtime_reports_unavailable_when_cocoro_console_and_otomekairo_are_absent(self) -> None:
+        definition = deepcopy(build_default_avatar()["tts"])
+        definition["enabled"] = True
+        service = _Service(
+            definition,
+            destination="cocoro_console",
+            accepted_client_kinds=set(),
+        )
+        runtime = TtsRuntime(service, _StaticProvider(_pcm16_wav()))
+        self.addCleanup(runtime.close)
+
+        reservation = runtime.reserve(
+            cycle_id="cycle:test",
+            source_kind="conversation",
+            interaction_ref="interaction:test",
+            recipient_person_refs=["person:test"],
+            speech_text="テスト",
+        )
+
+        self.assertEqual(
+            reservation.summary,
+            {
+                "delivery_id": None,
+                "status": "failed",
+                "error_code": "tts_target_unavailable",
+            },
+        )
+
+    def test_runtime_keeps_otomekairo_as_the_explicit_destination(self) -> None:
+        definition = deepcopy(build_default_avatar()["tts"])
+        definition["enabled"] = True
+        service = _Service(
+            definition,
+            destination="otomekairo",
+            accepted_client_kinds={"otomekairo_audio"},
+        )
+        runtime = TtsRuntime(service, _StaticProvider(_pcm16_wav()))
+        self.addCleanup(runtime.close)
+
+        reservation = runtime.reserve(
+            cycle_id="cycle:test",
+            source_kind="conversation",
+            interaction_ref="interaction:test",
+            recipient_person_refs=["person:test"],
+            speech_text="テスト",
+        )
+
+        self.assertEqual(reservation.summary["status"], "queued")
+        self.assertIsNotNone(reservation.delivery)
+        self.assertEqual(reservation.delivery.destination, "otomekairo")
+        self.assertEqual(
+            reservation.delivery.target_client_kind,
+            "otomekairo_audio",
+        )
+
+    def test_runtime_does_not_switch_browser_to_otomekairo(self) -> None:
+        definition = deepcopy(build_default_avatar()["tts"])
+        definition["enabled"] = True
+        service = _Service(
+            definition,
+            destination="browser",
+            accepted_client_kinds={"otomekairo_audio"},
+        )
+        runtime = TtsRuntime(service, _StaticProvider(_pcm16_wav()))
+        self.addCleanup(runtime.close)
+
+        reservation = runtime.reserve(
+            cycle_id="cycle:test",
+            source_kind="conversation",
+            interaction_ref="interaction:test",
+            recipient_person_refs=["person:test"],
+            speech_text="テスト",
+        )
+
+        self.assertEqual(
+            reservation.summary,
+            {
+                "delivery_id": None,
+                "status": "failed",
+                "error_code": "tts_target_unavailable",
+            },
+        )
 
     def test_runtime_reports_disabled_without_enqueuing(self) -> None:
         definition = deepcopy(build_default_avatar()["tts"])

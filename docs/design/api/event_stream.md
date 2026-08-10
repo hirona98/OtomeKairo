@@ -278,6 +278,8 @@ server -> client の代表例:
     "created_at": "2026-03-31T09:00:00+09:00",
     "cycle_id": "cycle:...",
     "source_kind": "capability_result",
+    "persona_id": "persona:default",
+    "persona_display_name": "標準人格設定",
     "request_id": "vision_capture_request:...",
     "capability_id": "vision.capture",
     "interaction_ref": "interaction:discord:channel-123",
@@ -298,6 +300,8 @@ server -> client の代表例:
     "cycle_id": "cycle:...",
     "source_kind": "wake",
     "trigger_kind": "wake",
+    "persona_id": "persona:default",
+    "persona_display_name": "標準人格設定",
     "interaction_ref": "interaction:discord:channel-123",
     "recipient_person_refs": ["person:external-123"],
     "system_text": "[wake]",
@@ -422,12 +426,14 @@ server -> client の代表例:
 `vision.capture_request`、`camera.ptz_request`、`external.status_request`、`schedule.status_request`、`device.status_request`、`body.status_request`、`environment.status_request`、`location.status_request`、`social.status_request`、`mcp.call_tool_request` は capability 実行要求である。
 `assistant_message` は server が生成した assistant 発話を client へ表示させる通知である。
 `assistant_message.data.source_kind` は `conversation / capability_result / wake / background_thinking / autonomous_run` のいずれかであり、capability result follow-up の場合だけ `request_id / capability_id` を持つ。
-`assistant_message.data.message_id / created_at / message` は全発話通知で必須とする。
+`assistant_message.data.message_id / created_at / message / persona_id / persona_display_name` は全発話通知で必須とする。
+`persona_id / persona_display_name` はその発話生成で使った人格設定の ID とプリセット名であり、client は受信時の現在設定から再解決しない。
 `assistant_message.data.interaction_ref / recipient_person_refs` は全発話通知で必須とする。
 `assistant_message.data.audio_delivery` と HTTP response の `speech.audio_delivery` は `delivery_id / status / error_code` を持つ。
 `audio_delivery.status` は `queued / disabled / failed` のいずれかとする。
 `queued` のときだけ `delivery_id` を返し、`disabled` のときは `error_code=null`、`failed` のときは `tts_target_unavailable / tts_queue_full` のいずれかを返す。
 `assistant_audio.data` は `delivery_id / destination / cycle_id / source_kind / interaction_ref / recipient_person_refs / status / media_type / byte_count / error_code` を持つ。
+`assistant_audio.data.destination` は保存設定ではなく、その発話で確定した実際の配送先を表す。保存先が `cocoro_console` でも、発話受付時にCocoroConsoleが未接続でOtomeKairoへ配送する場合は `otomekairo` とする。
 音声合成に成功した場合、server は `status=succeeded / media_type=audio/wav / byte_count>0 / error_code=null` の JSON message と、その直後の1個の binary messageを同じ送信lock内で配送する。
 binary message は RIFF/WAVE の PCM 16-bit または IEEE float 32-bit とし、長さを `byte_count` と一致させる。
 音声合成に失敗した場合、server は `status=failed / media_type=null / byte_count=0` の JSON messageだけを送り、`error_code` を `tts_request_failed / tts_response_invalid / tts_response_too_large` のいずれかにする。

@@ -174,6 +174,8 @@ response:
     "result_kind": "speech",
     "speech": {
       "text": "やわらかく穏やかに受け取ったよ。こんにちは",
+      "persona_id": "persona:default",
+      "persona_display_name": "標準人格設定",
       "audio_delivery": {
         "delivery_id": "tts_delivery:...",
         "status": "queued",
@@ -195,6 +197,7 @@ response:
 - `internal_failure`
 
 `speech.audio_delivery` は発話本文とは独立した音声配送の受付結果である。
+`speech.persona_id / persona_display_name` はその発話生成で使った人格設定を表す。
 shape と配送規則は [event_stream.md](event_stream.md) の `assistant_audio` を正とする。
 TTS が無効でも `result_kind=speech` と `speech.text` は成功し、`audio_delivery.status=disabled` を返す。
 TTS の配送先が接続されていない場合と queue が満杯の場合も発話本文は成功し、`audio_delivery.status=failed` を返す。
@@ -212,6 +215,8 @@ TTS の配送先が接続されていない場合と queue が満杯の場合も
     "result_kind": "speech",
     "speech": {
       "text": "うん、1分後に声をかけるね。",
+      "persona_id": "persona:default",
+      "persona_display_name": "標準人格設定",
       "audio_delivery": {
         "delivery_id": "tts_delivery:...",
         "status": "queued",
