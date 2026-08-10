@@ -404,7 +404,7 @@ capability 実行可否は `required_permissions` と認証済み client また�
 ## capability 定義ルール
 
 `mcp.call_tool` は MCP server の種類を capability id に入れない。
-ELYTH のような個別サービスは `hello.mcp_servers[].mcp_server_id` と tool catalog で識別する。
+e-Stat のような個別サービスは `hello.mcp_servers[].mcp_server_id` と tool catalog で識別する。
 server は保存済み MCP server 定義の `enabled_tools` を実行権限の正本とする。
 server は許可済み `mcp_server_id` と `tool_name` から dispatch 先 client を一意に決める。
 tool が持つ `inputSchema` は connector hello で server へ渡し、server は `arguments` を dispatch 前に検証する。

@@ -21,7 +21,7 @@ class CapabilityContextTests(unittest.TestCase):
         mcp_capability = {
             "id": "mcp.call_tool",
             "available": True,
-            "mcp_servers": [{"mcp_server_id": "elyth"}],
+            "mcp_servers": [{"mcp_server_id": "e-stat"}],
         }
         vision_capability = {
             "id": "vision.capture",
@@ -46,7 +46,7 @@ class CapabilityContextTests(unittest.TestCase):
                     "scope": "world",
                     "summary_text": "タイムラインに未読の投稿が2件ある。",
                     "age_label": "たった今",
-                    "integration_key": "external_service:mcp%3Aelyth/get_information",
+                    "integration_key": "external_service:e-stat/get_information",
                 },
                 {
                     "state_type": "visual_context",

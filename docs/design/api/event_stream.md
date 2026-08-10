@@ -46,12 +46,12 @@ client -> server:
   ],
   "mcp_servers": [
     {
-      "mcp_server_id": "elyth",
+      "mcp_server_id": "e-stat",
       "transport": "stdio",
       "tools": [
         {
-          "name": "get_information",
-          "description": "ELYTH の現在情報を取得する",
+          "name": "search_e_stat_tables",
+          "description": "政府統計の統計表をキーワードで検索する",
           "inputSchema": { "type": "object" }
         }
       ]

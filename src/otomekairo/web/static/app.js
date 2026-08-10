@@ -4220,11 +4220,13 @@ function addMcp() {
     client_id: "mcp-client-connector-main",
     enabled: false,
     transport: "stdio",
-    command: "npx",
-    args: ["-y", "elyth-mcp-server@latest"],
+    command: "uvx",
+    args: ["estat-mcp-server"],
     cwd: null,
     enabled_tools: [],
-    env: {},
+    env: {
+      E_STAT_APP_ID: "",
+    },
   });
   state.selectedMcpId = id;
   renderCapabilities();

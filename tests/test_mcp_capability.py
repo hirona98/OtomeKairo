@@ -18,7 +18,7 @@ class DummyStore:
     def __init__(self) -> None:
         # hello が参照する正規のMCPサーバー定義を保持する。
         self.state = build_default_state()
-        mcp_server = self.state["mcp_servers"]["elyth"]
+        mcp_server = self.state["mcp_servers"]["e-stat"]
         mcp_server["enabled"] = True
         mcp_server["enabled_tools"] = ["create_post", "get_information"]
 
@@ -56,7 +56,7 @@ class McpCapabilityTests(unittest.TestCase):
                 "caps": [{"id": "mcp.call_tool", "version": "1"}],
                 "mcp_servers": [
                     {
-                        "mcp_server_id": "elyth",
+                        "mcp_server_id": "e-stat",
                         "transport": "stdio",
                         "tools": [
                             {
@@ -77,7 +77,7 @@ class McpCapabilityTests(unittest.TestCase):
 
         bindings = service._event_stream_registry.list_capability_bindings()
         self.assertEqual(bindings["accepted"]["mcp.call_tool"], ["mcp-client-connector-main"])
-        self.assertEqual(bindings["mcp_servers"][0]["mcp_server_id"], "elyth")
+        self.assertEqual(bindings["mcp_servers"][0]["mcp_server_id"], "e-stat")
 
     def test_registry_resolves_mcp_tool_target(self) -> None:
         service = DummyService()
@@ -91,7 +91,7 @@ class McpCapabilityTests(unittest.TestCase):
                 "caps": [{"id": "mcp.call_tool", "version": "1"}],
                 "mcp_servers": [
                     {
-                        "mcp_server_id": "elyth",
+                        "mcp_server_id": "e-stat",
                         "transport": "stdio",
                         "tools": [{"name": "get_information", "description": "", "inputSchema": {"type": "object"}}],
                     }
@@ -100,7 +100,7 @@ class McpCapabilityTests(unittest.TestCase):
         )
 
         target = service._event_stream_registry.get_mcp_tool_target(
-            mcp_server_id="elyth",
+            mcp_server_id="e-stat",
             tool_name="get_information",
         )
 
@@ -122,7 +122,7 @@ class McpCapabilityTests(unittest.TestCase):
                     "caps": [],
                     "mcp_servers": [
                         {
-                            "mcp_server_id": "elyth",
+                            "mcp_server_id": "e-stat",
                             "transport": "stdio",
                             "tools": [{"name": "get_information"}],
                         }
@@ -141,7 +141,7 @@ class McpCapabilityTests(unittest.TestCase):
             "caps": [{"id": "mcp.call_tool", "version": "1"}],
             "mcp_servers": [
                 {
-                    "mcp_server_id": "elyth",
+                    "mcp_server_id": "e-stat",
                     "transport": "stdio",
                     "tools": [{"name": "get_information", "description": "", "inputSchema": {"type": "object"}}],
                 }
@@ -156,7 +156,7 @@ class McpCapabilityTests(unittest.TestCase):
 
     def test_hello_rejects_tool_not_enabled_in_server_definition(self) -> None:
         service = DummyService()
-        service.store.state["mcp_servers"]["elyth"]["enabled_tools"] = ["get_information"]
+        service.store.state["mcp_servers"]["e-stat"]["enabled_tools"] = ["get_information"]
         session_id = service.register_event_stream_connection(DummyWebSocket())
 
         with self.assertRaises(ServiceError) as raised:
@@ -169,7 +169,7 @@ class McpCapabilityTests(unittest.TestCase):
                     "caps": [{"id": "mcp.call_tool", "version": "1"}],
                     "mcp_servers": [
                         {
-                            "mcp_server_id": "elyth",
+                            "mcp_server_id": "e-stat",
                             "transport": "stdio",
                             "tools": [
                                 {
@@ -192,7 +192,7 @@ class McpCapabilityTests(unittest.TestCase):
         payload = service._normalize_mcp_call_tool_result_payload(
             result_payload={
                 "status": "completed",
-                "mcp_server_id": "elyth",
+                "mcp_server_id": "e-stat",
                 "tool_name": "get_information",
                 "is_error": False,
                 "content": [{"type": "text", "text": "raw result"}],

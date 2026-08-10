@@ -22,7 +22,7 @@ DEFAULT_GEMINI_GENERATION_MODEL = "openrouter/google/gemini-3.1-flash-lite-previ
 DEFAULT_GEMINI_EMBEDDING_MODEL = "openrouter/google/gemini-embedding-001"
 DEFAULT_PERSONA_DISPLAY_NAME = "標準人格設定"
 DEFAULT_PERSONA_INITIATIVE_BASELINE = "medium"
-DEFAULT_ELYTH_MCP_SERVER_ID = "elyth"
+DEFAULT_ESTAT_MCP_SERVER_ID = "e-stat"
 DEFAULT_PERSONA_PROMPT = """人のそばで長く時間を重ねることを自然だと思っている。
 必要以上に媚びず、相手を一人の人間としてまっすぐ扱う。
 静かで落ち着いているが、相手の無理や雑さには小さく釘を刺す。
@@ -173,7 +173,7 @@ def build_default_state() -> dict:
         },
         "camera_sources": {},
         "mcp_servers": {
-            DEFAULT_ELYTH_MCP_SERVER_ID: build_default_elyth_mcp_server(),
+            DEFAULT_ESTAT_MCP_SERVER_ID: build_default_estat_mcp_server(),
         },
         "console_client_settings": {},
     }
@@ -278,19 +278,19 @@ def build_default_model_preset() -> dict:
     }
 
 
-def build_default_elyth_mcp_server() -> dict:
+def build_default_estat_mcp_server() -> dict:
+    # 総務省 e-Stat（政府統計）API 向け stdio MCP の雛形。APP ID は空で保持し秘密値は入れない。
     return {
-        "mcp_server_id": DEFAULT_ELYTH_MCP_SERVER_ID,
+        "mcp_server_id": DEFAULT_ESTAT_MCP_SERVER_ID,
         "connector_kind": "mcp_client",
         "client_id": "mcp-client-connector-main",
         "enabled": False,
         "transport": "stdio",
-        "command": "npx",
-        "args": ["-y", "elyth-mcp-server@latest"],
+        "command": "uvx",
+        "args": ["estat-mcp-server"],
         "cwd": None,
         "enabled_tools": [],
         "env": {
-            "ELYTH_API_BASE": "https://elythworld.com",
-            "ELYTH_API_KEY": "",
+            "E_STAT_APP_ID": "",
         },
     }

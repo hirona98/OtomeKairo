@@ -40,16 +40,16 @@ class ConfigStoreTests(unittest.TestCase):
                 }
             }
             state["mcp_servers"] = {
-                "elyth": {
-                    "mcp_server_id": "elyth",
+                "e-stat": {
+                    "mcp_server_id": "e-stat",
                     "connector_kind": "mcp_client",
                     "client_id": "mcp-client-connector-main",
                     "enabled": True,
                     "transport": "stdio",
-                    "command": "npx",
-                    "args": ["-y", "elyth-mcp-server@latest"],
+                    "command": "uvx",
+                    "args": ["estat-mcp-server"],
                     "cwd": None,
-                    "env": {"ELYTH_API_KEY": "secret"},
+                    "env": {"E_STAT_APP_ID": "secret"},
                 }
             }
             state["selected_avatar_id"] = "avatar:default"
@@ -91,7 +91,7 @@ class ConfigStoreTests(unittest.TestCase):
                 ],
                 "password",
             )
-            self.assertEqual(reloaded_state["mcp_servers"]["elyth"]["env"]["ELYTH_API_KEY"], "secret")
+            self.assertEqual(reloaded_state["mcp_servers"]["e-stat"]["env"]["E_STAT_APP_ID"], "secret")
             self.assertEqual(
                 reloaded_state["microphone_settings"],
                 {

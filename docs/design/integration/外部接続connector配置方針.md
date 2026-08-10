@@ -215,7 +215,7 @@ watcher は camera account、OtomeKairo access token、内部 URL の秘密部�
 ## 汎用 MCP client connector
 
 MCP client connector は、stdio MCP server を OtomeKairo の `mcp.call_tool` capability として接続する汎用 connector である。
-ELYTH は MCP server 設定例の 1 つとして扱い、OtomeKairo server 本体へ ELYTH 固有コードを入れない。
+e-Stat は MCP server 設定例の 1 つとして扱い、OtomeKairo server 本体へ e-Stat 固有コードを入れない。
 この repository 内の初期実装は `connectors/mcp_client/` に置く。
 
 MCP client connector は起動時に `GET /api/config/connectors/{client_id}/runtime-config` から設定済み MCP server を取得する。
@@ -224,23 +224,22 @@ server は `mcp_server_id / tool_name / inputSchema` を判断 view、inspection
 server は hello 登録時と dispatch 時に保存済み `enabled_tools` を照合する。
 connector は `enabled_tools` に含まれる `mcp.call_tool_request` を受けたときだけ MCP `tools/call` を実行し、`POST /api/capability/result` へ result を返す。
 
-ELYTH の接続は `PUT /api/config/mcp-servers/mcp%3Aelyth` で次の設定を登録する。
+e-Stat の接続は `PUT /api/config/mcp-servers/e-stat` で次の設定を登録する。
 
 ```json
 {
   "enabled": true,
-  "command": "npx",
-  "args": ["-y", "elyth-mcp-server@latest"],
+  "command": "uvx",
+  "args": ["estat-mcp-server"],
   "cwd": null,
-  "enabled_tools": ["get_information", "create_post"],
+  "enabled_tools": ["search_e_stat_tables", "get_e_stat_data_catalog"],
   "env": {
-    "ELYTH_API_BASE": "https://elythworld.com",
-    "ELYTH_API_KEY": "..."
+    "E_STAT_APP_ID": "..."
   }
 }
 ```
 
-`ELYTH_API_KEY` は設定値として OtomeKairo 本体に保持する。
+`E_STAT_APP_ID` は設定値として OtomeKairo 本体に保持する。
 MCP server の API key、token、command env、内部 URL の秘密部分を `hello`、result、inspection、通常ログへ入れない。
 MCP server の tool 名、description、input schema は capability manifest の正本ではなく、接続中 MCP server の tool catalog として扱う。
 `enabled_tools` は実行権限の設定値であり、tool catalog の正本ではない。
