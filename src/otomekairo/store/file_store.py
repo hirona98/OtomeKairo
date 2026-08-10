@@ -701,11 +701,6 @@ class SQLiteMemoryStore(
         with self._memory_db() as conn:
             conn.execute("DELETE FROM ongoing_actions WHERE memory_set_id = ?", (memory_set_id,))
 
-    def clear_autonomous_runs(self, *, memory_set_id: str) -> None:
-        # トランザクション
-        with self._memory_db() as conn:
-            conn.execute("DELETE FROM autonomous_runs WHERE memory_set_id = ?", (memory_set_id,))
-
     def get_latest_reflection_run(
         self,
         memory_set_id: str,

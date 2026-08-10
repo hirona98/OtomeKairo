@@ -354,23 +354,6 @@ class EventStreamRegistry:
         # 空
         return False
 
-    def client_accepts_event(self, client_id: str, event_type: str) -> bool:
-        # 走査
-        normalized_client_id = client_id.strip()
-        normalized_event_type = event_type.strip()
-        if not normalized_client_id or not normalized_event_type:
-            return False
-        with self._lock:
-            for session in self._sessions.values():
-                if session.get("client_id") != normalized_client_id:
-                    continue
-                event_subscriptions = session.get("event_subscriptions", [])
-                if normalized_event_type in event_subscriptions:
-                    return True
-
-        # 空
-        return False
-
     def subscriber_count(
         self,
         event_type: str,
@@ -389,24 +372,6 @@ class EventStreamRegistry:
                     or session.get("client_kind") == normalized_client_kind
                 )
             )
-
-    def find_single_client_with_capability(self, capability: str) -> str | None:
-        # capability を持つ接続中 client 群
-        with self._lock:
-            client_ids = sorted(
-                {
-                    client_id.strip()
-                    for session in self._sessions.values()
-                    if isinstance((client_id := session.get("client_id")), str)
-                    and client_id.strip()
-                    and capability in session.get("capabilities", {})
-                }
-            )
-
-        # 1 台だけのときだけ採用する
-        if len(client_ids) != 1:
-            return None
-        return client_ids[0]
 
     def is_client_connected(self, client_id: str) -> bool:
         # 走査
@@ -623,36 +588,6 @@ class EventStreamRegistry:
             return False
 
         # 結果
-        return True
-
-    def send_to_client_with_binary(
-        self,
-        client_id: str,
-        payload: dict[str, Any],
-        binary: bytes,
-    ) -> bool:
-        # スナップショット
-        event_type = payload.get("type")
-        with self._lock:
-            target_session = None
-            for session in self._sessions.values():
-                if session.get("client_id") != client_id:
-                    continue
-                if event_type not in session.get("event_subscriptions", []):
-                    continue
-                target_session = session
-
-        # 空
-        if target_session is None:
-            return False
-
-        # metadataとbinaryを一つの送信単位として配送する。
-        websocket = target_session["websocket"]
-        try:
-            websocket.send_json_and_binary(payload, binary)
-        except OSError:
-            self.remove_connection(target_session["session_id"])
-            return False
         return True
 
     def send_to_subscribers(

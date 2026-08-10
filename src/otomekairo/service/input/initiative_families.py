@@ -358,15 +358,6 @@ class ServiceInputInitiativeFamiliesMixin:
                 return family
         return None
 
-    def _initiative_has_ongoing_action_candidate(
-        self,
-        ongoing_action_summary: dict[str, Any] | None,
-    ) -> bool:
-        if not isinstance(ongoing_action_summary, dict):
-            return False
-        status = ongoing_action_summary.get("status")
-        return isinstance(status, str) and status.strip() != ""
-
     def _initiative_ongoing_action_family_reason(
         self,
         ongoing_action_summary: dict[str, Any] | None,

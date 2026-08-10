@@ -436,16 +436,6 @@ function formatDateTime(value) {
   }).format(parsed);
 }
 
-function formatDuration(startedAt, finishedAt) {
-  const started = new Date(startedAt);
-  const finished = new Date(finishedAt);
-  if (Number.isNaN(started.getTime()) || Number.isNaN(finished.getTime())) {
-    return "";
-  }
-  const milliseconds = Math.max(0, finished.getTime() - started.getTime());
-  return milliseconds < 1000 ? `${milliseconds}ms` : `${(milliseconds / 1000).toFixed(1)}秒`;
-}
-
 function formatScore(value) {
   return typeof value === "number" && Number.isFinite(value) ? value.toFixed(2) : "—";
 }
@@ -1176,10 +1166,6 @@ function isDashboardVisible() {
 function setDashboardVisible(visible) {
   // いまパネルの表示を明示的に切り替える。
   element("workspace-layout").classList.toggle("dashboard-hidden", !visible);
-}
-
-function toggleDashboard() {
-  setDashboardVisible(!isDashboardVisible());
 }
 
 function setConfirmMenuOpen(open) {

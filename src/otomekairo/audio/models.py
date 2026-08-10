@@ -196,15 +196,6 @@ class AudioModelRuntime:
             raise AudioModelError("Speaker enrollment mean norm is invalid.")
         return (mean / norm).tolist()
 
-    def pcm16le_to_float32(self, pcm16le: bytes) -> Any:
-        if len(pcm16le) % 2 != 0:
-            raise AudioModelError("PCM16LE byte count must be even.")
-        return (
-            self._np.frombuffer(pcm16le, dtype="<i2")
-            .astype(self._np.float32)
-            / 32768.0
-        )
-
     def _read_manifest(self) -> dict[str, Any]:
         try:
             return json.loads(

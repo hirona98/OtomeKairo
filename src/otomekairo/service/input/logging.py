@@ -225,14 +225,6 @@ class ServiceInputLoggingMixin:
         keys = sorted(str(key) for key in context.keys())[:8]
         return ",".join(keys) if keys else "-"
 
-    def _format_list_for_log(self, values: list[Any]) -> str:
-        # 空
-        if not values:
-            return "-"
-
-        # 結果
-        return ",".join(str(value) for value in values[:3])
-
     def _format_id_list_for_log(self, values: list[str]) -> str:
         # 空
         if not values:

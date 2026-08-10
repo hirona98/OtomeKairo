@@ -2354,52 +2354,6 @@ def _build_internal_context_payload(
     return payload
 
 
-def _format_internal_context(
-    time_context: dict[str, Any],
-    affect_context: dict[str, Any],
-    drive_state_summary: list[dict[str, Any]] | None,
-    foreground_world_state: list[dict[str, Any]] | None,
-    activity_context: dict[str, Any] | None,
-    ongoing_action_summary: dict[str, Any] | None,
-    autonomous_run_summaries: list[dict[str, Any]] | None,
-    capability_decision_view: list[dict[str, Any]] | None,
-    initiative_context: InitiativeContext | None,
-    capability_result_context: dict[str, Any] | None,
-    visual_observation_context: dict[str, Any] | None,
-    self_state_context: dict[str, Any] | None,
-    people_context: list[dict[str, str]] | None,
-    relationship_context: dict[str, Any] | None,
-    prediction_error_context: dict[str, Any] | None,
-    default_mode_context: dict[str, Any] | None,
-    workspace_context: dict[str, Any] | None,
-    reference_context: dict[str, Any] | None,
-    recall_pack: dict[str, Any],
-) -> str:
-    return _json_dumps_compact(
-        _build_internal_context_payload(
-            time_context,
-            affect_context,
-            drive_state_summary,
-            foreground_world_state,
-            activity_context,
-            ongoing_action_summary,
-            autonomous_run_summaries,
-            capability_decision_view,
-            initiative_context,
-            capability_result_context,
-            visual_observation_context,
-            self_state_context,
-            people_context,
-            relationship_context,
-            prediction_error_context,
-            default_mode_context,
-            workspace_context,
-            reference_context,
-            recall_pack,
-        )
-    )
-
-
 def _compact_recall_pack(recall_pack: dict[str, Any]) -> dict[str, Any]:
     compact = {
         "self_model": [_compact_memory_context_item(item) for item in recall_pack.get("self_model", [])],
@@ -2545,14 +2499,3 @@ def _compact_memory_link_context(value: Any) -> dict[str, Any]:
         "label_counts": value.get("label_counts", {}),
         "representative_links": representatives,
     }
-
-
-def _format_recent_turns(recent_turns: list[dict]) -> str:
-    if not recent_turns:
-        return "(none)"
-    lines = []
-    for turn in recent_turns:
-        role = turn.get("role", "unknown")
-        text = str(turn.get("text", "")).strip()
-        lines.append(f"- {role}: {text}")
-    return "\n".join(lines)

@@ -36,7 +36,6 @@ WAIT_SERVER_TIMEOUT_SECONDS = 20.0
 WAIT_QUEUE_DRAIN_TIMEOUT_SECONDS = 30.0
 WAIT_CAPTURE_RECOVERY_TIMEOUT_SECONDS = 30.0
 WAIT_RESTART_PENDING_TIMEOUT_SECONDS = 8.0
-WAIT_PENDING_INTENT_SEED_TIMEOUT_SECONDS = 20.0
 WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS = 20.0
 WAIT_ONGOING_ACTION_CLEAR_TIMEOUT_SECONDS = 20.0
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 10.0
@@ -479,7 +478,6 @@ class LongSmokeRunner:
         self.real_llm_memory_trace_shape_digest: dict[str, Any] = {}
         self.real_llm_memory_trace_shape_verified = False
         self.restart_probe_cycle_ids: list[str] = []
-        self.pending_intent_seed_cycle_ids: list[str] = []
         self.capture_empty_result_request_ids: list[str] = []
         self.capture_mismatch_request_ids: list[str] = []
         self.capture_invalid_images_request_ids: list[str] = []
@@ -2007,52 +2005,6 @@ class LongSmokeRunner:
                 break
             else:
                 raise SmokeError("vision.capture did not produce the injected empty result trace.")
-
-    def _seed_pending_intent_probe_candidate(self) -> str:
-        marker = "LongSmokePendingIntentProbeMarker"
-        first_cycle_id = self._post_conversation(
-            text=f"{marker} のレビュー相談を続けたいです。",
-            source="long_smoke_pending_intent_seed",
-            client_id="long-smoke-pending-intent-seed",
-            active_app="LongSmokePendingIntentSeed",
-            window_title=f"{marker} seed-1",
-        )
-        self.pending_intent_seed_cycle_ids.append(first_cycle_id)
-        self._wait_for_memory_jobs_to_drain()
-
-        second_cycle_id = self._post_conversation(
-            text=f"{marker} の件はまた今度あとで確認したいです。",
-            source="long_smoke_pending_intent_seed",
-            client_id="long-smoke-pending-intent-seed",
-            active_app="LongSmokePendingIntentSeed",
-            window_title=f"{marker} seed-2",
-        )
-        self.pending_intent_seed_cycle_ids.append(second_cycle_id)
-
-        deadline = time.monotonic() + WAIT_PENDING_INTENT_SEED_TIMEOUT_SECONDS
-        while time.monotonic() < deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            trace = self.api.get(f"/api/inspection/cycles/{second_cycle_id}")
-            decision_trace = trace.get("decision_trace", {})
-            result_trace = trace.get("result_trace", {})
-            if not isinstance(decision_trace, dict) or not isinstance(result_trace, dict):
-                time.sleep(0.25)
-                continue
-            if decision_trace.get("result_kind") != "pending_intent":
-                time.sleep(0.25)
-                continue
-            pending_intent_summary = result_trace.get("pending_intent_summary")
-            if not isinstance(pending_intent_summary, dict):
-                time.sleep(0.25)
-                continue
-            log(
-                "pending_intent seed confirmed"
-                f" cycle_id={second_cycle_id}"
-                f" dedupe_key={pending_intent_summary.get('dedupe_key')}"
-            )
-            return marker
-        raise SmokeError("pending_intent probe seed did not create a pending_intent candidate.")
 
     def _queue_capture_context_override(self, override: dict[str, Any]) -> None:
         with self._capture_lock:
@@ -5599,7 +5551,6 @@ class LongSmokeRunner:
             "recall_quality_probe_verified": self.recall_quality_probe_verified,
             "recall_quality_probe_digest": self.recall_quality_probe_digest,
             "restart_probe_cycle_ids": self.restart_probe_cycle_ids,
-            "pending_intent_seed_cycle_ids": self.pending_intent_seed_cycle_ids,
             "trigger_counts": trigger_counts,
             "failed_cycle_ids": failed_cycle_ids,
             "capture_request_count": self.capture_request_count,
