@@ -643,20 +643,41 @@ a.dashboard-item:hover {
 
 .message {
   display: grid;
-  gap: 4px;
+  align-items: end;
+  column-gap: 6px;
   max-width: min(78ch, 86%);
 }
 
 .message.person {
+  grid-template-columns: auto minmax(0, 1fr);
   align-self: flex-end;
 }
 
-.message.assistant,
-.message.system {
+.message.assistant {
+  grid-template-columns: minmax(0, 1fr) auto;
   align-self: flex-start;
 }
 
+.message.system {
+  display: block;
+  align-self: flex-start;
+}
+
+.message-content {
+  display: grid;
+  min-width: 0;
+}
+
+.message.person .message-content {
+  justify-items: end;
+}
+
+.message.assistant .message-content {
+  justify-items: start;
+}
+
 .bubble {
+  max-width: 100%;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   padding: 8px 10px;
@@ -683,12 +704,20 @@ a.dashboard-item:hover {
   color: var(--text);
 }
 
-.meta {
+.message-time,
+.message-display-name {
   color: var(--muted);
   font-size: var(--font-secondary);
 }
 
-.message.person .meta {
+.message-time {
+  margin-bottom: 2px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.message-display-name {
+  margin: 0 2px 2px 0;
   text-align: right;
 }
 

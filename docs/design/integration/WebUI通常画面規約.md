@@ -93,6 +93,13 @@ chip、badge、`.status.processing` / `.status.error` は上記を共有する�
 
 役割差のための配色差は維持する。
 
+バルーン周辺の表示は CocoroConsole と同じ配置にする。
+
+- person の `display_name` はバルーン直上に右寄せで表示する
+- 時刻は client が表示した時刻を `HH:mm` で表示し、person はバルーン左側、assistant は右側の下端に揃える
+- system / error / noop には表示名や時刻を付けない
+- 入力元や assistant 発話の起点はバルーン周辺に表示しない
+
 person と assistant の吹き出しは event stream を表示の正本とし、event 発生時に起動・購読中の全 client で同じ順序に追加する。HTTP response から assistant 吹き出しを追加しない。送信画像は `message_id` に対応づけて送信元ブラウザだけが表示し、他 client へ同期しない。system / error / noop の表示は各 UI のローカル通知とする。
 
 ## 実装対応

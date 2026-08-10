@@ -1188,15 +1188,6 @@ function setEventStreamStatus(text, kind = "") {
   status.className = `status ${kind}`.trim();
 }
 
-function assistantSourceLabel(sourceKind) {
-  return {
-    capability_result: "能力結果",
-    wake: "起床",
-    background_thinking: "定期思考",
-    autonomous_run: "自律実行",
-  }[sourceKind] || "非同期";
-}
-
 function playAssistantAudio(arrayBuffer, metadata) {
   const playback = async () => {
     const blob = new Blob([arrayBuffer], { type: metadata.media_type });
@@ -1265,12 +1256,7 @@ function connectEventStream() {
       return;
     }
     if (payload?.type === "assistant_message" && typeof payload.data?.message === "string") {
-      addMessage(
-        "assistant",
-        payload.data.message,
-        [],
-        assistantSourceLabel(payload.data.source_kind),
-      );
+      addMessage("assistant", payload.data.message);
       refreshDashboard({ silent: true });
     } else if (payload?.type === "assistant_audio" && payload.data) {
       state.assistantAudio.pendingMetadata = (
@@ -1284,17 +1270,11 @@ function connectEventStream() {
     ) {
       const pending = state.pendingConversationInputs.get(payload.data.message_id);
       state.pendingConversationInputs.delete(payload.data.message_id);
-      const sourceLabel = {
-        user_message: "テキスト入力",
-        web_microphone: "Webマイク",
-        console_microphone: "CocoroConsoleマイク",
-        local_microphone: "ローカルマイク",
-      }[payload.data.source_kind] || "会話入力";
       addMessage(
         "person",
         payload.data.message,
         pending?.images || [],
-        [payload.data.display_name, sourceLabel].filter(Boolean).join(" · "),
+        { displayName: payload.data.display_name },
       );
       refreshDashboard({ silent: true });
     } else if (payload?.type === "audio_runtime_state" && payload.data) {
@@ -2103,7 +2083,7 @@ function renderAudioMeters() {
   }
 }
 
-function addMessage(kind, text, images = [], sourceLabel = "", options = {}) {
+function addMessage(kind, text, images = [], options = {}) {
   const wrapper = document.createElement("article");
   wrapper.className = `message ${kind}`;
 
@@ -2127,11 +2107,29 @@ function addMessage(kind, text, images = [], sourceLabel = "", options = {}) {
     bubble.append(document.createElement("br"), link);
   }
 
-  const meta = document.createElement("div");
-  meta.className = "meta";
-  meta.textContent = [nowLabel(), sourceLabel].filter(Boolean).join(" · ");
+  if (kind === "system") {
+    wrapper.append(bubble);
+  } else {
+    // CocoroConsole と同じく、表示名は person バルーン直上、時刻はバルーンの外側に置く。
+    const content = document.createElement("div");
+    content.className = "message-content";
+    if (kind === "person") {
+      const displayName = document.createElement("div");
+      displayName.className = "message-display-name";
+      displayName.textContent = options.displayName;
+      content.append(displayName);
+    }
+    content.append(bubble);
 
-  wrapper.append(bubble, meta);
+    const time = document.createElement("div");
+    time.className = "message-time";
+    time.textContent = nowLabel();
+    if (kind === "person") {
+      wrapper.append(time, content);
+    } else {
+      wrapper.append(content, time);
+    }
+  }
   element("messages").append(wrapper);
   element("messages").scrollTop = element("messages").scrollHeight;
 }
@@ -2217,7 +2215,7 @@ async function sendMessage(event) {
     });
     if (result?.result_kind !== "speech") {
       const rendered = resultText(result);
-      addMessage(rendered.kind, rendered.text, [], "", { cycleId: rendered.cycleId || "" });
+      addMessage(rendered.kind, rendered.text, [], { cycleId: rendered.cycleId || "" });
     }
     await loadStatus({ silent: true });
     await refreshDashboard({ silent: true });
