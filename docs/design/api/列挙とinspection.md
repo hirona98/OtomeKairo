@@ -24,7 +24,7 @@ response:
     "personas": [
       {
         "persona_id": "persona:default",
-        "display_name": "標準人格設定"
+        "display_name": "初音ミク"
       }
     ],
     "memory_sets": [

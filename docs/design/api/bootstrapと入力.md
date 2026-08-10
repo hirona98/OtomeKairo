@@ -175,7 +175,7 @@ response:
     "speech": {
       "text": "やわらかく穏やかに受け取ったよ。こんにちは",
       "persona_id": "persona:default",
-      "persona_display_name": "標準人格設定",
+      "persona_display_name": "初音ミク",
       "audio_delivery": {
         "delivery_id": "tts_delivery:...",
         "status": "queued",
@@ -216,7 +216,7 @@ TTS の配送先が接続されていない場合と queue が満杯の場合も
     "speech": {
       "text": "うん、1分後に声をかけるね。",
       "persona_id": "persona:default",
-      "persona_display_name": "標準人格設定",
+      "persona_display_name": "初音ミク",
       "audio_delivery": {
         "delivery_id": "tts_delivery:...",
         "status": "queued",
