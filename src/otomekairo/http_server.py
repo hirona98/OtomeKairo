@@ -34,7 +34,13 @@ SUPPRESSED_HTTP_LOG_EXACT_PATHS = {
     "/api/audio/stream",
     "/api/audio/console-stream",
     "/api/audio/input-state",
+    "/api/audio/stt-enabled",
+    "/api/audio/tts-enabled",
+    "/api/audio/output-state",
     "/ui/api/audio/stream",
+    "/ui/api/audio/stt-enabled",
+    "/ui/api/audio/tts-enabled",
+    "/ui/api/audio/output-state",
 }
 SUPPRESSED_HTTP_LOG_PATH_PREFIXES = (
     "/api/inspection",
