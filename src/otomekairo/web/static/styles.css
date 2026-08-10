@@ -682,7 +682,8 @@ a.dashboard-item:hover {
   overflow-wrap: anywhere;
   padding: 8px 10px;
   border-radius: 8px;
-  font-size: var(--font-body);
+  /* 周辺の表示密度は保ち、会話本文だけをわずかに大きくする。 */
+  font-size: calc(var(--font-body) + 1px);
   line-height: 1.5;
 }
 
