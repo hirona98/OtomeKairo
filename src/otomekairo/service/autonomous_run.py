@@ -1893,10 +1893,6 @@ class ServiceAutonomousRunMixin:
         run: dict[str, Any],
         speech_payload: dict[str, Any],
     ) -> None:
-        target_client_id = self._request_run_assistant_message_target_client_id(run)
-        if target_client_id is None:
-            debug_log("AutonomousRun", f"assistant_message skipped no_client run={run.get('run_id')}", level="DEBUG")
-            return
         interaction_ref = run.get("origin_interaction_ref")
         participant_refs = run.get("participant_refs")
         if (
@@ -1911,15 +1907,7 @@ class ServiceAutonomousRunMixin:
                 level="DEBUG",
             )
             return
-        if not self._event_stream_registry.client_accepts_event(target_client_id, "assistant_message"):
-            debug_log(
-                "AutonomousRun",
-                f"assistant_message skipped client_not_subscribed client={target_client_id}",
-                level="DEBUG",
-            )
-            return
         sent, _ = self._emit_assistant_message_with_audio(
-            target_client_id=target_client_id,
             event_data={
                 "cycle_id": self._autonomous_run_event_cycle_id(run),
                 "source_kind": "autonomous_run",
@@ -1934,7 +1922,7 @@ class ServiceAutonomousRunMixin:
             "AutonomousRun",
             (
                 f"assistant_message sent={sent} run={run.get('run_id')} "
-                f"client={target_client_id} speech_chars={len(speech_payload['speech_text'])}"
+                f"speech_chars={len(speech_payload['speech_text'])}"
             ),
             level="DEBUG",
         )

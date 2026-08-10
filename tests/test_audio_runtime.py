@@ -58,8 +58,8 @@ class AudioSegmenterTests(unittest.TestCase):
 
 
 class AudioRuntimeControlTests(unittest.TestCase):
-    def test_local_microphone_uses_console_without_windows_device(self) -> None:
-        # Windows入力deviceがなくてもconsole clientを応答先としてleaseを開始する。
+    def test_local_microphone_starts_without_display_delivery_target(self) -> None:
+        # チャット配送先とは独立してローカル入力leaseを開始する。
         with TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))
             try:
@@ -85,6 +85,7 @@ class AudioRuntimeControlTests(unittest.TestCase):
                     {
                         "type": "hello",
                         "client_id": "console-main",
+                        "client_kind": "cocoro_console",
                         "caps": [],
                         "event_subscriptions": [
                             "conversation_input",
@@ -126,10 +127,7 @@ class AudioRuntimeControlTests(unittest.TestCase):
                     audio_socket.sent[0]["paused_reason"],
                     "stt_disabled",
                 )
-                self.assertEqual(
-                    service._audio_runtime.snapshot()["response_client_id"],
-                    "console-main",
-                )
+                self.assertNotIn("response_client_id", service._audio_runtime.snapshot())
             finally:
                 service.close_audio_runtime()
 
@@ -158,6 +156,7 @@ class AudioRuntimeControlTests(unittest.TestCase):
                     {
                         "type": "hello",
                         "client_id": "web-audio-test",
+                        "client_kind": "browser",
                         "caps": [],
                         "event_subscriptions": [
                             "conversation_input",
@@ -248,6 +247,7 @@ class AudioRuntimeControlTests(unittest.TestCase):
                     {
                         "type": "hello",
                         "client_id": "web-audio-test",
+                        "client_kind": "browser",
                         "caps": [],
                         "event_subscriptions": [
                             "conversation_input",
@@ -274,10 +274,7 @@ class AudioRuntimeControlTests(unittest.TestCase):
                         )
 
                         self.assertEqual(session["input_source"], input_source)
-                        self.assertEqual(
-                            service._audio_runtime.snapshot()["response_client_id"],
-                            "web-audio-test",
-                        )
+                        self.assertNotIn("response_client_id", service._audio_runtime.snapshot())
                         service.stop_web_audio_input_session(
                             "token",
                             session["input_session_id"],
@@ -301,8 +298,8 @@ class AudioRuntimeControlTests(unittest.TestCase):
             finally:
                 service.close_audio_runtime()
 
-    def test_console_microphone_web_session_routes_response_to_browser(self) -> None:
-        # Consoleが取得する音声でもWeb入力session中の応答先はbrowser ownerにする。
+    def test_console_microphone_web_session_has_no_response_client_state(self) -> None:
+        # Web入力session中もチャット配送先をruntime stateへ持たない。
         with TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))
             try:
@@ -328,6 +325,7 @@ class AudioRuntimeControlTests(unittest.TestCase):
                     {
                         "type": "hello",
                         "client_id": "web-audio-test",
+                        "client_kind": "browser",
                         "caps": [],
                         "event_subscriptions": [
                             "conversation_input",
@@ -369,10 +367,7 @@ class AudioRuntimeControlTests(unittest.TestCase):
                 )
 
                 self.assertEqual(audio_socket.sent[0]["type"], "audio_started")
-                self.assertEqual(
-                    service._audio_runtime.snapshot()["response_client_id"],
-                    "web-audio-test",
-                )
+                self.assertNotIn("response_client_id", service._audio_runtime.snapshot())
             finally:
                 service.close_audio_runtime()
 
@@ -391,7 +386,7 @@ class AudioRuntimeControlTests(unittest.TestCase):
                 item = QueuedUtterance(
                     utterance_seq=1,
                     source="local_microphone",
-                    response_client_id="console-main",
+                    source_client_id="microphone-connector-main",
                     lease_generation=1,
                     settings_generation=1,
                     work_generation=1,

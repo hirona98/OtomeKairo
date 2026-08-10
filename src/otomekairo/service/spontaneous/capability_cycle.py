@@ -466,10 +466,6 @@ class ServiceSpontaneousCapabilityCycleMixin:
             return
 
         request_record = capability_response.get("request_record")
-        target_client_id = self._request_record_assistant_message_target_client_id(request_record)
-        if target_client_id is None:
-            debug_log("CapabilityResult", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_client", level="DEBUG")
-            return
         if interaction_context is None:
             debug_log(
                 "CapabilityResult",
@@ -482,18 +478,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
         capability_id = self._capability_result_capability_id(capability_response)
         if isinstance(request_record, dict):
             request_id = request_record.get("request_id", request_id)
-        if not self._event_stream_registry.client_accepts_event(target_client_id, "assistant_message"):
-            debug_log(
-                "CapabilityResult",
-                (
-                    f"{self._short_cycle_id(cycle_id)} assistant_message skipped "
-                    f"client_not_subscribed client={target_client_id}"
-                ),
-                level="DEBUG",
-            )
-            return
         sent, _ = self._emit_assistant_message_with_audio(
-            target_client_id=target_client_id,
             event_data={
                 "cycle_id": cycle_id,
                 "source_kind": "capability_result",
@@ -509,7 +494,6 @@ class ServiceSpontaneousCapabilityCycleMixin:
             "CapabilityResult",
             (
                 f"{self._short_cycle_id(cycle_id)} assistant_message sent={sent} "
-                f"client={target_client_id} "
                 f"speech_chars={len(speech_payload['speech_text'])}"
             ),
             level="DEBUG",

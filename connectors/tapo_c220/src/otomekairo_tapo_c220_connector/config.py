@@ -70,6 +70,7 @@ class AppConfig:
         return {
             "type": "hello",
             "client_id": self.connector.client_id,
+            "client_kind": "capability_connector",
             "caps": [
                 {"id": "vision.capture", "version": "1"},
                 {"id": "camera.ptz", "version": "1"},

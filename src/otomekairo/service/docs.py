@@ -8,6 +8,11 @@ from otomekairo.service.common import ServiceError
 
 CONSOLE_DOC_SECTIONS = (
     {
+        "section_id": "conversation",
+        "title": "対話入力",
+        "relative_path": Path("docs/console/api_conversation.txt"),
+    },
+    {
         "section_id": "wake",
         "title": "API起床",
         "relative_path": Path("docs/console/api_wake.txt"),

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import queue
 import ssl
+import struct
 import threading
 import time
 import urllib.error
@@ -135,6 +136,12 @@ class MicrophoneConnector:
             self._ssl_context.verify_mode = ssl.CERT_NONE
 
     def run_forever(self) -> None:
+        playback_thread = threading.Thread(
+            target=self._run_playback_forever,
+            name="otomekairo-local-audio-output",
+            daemon=True,
+        )
+        playback_thread.start()
         while True:
             # 初回起動直後に server が token を生成する構成にも追従する。
             if self.config.server.access_token_env:
@@ -214,20 +221,29 @@ class MicrophoneConnector:
                         selected_device = None
 
                 if now - last_device_scan >= DEVICE_SCAN_SECONDS:
-                    devices = self._list_alsa_devices()
+                    devices = self._list_alsa_devices(direction="input")
+                    output_devices = self._list_alsa_devices(direction="output")
                     # device index は再起動で変化するため wire へ出さない。
                     websocket.send(
                         json.dumps(
                             {
                                 "type": "audio_device_catalog",
                                 "client_id": self.config.client_id,
-                                "devices": [
+                                "input_devices": [
                                     {
                                         key: value
                                         for key, value in device.items()
                                         if key != "device_index"
                                     }
                                     for device in devices
+                                ],
+                                "output_devices": [
+                                    {
+                                        key: value
+                                        for key, value in device.items()
+                                        if key != "device_index"
+                                    }
+                                    for device in output_devices
                                 ],
                             },
                             ensure_ascii=False,
@@ -425,12 +441,15 @@ class MicrophoneConnector:
             "local_input_device": deepcopy(device),
         }
 
-    def _list_alsa_devices(self) -> list[dict[str, Any]]:
+    def _list_alsa_devices(self, *, direction: str) -> list[dict[str, Any]]:
+        if direction not in {"input", "output"}:
+            raise ValueError("Unknown audio device direction.")
         host_apis = sounddevice.query_hostapis()
         devices = sounddevice.query_devices()
         results: list[dict[str, Any]] = []
+        channels_field = f"max_{direction}_channels"
         for device_index, device in enumerate(devices):
-            max_channels = int(device["max_input_channels"])
+            max_channels = int(device[channels_field])
             host_api = host_apis[int(device["hostapi"])]["name"]
             if host_api != "ALSA" or max_channels < 1:
                 continue
@@ -438,7 +457,7 @@ class MicrophoneConnector:
                 {
                     "host_api": host_api,
                     "name": str(device["name"]),
-                    "max_input_channels": max_channels,
+                    channels_field: max_channels,
                     "default_sample_rate": float(
                         device["default_samplerate"]
                     ),
@@ -446,6 +465,190 @@ class MicrophoneConnector:
                 }
             )
         return results
+
+    def _run_playback_forever(self) -> None:
+        while True:
+            try:
+                if self.config.server.access_token_env:
+                    refreshed_token = find_runtime_access_token(
+                        self.config.server.access_token_env
+                    )
+                    if refreshed_token:
+                        self._access_token = refreshed_token
+                if not self._access_token:
+                    time.sleep(self.config.server.reconnect_delay_seconds)
+                    continue
+                output_state = self._fetch_output_state()
+                selected = output_state["local_output_device"]
+                devices = self._list_alsa_devices(direction="output")
+                matched = (
+                    self._find_selected_device(devices, selected)
+                    if selected is not None
+                    else None
+                )
+                if output_state["destination"] != "otomekairo" or matched is None:
+                    time.sleep(CONFIG_POLL_SECONDS)
+                    continue
+                self._run_playback_connection(selected, matched["device_index"])
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                self._log(f"音声出力を再接続します: {type(exc).__name__}")
+                time.sleep(self.config.server.reconnect_delay_seconds)
+
+    def _run_playback_connection(
+        self,
+        selected_device: dict[str, str],
+        device_index: int,
+    ) -> None:
+        websocket_url = self.config.server.base_url.replace(
+            "https://",
+            "wss://",
+            1,
+        ) + "/api/events/stream"
+        with connect(
+            websocket_url,
+            ssl=self._ssl_context,
+            additional_headers={
+                "Authorization": f"Bearer {self._access_token}"
+            },
+            open_timeout=self.config.server.request_timeout_seconds,
+            close_timeout=5.0,
+        ) as websocket:
+            websocket.send(
+                json.dumps(
+                    {
+                        "type": "hello",
+                        "client_id": f"{self.config.client_id}:audio-output",
+                        "client_kind": "otomekairo_audio",
+                        "caps": [],
+                        "event_subscriptions": ["assistant_audio"],
+                    }
+                )
+            )
+            pending_metadata: dict[str, Any] | None = None
+            last_config_poll = 0.0
+            while True:
+                now = time.monotonic()
+                if now - last_config_poll >= CONFIG_POLL_SECONDS:
+                    current = self._fetch_output_state()
+                    current_devices = self._list_alsa_devices(direction="output")
+                    current_match = (
+                        self._find_selected_device(
+                            current_devices,
+                            current["local_output_device"],
+                        )
+                        if current["local_output_device"] is not None
+                        else None
+                    )
+                    if (
+                        current["destination"] != "otomekairo"
+                        or current["local_output_device"] != selected_device
+                        or current_match is None
+                    ):
+                        raise ReconnectRequested("Audio output settings changed.")
+                    device_index = current_match["device_index"]
+                    last_config_poll = now
+                try:
+                    message = websocket.recv(timeout=CONFIG_POLL_SECONDS)
+                except TimeoutError:
+                    continue
+                if isinstance(message, str):
+                    event = json.loads(message)
+                    if event.get("type") != "assistant_audio":
+                        continue
+                    data = event.get("data")
+                    pending_metadata = (
+                        data
+                        if isinstance(data, dict)
+                        and data.get("status") == "succeeded"
+                        else None
+                    )
+                    continue
+                if not isinstance(message, bytes) or pending_metadata is None:
+                    raise ConnectorError("assistant_audio binary ordering is invalid.")
+                metadata = pending_metadata
+                pending_metadata = None
+                if metadata.get("byte_count") != len(message):
+                    raise ConnectorError("assistant_audio byte_count mismatch.")
+                self._play_wav(message, device_index=device_index)
+
+    def _fetch_output_state(self) -> dict[str, Any]:
+        request = urllib.request.Request(
+            self.config.server.base_url + "/api/audio/output-state",
+            method="GET",
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self._access_token}",
+            },
+        )
+        try:
+            with urllib.request.urlopen(
+                request,
+                context=self._ssl_context,
+                timeout=self.config.server.request_timeout_seconds,
+            ) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, json.JSONDecodeError) as exc:
+            raise ConnectorError("audio output state could not be fetched.") from exc
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, dict) or data.get("destination") not in {
+            "otomekairo",
+            "cocoro_console",
+            "browser",
+        }:
+            raise ConnectorError("audio output state response is invalid.")
+        device = data.get("local_output_device")
+        if device is not None and (
+            not isinstance(device, dict)
+            or set(device) != {"host_api", "name"}
+            or not all(
+                isinstance(device.get(key), str) and device[key]
+                for key in ("host_api", "name")
+            )
+        ):
+            raise ConnectorError("local_output_device is invalid.")
+        return {
+            "destination": data["destination"],
+            "local_output_device": deepcopy(device),
+        }
+
+    def _play_wav(self, payload: bytes, *, device_index: int) -> None:
+        audio_format = channels = sample_rate = bits_per_sample = 0
+        audio_data: bytes | None = None
+        if len(payload) < 12 or payload[:4] != b"RIFF" or payload[8:12] != b"WAVE":
+            raise ConnectorError("assistant_audio is not RIFF/WAVE.")
+        offset = 12
+        while offset + 8 <= len(payload):
+            chunk_id = payload[offset : offset + 4]
+            chunk_size = struct.unpack_from("<I", payload, offset + 4)[0]
+            chunk_start = offset + 8
+            chunk_end = chunk_start + chunk_size
+            if chunk_end > len(payload):
+                raise ConnectorError("assistant_audio chunk is invalid.")
+            if chunk_id == b"fmt " and chunk_size >= 16:
+                audio_format, channels, sample_rate, _, _, bits_per_sample = (
+                    struct.unpack_from("<HHIIHH", payload, chunk_start)
+                )
+            elif chunk_id == b"data" and audio_data is None:
+                audio_data = payload[chunk_start:chunk_end]
+            offset = chunk_end + (chunk_size % 2)
+        dtype = (
+            "int16"
+            if audio_format == 1 and bits_per_sample == 16
+            else "float32"
+            if audio_format == 3 and bits_per_sample == 32
+            else None
+        )
+        if dtype is None or channels < 1 or sample_rate < 1 or not audio_data:
+            raise ConnectorError("assistant_audio format is unsupported.")
+        with sounddevice.RawOutputStream(
+            device=device_index,
+            samplerate=sample_rate,
+            channels=channels,
+            dtype=dtype,
+        ) as output:
+            output.write(audio_data)
 
     def _find_selected_device(
         self,

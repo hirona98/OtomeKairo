@@ -286,6 +286,7 @@ class SimpleWebSocketClient:
         hello_payload: dict[str, Any] = {
             "type": "hello",
             "client_id": client_id,
+            "client_kind": "capability_connector",
             "caps": caps,
         }
         if vision_sources is not None:
@@ -7791,6 +7792,7 @@ class LongSmokeRunner:
         extra_client_context: dict[str, str] | None = None,
     ) -> str:
         payload = {
+            "message_id": f"chat_message:{os.urandom(16).hex()}",
             "text": text,
             "interaction_context": {
                 "interaction_ref": "interaction:long-smoke:direct",

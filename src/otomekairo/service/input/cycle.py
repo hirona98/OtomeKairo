@@ -26,19 +26,10 @@ class ServiceInputCycleMixin:
 
         # 音声入力経路はassistant_message eventとの順序を保つため呼び出し側で配送する。
         if not defer_audio_delivery:
-            client_context = payload.get("client_context")
-            target_client_id = (
-                client_context.get("client_id")
-                if isinstance(client_context, dict)
-                else None
-            )
-            reservation = self._attach_response_audio_delivery(
+            self._attach_response_audio_delivery(
                 response,
-                target_client_id=target_client_id,
                 source_kind="conversation",
             )
-            if reservation is not None:
-                self._tts_runtime.activate(reservation)
         return response
 
     def _handle_conversation_cycle(self, token: str | None, payload: dict) -> dict[str, Any]:
@@ -47,6 +38,7 @@ class ServiceInputCycleMixin:
 
         # 検証
         input_text = payload.get("text")
+        message_id = payload.get("message_id")
         client_context = payload.get("client_context", {})
         interaction_context = normalize_interaction_context(
             payload.get("interaction_context"),
@@ -56,6 +48,16 @@ class ServiceInputCycleMixin:
         input_images = self._normalize_visual_observation_images(payload.get("images"), allow_missing=True)
         if not isinstance(input_text, str):
             raise ServiceError(400, "invalid_text", "The text field must be a string.")
+        if (
+            not isinstance(message_id, str)
+            or not message_id.startswith("chat_message:")
+            or not message_id.removeprefix("chat_message:")
+        ):
+            raise ServiceError(
+                400,
+                "invalid_message_id",
+                "message_id must use chat_message:<key> form.",
+            )
         if not isinstance(client_context, dict):
             raise ServiceError(400, "invalid_client_context", "The client_context field must be an object.")
         autonomous_run_action = self._normalize_conversation_autonomous_run_action(
@@ -68,6 +70,46 @@ class ServiceInputCycleMixin:
         # スナップショット
         cycle_id = self._new_cycle_id()
         started_at = self._now_iso()
+        source_kind = client_context.get("source_kind", "user_message")
+        if source_kind not in {
+            "user_message",
+            "local_microphone",
+            "console_microphone",
+            "web_microphone",
+        }:
+            raise ServiceError(
+                400,
+                "invalid_conversation_source_kind",
+                "client_context.source_kind is unsupported.",
+            )
+        speaker = next(
+            participant
+            for participant in interaction_context.participants
+            if participant.person_ref == interaction_context.speaker_ref
+        )
+        event_data: dict[str, Any] = {
+            "message_id": message_id,
+            "cycle_id": cycle_id,
+            "created_at": started_at,
+            "source_kind": source_kind,
+            "source_client_id": client_context.get("client_id"),
+            "message": input_text,
+            "interaction_ref": interaction_context.interaction_ref,
+            "speaker_ref": interaction_context.speaker_ref,
+            "participant_refs": list(interaction_context.participant_refs),
+            "display_name": speaker.display_name,
+        }
+        utterance_seq = client_context.get("utterance_seq")
+        if isinstance(utterance_seq, int):
+            event_data["utterance_seq"] = utterance_seq
+        self._event_stream_registry.send_to_subscribers(
+            "conversation_input",
+            {
+                "event_id": self._next_stream_event_id(),
+                "type": "conversation_input",
+                "data": event_data,
+            },
+        )
         recent_turns = self._load_recent_turns(state, interaction_context)
         runtime_summary = self._build_runtime_summary(state)
         cancel_autonomous_runs = autonomous_run_action == "cancel_all"

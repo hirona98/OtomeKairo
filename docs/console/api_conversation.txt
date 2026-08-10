@@ -1,0 +1,32 @@
+対話入力 API
+
+POST {BASE_URL}/api/conversation
+Authorization: Bearer <console_access_token>
+Content-Type: application/json
+
+request:
+{
+  "message_id": "chat_message:<送信ごとに一意な値>",
+  "text": "こんにちは",
+  "images": ["data:image/png;base64,..."],
+  "interaction_context": {
+    "interaction_ref": "interaction:...",
+    "speaker_ref": "person:...",
+    "participants": [
+      {
+        "person_ref": "person:...",
+        "display_name": "呼ばれ方"
+      }
+    ]
+  },
+  "client_context": {
+    "client_id": "console-...",
+    "source_kind": "user_message"
+  }
+}
+
+message_id は chat_message: で始め、送信ごとに一意にする。
+images は省略可能で、Data URI 1件までとする。
+確定した person / assistant のチャット表示は HTTP response ではなく /api/events/stream の conversation_input / assistant_message を正本にする。
+conversation_input は起動・購読中の全 client に配信されるが、images は含まれない。送信元 UI だけが message_id と画像を対応づけて表示する。
+HTTP response は cycle_id、result_kind、論理的な interaction_ref / recipient_person_refs と種別別結果を返す。

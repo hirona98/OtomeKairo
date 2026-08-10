@@ -45,7 +45,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | 意味判断・記憶更新 | 担う | しない | しない |
 | STT / 話者識別 / 音声起動ワード | 担う（`stt.enabled` が運用トグルの正本） | マイク PCM を送る。メイン画面マイクボタンは `stt.enabled` を切替 | しない |
-| TTS（音声合成） | 担う（`tts.enabled` が運用トグルの正本） | 合成済み WAV を受け取る。メイン画面 Speaker は `tts.enabled` を切替 | 合成しない（再生のみ） |
+| TTS（音声合成） | 担う（`tts.enabled` と明示的な出力先が正本） | 出力先が CocoroConsole のとき合成済み WAV を受け取る。メイン画面 Speaker は `tts.enabled` を切替 | 合成しない（Console が受信した場合の再生のみ） |
 | 対話 UI・設定 UI | Web UI も配信 | 端末 UI の中心 | アバター表示 |
 | デスクトップ画面取得 | 要求を出す | `vision.capture` を実行 | しない |
 | VRM / モーション / 表示位置 | 端末設定として保持 | 編集・配送 | 実行時に適用 |
@@ -70,7 +70,7 @@ flowchart TB
     CC -->|"/api/config/* / status / inspection<br/>設定・状態"| OK
     CC <-->|"WS /api/events/stream<br/>hello / event / capability"| OK
     CC -->|"WS /api/audio/console-stream<br/>マイク PCM"| OK
-    OK -->|"assistant_message<br/>assistant_audio + WAV"| CC
+    OK -->|"assistant_message<br/>選択時 assistant_audio + WAV"| CC
     OK -->|"vision.capture_request 等"| CC
     CC -->|"capability result"| OK
 ```
@@ -105,9 +105,12 @@ sequenceDiagram
     OK->>OK: 判断・記憶更新・TTS
     OK-->>CC: HTTP response<br/>(result_kind 等)
     OK-->>CC: event stream<br/>assistant_message
-    OK-->>CC: event stream<br/>assistant_audio + binary WAV
+    OK-->>CC: event stream<br/>conversation_input / assistant_message
     CC->>CC: UI に表示
-    alt CocoroShell 起動中
+    opt 音声出力先が CocoroConsole
+      OK-->>CC: event stream<br/>assistant_audio + binary WAV
+    end
+    alt 出力先が CocoroConsole かつ CocoroShell 起動中
         CC->>CS: POST /api/audio/playback<br/>(session token)
         CS->>CS: 再生・lip sync
     else Shell 未起動
@@ -174,7 +177,7 @@ sequenceDiagram
     Note over CS: 設定変更の反映は再起動<br/>実行中の部分更新 API はなし
 ```
 
-Shell 未起動時、Console は受信済み WAV をローカル音声出力で直接再生する。
+音声出力先が CocoroConsole で Shell 未起動時、Console は受信済み WAV をローカル音声出力で直接再生する。出力先が OtomeKairo またはブラウザの場合、Console は WAV を受信しない。詳細は [../audio/音声出力.md](../audio/音声出力.md) を正とする。
 
 ### 3. その他の接点（本資料の範囲外の位置づけ）
 

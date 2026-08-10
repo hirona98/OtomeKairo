@@ -766,6 +766,26 @@
               </div>
             </fieldset>
             <fieldset class="settings-group">
+              <legend>音声出力</legend>
+              <div class="settings-list">
+                <div class="setting-row">
+                  <label for="audio-output-destination">出力先:</label>
+                  <select id="audio-output-destination">
+                    <option value="otomekairo">OtomeKairo</option>
+                    <option value="cocoro_console">CocoroConsole</option>
+                    <option value="browser">ブラウザ</option>
+                  </select>
+                </div>
+                <div class="setting-row">
+                  <label for="local-output-device">OtomeKairo:</label>
+                  <select id="local-output-device">
+                    <option value="">未選択</option>
+                  </select>
+                </div>
+                <p class="field-hint field-hint-indent">選択した種類で起動中のすべてのクライアントへ同じ音声を配信します。</p>
+              </div>
+            </fieldset>
+            <fieldset class="settings-group">
               <legend>マイク・話者識別</legend>
               <div class="settings-list">
                 <div class="setting-row">

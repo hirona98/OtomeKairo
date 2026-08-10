@@ -47,6 +47,10 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
                 "speaker_recognition_threshold": 0.6,
             },
         )
+        self.assertEqual(
+            response["audio_output_settings"],
+            {"destination": "otomekairo", "local_output_device": None},
+        )
         avatar = response["avatars"][0]
         self.assertEqual(
             set(avatar),
@@ -119,6 +123,13 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
         definition["selected_avatar_id"] = avatar["avatar_id"]
         definition["microphone_settings"]["vad_probability_threshold"] = 0.55
         definition["microphone_settings"]["speaker_recognition_threshold"] = 0.65
+        definition["audio_output_settings"] = {
+            "destination": "browser",
+            "local_output_device": {
+                "host_api": "ALSA",
+                "name": "USB Audio Device",
+            },
+        }
         definition["avatars"][0]["tts"]["voicevox_config"][
             "secondary_endpoint_url"
         ] = "http://127.0.0.1:50022"
@@ -132,6 +143,7 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
             0.55,
         )
         self.assertEqual(response["avatars"][1]["display_name"], "2番目")
+        self.assertEqual(response["audio_output_settings"]["destination"], "browser")
         self.assertEqual(response["avatars"][1]["stt"]["profile_id"], "service_profile-01")
         self.assertEqual(
             response["avatars"][0]["tts"]["voicevox_config"]["secondary_endpoint_url"],
@@ -155,7 +167,7 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
         self.assertIn("wake_words", raised.exception.message)
 
     def test_local_microphone_accepts_console_without_windows_device(self) -> None:
-        # ローカルマイクの応答先はWindows入力deviceと独立して保存する。
+        # ローカルマイク設定はWindows入力deviceと独立して保存する。
         service = DummyService()
         definition = service.get_avatar_speech_editor_state("token")
         definition["microphone_settings"]["console"] = {
@@ -214,6 +226,16 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
                 "fractional microphone",
                 fractional_microphone,
                 "invalid_microphone_settings",
+            )
+        )
+
+        invalid_audio_output = deepcopy(original)
+        invalid_audio_output["audio_output_settings"]["destination"] = "default"
+        cases.append(
+            (
+                "invalid audio output",
+                invalid_audio_output,
+                "invalid_audio_output_settings",
             )
         )
 

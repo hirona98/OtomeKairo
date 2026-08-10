@@ -134,7 +134,9 @@ response:
         "stt_enabled": true,
         "tts_enabled": true,
         "selected_avatar_id": "avatar:default",
-        "response_client_id": "console-main",
+        "audio_output_destination": "cocoro_console",
+        "local_output_device": null,
+        "audio_output_client_count": 2,
         "selected_device": {
           "host_api": "ALSA",
           "name": "USB Audio Device"
@@ -213,7 +215,7 @@ response:
 `current_state.relation_index` は `relation_index_id / source_ref / target_ref / relation_predicate / derived_status / confidence / salience / last_evidence_at / supporting_memory_unit_count / supporting_memory_link_count / representative_summary` を返す。
 `current_state.relation_index` は読み取り専用であり、支持元の本文や revision 本文を含めない。
 `runtime_detail` は scheduler、memory postprocess、visual daily worker、capability request 待ち、due `autonomous_run` のような runtime state を返す。
-`runtime_detail.audio_runtime_state` は音声 model、connector、入力リース、VAD、発話キュー、話者登録、直近発話結果の process-local snapshot を返す。
+`runtime_detail.audio_runtime_state` は音声 model、connector、入力リース、VAD、発話キュー、話者登録、直近発話結果、保存済み音声出力先と接続中出力 client 数の process-local snapshot を返す。
 音声 runtime state の意味と必須情報は [../audio/音声入力と話者識別.md](../audio/音声入力と話者識別.md) を正とする。
 `last_utterance_result` は直近 1 件だけを持ち、文字起こし、音声、表示名、embedding を含めない。
 通常発話の `last_utterance_result` は `top1_similarity` / `top2_similarity` / `threshold_met` を持つ。

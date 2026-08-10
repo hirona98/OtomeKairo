@@ -9,7 +9,7 @@ from copy import deepcopy
 from types import MethodType
 
 from otomekairo.defaults import build_default_avatar
-from otomekairo.event_stream import ServerWebSocket
+from otomekairo.event_stream import EventStreamRegistry, ServerWebSocket
 from otomekairo.tts.endpoint_health import VoicevoxEndpointHealth, normalize_endpoint_url
 from otomekairo.tts.provider import (
     SynthesizedAudio,
@@ -75,6 +75,10 @@ class _Store:
     def __init__(self, tts_definition: dict) -> None:
         self._state = {
             "selected_avatar_id": "avatar:test",
+            "audio_output_settings": {
+                "destination": "browser",
+                "local_output_device": None,
+            },
             "avatars": {
                 "avatar:test": {
                     "tts": deepcopy(tts_definition),
@@ -93,23 +97,25 @@ class _Registry:
         self.binary_deliveries: list[tuple[dict, bytes]] = []
         self.delivered = threading.Event()
 
-    def client_accepts_event(self, client_id: str, event_type: str) -> bool:
-        return self.accepted and client_id == "client:test" and event_type == "assistant_audio"
+    def subscriber_count(self, event_type: str, *, client_kind: str | None = None) -> int:
+        return int(self.accepted and event_type == "assistant_audio" and client_kind == "browser")
 
-    def send_to_client(self, client_id: str, event: dict) -> bool:
+    def send_to_subscribers(self, event_type: str, event: dict, *, client_kind: str | None = None) -> int:
         self.events.append(event)
         self.delivered.set()
-        return True
+        return 1
 
-    def send_to_client_with_binary(
+    def send_to_subscribers_with_binary(
         self,
-        client_id: str,
+        event_type: str,
         event: dict,
         binary: bytes,
-    ) -> bool:
+        *,
+        client_kind: str | None = None,
+    ) -> int:
         self.binary_deliveries.append((event, binary))
         self.delivered.set()
-        return True
+        return 1
 
 
 class _Service:
@@ -284,7 +290,6 @@ class TtsRuntimeTests(unittest.TestCase):
         self.addCleanup(runtime.close)
 
         reservation = runtime.reserve(
-            target_client_id="client:test",
             cycle_id="cycle:test",
             source_kind="conversation",
             interaction_ref="interaction:test",
@@ -310,7 +315,6 @@ class TtsRuntimeTests(unittest.TestCase):
         self.addCleanup(runtime.close)
 
         reservation = runtime.reserve(
-            target_client_id="client:test",
             cycle_id="cycle:test",
             source_kind="conversation",
             interaction_ref="interaction:test",
@@ -333,7 +337,6 @@ class TtsRuntimeTests(unittest.TestCase):
         service = _Service(definition)
         runtime = TtsRuntime(service, _StaticProvider(_pcm16_wav()))
         runtime.reserve(
-            target_client_id="client:test",
             cycle_id="cycle:test",
             source_kind="conversation",
             interaction_ref="interaction:test",
@@ -347,6 +350,52 @@ class TtsRuntimeTests(unittest.TestCase):
 
 
 class EventStreamBinaryTests(unittest.TestCase):
+    def test_registry_fans_out_by_selected_client_kind(self) -> None:
+        class RecordingWebSocket:
+            def __init__(self) -> None:
+                self.json: list[dict] = []
+                self.binary: list[tuple[dict, bytes]] = []
+
+            def send_json(self, payload: dict) -> None:
+                self.json.append(payload)
+
+            def send_json_and_binary(self, payload: dict, binary: bytes) -> None:
+                self.binary.append((payload, binary))
+
+            def close(self) -> None:
+                return
+
+        registry = EventStreamRegistry()
+        clients = []
+        for index, kind in enumerate(("browser", "browser", "cocoro_console")):
+            websocket = RecordingWebSocket()
+            session_id = registry.add_connection(websocket)  # type: ignore[arg-type]
+            registry.register_hello(
+                session_id,
+                client_id=f"client:{index}",
+                client_kind=kind,
+                capabilities={},
+                rejected_bindings=[],
+                event_subscriptions=["assistant_message", "assistant_audio"],
+            )
+            clients.append(websocket)
+
+        self.assertEqual(
+            registry.send_to_subscribers("assistant_message", {"type": "assistant_message"}),
+            3,
+        )
+        self.assertEqual(
+            registry.send_to_subscribers_with_binary(
+                "assistant_audio",
+                {"type": "assistant_audio"},
+                b"wav",
+                client_kind="browser",
+            ),
+            2,
+        )
+        self.assertEqual([len(client.json) for client in clients], [1, 1, 1])
+        self.assertEqual([len(client.binary) for client in clients], [1, 1, 0])
+
     def test_metadata_and_binary_are_an_atomic_send_unit(self) -> None:
         websocket = ServerWebSocket(None)  # type: ignore[arg-type]
         recorded: list[tuple[int, bytes]] = []

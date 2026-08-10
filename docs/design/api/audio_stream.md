@@ -338,7 +338,6 @@ server -> client:
 - `stt_configuration_error`
 - `speaker_enrollment_required`
 - `microphone_device_unavailable`
-- `response_client_unavailable`
 - `audio_runtime_unavailable`
 - `settings_reloaded`
 
@@ -373,11 +372,19 @@ microphone connector は接続後または device 一覧変化時に device cata
 {
   "type": "audio_device_catalog",
   "client_id": "microphone-connector-main",
-  "devices": [
+  "input_devices": [
     {
       "host_api": "ALSA",
       "name": "USB Audio Device",
       "max_input_channels": 1,
+      "default_sample_rate": 48000
+    }
+  ],
+  "output_devices": [
+    {
+      "host_api": "ALSA",
+      "name": "USB Audio Device",
+      "max_output_channels": 2,
       "default_sample_rate": 48000
     }
   ]
@@ -432,6 +439,36 @@ response:
 
 `GET /ui/api/audio/input-devices` は同じ処理を呼び出す。
 device catalog は現在値であり、再起動をまたぐ正本ではない。
+
+## output device / state API
+
+### `GET /api/audio/output-devices`
+
+- 認証: 必要
+- 役割: microphone connector が報告した現在の output device catalog を返す
+
+response は input device API と同じ最上位 shape で、`devices[]` は `host_api / name / max_output_channels / default_sample_rate / ambiguous` を持つ。`GET /ui/api/audio/output-devices` は同じ処理を呼び出す。
+
+### `GET /api/audio/output-state`
+
+- 認証: 必要
+- 利用主体: microphone connector、CocoroConsole
+- 役割: 保存済みの音声出力先と OtomeKairo ローカル出力デバイスを返す
+
+```json
+{
+  "ok": true,
+  "data": {
+    "destination": "otomekairo",
+    "local_output_device": {
+      "host_api": "ALSA",
+      "name": "USB Audio Device"
+    }
+  }
+}
+```
+
+`GET /ui/api/audio/output-state` は同じ処理を呼び出す。意味規則は [../audio/音声出力.md](../audio/音声出力.md) を正とする。
 
 ## 話者一覧
 
@@ -578,6 +615,5 @@ request body は不要とする。
 | `409` | `conversation_display_name_already_assigned` | 呼ばれ方定義が別の音声話者へ割当済み |
 | `422` | `speaker_enrollment_required` | active な話者 embedding が存在しない |
 | `422` | `microphone_device_unavailable` | 選択 device が存在しない |
-| `422` | `response_client_unavailable` | 物理音声の応答先が不在 |
 | `503` | `audio_runtime_unavailable` | model runtime を利用できない |
 | `503` | `stt_configuration_error` | STT 設定が成立しない |

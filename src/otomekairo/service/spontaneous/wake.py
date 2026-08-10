@@ -35,13 +35,7 @@ class ServiceSpontaneousWakeMixin:
         if interaction_context is None:
             debug_log("Wake", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_interaction", level="DEBUG")
             return None
-        target_client_id = self._wake_assistant_message_target_client_id(client_context)
-        if target_client_id is None:
-            debug_log("Wake", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_client", level="DEBUG")
-            return None
-
         sent, audio_delivery = self._emit_assistant_message_with_audio(
-            target_client_id=target_client_id,
             event_data={
                 "cycle_id": cycle_id,
                 "source_kind": trigger_kind,
@@ -56,17 +50,11 @@ class ServiceSpontaneousWakeMixin:
             "Wake",
             (
                 f"{self._short_cycle_id(cycle_id)} assistant_message sent={sent} "
-                f"client={target_client_id} speech_chars={len(speech_payload['speech_text'])}"
+                f"speech_chars={len(speech_payload['speech_text'])}"
             ),
             level="DEBUG",
         )
         return audio_delivery
-
-    def _wake_assistant_message_target_client_id(self, client_context: dict[str, Any]) -> str | None:
-        client_id = self._client_context_text(client_context.get("client_id"), limit=128)
-        if client_id is not None and self._event_stream_registry.client_accepts_event(client_id, "assistant_message"):
-            return client_id
-        return None
 
     def _execute_wake_cycle(
         self,

@@ -32,6 +32,12 @@ EVENT_STREAM_EVENT_SUBSCRIPTIONS = {
     "conversation_input",
 }
 MCP_TRANSPORTS = {"stdio"}
+EVENT_STREAM_CLIENT_KINDS = {
+    "browser",
+    "cocoro_console",
+    "otomekairo_audio",
+    "capability_connector",
+}
 
 
 class ServiceConfigStreamMixin:
@@ -50,9 +56,16 @@ class ServiceConfigStreamMixin:
 
         # 項目
         client_id = payload.get("client_id")
+        client_kind = payload.get("client_kind")
         caps = payload.get("caps", [])
         if not isinstance(client_id, str) or not client_id.strip():
             raise ServiceError(400, "invalid_client_id", "hello.client_id must be a non-empty string.")
+        if client_kind not in EVENT_STREAM_CLIENT_KINDS:
+            raise ServiceError(
+                400,
+                "invalid_client_kind",
+                "hello.client_kind is unsupported.",
+            )
         if not isinstance(caps, list):
             raise ServiceError(400, "invalid_caps", "hello.caps must be an array.")
         event_subscriptions = self._normalize_event_subscriptions(payload.get("event_subscriptions"))
@@ -133,6 +146,7 @@ class ServiceConfigStreamMixin:
             self._event_stream_registry.register_hello(
                 session_id,
                 client_id=client_id.strip(),
+                client_kind=client_kind,
                 capabilities=accepted_capabilities,
                 rejected_bindings=rejected_bindings,
                 event_subscriptions=event_subscriptions,
@@ -145,6 +159,7 @@ class ServiceConfigStreamMixin:
             "EventStream",
             (
                 f"hello client_id={client_id.strip()} "
+                f"client_kind={client_kind} "
                 f"accepted={sorted(accepted_capabilities)} rejected={len(rejected_bindings)} "
                 f"event_subscriptions={event_subscriptions} "
                 f"vision_sources={len(vision_sources)} "

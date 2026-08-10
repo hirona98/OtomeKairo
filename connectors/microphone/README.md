@@ -1,6 +1,6 @@
 # microphone connector
 
-この connector は Ubuntu の PortAudio / ALSA input device を OtomeKairo のローカル音声入力へ接続する。
+この connector は Ubuntu の PortAudio / ALSA input device を OtomeKairo のローカル音声入力へ接続し、選択時は合成済み音声を明示設定された output device で再生する。
 VAD、STT、音声起動ワード判定、話者識別は実行しない。
 
 ## OS準備
@@ -26,7 +26,7 @@ OtomeKairo serverと同じPCで実行する場合、tokenは`OTOMEKAIRO_DATA_DIR
 実tokenを`config.example.json`へ書かない。
 
 ローカル設定を上書きする場合は`config.example.json`を`config.local.json`へコピーする。
-通常入力元、選択device、応答先clientはOtomeKairoの音声設定で管理する。
+通常入力元、input device、音声出力先、output device は OtomeKairo の音声設定で管理する。
 
 ## 実行
 
@@ -40,5 +40,5 @@ OtomeKairo serverと同じPCで実行する場合、tokenは`OTOMEKAIRO_DATA_DIR
 .venv/bin/python -m otomekairo_microphone_connector --config config.local.json
 ```
 
-connectorは無効設定中も起動を維持し、device catalogと設定変更を監視する。
-選択deviceが消えた場合はOS defaultへ切り替えず、同じALSA host API名とdevice名を5秒間隔で探索する。
+connectorは無効設定中も起動を維持し、input / output device catalog と設定変更を監視する。
+選択deviceが消えた場合はOS defaultへ切り替えず、同じALSA host API名とdevice名を5秒間隔で探索する。出力は `destination=otomekairo` かつ保存済み output device が一意に存在するときだけ event stream を購読する。

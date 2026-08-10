@@ -206,6 +206,7 @@ class EventStreamRegistry:
                 "session_id": session_id,
                 "websocket": websocket,
                 "client_id": None,
+                "client_kind": None,
                 "capabilities": {},
                 "permissions": sorted(set(permissions or [])),
                 "rejected_bindings": [],
@@ -237,6 +238,7 @@ class EventStreamRegistry:
         session_id: str,
         *,
         client_id: str,
+        client_kind: str,
         capabilities: dict[str, str],
         rejected_bindings: list[dict[str, Any]],
         event_subscriptions: list[str] | None = None,
@@ -316,6 +318,7 @@ class EventStreamRegistry:
 
             # 更新
             session["client_id"] = client_id
+            session["client_kind"] = client_kind
             session["capabilities"] = dict(capabilities)
             session["rejected_bindings"] = list(rejected_bindings)
             session["event_subscriptions"] = normalized_event_subscriptions
@@ -367,6 +370,25 @@ class EventStreamRegistry:
 
         # 空
         return False
+
+    def subscriber_count(
+        self,
+        event_type: str,
+        *,
+        client_kind: str | None = None,
+    ) -> int:
+        normalized_event_type = event_type.strip()
+        normalized_client_kind = client_kind.strip() if isinstance(client_kind, str) else None
+        with self._lock:
+            return sum(
+                1
+                for session in self._sessions.values()
+                if normalized_event_type in session.get("event_subscriptions", [])
+                and (
+                    normalized_client_kind is None
+                    or session.get("client_kind") == normalized_client_kind
+                )
+            )
 
     def find_single_client_with_capability(self, capability: str) -> str | None:
         # capability を持つ接続中 client 群
@@ -637,18 +659,46 @@ class EventStreamRegistry:
         self,
         event_type: str,
         payload: dict[str, Any],
+        *,
+        client_kind: str | None = None,
     ) -> int:
-        # runtime snapshotの配送先は明示購読中の全clientとする。
+        # 表示eventは全購読者、音声eventは選択されたclient種別へ配送する。
         with self._lock:
             targets = [
                 dict(session)
                 for session in self._sessions.values()
                 if event_type in session.get("event_subscriptions", [])
+                and (client_kind is None or session.get("client_kind") == client_kind)
             ]
         sent_count = 0
         for target in targets:
             try:
                 target["websocket"].send_json(payload)
+                sent_count += 1
+            except OSError:
+                self.remove_connection(target["session_id"])
+        return sent_count
+
+    def send_to_subscribers_with_binary(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        binary: bytes,
+        *,
+        client_kind: str,
+    ) -> int:
+        # metadataとbinaryの隣接を各WebSocketの送信lockで保証する。
+        with self._lock:
+            targets = [
+                dict(session)
+                for session in self._sessions.values()
+                if event_type in session.get("event_subscriptions", [])
+                and session.get("client_kind") == client_kind
+            ]
+        sent_count = 0
+        for target in targets:
+            try:
+                target["websocket"].send_json_and_binary(payload, binary)
                 sent_count += 1
             except OSError:
                 self.remove_connection(target["session_id"])

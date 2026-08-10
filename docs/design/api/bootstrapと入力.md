@@ -42,7 +42,7 @@ response:
   "data": {
     "server_id": "server:...",
     "server_display_name": "OtomeKairo",
-    "api_version": "0.8.0",
+    "api_version": "0.9.0",
     "bootstrap_state": "unregistered",
     "console_access_token_issued": false
   }
@@ -107,6 +107,7 @@ request:
 
 ```json
 {
+  "message_id": "chat_message:...",
   "text": "こんにちは",
   "images": ["data:image/png;base64,..."],
   "autonomous_run_action": {
@@ -124,6 +125,7 @@ request:
   },
   "client_context": {
     "source": "CocoroConsole",
+    "source_kind": "user_message",
     "client_id": "console-...",
     "active_app": "Slack",
     "window_title": "general | Slack",
@@ -132,6 +134,7 @@ request:
 }
 ```
 
+- `message_id` は必須で `chat_message:` から始まる送信ごとに一意な値とする
 - `text` は必須の文字列
 - `autonomous_run_action` は任意とし、全自律実行を明示的に停止する場合だけ `{"kind":"cancel_all"}` を渡す
 - server は入力文から自律実行の停止意図を推定しない
@@ -146,7 +149,7 @@ request:
 - `images` は任意の画像 Data URI 配列とする。値がないときは省略する
 - `images` は最大 1 件とする
 - `client_context` は object とする。値がないときは省略する
-- 標準の `client_context` には `source / client_id / active_app / window_title / locale` を含める
+- 標準の `client_context` には `source / source_kind / client_id / active_app / window_title / locale` を含める。テキスト入力の `source_kind` は `user_message` とする
 - `client_context` の任意 field として `social_context_summary / environment_summary / location_summary / external_service_summary / body_state_summary / device_state_summary / schedule_summary` を定義する。いずれも raw payload ではなく短い要約だけを渡す
 - server は raw `images` を永続化せず、必要な場合だけ詳細な視覚説明へ変換して shared pipeline と視覚記録へ渡す
 - 会話の `images` は `conversation_attachment` として扱い、`vision.capture` の capability result とは結び付けない
@@ -156,6 +159,8 @@ request:
 - server は人物識別結果を信頼し、認証主体との対応確認となりすまし検出を実行しない
 - 会話履歴は `interaction_ref` が一致する event だけから構成する
 - 人物発話に対する `speech / noop` の意味判断と validator 境界は [../llm/プロンプト文脈分離方針.md](../llm/プロンプト文脈分離方針.md) を正とする
+- server は入力の受理後、判断処理より先に `conversation_input` を全購読 client へ配信する。画像は event に含めず送信元 UI だけが `message_id` で対応づける
+- `speech` の表示は HTTP response ではなく全購読 client へ配信する `assistant_message` event を正本とする
 
 response:
 

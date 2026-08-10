@@ -13,7 +13,7 @@ from otomekairo.service.common import debug_log
 
 
 CONFIG_DB_FILE_NAME = "config.db"
-CURRENT_CONFIG_DB_VERSION = 14
+CURRENT_CONFIG_DB_VERSION = 15
 
 
 class ConfigStore:
@@ -46,6 +46,7 @@ class ConfigStore:
                     thinking_speech_level,
                     selected_conversation_display_name_id,
                     wake_policy_json,
+                    audio_output_settings_json,
                     microphone_settings_json
                 FROM current_config
                 WHERE id = 1
@@ -70,6 +71,9 @@ class ConfigStore:
                 ],
                 "conversation_display_names": self._read_conversation_display_names(conn),
                 "wake_policy": json.loads(current["wake_policy_json"]),
+                "audio_output_settings": json.loads(
+                    current["audio_output_settings_json"]
+                ),
                 "microphone_settings": json.loads(current["microphone_settings_json"]),
                 "personas": self._read_payload_table(conn, "personas", "persona_id"),
                 "memory_sets": self._read_payload_table(conn, "memory_sets", "memory_set_id"),
@@ -408,6 +412,7 @@ class ConfigStore:
                 thinking_speech_level INTEGER NOT NULL DEFAULT 5,
                 selected_conversation_display_name_id TEXT,
                 wake_policy_json TEXT NOT NULL,
+                audio_output_settings_json TEXT NOT NULL,
                 microphone_settings_json TEXT NOT NULL,
                 FOREIGN KEY (selected_conversation_display_name_id)
                     REFERENCES conversation_display_names(conversation_display_name_id)
@@ -527,9 +532,10 @@ class ConfigStore:
                 thinking_speech_level,
                 selected_conversation_display_name_id,
                 wake_policy_json,
+                audio_output_settings_json,
                 microphone_settings_json
             )
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 state["selected_persona_id"],
@@ -539,6 +545,7 @@ class ConfigStore:
                 state["thinking_speech_level"],
                 state["selected_conversation_display_name_id"],
                 self._to_json(state["wake_policy"]),
+                self._to_json(state["audio_output_settings"]),
                 self._to_json(state["microphone_settings"]),
             ),
         )

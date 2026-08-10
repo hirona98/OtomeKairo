@@ -30,6 +30,7 @@ class McpClientConnector:
         return {
             "type": "hello",
             "client_id": self.config.client_id,
+            "client_kind": "capability_connector",
             "caps": [{"id": "mcp.call_tool", "version": "1"}],
             "mcp_servers": [
                 {

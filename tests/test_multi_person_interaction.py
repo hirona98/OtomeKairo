@@ -275,6 +275,7 @@ class MultiPersonInteractionTests(unittest.TestCase):
                 result = service.handle_conversation(
                     "test-token",
                     {
+                        "message_id": "chat_message:test-failure",
                         "text": "失敗する入力",
                         "interaction_context": {
                             "interaction_ref": "interaction:failure",
@@ -309,6 +310,7 @@ class MultiPersonInteractionTests(unittest.TestCase):
             result = service.handle_conversation(
                 "test-token",
                 {
+                    "message_id": "chat_message:test-e2e",
                     "text": "こんにちは",
                     "interaction_context": {
                         "interaction_ref": "interaction:e2e",

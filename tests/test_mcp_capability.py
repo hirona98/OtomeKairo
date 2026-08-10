@@ -52,6 +52,7 @@ class McpCapabilityTests(unittest.TestCase):
             {
                 "type": "hello",
                 "client_id": "mcp-client-connector-main",
+                "client_kind": "capability_connector",
                 "caps": [{"id": "mcp.call_tool", "version": "1"}],
                 "mcp_servers": [
                     {
@@ -86,6 +87,7 @@ class McpCapabilityTests(unittest.TestCase):
             {
                 "type": "hello",
                 "client_id": "mcp-client-connector-main",
+                "client_kind": "capability_connector",
                 "caps": [{"id": "mcp.call_tool", "version": "1"}],
                 "mcp_servers": [
                     {
@@ -116,6 +118,7 @@ class McpCapabilityTests(unittest.TestCase):
                 {
                     "type": "hello",
                     "client_id": "mcp-client-connector-main",
+                    "client_kind": "capability_connector",
                     "caps": [],
                     "mcp_servers": [
                         {
@@ -134,6 +137,7 @@ class McpCapabilityTests(unittest.TestCase):
         payload = {
             "type": "hello",
             "client_id": "mcp-client-connector-secondary",
+            "client_kind": "capability_connector",
             "caps": [{"id": "mcp.call_tool", "version": "1"}],
             "mcp_servers": [
                 {
@@ -161,6 +165,7 @@ class McpCapabilityTests(unittest.TestCase):
                 {
                     "type": "hello",
                     "client_id": "mcp-client-connector-main",
+                    "client_kind": "capability_connector",
                     "caps": [{"id": "mcp.call_tool", "version": "1"}],
                     "mcp_servers": [
                         {

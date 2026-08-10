@@ -197,6 +197,7 @@ class ServiceConfigResourcesMixin:
         selected_avatar = state["avatars"][state["selected_avatar_id"]]
         return {
             "selected_avatar_id": state["selected_avatar_id"],
+            "audio_output_settings": deepcopy(state["audio_output_settings"]),
             "microphone_settings": deepcopy(state["microphone_settings"]),
             "selected_avatar": self._public_avatar_definition(selected_avatar),
         }
@@ -305,7 +306,12 @@ class ServiceConfigResourcesMixin:
     ) -> dict[str, Any]:
         # 音声設定は独立したbundleとして一括検証してから保存する。
         state = self._require_token(token)
-        supported_fields = {"selected_avatar_id", "microphone_settings", "avatars"}
+        supported_fields = {
+            "selected_avatar_id",
+            "audio_output_settings",
+            "microphone_settings",
+            "avatars",
+        }
         unsupported_fields = sorted(set(definition) - supported_fields)
         if unsupported_fields:
             raise ServiceError(
@@ -334,8 +340,13 @@ class ServiceConfigResourcesMixin:
             definition.get("microphone_settings")
         )
         self._validate_microphone_settings(microphone_settings)
+        audio_output_settings = self._normalize_audio_output_settings(
+            definition.get("audio_output_settings")
+        )
+        self._validate_audio_output_settings(audio_output_settings)
 
         state["selected_avatar_id"] = selected_avatar_id
+        state["audio_output_settings"] = deepcopy(audio_output_settings)
         state["microphone_settings"] = deepcopy(microphone_settings)
         state["avatars"] = normalized_avatars
         for client_entry in state.get("console_client_settings", {}).values():
@@ -353,6 +364,7 @@ class ServiceConfigResourcesMixin:
             ]
         self.store.write_state(state)
         self._reload_audio_runtime_settings()
+        self._publish_audio_runtime_state()
         self._append_avatar_speech_editor_state_audit_event(state=state, operation="write")
         return self._build_avatar_speech_editor_state(state)
 
@@ -1142,6 +1154,7 @@ class ServiceConfigResourcesMixin:
     def _build_avatar_speech_editor_state(self, state: dict[str, Any]) -> dict[str, Any]:
         return {
             "selected_avatar_id": state["selected_avatar_id"],
+            "audio_output_settings": deepcopy(state["audio_output_settings"]),
             "microphone_settings": deepcopy(state["microphone_settings"]),
             "avatars": [
                 deepcopy(value)

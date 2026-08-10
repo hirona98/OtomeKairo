@@ -60,7 +60,7 @@ class AudioConnection:
 class QueuedUtterance:
     utterance_seq: int
     source: str
-    response_client_id: str
+    source_client_id: str
     lease_generation: int
     settings_generation: int
     work_generation: int
@@ -84,7 +84,8 @@ class AudioRuntime:
         self._processing: QueuedUtterance | None = None
         self._paused_reason: str | None = None
         self._device_catalog_client_id: str | None = None
-        self._device_catalog: list[dict[str, Any]] = []
+        self._input_device_catalog: list[dict[str, Any]] = []
+        self._output_device_catalog: list[dict[str, Any]] = []
         self._web_input_session: dict[str, str] | None = None
         self._enrollment: dict[str, Any] | None = None
         self._normal_active_until_monotonic: float | None = None
@@ -291,24 +292,10 @@ class AudioRuntime:
             ):
                 self._web_input_session = None
                 self._revoke_active_locked("source_switched")
-            active = self._active_connection
-            if (
-                active is not None
-                and self._response_client_id_locked(active) == client_id
-            ):
-                self._set_paused_locked("response_client_unavailable")
-                self._discard_audio_locked()
         self._publish_state(force=True)
 
     def on_event_client_connected(self, client_id: str) -> None:
-        # hello確定後にresponse client条件を再評価する。
-        with self._condition:
-            active = self._active_connection
-            if (
-                active is not None
-                and self._response_client_id_locked(active) == client_id
-            ):
-                self._refresh_pause_state_locked()
+        # 新しい表示・再生購読者へ完全snapshotを送る。
         self._publish_state(force=True)
 
     def list_input_devices(self) -> dict[str, Any]:
@@ -320,8 +307,24 @@ class AudioRuntime:
             return {
                 "connector_client_id": self._device_catalog_client_id,
                 "connector_connected": connector_connected,
-                "devices": deepcopy(self._device_catalog),
+                "devices": deepcopy(self._input_device_catalog),
             }
+
+    def list_output_devices(self) -> dict[str, Any]:
+        with self._lock:
+            connector_connected = any(
+                connection.endpoint_source == "local_microphone"
+                for connection in self._connections.values()
+            )
+            return {
+                "connector_client_id": self._device_catalog_client_id,
+                "connector_connected": connector_connected,
+                "devices": deepcopy(self._output_device_catalog),
+            }
+
+    def output_state(self) -> dict[str, Any]:
+        state = self._service.store.read_state()
+        return deepcopy(state["audio_output_settings"])
 
     def input_state(self) -> dict[str, Any]:
         with self._lock:
@@ -430,7 +433,7 @@ class AudioRuntime:
                     "The enrollment owner client is not connected.",
                 )
             active = self._active_connection
-            if active is None or self._response_client_id_locked(active) != owner_client_id:
+            if active is None or self._input_owner_client_id_locked(active) != owner_client_id:
                 raise ServiceError(
                     409,
                     "speaker_enrollment_source_unavailable",
@@ -596,6 +599,13 @@ class AudioRuntime:
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
+            state = self._service.store.read_state()
+            audio_output_settings = state["audio_output_settings"]
+            output_client_kind = {
+                "otomekairo": "otomekairo_audio",
+                "cocoro_console": "cocoro_console",
+                "browser": "browser",
+            }[audio_output_settings["destination"]]
             active = self._active_connection
             normal_state = (
                 "active"
@@ -626,7 +636,16 @@ class AudioRuntime:
                 "stt_enabled": bool(self._settings["stt"]["enabled"]),
                 "tts_enabled": self._tts_enabled_from_store(),
                 "selected_avatar_id": self._settings["selected_avatar_id"],
-                "response_client_id": self._effective_response_client_id_locked(),
+                "audio_output_destination": audio_output_settings["destination"],
+                "local_output_device": deepcopy(
+                    audio_output_settings["local_output_device"]
+                ),
+                "audio_output_client_count": (
+                    self._service._event_stream_registry.subscriber_count(
+                        "assistant_audio",
+                        client_kind=output_client_kind,
+                    )
+                ),
                 "selected_device": deepcopy(
                     active.device if active is not None else None
                 ),
@@ -902,41 +921,53 @@ class AudioRuntime:
                 "invalid_audio_control",
                 "Web microphone cannot publish an input device catalog.",
             )
-        if set(payload) != {"type", "client_id", "devices"}:
+        if set(payload) != {
+            "type",
+            "client_id",
+            "input_devices",
+            "output_devices",
+        }:
             raise ServiceError(
                 400,
                 "invalid_audio_control",
                 "audio_device_catalog fields are invalid.",
             )
         client_id = payload.get("client_id")
-        devices = payload.get("devices")
+        input_devices = payload.get("input_devices")
+        output_devices = payload.get("output_devices")
         if not isinstance(client_id, str) or not client_id.strip():
             raise ServiceError(
                 400,
                 "invalid_audio_control",
                 "audio_device_catalog.client_id is required.",
             )
-        if not isinstance(devices, list):
+        if not isinstance(input_devices, list) or not isinstance(output_devices, list):
             raise ServiceError(
                 400,
                 "invalid_audio_control",
-                "audio_device_catalog.devices must be an array.",
+                "audio_device_catalog input_devices/output_devices must be arrays.",
             )
-        normalized_devices = [
-            self._normalize_catalog_device(device)
-            for device in devices
+        normalized_input_devices = [
+            self._normalize_catalog_device(device, direction="input")
+            for device in input_devices
         ]
-        identities = [
-            (device["host_api"], device["name"])
-            for device in normalized_devices
+        normalized_output_devices = [
+            self._normalize_catalog_device(device, direction="output")
+            for device in output_devices
         ]
-        for device in normalized_devices:
-            identity = (device["host_api"], device["name"])
-            device["ambiguous"] = identities.count(identity) > 1
+        for devices in (normalized_input_devices, normalized_output_devices):
+            identities = [
+                (device["host_api"], device["name"])
+                for device in devices
+            ]
+            for device in devices:
+                identity = (device["host_api"], device["name"])
+                device["ambiguous"] = identities.count(identity) > 1
         with self._lock:
             connection.client_id = client_id.strip()
             self._device_catalog_client_id = client_id.strip()
-            self._device_catalog = normalized_devices
+            self._input_device_catalog = normalized_input_devices
+            self._output_device_catalog = normalized_output_devices
         self._publish_state(force=True)
 
     def _enqueue_utterance_locked(
@@ -947,17 +978,15 @@ class AudioRuntime:
         if len(self._waiting) >= MAX_WAITING_UTTERANCES:
             self._set_paused_locked("queue_full")
             return
-        response_client_id = self._response_client_id_locked(connection)
-        if response_client_id is None:
-            self._set_paused_locked("response_client_unavailable")
-            self._discard_audio_locked()
-            return
+        source_client_id = connection.client_id
+        if source_client_id is None:
+            raise RuntimeError("Active audio connection is missing client_id.")
         self._utterance_seq += 1
         self._waiting.append(
             QueuedUtterance(
                 utterance_seq=self._utterance_seq,
                 source=connection.endpoint_source,
-                response_client_id=response_client_id,
+                source_client_id=source_client_id,
                 lease_generation=connection.lease_generation or 0,
                 settings_generation=self._settings_generation,
                 work_generation=self._work_generation,
@@ -1198,36 +1227,10 @@ class AudioRuntime:
         speaker = self._service.store.get_voice_speaker(person_ref)
         if speaker is None:
             return
-        target_client_id = item.response_client_id
-        if not self._response_client_available(target_client_id):
-            with self._condition:
-                if self._item_is_current_locked(item):
-                    self._set_paused_locked("response_client_unavailable")
-                    self._discard_audio_locked(keep_processing=True)
-            return
         voice_id = person_ref.removeprefix("person:voice:")
         interaction_ref = f"interaction:voice:direct:{voice_id}"
-        conversation_event = {
-            "event_id": self._service._next_stream_event_id(),
-            "type": "conversation_input",
-            "data": {
-                "utterance_seq": item.utterance_seq,
-                "source_kind": item.source,
-                "message": transcript,
-                "interaction_ref": interaction_ref,
-                "speaker_ref": person_ref,
-                "participant_refs": [person_ref],
-                "display_name": speaker["display_name"],
-            },
-        }
-        if not self._service._event_stream_registry.send_to_client(
-            target_client_id,
-            conversation_event,
-        ):
-            return
-
         client_context: dict[str, Any] = {
-            "client_id": target_client_id,
+            "client_id": item.source_client_id,
             "source_kind": item.source,
             "utterance_seq": item.utterance_seq,
         }
@@ -1237,6 +1240,7 @@ class AudioRuntime:
         response = self._service.handle_conversation(
             state.get("console_access_token"),
             {
+                "message_id": f"chat_message:{uuid.uuid4().hex}",
                 "text": transcript,
                 "client_context": client_context,
                 "interaction_context": {
@@ -1265,7 +1269,6 @@ class AudioRuntime:
         speech = response.get("speech")
         if isinstance(speech, dict) and isinstance(speech.get("text"), str):
             _, audio_delivery = self._service._emit_assistant_message_with_audio(
-                target_client_id=target_client_id,
                 event_data={
                     "cycle_id": response.get("cycle_id"),
                     "source_kind": "conversation",
@@ -1367,12 +1370,6 @@ class AudioRuntime:
             console = microphone["console"]
             if console is None or connection.device != console["input_device"]:
                 return "microphone_device_unavailable"
-        response_client_id = self._response_client_id_locked(connection)
-        if (
-            response_client_id is None
-            or not self._response_client_available(response_client_id)
-        ):
-            return "response_client_unavailable"
         if self._enrollment is not None:
             return None
         stt = self._settings["stt"]
@@ -1392,19 +1389,16 @@ class AudioRuntime:
             return "speaker_enrollment_required"
         return None
 
-    def _response_client_id_locked(
+    def _input_owner_client_id_locked(
         self,
         connection: AudioConnection,
     ) -> str | None:
-        return self._effective_response_client_id_locked()
-
-    def _response_client_available(self, client_id: str) -> bool:
-        registry = self._service._event_stream_registry
-        return (
-            registry.is_client_connected(client_id)
-            and registry.client_accepts_event(client_id, "conversation_input")
-            and registry.client_accepts_event(client_id, "assistant_message")
-        )
+        if self._web_input_session is not None:
+            return self._web_input_session["owner_client_id"]
+        if connection.endpoint_source == "console_microphone":
+            return connection.client_id
+        console = self._settings["microphone_settings"]["console"]
+        return console["client_id"] if console is not None else None
 
     def _set_paused_locked(self, reason: str) -> None:
         if self._paused_reason == reason:
@@ -1446,18 +1440,6 @@ class AudioRuntime:
         if self._web_input_session is not None:
             return self._web_input_session["input_source"]
         return self._settings["microphone_settings"]["input_source"]
-
-    def _effective_response_client_id_locked(self) -> str | None:
-        if self._web_input_session is not None:
-            return self._web_input_session["owner_client_id"]
-        microphone = self._settings["microphone_settings"]
-        # ブラウザ入力は明示的なWeb入力sessionだけが応答先を持つ。
-        if microphone["input_source"] == "web_microphone":
-            return None
-        console = microphone["console"]
-        if console is None:
-            return None
-        return console["client_id"]
 
     def _discard_audio_locked(self, *, keep_processing: bool = False) -> None:
         # 実行中の外部処理結果もwork generationで失効させる。
@@ -1835,11 +1817,17 @@ class AudioRuntime:
                 )
         return deepcopy(value)
 
-    def _normalize_catalog_device(self, value: Any) -> dict[str, Any]:
+    def _normalize_catalog_device(
+        self,
+        value: Any,
+        *,
+        direction: str,
+    ) -> dict[str, Any]:
+        channels_field = f"max_{direction}_channels"
         fields = {
             "host_api",
             "name",
-            "max_input_channels",
+            channels_field,
             "default_sample_rate",
         }
         if not isinstance(value, dict) or set(value) != fields:
@@ -1850,7 +1838,7 @@ class AudioRuntime:
             )
         host_api = value.get("host_api")
         name = value.get("name")
-        channels = value.get("max_input_channels")
+        channels = value.get(channels_field)
         sample_rate = value.get("default_sample_rate")
         if (
             not isinstance(host_api, str)
@@ -1870,7 +1858,7 @@ class AudioRuntime:
         return {
             "host_api": host_api.strip(),
             "name": name.strip(),
-            "max_input_channels": channels,
+            channels_field: channels,
             "default_sample_rate": float(sample_rate),
         }
 
@@ -1975,7 +1963,7 @@ class AudioRuntime:
             separators=(",", ":"),
         )
         with self._lock:
-            if fingerprint == self._last_published_fingerprint:
+            if not force and fingerprint == self._last_published_fingerprint:
                 return
             self._last_published_fingerprint = fingerprint
         self._service._event_stream_registry.send_to_subscribers(

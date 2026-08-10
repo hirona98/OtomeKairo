@@ -314,6 +314,18 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                     self.server.service.list_audio_input_devices(token),
                 )
                 return
+            if method == "GET" and parsed.path == "/api/audio/output-devices":
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.list_audio_output_devices(token),
+                )
+                return
+            if method == "GET" and parsed.path == "/api/audio/output-state":
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.get_audio_output_state(token),
+                )
+                return
             if method == "GET" and parsed.path == "/api/audio/speakers":
                 self._write_success(
                     HTTPStatus.OK,
@@ -989,6 +1001,18 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             self._write_success(
                 HTTPStatus.OK,
                 self.server.service.list_audio_input_devices(token),
+            )
+            return
+        if method == "GET" and path == "/ui/api/audio/output-devices":
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.list_audio_output_devices(token),
+            )
+            return
+        if method == "GET" and path == "/ui/api/audio/output-state":
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.get_audio_output_state(token),
             )
             return
         if method == "GET" and path == "/ui/api/audio/stt-enabled":

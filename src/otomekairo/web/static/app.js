@@ -11,6 +11,7 @@ const state = {
   mcp: null,
   apiDocs: null,
   audioInputDevices: null,
+  audioOutputDevices: null,
   speakers: [],
   audioRuntime: null,
   activeEnrollment: null,
@@ -26,6 +27,7 @@ const state = {
   attachment: null,
   settingsOpen: false,
   sending: false,
+  pendingConversationInputs: new Map(),
   dashboard: {
     currentState: null,
     cycleSummaries: [],
@@ -1216,7 +1218,7 @@ function playAssistantAudio(arrayBuffer, metadata) {
     .catch((error) => showNotice(error.message, true));
 }
 
-// 対話入力と同じ client_id で購読し、音声入力と発話の配送先を一致させる。
+// チャットと音声 runtime を全 client 同期し、browser 選択時は合成音声も受け取る。
 function connectEventStream() {
   if (state.unloading || state.eventSocket) {
     return;
@@ -1231,6 +1233,7 @@ function connectEventStream() {
     socket.send(JSON.stringify({
       type: "hello",
       client_id: state.clientId,
+      client_kind: "browser",
       caps: [],
       event_subscriptions: [
         "conversation_input",
@@ -1279,15 +1282,18 @@ function connectEventStream() {
       payload?.type === "conversation_input"
       && typeof payload.data?.message === "string"
     ) {
+      const pending = state.pendingConversationInputs.get(payload.data.message_id);
+      state.pendingConversationInputs.delete(payload.data.message_id);
       const sourceLabel = {
+        user_message: "テキスト入力",
         web_microphone: "Webマイク",
         console_microphone: "CocoroConsoleマイク",
         local_microphone: "ローカルマイク",
-      }[payload.data.source_kind] || "音声入力";
+      }[payload.data.source_kind] || "会話入力";
       addMessage(
         "person",
         payload.data.message,
-        [],
+        pending?.images || [],
         [payload.data.display_name, sourceLabel].filter(Boolean).join(" · "),
       );
       refreshDashboard({ silent: true });
@@ -1464,7 +1470,6 @@ function audioPauseLabel(reason) {
     stt_configuration_error: "STT設定エラー",
     speaker_enrollment_required: "話者登録待ち",
     microphone_device_unavailable: "マイク利用不可",
-    response_client_unavailable: "イベント接続待ち",
     audio_runtime_unavailable: "音声処理利用不可",
     settings_reloaded: "設定更新",
   }[reason] || "一時停止";
@@ -1895,7 +1900,6 @@ function updateAudioRuntimeState(runtimeState) {
     state.webAudio.inputSessionId
     && (
       runtimeState.stt_enabled !== true
-      || runtimeState.response_client_id !== state.clientId
       || runtimeState.configured_source !== "web_microphone"
     )
   ) {
@@ -2169,7 +2173,12 @@ async function sendMessage(event) {
     showNotice("設定画面の「会話入力」で呼ばれ方を設定してください。", true);
     return;
   }
-  addMessage("person", text, images);
+  if (!state.eventSocket || state.eventSocket.readyState !== WebSocket.OPEN) {
+    showNotice("イベント接続が完了してから送信してください。", true);
+    return;
+  }
+  const messageId = `chat_message:${idSuffix()}`;
+  state.pendingConversationInputs.set(messageId, { images });
   input.value = "";
   clearAttachment();
   state.sending = true;
@@ -2179,6 +2188,7 @@ async function sendMessage(event) {
     const result = await apiRequest("/ui/api/conversation", {
       method: "POST",
       body: JSON.stringify({
+        message_id: messageId,
         text,
         images,
         interaction_context: {
@@ -2191,16 +2201,20 @@ async function sendMessage(event) {
         },
         client_context: {
           source: "OtomeKairoWebUI",
+          source_kind: "user_message",
           client_id: state.clientId,
           locale: navigator.language,
         },
       }),
     });
-    const rendered = resultText(result);
-    addMessage(rendered.kind, rendered.text, [], "", { cycleId: rendered.cycleId || "" });
+    if (result?.result_kind !== "speech") {
+      const rendered = resultText(result);
+      addMessage(rendered.kind, rendered.text, [], "", { cycleId: rendered.cycleId || "" });
+    }
     await loadStatus({ silent: true });
     await refreshDashboard({ silent: true });
   } catch (error) {
+    state.pendingConversationInputs.delete(messageId);
     setStatus("送信失敗", "error");
     addMessage("system", error.message);
     showNotice(error.message, true);
@@ -2259,6 +2273,7 @@ async function loadSettingsDrafts() {
       mcp,
       apiDocs,
       audioInputDevices,
+      audioOutputDevices,
       speakers,
       conversationDisplayNames,
     ] = await Promise.all([
@@ -2268,6 +2283,7 @@ async function loadSettingsDrafts() {
       apiRequest("/ui/api/config/mcp-servers/editor-state"),
       apiRequest("/ui/api/docs"),
       apiRequest("/ui/api/audio/input-devices"),
+      apiRequest("/ui/api/audio/output-devices"),
       apiRequest("/ui/api/audio/speakers"),
       apiRequest("/ui/api/config/conversation-display-names"),
     ]);
@@ -2288,6 +2304,7 @@ async function loadSettingsDrafts() {
     state.mcp = clone(mcp);
     state.apiDocs = clone(apiDocs);
     state.audioInputDevices = clone(audioInputDevices);
+    state.audioOutputDevices = clone(audioOutputDevices);
     state.speakers = clone(speakers.speakers || []);
     state.conversationDisplayNames = clone(
       conversationDisplayNames.conversation_display_names || [],
@@ -2796,6 +2813,9 @@ function renderMicrophoneSettings() {
   element("microphone-console-client-id").value = microphone.console?.client_id || "未設定";
   element("microphone-console-device").value = microphone.console?.input_device?.name || "未設定";
   renderLocalInputDevices(microphone.local_input_device);
+  const audioOutput = state.avatarSpeech.audio_output_settings;
+  element("audio-output-destination").value = audioOutput.destination;
+  renderLocalOutputDevices(audioOutput.local_output_device);
   element("vad-probability-threshold").value = microphone.vad_probability_threshold;
   element("speaker-recognition-threshold").value = microphone.speaker_recognition_threshold;
   updateMicrophoneSettingLabels();
@@ -2811,6 +2831,11 @@ function syncMicrophoneSettings() {
     console: state.avatarSpeech.microphone_settings.console,
     vad_probability_threshold: numberValue("vad-probability-threshold", 0.5),
     speaker_recognition_threshold: numberValue("speaker-recognition-threshold", 0.6),
+  };
+  const selectedOutputDevice = textValue("local-output-device");
+  state.avatarSpeech.audio_output_settings = {
+    destination: textValue("audio-output-destination"),
+    local_output_device: selectedOutputDevice ? JSON.parse(selectedOutputDevice) : null,
   };
 }
 
@@ -2859,6 +2884,40 @@ function renderLocalInputDevices(selectedDevice) {
     unavailableOption.value = selectedValue;
     unavailableOption.textContent =
       `${selectedDevice.host_api}: ${selectedDevice.name} / 現在利用不可`;
+    select.append(unavailableOption);
+  }
+  select.value = selectedValue;
+}
+
+function renderLocalOutputDevices(selectedDevice) {
+  const select = element("local-output-device");
+  const selectedValue = selectedDevice
+    ? JSON.stringify({ host_api: selectedDevice.host_api, name: selectedDevice.name })
+    : "";
+  select.innerHTML = "";
+  const emptyOption = document.createElement("option");
+  emptyOption.value = "";
+  emptyOption.textContent = "未選択";
+  select.append(emptyOption);
+  let selectedFound = false;
+  for (const device of state.audioOutputDevices?.devices || []) {
+    const option = document.createElement("option");
+    option.value = JSON.stringify({ host_api: device.host_api, name: device.name });
+    option.textContent = [
+      `${device.host_api}: ${device.name}`,
+      `${device.default_sample_rate} Hz`,
+      device.ambiguous ? "同名重複" : "",
+    ].filter(Boolean).join(" / ");
+    option.disabled = device.ambiguous === true;
+    select.append(option);
+    if (option.value === selectedValue && !option.disabled) {
+      selectedFound = true;
+    }
+  }
+  if (selectedValue && !selectedFound) {
+    const unavailableOption = document.createElement("option");
+    unavailableOption.value = selectedValue;
+    unavailableOption.textContent = `${selectedDevice.host_api}: ${selectedDevice.name} / 現在利用不可`;
     select.append(unavailableOption);
   }
   select.value = selectedValue;

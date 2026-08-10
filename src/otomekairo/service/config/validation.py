@@ -383,6 +383,63 @@ class ServiceConfigValidationMixin:
             normalized["console"] = normalized_console
         return normalized
 
+    def _normalize_audio_output_settings(self, definition: Any) -> Any:
+        if not isinstance(definition, dict):
+            return definition
+        normalized = {**definition}
+        output_device = normalized.get("local_output_device")
+        if isinstance(output_device, dict):
+            normalized["local_output_device"] = {
+                key: value.strip() if isinstance(value, str) else value
+                for key, value in output_device.items()
+            }
+        return normalized
+
+    def _validate_audio_output_settings(self, definition: Any) -> None:
+        if not isinstance(definition, dict):
+            raise ServiceError(
+                400,
+                "invalid_audio_output_settings",
+                "audio_output_settings must be an object.",
+            )
+        self._validate_exact_fields(
+            definition,
+            {"destination", "local_output_device"},
+            "audio_output_settings",
+        )
+        if definition.get("destination") not in {
+            "otomekairo",
+            "cocoro_console",
+            "browser",
+        }:
+            raise ServiceError(
+                400,
+                "invalid_audio_output_settings",
+                "audio_output_settings.destination is unsupported.",
+            )
+        output_device = definition.get("local_output_device")
+        if output_device is None:
+            return
+        if not isinstance(output_device, dict):
+            raise ServiceError(
+                400,
+                "invalid_audio_output_settings",
+                "audio_output_settings.local_output_device must be null or an object.",
+            )
+        self._validate_exact_fields(
+            output_device,
+            {"host_api", "name"},
+            "audio_output_settings.local_output_device",
+        )
+        for field_name in ("host_api", "name"):
+            value = output_device.get(field_name)
+            if not isinstance(value, str) or not value or value != value.strip():
+                raise ServiceError(
+                    400,
+                    "invalid_audio_output_settings",
+                    f"audio_output_settings.local_output_device.{field_name} must be a trimmed non-empty string.",
+                )
+
     def _validate_avatar_definition(self, avatar_id: str, definition: dict[str, Any]) -> None:
         if not isinstance(definition, dict):
             raise ServiceError(400, "invalid_avatar", "avatar must be an object.")

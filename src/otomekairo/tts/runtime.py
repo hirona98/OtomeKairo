@@ -18,7 +18,8 @@ TTS_QUEUE_CAPACITY = 32
 @dataclass(slots=True)
 class _TtsDelivery:
     delivery_id: str
-    target_client_id: str
+    target_client_kind: str
+    destination: str
     cycle_id: str
     source_kind: str
     interaction_ref: str
@@ -70,7 +71,6 @@ class TtsRuntime:
     def reserve(
         self,
         *,
-        target_client_id: str | None,
         cycle_id: str,
         source_kind: str,
         interaction_ref: str,
@@ -83,18 +83,16 @@ class TtsRuntime:
         if tts_definition.get("enabled") is not True:
             return self._terminal_reservation("disabled", None)
 
-        normalized_client_id = (
-            target_client_id.strip()
-            if isinstance(target_client_id, str)
-            else ""
-        )
-        if (
-            not normalized_client_id
-            or not self._service._event_stream_registry.client_accepts_event(
-                normalized_client_id,
-                "assistant_audio",
-            )
-        ):
+        destination = state["audio_output_settings"]["destination"]
+        target_client_kind = {
+            "otomekairo": "otomekairo_audio",
+            "cocoro_console": "cocoro_console",
+            "browser": "browser",
+        }[destination]
+        if self._service._event_stream_registry.subscriber_count(
+            "assistant_audio",
+            client_kind=target_client_kind,
+        ) == 0:
             return self._terminal_reservation(
                 "failed",
                 "tts_target_unavailable",
@@ -103,7 +101,8 @@ class TtsRuntime:
         delivery_id = f"tts_delivery:{uuid.uuid4().hex}"
         delivery = _TtsDelivery(
             delivery_id=delivery_id,
-            target_client_id=normalized_client_id,
+            target_client_kind=target_client_kind,
+            destination=destination,
             cycle_id=cycle_id,
             source_kind=source_kind,
             interaction_ref=interaction_ref,
@@ -173,15 +172,15 @@ class TtsRuntime:
                 self._queue.task_done()
 
     def _execute(self, delivery: _TtsDelivery) -> None:
-        if not self._service._event_stream_registry.client_accepts_event(
-            delivery.target_client_id,
+        if self._service._event_stream_registry.subscriber_count(
             "assistant_audio",
-        ):
+            client_kind=delivery.target_client_kind,
+        ) == 0:
             debug_log(
                 "TTS",
                 (
                     f"delivery skipped target_unavailable "
-                    f"delivery={delivery.delivery_id} client={delivery.target_client_id}"
+                    f"delivery={delivery.delivery_id} destination={delivery.destination}"
                 ),
                 level="WARNING",
             )
@@ -197,7 +196,7 @@ class TtsRuntime:
                 "TTS",
                 (
                     f"delivery failed delivery={delivery.delivery_id} "
-                    f"client={delivery.target_client_id} code={exc.error_code}"
+                    f"destination={delivery.destination} code={exc.error_code}"
                 ),
                 level="WARNING",
             )
@@ -208,7 +207,7 @@ class TtsRuntime:
                 "TTS",
                 (
                     f"delivery failed delivery={delivery.delivery_id} "
-                    f"client={delivery.target_client_id} error={type(exc).__name__}"
+                    f"destination={delivery.destination} error={type(exc).__name__}"
                 ),
                 level="ERROR",
             )
@@ -221,23 +220,24 @@ class TtsRuntime:
             byte_count=len(audio.data),
             error_code=None,
         )
-        sent = self._service._event_stream_registry.send_to_client_with_binary(
-            delivery.target_client_id,
+        sent = self._service._event_stream_registry.send_to_subscribers_with_binary(
+            "assistant_audio",
             event,
             audio.data,
+            client_kind=delivery.target_client_kind,
         )
         debug_log(
             "TTS",
             (
                 f"delivery completed delivery={delivery.delivery_id} "
-                f"client={delivery.target_client_id} sent={sent} bytes={len(audio.data)}"
+                f"destination={delivery.destination} sent={sent} bytes={len(audio.data)}"
             ),
             level="DEBUG",
         )
 
     def _send_failure(self, delivery: _TtsDelivery, error_code: str) -> None:
-        self._service._event_stream_registry.send_to_client(
-            delivery.target_client_id,
+        self._service._event_stream_registry.send_to_subscribers(
+            "assistant_audio",
             self._event(
                 delivery,
                 status="failed",
@@ -245,6 +245,7 @@ class TtsRuntime:
                 byte_count=0,
                 error_code=error_code,
             ),
+            client_kind=delivery.target_client_kind,
         )
 
     def _event(
@@ -261,6 +262,7 @@ class TtsRuntime:
             "type": "assistant_audio",
             "data": {
                 "delivery_id": delivery.delivery_id,
+                "destination": delivery.destination,
                 "cycle_id": delivery.cycle_id,
                 "source_kind": delivery.source_kind,
                 "interaction_ref": delivery.interaction_ref,

@@ -10,7 +10,7 @@ DEFAULT_PERSONA_ID = "persona:default"
 DEFAULT_MEMORY_SET_ID = "memory_set:default"
 DEFAULT_MODEL_PRESET_ID = "model_preset:default"
 DEFAULT_AVATAR_ID = "avatar:default"
-API_VERSION = "0.8.0"
+API_VERSION = "0.9.0"
 DEFAULT_THINKING_SPEECH_LEVEL = 5
 DEFAULT_WAKE_INTERVAL_SECONDS = 300
 DEFAULT_PROMPT_WINDOW_RECENT_TURN_LIMIT = 30
@@ -137,6 +137,10 @@ def build_default_state() -> dict:
         "thinking_speech_level": DEFAULT_THINKING_SPEECH_LEVEL,
         "selected_conversation_display_name_id": None,
         "conversation_display_names": {},
+        "audio_output_settings": {
+            "destination": "otomekairo",
+            "local_output_device": None,
+        },
         "microphone_settings": {
             "input_source": "local_microphone",
             "local_input_device": None,

@@ -23,6 +23,7 @@ client -> server:
 {
   "type": "hello",
   "client_id": "console-...",
+  "client_kind": "cocoro_console",
   "caps": [
     {
       "id": "vision.capture",
@@ -87,11 +88,12 @@ client -> server:
 ```
 
 - `client_id` は対象 client の安定識別子である
+- `client_kind` は `browser / cocoro_console / otomekairo_audio / capability_connector` のいずれかであり、表示・音声配送先の種類を明示する
 - `caps` はその client が現在受けられる capability binding 候補の一覧である
 - `event_subscriptions` はその client が受信して処理する server-driven event の一覧である
 - `assistant_message` を表示できる client だけが `event_subscriptions` に `assistant_message` を入れる
 - `assistant_audio` の直後の binary WAV を再生できる client だけが `event_subscriptions` に `assistant_audio` を入れる
-- 音声由来のユーザー発話を表示できる client だけが `conversation_input` を入れる
+- ユーザー発話を表示できる client は入力元にかかわらず `conversation_input` を入れる
 - 音声 runtime を表示できる client だけが `audio_runtime_state` を入れる
 - `mcp_servers` は `mcp.call_tool` を実行できる client が接続中 MCP server の許可済み tool catalog を通知する一覧である
 - `vision_sources` はその client が `vision.capture` で観測できる視覚 source の一覧である
@@ -125,12 +127,13 @@ client -> server:
 event type の分類軸は次に固定する。
 
 - `*_request` は server から client への capability 実行要求である
-- `conversation_input` は音声入力から確定したユーザー発話を入力元 client に表示させる通知である
+- `conversation_input` は確定したテキストまたは音声のユーザー発話を、購読中の全 client に表示させる通知である
 - `assistant_message` は server が生成した assistant 発話を client に表示させる通知である
 - `assistant_audio` は server が合成した assistant 発話音声の配送 metadata である
 - `audio_runtime_state` は音声 runtime の process-local snapshot を表示させる通知である
 - server は `event_subscriptions` に `assistant_message` を宣言した client だけへ `assistant_message` を送る
-- server は `event_subscriptions` に `assistant_audio` を宣言した client だけを音声合成の配送先にする
+- server は `assistant_message` と `conversation_input` を、それぞれを購読する起動中の全 client へ履歴再送なしで配信する
+- server は `audio_output_settings.destination` が示す `client_kind` のうち、`assistant_audio` を購読する起動中の全 client へ同じ合成済み WAV を配信する
 - `assistant_message.data.source_kind` は発話生成の起点を示し、event type を増やして起点ごとの発話通知を分けない
 - `assistant_message.data.interaction_ref / recipient_person_refs` は論理配送先を示す
 - capability result follow-up の発話通知は `assistant_message` に `source_kind=capability_result`、`request_id`、`capability_id` を入れる
@@ -271,6 +274,8 @@ server -> client の代表例:
   "event_id": 9,
   "type": "assistant_message",
   "data": {
+    "message_id": "chat_message:...",
+    "created_at": "2026-03-31T09:00:00+09:00",
     "cycle_id": "cycle:...",
     "source_kind": "capability_result",
     "request_id": "vision_capture_request:...",
@@ -288,6 +293,8 @@ server -> client の代表例:
   "event_id": 10,
   "type": "assistant_message",
   "data": {
+    "message_id": "chat_message:...",
+    "created_at": "2026-03-31T09:00:00+09:00",
     "cycle_id": "cycle:...",
     "source_kind": "wake",
     "trigger_kind": "wake",
@@ -305,6 +312,7 @@ server -> client の代表例:
   "type": "assistant_audio",
   "data": {
     "delivery_id": "tts_delivery:...",
+    "destination": "cocoro_console",
     "cycle_id": "cycle:...",
     "source_kind": "wake",
     "interaction_ref": "interaction:discord:channel-123",
@@ -324,8 +332,12 @@ server -> client の代表例:
   "event_id": 12,
   "type": "conversation_input",
   "data": {
+    "message_id": "chat_message:...",
+    "cycle_id": "cycle:...",
+    "created_at": "2026-03-31T09:00:00+09:00",
     "utterance_seq": 18,
     "source_kind": "local_microphone",
+    "source_client_id": "microphone-connector-main",
     "message": "おとめ、今日の予定を教えて",
     "interaction_ref": "interaction:voice:direct:550e8400-e29b-41d4-a716-446655440000",
     "speaker_ref": "person:voice:550e8400-e29b-41d4-a716-446655440000",
@@ -353,7 +365,9 @@ server -> client の代表例:
     "stt_enabled": true,
     "tts_enabled": true,
     "selected_avatar_id": "avatar:default",
-    "response_client_id": "console-main",
+    "audio_output_destination": "cocoro_console",
+    "local_output_device": null,
+    "audio_output_client_count": 2,
     "selected_device": {
       "host_api": "ALSA",
       "name": "USB Audio Device"
@@ -399,7 +413,7 @@ server -> client の代表例:
 - `location.status_request`: 位置状態の取得を client に要求する
 - `social.status_request`: 社会的文脈の状態取得を client に要求する
 - `mcp.call_tool_request`: MCP server の tool 実行を client に要求する
-- `conversation_input`: 音声入力から確定したユーザー発話を入力元 client に表示させる
+- `conversation_input`: テキストまたは音声入力から確定したユーザー発話を全購読 client に表示させる
 - `assistant_message`: server が生成した assistant 発話を client に表示させる
 - `assistant_audio`: server が生成した assistant 発話の合成結果を metadata と WAV で配送する
 - `audio_runtime_state`: 音声 runtime の完全 snapshot を表示させる
@@ -407,11 +421,12 @@ server -> client の代表例:
 `vision.capture_request`、`camera.ptz_request`、`external.status_request`、`schedule.status_request`、`device.status_request`、`body.status_request`、`environment.status_request`、`location.status_request`、`social.status_request`、`mcp.call_tool_request` は capability 実行要求である。
 `assistant_message` は server が生成した assistant 発話を client へ表示させる通知である。
 `assistant_message.data.source_kind` は `conversation / capability_result / wake / background_thinking / autonomous_run` のいずれかであり、capability result follow-up の場合だけ `request_id / capability_id` を持つ。
+`assistant_message.data.message_id / created_at / message` は全発話通知で必須とする。
 `assistant_message.data.interaction_ref / recipient_person_refs` は全発話通知で必須とする。
 `assistant_message.data.audio_delivery` と HTTP response の `speech.audio_delivery` は `delivery_id / status / error_code` を持つ。
 `audio_delivery.status` は `queued / disabled / failed` のいずれかとする。
 `queued` のときだけ `delivery_id` を返し、`disabled` のときは `error_code=null`、`failed` のときは `tts_target_unavailable / tts_queue_full` のいずれかを返す。
-`assistant_audio.data` は `delivery_id / cycle_id / source_kind / interaction_ref / recipient_person_refs / status / media_type / byte_count / error_code` を持つ。
+`assistant_audio.data` は `delivery_id / destination / cycle_id / source_kind / interaction_ref / recipient_person_refs / status / media_type / byte_count / error_code` を持つ。
 音声合成に成功した場合、server は `status=succeeded / media_type=audio/wav / byte_count>0 / error_code=null` の JSON message と、その直後の1個の binary messageを同じ送信lock内で配送する。
 binary message は RIFF/WAVE の PCM 16-bit または IEEE float 32-bit とし、長さを `byte_count` と一致させる。
 音声合成に失敗した場合、server は `status=failed / media_type=null / byte_count=0` の JSON messageだけを送り、`error_code` を `tts_request_failed / tts_response_invalid / tts_response_too_large` のいずれかにする。
@@ -424,13 +439,11 @@ server は両 endpoint の HTTP 応答を 10 秒間隔で監視し、健全な1�
 TTS入力では発話本文先頭の`[face:Joy] / [face:Angry] / [face:Sorrow] / [face:Fun]`を1個だけ除去し、それ以外の文字、空白、改行を保持する。
 server はTTS入力を文字列長で切り詰めない。
 音声合成失敗は先行する発話本文の成功を取り消さない。
-`conversation_input.data.message / interaction_ref / speaker_ref / participant_refs / display_name / source_kind / utterance_seq` は必須とする。
+`conversation_input.data.message_id / cycle_id / created_at / message / interaction_ref / speaker_ref / participant_refs / display_name / source_kind` は必須とする。`utterance_seq` は音声入力時だけ持つ。
 `audio_runtime_state.data` は [列挙とinspection.md](列挙とinspection.md) の `runtime_detail.audio_runtime_state` と同じ shape にする。
 `audio_runtime_state` は完全 snapshot とし、差分 event にしない。
-server は同じ cycle または非同期処理の起点に保存した client へ物理配送する。
-起点 client、`interaction_ref`、`recipient_person_refs` のいずれかが確定しない場合は配送しない。
-人物と相互作用に紐づかない定期思考の発話は外部へ配送しない。
-接続中の購読 client が1件だけであることを配送先決定に使用しない。
+チャット event は保存済み履歴を再送せず、event 発生時に接続・購読中の client だけへ配送する。画像 Data URI は `conversation_input` に含めず、送信元 UI だけがローカル保持して表示する。
+音声出力の意味規則は [../audio/音声出力.md](../audio/音声出力.md) を正とする。
 capability 実行要求と結果の対応は [実行連携.md](実行連携.md) を正とする。
 
 主な失敗:
