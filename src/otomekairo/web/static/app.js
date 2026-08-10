@@ -35,6 +35,11 @@ const state = {
   },
   dashboardRefreshing: false,
   dashboardTimer: null,
+  audioMeters: {
+    speakerResult: null,
+    lastSpeakerUtteranceSeq: null,
+    speakerResetTimer: null,
+  },
   eventSocket: null,
   eventReconnectTimer: null,
   assistantAudio: {
@@ -115,6 +120,7 @@ const AUDIO_METER_LEVEL_MIN_DBFS = -60;
 const AUDIO_METER_LEVEL_MAX_DBFS = -12; // バー満杯（上限固定）
 const AUDIO_METER_UNIT_MIN = 0;
 const AUDIO_METER_UNIT_MAX = 1; // VAD probability / speaker similarity
+const SPEAKER_METER_HOLD_MS = 3000;
 
 function element(id) {
   return document.getElementById(id);
@@ -1119,6 +1125,7 @@ async function refreshDashboard({ silent = false } = {}) {
     // イベント未受信時の初期表示用。連続更新は audio_runtime_state event が担う。
     const audioSnapshot = currentState?.runtime_detail?.audio_runtime_state;
     if (audioSnapshot && typeof audioSnapshot === "object") {
+      syncSpeakerMeterResult(audioSnapshot);
       state.audioRuntime = clone(audioSnapshot);
       renderWebMicrophoneControls();
       renderAudioMeters();
@@ -1861,6 +1868,7 @@ async function stopWebMicrophone({ sendStop = true } = {}) {
 
 function updateAudioRuntimeState(runtimeState) {
   const hadEnrollment = Boolean(state.audioRuntime?.enrollment || state.activeEnrollment);
+  syncSpeakerMeterResult(runtimeState);
   state.audioRuntime = clone(runtimeState);
   if (!state.settingsOpen) {
     // 設定パネル編集中は下書きを壊さない。通常画面では runtime を正本にする。
@@ -1967,35 +1975,46 @@ function setMeterFill(fillId, ratio, row, { active = null, empty = false } = {})
   }
 }
 
-function setMeterBadge(badgeId, text, kind = "") {
-  const badge = element(badgeId);
-  if (!badge) {
+// 同じ snapshot の再受信で保持時間を延ばさず、新しい発話結果だけ3秒表示する。
+function syncSpeakerMeterResult(runtimeState) {
+  const last = runtimeState?.last_utterance_result || null;
+  const utteranceSeq = Number.isInteger(last?.utterance_seq)
+    ? last.utterance_seq
+    : null;
+  if (utteranceSeq === null) {
+    state.audioMeters.lastSpeakerUtteranceSeq = null;
+    state.audioMeters.speakerResult = null;
+    window.clearTimeout(state.audioMeters.speakerResetTimer);
+    state.audioMeters.speakerResetTimer = null;
     return;
   }
-  badge.textContent = text || "";
-  badge.className = `audio-meter-badge${kind ? ` ${kind}` : ""}`;
-}
+  if (utteranceSeq === state.audioMeters.lastSpeakerUtteranceSeq) {
+    return;
+  }
 
-function resultCodeLabel(code) {
-  const labels = {
-    accepted: "受理",
-    speaker_unidentified: "識別不可",
-    wake_word_not_matched: "起動語不一致",
-    stt_transient_error: "STT失敗",
-    stt_configuration_error: "STT設定",
-    speaker_processing_error: "識別処理失敗",
-    enrollment_sample_accepted: "登録サンプル",
-    enrollment_completed: "登録完了",
-    enrollment_sample_too_short: "短すぎ",
-    internal_error: "内部エラー",
-  };
-  return labels[code] || code || "";
+  state.audioMeters.lastSpeakerUtteranceSeq = utteranceSeq;
+  const top1 = last.top1_similarity;
+  state.audioMeters.speakerResult = (
+    typeof top1 === "number" && Number.isFinite(top1)
+      ? clone(last)
+      : null
+  );
+  window.clearTimeout(state.audioMeters.speakerResetTimer);
+  state.audioMeters.speakerResetTimer = null;
+  if (!state.audioMeters.speakerResult) {
+    return;
+  }
+  state.audioMeters.speakerResetTimer = window.setTimeout(() => {
+    state.audioMeters.speakerResult = null;
+    state.audioMeters.speakerResetTimer = null;
+    renderAudioMeters();
+  }, SPEAKER_METER_HOLD_MS);
 }
 
 function renderAudioMeters() {
   const runtime = state.audioRuntime;
   const vad = runtime?.vad || {};
-  const last = runtime?.last_utterance_result || null;
+  const speakerResult = state.audioMeters.speakerResult;
   const available = runtime?.available === true;
   const hasActiveSource = Boolean(runtime?.active_source);
   const liveReady = available && hasActiveSource;
@@ -2011,75 +2030,48 @@ function renderAudioMeters() {
     const isSettings = row.closest(".audio-meters-settings");
     const fillId = isSettings ? "settings-meter-level-fill" : "audio-meter-level-fill";
     const valueId = isSettings ? "settings-meter-level-value" : "audio-meter-level-value";
-    const badgeId = isSettings ? "settings-meter-level-badge" : "audio-meter-level-badge";
     setMeterFill(fillId, dbfsToRatio(dbfs), row, { empty: !hasLevel });
     element(valueId).textContent = levelText;
-    setMeterBadge(badgeId, "", "");
   }
 
-  // --- VAD（しきい値超過は probability 比較。speaking は区間中） ---
+  // --- VAD（値が未取得でも 0.0 としてしきい値と併記する） ---
   const vadRows = document.querySelectorAll('.audio-meter-row[data-meter="vad"]');
-  const probability = vad.probability;
-  const hasProbability = liveReady && typeof probability === "number" && Number.isFinite(probability);
-  const vadExceeded = hasProbability && probability >= vadThreshold;
-  const vadValueText = hasProbability
-    ? `P ${probability.toFixed(2)} / ${vadThreshold.toFixed(2)}`
-    : "—";
-  let vadBadgeText = "";
-  let vadBadgeKind = "";
-  if (hasProbability) {
-    vadBadgeText = vadExceeded ? "超過" : "未満";
-    vadBadgeKind = vadExceeded ? "ok" : "muted";
-    if (vad.speaking) {
-      vadBadgeText = `${vadBadgeText} · 区間中`;
-    }
-  }
+  const probability = (
+    liveReady && typeof vad.probability === "number" && Number.isFinite(vad.probability)
+      ? vad.probability
+      : 0
+  );
+  const vadExceeded = probability >= vadThreshold;
+  const vadValueText = `P ${probability.toFixed(2)} / ${vadThreshold.toFixed(2)}`;
   for (const row of vadRows) {
     const isSettings = row.closest(".audio-meters-settings");
     const fillId = isSettings ? "settings-meter-vad-fill" : "audio-meter-vad-fill";
     const thrId = isSettings ? "settings-meter-vad-threshold" : "audio-meter-vad-threshold";
     const valueId = isSettings ? "settings-meter-vad-value" : "audio-meter-vad-value";
-    const badgeId = isSettings ? "settings-meter-vad-badge" : "audio-meter-vad-badge";
-    setMeterFill(fillId, hasProbability ? unitMeterRatio(probability) : 0, row, {
-      active: hasProbability ? vadExceeded : null,
-      empty: !hasProbability,
+    setMeterFill(fillId, unitMeterRatio(probability), row, {
+      active: vadExceeded,
     });
     setMeterThreshold(thrId, unitMeterRatio(vadThreshold));
     element(valueId).textContent = vadValueText;
-    setMeterBadge(badgeId, vadBadgeText, vadBadgeKind);
   }
 
-  // --- 識別（直近発話。連続更新ではない） ---
+  // --- 識別（新しい発話結果を3秒間だけ表示） ---
   const speakerRows = document.querySelectorAll('.audio-meter-row[data-meter="speaker"]');
-  const top1 = typeof last?.top1_similarity === "number" ? last.top1_similarity : null;
-  const hasSpeaker = top1 !== null && Number.isFinite(top1);
+  const top1 = speakerResult?.top1_similarity ?? 0;
+  const hasSpeaker = speakerResult !== null;
   // threshold_met はサーバ処理時のしきい値。表示マーカーは現在スライダも示す。
-  const thresholdMet = last?.threshold_met === true;
-  const speakerValueText = hasSpeaker
-    ? `sim ${top1.toFixed(2)} / thr ${speakerThreshold.toFixed(2)}`
-    : "—";
-  let speakerBadgeText = "";
-  let speakerBadgeKind = "";
-  if (hasSpeaker) {
-    speakerBadgeText = thresholdMet ? "超過" : "未満";
-    speakerBadgeKind = thresholdMet ? "ok" : "muted";
-    if (last?.result_code) {
-      speakerBadgeText = `${speakerBadgeText} · ${resultCodeLabel(last.result_code)}`;
-    }
-  }
+  const thresholdMet = speakerResult?.threshold_met === true;
+  const speakerValueText = `sim ${top1.toFixed(2)} / thr ${speakerThreshold.toFixed(2)}`;
   for (const row of speakerRows) {
     const isSettings = row.closest(".audio-meters-settings");
     const fillId = isSettings ? "settings-meter-speaker-fill" : "audio-meter-speaker-fill";
     const thrId = isSettings ? "settings-meter-speaker-threshold" : "audio-meter-speaker-threshold";
     const valueId = isSettings ? "settings-meter-speaker-value" : "audio-meter-speaker-value";
-    const badgeId = isSettings ? "settings-meter-speaker-badge" : "audio-meter-speaker-badge";
-    setMeterFill(fillId, hasSpeaker ? unitMeterRatio(top1) : 0, row, {
-      active: hasSpeaker ? thresholdMet : null,
-      empty: !hasSpeaker,
+    setMeterFill(fillId, unitMeterRatio(top1), row, {
+      active: hasSpeaker ? thresholdMet : false,
     });
     setMeterThreshold(thrId, unitMeterRatio(speakerThreshold));
     element(valueId).textContent = speakerValueText;
-    setMeterBadge(badgeId, speakerBadgeText, speakerBadgeKind);
   }
 }
 
@@ -4420,6 +4412,7 @@ function bindEvents() {
     state.unloading = true;
     window.clearInterval(state.dashboardTimer);
     window.clearTimeout(state.eventReconnectTimer);
+    window.clearTimeout(state.audioMeters.speakerResetTimer);
     stopWebMicrophone();
     state.eventSocket?.close();
   });

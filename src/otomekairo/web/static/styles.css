@@ -818,10 +818,10 @@ a.dashboard-item:hover {
   background: var(--info-bg);
 }
 
-/* value / badge は固定幅。内容の有無や桁変化で track（バー）幅を変えない。 */
+/* value は固定幅。桁変化で track（バー）幅を変えない。 */
 .audio-meter-row {
   display: grid;
-  grid-template-columns: 5.5em minmax(0, 1fr) 12em 9em;
+  grid-template-columns: 5.5em minmax(0, 1fr) 12em;
   gap: var(--space-2);
   align-items: center;
   min-height: 17px;
@@ -883,46 +883,6 @@ a.dashboard-item:hover {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   text-align: right;
-}
-
-.audio-meter-badge {
-  box-sizing: border-box;
-  width: 100%;
-  min-width: 0;
-  padding: 0 6px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  font-size: var(--font-micro);
-  line-height: 1.5;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* 空でも列幅を潰さず、見た目だけ消す。 */
-.audio-meter-badge:empty {
-  visibility: hidden;
-  border-color: transparent;
-  background: transparent;
-}
-
-.audio-meter-badge.ok {
-  border-color: var(--ok-border);
-  background: var(--ok-bg);
-  color: var(--ok);
-}
-
-.audio-meter-badge.waiting {
-  border-color: var(--waiting-border);
-  background: var(--waiting-bg);
-  color: var(--waiting);
-}
-
-.audio-meter-badge.muted {
-  border-color: var(--line);
-  background: #ffffff;
-  color: var(--muted);
 }
 
 #message-input {
@@ -1641,12 +1601,12 @@ input[type="checkbox"]:disabled {
     grid-template-columns: 1fr;
   }
 
-  /* 上段 track は label 以外フル幅のまま。下段だけ value/badge を固定幅で並べる。 */
+  /* 狭い画面では track を上段、value を下段に置く。 */
   .audio-meter-row {
-    grid-template-columns: 4.5em minmax(0, 1fr) 12em 9em;
+    grid-template-columns: 4.5em minmax(0, 1fr) 12em;
     grid-template-areas:
-      "label track track track"
-      ". value value badge";
+      "label track track"
+      ". value value";
   }
 
   .audio-meter-label {
@@ -1660,10 +1620,6 @@ input[type="checkbox"]:disabled {
   .audio-meter-value {
     grid-area: value;
     text-align: right;
-  }
-
-  .audio-meter-badge {
-    grid-area: badge;
   }
 
   .audio-meters-settings {
