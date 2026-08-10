@@ -40,8 +40,8 @@ class ConfigStoreTests(unittest.TestCase):
                 }
             }
             state["mcp_servers"] = {
-                "mcp:elyth": {
-                    "mcp_server_id": "mcp:elyth",
+                "elyth": {
+                    "mcp_server_id": "elyth",
                     "connector_kind": "mcp_client",
                     "client_id": "mcp-client-connector-main",
                     "enabled": True,
@@ -91,7 +91,7 @@ class ConfigStoreTests(unittest.TestCase):
                 ],
                 "password",
             )
-            self.assertEqual(reloaded_state["mcp_servers"]["mcp:elyth"]["env"]["ELYTH_API_KEY"], "secret")
+            self.assertEqual(reloaded_state["mcp_servers"]["elyth"]["env"]["ELYTH_API_KEY"], "secret")
             self.assertEqual(
                 reloaded_state["microphone_settings"],
                 {

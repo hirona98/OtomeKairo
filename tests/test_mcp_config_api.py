@@ -38,7 +38,7 @@ class McpConfigApiTests(unittest.TestCase):
 
         self.assertEqual(len(response["mcp_servers"]), 1)
         mcp_server = response["mcp_servers"][0]
-        self.assertEqual(mcp_server["mcp_server_id"], "mcp:elyth")
+        self.assertEqual(mcp_server["mcp_server_id"], "elyth")
         self.assertFalse(mcp_server["enabled"])
         self.assertEqual(mcp_server["command"], "npx")
         self.assertEqual(mcp_server["args"], ["-y", "elyth-mcp-server@latest"])
@@ -50,7 +50,7 @@ class McpConfigApiTests(unittest.TestCase):
 
         service.replace_mcp_server(
             "token",
-            "mcp:elyth",
+            "elyth",
             {
                 "enabled": True,
                 "command": "npx",
@@ -62,7 +62,7 @@ class McpConfigApiTests(unittest.TestCase):
             },
         )
 
-        response = service.get_mcp_server("token", "mcp:elyth")
+        response = service.get_mcp_server("token", "elyth")
         mcp_server = response["mcp_server"]
         self.assertEqual(mcp_server["connector_kind"], "mcp_client")
         self.assertEqual(mcp_server["client_id"], "mcp-client-connector-main")
@@ -78,7 +78,7 @@ class McpConfigApiTests(unittest.TestCase):
             {
                 "mcp_servers": [
                     {
-                        "mcp_server_id": "mcp:elyth",
+                        "mcp_server_id": "elyth",
                         "connector_kind": "mcp_client",
                         "client_id": "mcp-client-connector-main",
                         "enabled": True,
@@ -102,7 +102,7 @@ class McpConfigApiTests(unittest.TestCase):
             {
                 "mcp_servers": [
                     {
-                        "mcp_server_id": "mcp:elyth",
+                        "mcp_server_id": "elyth",
                         "client_id": "mcp-client-connector-main",
                         "enabled": True,
                         "command": "npx",
@@ -110,7 +110,7 @@ class McpConfigApiTests(unittest.TestCase):
                         "env": {"ELYTH_API_KEY": "secret"},
                     },
                     {
-                        "mcp_server_id": "mcp:disabled",
+                        "mcp_server_id": "disabled",
                         "client_id": "mcp-client-connector-main",
                         "enabled": False,
                         "command": "npx",
@@ -118,7 +118,7 @@ class McpConfigApiTests(unittest.TestCase):
                         "env": {},
                     },
                     {
-                        "mcp_server_id": "mcp:other",
+                        "mcp_server_id": "other",
                         "client_id": "mcp-client-connector-other",
                         "enabled": True,
                         "command": "npx",
@@ -132,7 +132,7 @@ class McpConfigApiTests(unittest.TestCase):
         response = service.get_connector_runtime_config("token", "mcp-client-connector-main")
 
         self.assertEqual(response["camera_sources"], [])
-        self.assertEqual([item["mcp_server_id"] for item in response["mcp_servers"]], ["mcp:elyth"])
+        self.assertEqual([item["mcp_server_id"] for item in response["mcp_servers"]], ["elyth"])
         self.assertEqual(response["mcp_servers"][0]["env"]["ELYTH_API_KEY"], "secret")
         self.assertEqual(service.store.events[-1]["mcp_server_count"], 1)
 
@@ -142,7 +142,7 @@ class McpConfigApiTests(unittest.TestCase):
         with self.assertRaises(ServiceError) as raised:
             service.replace_mcp_server(
                 "token",
-                "mcp:elyth",
+                "elyth",
                 {
                     "enabled": True,
                     "transport": "sse",

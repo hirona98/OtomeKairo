@@ -96,9 +96,8 @@ def _mcp_server_configs(value: Any) -> list[McpServerConfig]:
     seen: set[str] = set()
     for item in value:
         server = _object(item, "mcp_servers[]")
+        # 設定正本と同じく、mcp_server_id は接頭辞なしの名前。
         server_id = _required_string(server, "mcp_server_id", "mcp_servers[].mcp_server_id")
-        if not server_id.startswith("mcp:"):
-            raise ConfigError("mcp_servers[].mcp_server_id must start with mcp:.")
         if server_id in seen:
             raise ConfigError("mcp_servers contains duplicate mcp_server_id.")
         seen.add(server_id)

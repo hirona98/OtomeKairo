@@ -2329,9 +2329,39 @@ async function loadSettingsDrafts() {
   }
 }
 
+// コレクション内の名前重複を検出し、最初の重複名を返す。空文字は対象外。
+function findDuplicateName(names) {
+  const seen = new Set();
+  for (const raw of names) {
+    const name = typeof raw === "string" ? raw.trim() : "";
+    if (!name) {
+      continue;
+    }
+    if (seen.has(name)) {
+      return name;
+    }
+    seen.add(name);
+  }
+  return "";
+}
+
 async function saveSettings({ closeAfterSave = false } = {}) {
   try {
     syncAllForms();
+    const duplicateCameraName = findDuplicateName(
+      (state.camera?.camera_sources || []).map((camera) => camera.display_name),
+    );
+    if (duplicateCameraName) {
+      showNotice(`カメラの表示名「${duplicateCameraName}」が重複しています。`, true);
+      return;
+    }
+    const duplicateMcpName = findDuplicateName(
+      (state.mcp?.mcp_servers || []).map((server) => server.mcp_server_id),
+    );
+    if (duplicateMcpName) {
+      showNotice(`MCP の名前「${duplicateMcpName}」が重複しています。`, true);
+      return;
+    }
     // 記憶実体の clone は editor-state 置換の前に専用 endpoint で確定する。
     const pendingClones = (state.editor.memory_sets || []).filter((memory) => {
       const meta = memoryDraftMeta(memory.memory_set_id);
@@ -3529,10 +3559,28 @@ function renderCapabilities() {
   renderWatcher();
 }
 
+function setCollectionEditorEnabled(selectId, fieldsetSelector, deleteAction, hasItems) {
+  // 0 件のときは選択・入力・削除を無効化し、追加だけ残す。
+  const select = element(selectId);
+  select.disabled = !hasItems;
+  const page = select.closest(".tab-page");
+  const fieldset = page?.querySelector(fieldsetSelector);
+  if (fieldset) {
+    fieldset.disabled = !hasItems;
+  }
+  const deleteButton = page?.querySelector(`[data-action="${deleteAction}"]`);
+  if (deleteButton) {
+    deleteButton.disabled = !hasItems;
+  }
+}
+
 function renderCamera() {
-  state.selectedCameraId = selectedOrFirst(state.camera.camera_sources, "vision_source_id", state.selectedCameraId);
-  setSelectOptions(element("camera-select"), state.camera.camera_sources, "vision_source_id", state.selectedCameraId);
-  const camera = arrayById(state.camera.camera_sources, "vision_source_id", state.selectedCameraId);
+  const cameras = state.camera.camera_sources || [];
+  const hasCamera = cameras.length > 0;
+  state.selectedCameraId = selectedOrFirst(cameras, "vision_source_id", state.selectedCameraId);
+  setSelectOptions(element("camera-select"), cameras, "vision_source_id", state.selectedCameraId);
+  setCollectionEditorEnabled("camera-select", "fieldset.settings-group", "delete-camera", hasCamera);
+  const camera = arrayById(cameras, "vision_source_id", state.selectedCameraId);
   const connection = camera?.connection || {};
   element("camera-display-name").value = camera?.display_name || "";
   element("camera-host").value = connection.host || "";
@@ -3659,8 +3707,16 @@ function watcherItems() {
 
 function renderWatcher() {
   const items = watcherItems();
+  const hasWatcher = items.length > 0;
   state.selectedWatcherSourceId = selectedOrFirst(items, "vision_source_id", state.selectedWatcherSourceId);
   setSelectOptions(element("watcher-select"), items, "vision_source_id", state.selectedWatcherSourceId);
+  // Watcher はカメラ定義に従属するため、0 件時は入力を無効化する。
+  const watcherSelect = element("watcher-select");
+  watcherSelect.disabled = !hasWatcher;
+  const watcherFieldset = watcherSelect.closest(".tab-page")?.querySelector("fieldset.settings-group");
+  if (watcherFieldset) {
+    watcherFieldset.disabled = !hasWatcher;
+  }
   const camera = arrayById(state.camera.camera_sources, "vision_source_id", state.selectedWatcherSourceId);
   const watcher = cameraWatcher(camera);
   element("watcher-display-name").value = camera?.display_name || "";
@@ -3707,7 +3763,7 @@ function cameraWatcher(camera) {
 }
 
 function defaultVisionSourceId(camera) {
-  const displayName = camera?.display_name || "新規カメラ";
+  const displayName = camera?.display_name || "カメラ";
   const suffix = identifierSuffix(displayName);
   return `vision_source:${suffix || "camera"}`;
 }
@@ -3726,9 +3782,12 @@ function identifierSuffix(value) {
 }
 
 function renderMcp() {
-  state.selectedMcpId = selectedOrFirst(state.mcp.mcp_servers, "mcp_server_id", state.selectedMcpId);
-  setSelectOptions(element("mcp-select"), state.mcp.mcp_servers, "mcp_server_id", state.selectedMcpId);
-  const mcp = arrayById(state.mcp.mcp_servers, "mcp_server_id", state.selectedMcpId);
+  const servers = state.mcp.mcp_servers || [];
+  const hasMcp = servers.length > 0;
+  state.selectedMcpId = selectedOrFirst(servers, "mcp_server_id", state.selectedMcpId);
+  setSelectOptions(element("mcp-select"), servers, "mcp_server_id", state.selectedMcpId);
+  setCollectionEditorEnabled("mcp-select", "fieldset.settings-group", "delete-mcp", hasMcp);
+  const mcp = arrayById(servers, "mcp_server_id", state.selectedMcpId);
   element("mcp-enabled").checked = mcp?.enabled === true;
   element("mcp-server-id").value = mcp?.mcp_server_id || "";
   element("mcp-client-id").value = mcp?.client_id || "mcp-client-connector-main";
@@ -4107,7 +4166,10 @@ function deleteMemory() {
 function addCamera() {
   syncAllForms();
   const camera = {
-    display_name: `新規カメラ${idSuffix()}`,
+    display_name: uniqueDisplayName(
+      state.camera.camera_sources.map((item) => item.display_name),
+      "カメラ",
+    ),
     vision_source_id: "",
     connector_kind: "tapo_c220",
     client_id: "tapo-c220-connector-main",
@@ -4147,7 +4209,11 @@ function deleteCamera() {
 
 function addMcp() {
   syncAllForms();
-  const id = `mcp:${idSuffix()}`;
+  // 設定正本の mcp_server_id は接頭辞なしの名前。
+  const id = uniqueDisplayName(
+    state.mcp.mcp_servers.map((item) => item.mcp_server_id),
+    "MCP",
+  );
   state.mcp.mcp_servers.push({
     mcp_server_id: id,
     connector_kind: "mcp_client",

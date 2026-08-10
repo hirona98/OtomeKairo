@@ -21,7 +21,7 @@ class CapabilityContextTests(unittest.TestCase):
         mcp_capability = {
             "id": "mcp.call_tool",
             "available": True,
-            "mcp_servers": [{"mcp_server_id": "mcp:elyth"}],
+            "mcp_servers": [{"mcp_server_id": "elyth"}],
         }
         vision_capability = {
             "id": "vision.capture",

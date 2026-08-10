@@ -1369,9 +1369,8 @@ class ServiceConfigResourcesMixin:
             mcp_server_id = entry.get("mcp_server_id")
             if not isinstance(mcp_server_id, str) or not mcp_server_id.strip():
                 raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.mcp_server_id must be a non-empty string.")
+            # 設定正本の mcp_server_id は接頭辞なしの名前。
             normalized = mcp_server_id.strip()
-            if not normalized.startswith("mcp:"):
-                raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.mcp_server_id must start with mcp:.")
             if normalized in result:
                 raise ServiceError(
                     400,
@@ -1722,8 +1721,8 @@ class ServiceConfigResourcesMixin:
             raise ServiceError(400, "invalid_mcp_server", "mcp_server must be an object.")
         if definition.get("mcp_server_id") != mcp_server_id:
             raise ServiceError(400, "mcp_server_id_mismatch", "mcp_server_id must match the path.")
-        if not isinstance(mcp_server_id, str) or not mcp_server_id.startswith("mcp:"):
-            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.mcp_server_id must start with mcp:.")
+        if not isinstance(mcp_server_id, str) or not mcp_server_id.strip():
+            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.mcp_server_id must be a non-empty string.")
         supported_fields = {
             "mcp_server_id",
             "connector_kind",

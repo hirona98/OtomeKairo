@@ -187,7 +187,7 @@ class WorldStateContractTests(unittest.TestCase):
                 "is_error": False,
                 "error": None,
                 "mcp_result_summary": "タイムラインに未読の投稿が2件ある。",
-                "mcp_server_id": "mcp:elyth/main",
+                "mcp_server_id": "elyth/main",
                 "tool_name": "timeline/read",
             },
             source_kind="capability_result",
@@ -195,7 +195,7 @@ class WorldStateContractTests(unittest.TestCase):
 
         self.assertIsInstance(context, WorldStateExternalServiceContext)
         self.assertEqual(context.summary_text, "タイムラインに未読の投稿が2件ある。")
-        self.assertEqual(context.mcp_server_id, "mcp:elyth/main")
+        self.assertEqual(context.mcp_server_id, "elyth/main")
         self.assertEqual(context.tool_name, "timeline/read")
         self.assertEqual(
             context.summary_source_hint,
@@ -210,7 +210,7 @@ class WorldStateContractTests(unittest.TestCase):
             ),
             {
                 "mode": "external_service_service",
-                "key": "external_service:mcp%3Aelyth%2Fmain/timeline%2Fread",
+                "key": "external_service:elyth%2Fmain/timeline%2Fread",
             },
         )
         self.assertEqual(
@@ -227,8 +227,8 @@ class WorldStateContractTests(unittest.TestCase):
                     "tool_name",
                 ],
                 "capability_id": "mcp.call_tool",
-                "service": "mcp:elyth/main/timeline/read",
-                "mcp_server_id": "mcp:elyth/main",
+                "service": "elyth/main/timeline/read",
+                "mcp_server_id": "elyth/main",
                 "tool_name": "timeline/read",
             },
         )
@@ -241,7 +241,7 @@ class WorldStateContractTests(unittest.TestCase):
             "is_error": False,
             "error": None,
             "mcp_result_summary": "現在状態の候補",
-            "mcp_server_id": "mcp:elyth",
+            "mcp_server_id": "elyth",
             "tool_name": "get_information",
         }
         invalid_summaries = (

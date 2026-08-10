@@ -77,8 +77,8 @@ class ConnectorRuntimeConfigPreflightTests(unittest.TestCase):
             {
                 "camera_sources": [],
                 "mcp_servers": [
-                    {"mcp_server_id": "mcp:elyth", "connector_kind": "mcp_client"},
-                    {"mcp_server_id": "mcp:other", "connector_kind": "mcp_client"},
+                    {"mcp_server_id": "elyth", "connector_kind": "mcp_client"},
+                    {"mcp_server_id": "other", "connector_kind": "mcp_client"},
                 ],
             },
         )

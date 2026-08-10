@@ -29,7 +29,7 @@ curl -k \
   -H "Authorization: Bearer $OTOMEKAIRO_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -X PUT \
-  https://127.0.0.1:55601/api/config/mcp-servers/mcp%3Aelyth \
+  https://127.0.0.1:55601/api/config/mcp-servers/elyth \
   -d '{
     "enabled": true,
     "command": "npx",
@@ -75,7 +75,7 @@ curl -k \
   -H "Authorization: Bearer $OTOMEKAIRO_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -X PUT \
-  https://127.0.0.1:55601/api/config/mcp-servers/mcp%3Aelyth-test \
+  https://127.0.0.1:55601/api/config/mcp-servers/elyth-test \
   -d '{
     "enabled": true,
     "command": "python3",
@@ -101,7 +101,7 @@ curl -k \
   -H "Authorization: Bearer $OTOMEKAIRO_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -X PUT \
-  https://127.0.0.1:55601/api/config/mcp-servers/mcp%3Aelyth-test \
+  https://127.0.0.1:55601/api/config/mcp-servers/elyth-test \
   -d '{
     "enabled": true,
     "command": "otomekairo-mcp-stdio-trace-proxy",

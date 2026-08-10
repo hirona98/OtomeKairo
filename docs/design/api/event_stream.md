@@ -46,7 +46,7 @@ client -> server:
   ],
   "mcp_servers": [
     {
-      "mcp_server_id": "mcp:elyth",
+      "mcp_server_id": "elyth",
       "transport": "stdio",
       "tools": [
         {
@@ -102,7 +102,7 @@ client -> server:
 - client は capability manifest を送らない
 - 未知の capability id または非対応 version は実行不可として扱う
 - `mcp.call_tool` が accepted された client は、`mcp_servers` を必須かつ 1 件以上にする
-- `mcp_servers[].mcp_server_id` は `mcp:` で始め、接続中 server 全体で一意にする
+- `mcp_servers[].mcp_server_id` は接頭辞なしの名前とし、接続中 server 全体で一意にする
 - `mcp_servers[].transport` の初期対応値は `stdio` とする
 - `mcp_servers[].tools[]` は MCP `tools/list` のうち、保存済み MCP server 定義の `enabled_tools` に含まれる tool の `name / description / inputSchema` だけを渡す
 - `mcp_servers[].tools` は許可済み tool が MCP server に存在しない場合に空配列とする
