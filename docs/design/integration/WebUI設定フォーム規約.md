@@ -77,7 +77,6 @@ APIキー入力は `type="password"` で伏せず、通常のテキスト入力 
 設定画面内の折りたたみは `details.advanced-settings` のみを使う。
 
 - TTS 詳細設定
-- モーション一覧の種別グループ
 - API 説明の各ドキュメント節
 
 本文がコードや長文の場合は内側に用途別クラス（例: `.api-doc-body`）を置いてよいが、外側の枠・summary 見た目は `advanced-settings` に統一する。

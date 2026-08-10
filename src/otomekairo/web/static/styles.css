@@ -1466,28 +1466,6 @@ input[type="checkbox"]:disabled {
   gap: 6px;
 }
 
-.display-escape-positions {
-  display: grid;
-  gap: 6px;
-}
-
-.display-escape-position-row {
-  display: grid;
-  grid-template-columns: auto 1fr 1fr;
-  gap: 10px;
-  align-items: center;
-}
-
-.display-window-placements {
-  display: grid;
-  gap: 6px;
-}
-
-.motion-animation-list {
-  display: grid;
-  gap: 10px;
-}
-
 .settings-actions {
   display: flex;
   align-items: center;
