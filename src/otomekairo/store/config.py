@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from otomekairo.defaults import build_default_state
+from otomekairo.defaults import build_default_desktop_capture, build_default_state
 from otomekairo.memory.utils import now_iso
 from otomekairo.service.common import debug_log
 
@@ -81,6 +81,7 @@ class ConfigStore:
                 "avatars": self._read_payload_table(conn, "avatars", "avatar_id"),
                 "camera_sources": self._read_payload_table(conn, "camera_sources", "vision_source_id"),
                 "mcp_servers": self._read_payload_table(conn, "mcp_servers", "mcp_server_id"),
+                "desktop_capture_defaults": self._read_desktop_capture_defaults(conn),
                 "console_client_settings": self._read_console_client_settings(conn),
             }
 
@@ -462,6 +463,11 @@ class ConfigStore:
                 payload_json TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS desktop_capture_defaults (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                payload_json TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS conversation_display_names (
                 conversation_display_name_id TEXT PRIMARY KEY,
                 display_name TEXT NOT NULL UNIQUE,
@@ -562,6 +568,7 @@ class ConfigStore:
         self._write_payload_table(conn, "avatars", "avatar_id", state["avatars"])
         self._write_payload_table(conn, "camera_sources", "vision_source_id", state.get("camera_sources", {}))
         self._write_payload_table(conn, "mcp_servers", "mcp_server_id", state.get("mcp_servers", {}))
+        self._write_desktop_capture_defaults(conn, state.get("desktop_capture_defaults"))
         self._write_console_client_settings(conn, state.get("console_client_settings", {}))
 
     def _read_payload_table(self, conn: sqlite3.Connection, table_name: str, id_column: str) -> dict[str, dict[str, Any]]:
@@ -631,6 +638,36 @@ class ConfigStore:
                 """,
                 (entry_id, self._to_json(payload)),
             )
+
+    def _read_desktop_capture_defaults(self, conn: sqlite3.Connection) -> dict[str, Any]:
+        row = conn.execute(
+            """
+            SELECT payload_json
+            FROM desktop_capture_defaults
+            WHERE id = 1
+            """
+        ).fetchone()
+        if row is None:
+            return build_default_desktop_capture()
+        payload = json.loads(row["payload_json"])
+        if not isinstance(payload, dict):
+            return build_default_desktop_capture()
+        return payload
+
+    def _write_desktop_capture_defaults(
+        self,
+        conn: sqlite3.Connection,
+        definition: dict[str, Any] | None,
+    ) -> None:
+        conn.execute("DELETE FROM desktop_capture_defaults")
+        payload = definition if isinstance(definition, dict) else build_default_desktop_capture()
+        conn.execute(
+            """
+            INSERT INTO desktop_capture_defaults (id, payload_json)
+            VALUES (1, ?)
+            """,
+            (self._to_json(payload),),
+        )
 
     def _read_console_client_settings(self, conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
         rows = conn.execute(

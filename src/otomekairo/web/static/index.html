@@ -668,6 +668,7 @@
             <fieldset class="settings-group" data-console-setting>
               <legend>デスクトップキャプチャ</legend>
               <div class="settings-list">
+                <p class="field-hint">CocoroConsole 未接続でも編集できます。一度も接続していない間はサーバ既定として保持し、初回接続時に端末設定へ渡します。</p>
                 <div class="setting-row">
                   <label for="desktop-capture-idle-timeout">アイドル時スキップ:</label>
                   <div class="inline-suffix-control">
@@ -876,7 +877,7 @@
             <fieldset class="settings-group">
               <legend>デスクトップの観測</legend>
               <div class="settings-list">
-                <p class="field-hint">定期思考の前にデスクトップを観測するかを設定します。取得の除外条件は「接続 → デスクトップ」で設定します。</p>
+                <p class="field-hint">定期思考の前にデスクトップを観測するかを設定します。CocoroConsole 未接続でも設定できます。実際の取得要求は接続中だけ送ります。取得の除外条件は「接続 → デスクトップ」で設定します。</p>
                 <label class="checkbox-field">思考前にデスクトップを観測する
                   <input id="current-wake-desktop-observation" type="checkbox">
                 </label>

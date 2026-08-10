@@ -5,7 +5,11 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from otomekairo.defaults import API_VERSION, build_default_console_client_settings
+from otomekairo.defaults import (
+    API_VERSION,
+    build_default_console_client_settings,
+    build_default_desktop_capture,
+)
 from otomekairo.service.common import ServiceError
 from otomekairo.service.config.constants import (
     MCP_CONNECTOR_KINDS,
@@ -408,7 +412,14 @@ class ServiceConfigResourcesMixin:
         entries = state.setdefault("console_client_settings", {})
         entry = entries.get(normalized_client_id)
         if not isinstance(entry, dict):
-            settings = build_default_console_client_settings(normalized_client_id)
+            # 未接続時に Web UI が編集した desktop_capture 既定を初回端末設定へ渡す。
+            desktop_defaults = state.get("desktop_capture_defaults")
+            if not isinstance(desktop_defaults, dict):
+                desktop_defaults = build_default_desktop_capture()
+            settings = build_default_console_client_settings(
+                normalized_client_id,
+                desktop_capture=desktop_defaults,
+            )
             self._validate_console_client_settings(normalized_client_id, settings)
             entry = {
                 "last_connected_at": None,
@@ -473,6 +484,8 @@ class ServiceConfigResourcesMixin:
         self._validate_console_client_settings(normalized_client_id, settings)
         self._validate_console_avatar_references(state, settings)
         entry["settings"] = settings
+        # 端末設定全体置換でも取得方針既定を揃える（CocoroConsole 保存経路）。
+        state["desktop_capture_defaults"] = deepcopy(settings["desktop_capture"])
         self.store.write_state(state)
         return self._build_console_client_editor_state(normalized_client_id, entry)
 
@@ -512,8 +525,39 @@ class ServiceConfigResourcesMixin:
         self._validate_console_client_settings(normalized_client_id, settings)
         self._validate_console_avatar_references(state, settings)
         entry["settings"] = settings
+        # 最終接続端末の取得方針は、次回以降の新規端末向け既定にも揃える。
+        if "desktop_capture" in payload:
+            state["desktop_capture_defaults"] = deepcopy(settings["desktop_capture"])
         self.store.write_state(state)
         return self._build_console_client_editor_state(normalized_client_id, entry)
+
+    def get_desktop_capture_defaults(self, token: str | None) -> dict[str, Any]:
+        # 一度も connect していない間の desktop 取得方針を返す。
+        state = self._require_token(token)
+        defaults = state.get("desktop_capture_defaults")
+        if not isinstance(defaults, dict):
+            defaults = build_default_desktop_capture()
+        self._validate_console_desktop_capture_settings(defaults)
+        return {"desktop_capture": deepcopy(defaults)}
+
+    def replace_desktop_capture_defaults(
+        self,
+        token: str | None,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        # 未接続時でも取得除外などを永続化し、初回 connect で端末設定へ渡す。
+        state = self._require_token(token)
+        if not isinstance(payload, dict):
+            raise ServiceError(
+                400,
+                "invalid_desktop_capture_defaults",
+                "desktop capture defaults must be an object.",
+            )
+        desktop_capture = payload.get("desktop_capture", payload)
+        self._validate_console_desktop_capture_settings(desktop_capture)
+        state["desktop_capture_defaults"] = deepcopy(desktop_capture)
+        self.store.write_state(state)
+        return {"desktop_capture": deepcopy(desktop_capture)}
 
     def _validate_console_avatar_references(
         self,

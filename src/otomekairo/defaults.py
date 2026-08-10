@@ -73,8 +73,40 @@ def build_default_console_motion() -> dict:
     return json.loads(text)
 
 
-def build_default_console_client_settings(client_id: str) -> dict:
+def build_default_desktop_capture() -> dict:
+    # 端末未作成時の取得方針と、新規 console client の初期 desktop_capture。
+    return {
+        "enabled": False,
+        "capture_active_window_only": True,
+        "idle_timeout_minutes": 10,
+        "exclude_patterns": [
+            ".*CocoroAI.*",
+            ".*支払.*",
+            ".*決済.*",
+            ".*パスワード.*",
+            ".*Password.*",
+            ".*ログイン.*",
+            ".*Login.*",
+            ".*プライベート.*",
+            ".*Private.*",
+            ".*シークレット.*",
+            ".*Secret.*",
+            ".*incognito.*",
+        ],
+    }
+
+
+def build_default_console_client_settings(
+    client_id: str,
+    *,
+    desktop_capture: dict | None = None,
+) -> dict:
     # CocoroConsole 端末で実行する表示・入力・観測の既定値。
+    capture = (
+        dict(desktop_capture)
+        if isinstance(desktop_capture, dict)
+        else build_default_desktop_capture()
+    )
     return {
         "client_id": client_id,
         "process": {
@@ -111,23 +143,12 @@ def build_default_console_client_settings(client_id: str) -> dict:
             "window_placements": {},
         },
         "desktop_capture": {
-            "enabled": False,
-            "capture_active_window_only": True,
-            "idle_timeout_minutes": 10,
-            "exclude_patterns": [
-                ".*CocoroAI.*",
-                ".*支払.*",
-                ".*決済.*",
-                ".*パスワード.*",
-                ".*Password.*",
-                ".*ログイン.*",
-                ".*Login.*",
-                ".*プライベート.*",
-                ".*Private.*",
-                ".*シークレット.*",
-                ".*Secret.*",
-                ".*incognito.*",
-            ],
+            "enabled": bool(capture.get("enabled", False)),
+            "capture_active_window_only": bool(
+                capture.get("capture_active_window_only", True)
+            ),
+            "idle_timeout_minutes": int(capture.get("idle_timeout_minutes", 10)),
+            "exclude_patterns": list(capture.get("exclude_patterns") or []),
         },
         "avatar_presentations": [
             {
@@ -197,6 +218,9 @@ def build_default_state() -> dict:
         "mcp_servers": {
             DEFAULT_ESTAT_MCP_SERVER_ID: build_default_estat_mcp_server(),
         },
+        # 一度も connect していない間の desktop 取得方針。初回 connect で端末設定へ渡す。
+        "desktop_capture_defaults": build_default_desktop_capture(),
+
         "console_client_settings": {},
     }
 

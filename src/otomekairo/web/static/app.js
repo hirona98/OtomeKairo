@@ -7,6 +7,8 @@ const state = {
   editor: null,
   avatarSpeech: null,
   consoleClient: null,
+  // 一度も connect していない間の desktop_capture 編集用。
+  desktopCaptureDefaults: null,
   camera: null,
   mcp: null,
   apiDocs: null,
@@ -2290,9 +2292,16 @@ async function loadSettingsDrafts() {
         throw error;
       }
     }
+    // 端末が無くても取得方針は編集できるよう既定を常に読む。
+    const desktopCaptureDefaults = await apiRequest(
+      "/ui/api/config/desktop-capture-defaults",
+    );
     state.editor = clone(editor);
     state.avatarSpeech = clone(avatarSpeech);
     state.consoleClient = consoleClient ? clone(consoleClient) : null;
+    state.desktopCaptureDefaults = clone(
+      desktopCaptureDefaults?.desktop_capture || desktopCaptureDefaults,
+    );
     state.camera = clone(camera);
     state.mcp = clone(mcp);
     state.apiDocs = clone(apiDocs);
@@ -2395,12 +2404,27 @@ async function saveSettings({ closeAfterSave = false } = {}) {
           body: JSON.stringify(consoleSettingsPatch),
         },
       );
+    } else if (state.desktopCaptureDefaults) {
+      // 未接続時は取得方針既定だけを永続化し、初回 connect で端末へ渡す。
+      const defaultsResponse = await apiRequest(
+        "/ui/api/config/desktop-capture-defaults",
+        {
+          method: "PUT",
+          body: JSON.stringify({ desktop_capture: state.desktopCaptureDefaults }),
+        },
+      );
+      state.desktopCaptureDefaults = clone(
+        defaultsResponse?.desktop_capture || defaultsResponse,
+      );
     }
     state.editor = clone(editor);
     state.avatarSpeech = clone(avatarSpeech);
     state.camera = clone(camera);
     state.mcp = clone(mcp);
     state.consoleClient = consoleClient ? clone(consoleClient) : null;
+    if (consoleClient?.settings?.desktop_capture) {
+      state.desktopCaptureDefaults = clone(consoleClient.settings.desktop_capture);
+    }
     resetMemoryDraftMeta(state.editor.memory_sets);
     const selectedDisplayName = arrayById(
       state.conversationDisplayNames,
@@ -2619,39 +2643,67 @@ function renderAvatarPresentation() {
 }
 
 function renderConsoleClientSettings() {
-  const available = Boolean(state.consoleClient);
+  const hasConsoleClient = Boolean(state.consoleClient);
   document.querySelectorAll("[data-console-setting]").forEach((fieldset) => {
-    // data-always-disabled は常に編集不可。端末未接続時も同様に無効化する。
-    fieldset.disabled = fieldset.hasAttribute("data-always-disabled") || !available;
+    // VRM など常時無効の欄だけ止め、desktop 取得方針は未接続でも編集する。
+    if (fieldset.hasAttribute("data-always-disabled")) {
+      fieldset.disabled = true;
+      return;
+    }
+    // デスクトップ取得方針は defaults でも編集できる。
+    if (fieldset.querySelector("#desktop-capture-idle-timeout")) {
+      fieldset.disabled = false;
+      return;
+    }
+    fieldset.disabled = !hasConsoleClient;
   });
-  element("current-wake-desktop-observation").disabled = !available;
-  if (!available) {
-    renderAvatarPresentation();
-    return;
-  }
+  // 思考前デスクトップ観測は server 側 wake_policy なので常に編集可。
+  element("current-wake-desktop-observation").disabled = false;
 
-  const settings = state.consoleClient.settings;
-  const desktop = settings.desktop_capture;
-  element("desktop-capture-idle-timeout").value = desktop.idle_timeout_minutes;
-  element("desktop-capture-exclude-patterns").value = desktop.exclude_patterns.join("\n");
+  const desktop = hasConsoleClient
+    ? state.consoleClient.settings.desktop_capture
+    : state.desktopCaptureDefaults;
+  if (desktop) {
+    element("desktop-capture-idle-timeout").value = desktop.idle_timeout_minutes;
+    element("desktop-capture-exclude-patterns").value = (desktop.exclude_patterns || []).join(
+      "\n",
+    );
+  }
   renderAvatarPresentation();
 }
 
 function syncConsoleClientSettings() {
-  if (!state.consoleClient) {
+  const idleTimeout = intValue("desktop-capture-idle-timeout", 10);
+  const excludePatterns = parseLines(textValue("desktop-capture-exclude-patterns"));
+  if (state.consoleClient) {
+    const settings = state.consoleClient.settings;
+    // process は port 群だけを正本にする。旧 conversation_input_enabled を残さない。
+    settings.process = {
+      console_api_port: settings.process.console_api_port,
+      cocoro_shell_port: settings.process.cocoro_shell_port,
+    };
+    // CocoroConsoleに表示しない取得方式の設定値は変更せず保持する。
+    settings.desktop_capture = {
+      ...settings.desktop_capture,
+      idle_timeout_minutes: idleTimeout,
+      exclude_patterns: excludePatterns,
+    };
+    state.desktopCaptureDefaults = clone(settings.desktop_capture);
     return;
   }
-  const settings = state.consoleClient.settings;
-  // process は port 群だけを正本にする。旧 conversation_input_enabled を残さない。
-  settings.process = {
-    console_api_port: settings.process.console_api_port,
-    cocoro_shell_port: settings.process.cocoro_shell_port,
-  };
-  // CocoroConsoleに表示しない取得方式の設定値は変更せず保持する。
-  settings.desktop_capture = {
-    ...settings.desktop_capture,
-    idle_timeout_minutes: intValue("desktop-capture-idle-timeout", 10),
-    exclude_patterns: parseLines(textValue("desktop-capture-exclude-patterns")),
+  if (!state.desktopCaptureDefaults) {
+    state.desktopCaptureDefaults = {
+      enabled: false,
+      capture_active_window_only: true,
+      idle_timeout_minutes: idleTimeout,
+      exclude_patterns: excludePatterns,
+    };
+    return;
+  }
+  state.desktopCaptureDefaults = {
+    ...state.desktopCaptureDefaults,
+    idle_timeout_minutes: idleTimeout,
+    exclude_patterns: excludePatterns,
   };
 }
 
@@ -3180,20 +3232,19 @@ function syncCurrent() {
   let observations = Array.isArray(state.editor.current.wake_policy?.observations)
     ? state.editor.current.wake_policy.observations
     : [];
-  if (state.consoleClient) {
-    // 対象端末のデスクトップ観測だけをCocoroConsoleと同じ定義で置き換える。
-    observations = observations.filter((observation) => !isDesktopWakeObservation(observation));
-    if (boolValue("current-wake-desktop-observation")) {
-      observations.push({
-        observation_id: DESKTOP_WAKE_OBSERVATION_ID,
-        enabled: true,
-        capability_id: "vision.capture",
-        input: {
-          vision_source_id: desktopVisionSourceId(),
-          mode: "still",
-        },
-      });
-    }
+  // デスクトップ観測方針は接続有無に依存せず wake_policy へ保存する。
+  // 実要求（vision.capture_request）は接続中 source があるときだけ配送される。
+  observations = observations.filter((observation) => !isDesktopWakeObservation(observation));
+  if (boolValue("current-wake-desktop-observation")) {
+    observations.push({
+      observation_id: DESKTOP_WAKE_OBSERVATION_ID,
+      enabled: true,
+      capability_id: "vision.capture",
+      input: {
+        vision_source_id: desktopVisionSourceId(),
+        mode: "still",
+      },
+    });
   }
   state.editor.current.wake_policy = {
     mode: element("current-wake-enabled").checked ? "interval" : "disabled",
@@ -3208,22 +3259,33 @@ function syncCurrent() {
 }
 
 function desktopVisionSourceId() {
-  const clientId = state.consoleClient.client_id.trim();
+  const clientId = state.consoleClient?.client_id?.trim();
+  if (!clientId) {
+    // 未接続時は kind 再解決用の安定 ID を使う。
+    return "vision_source:desktop";
+  }
   const sourceToken = Array.from(clientId)
     .filter((character) => /[\p{L}\p{N}_-]/u.test(character))
     .join("");
-  return `vision_source:${sourceToken}:desktop`;
+  return `vision_source:${sourceToken || "desktop"}:desktop`;
 }
 
 function isDesktopWakeObservation(observation) {
   if (observation?.observation_id === DESKTOP_WAKE_OBSERVATION_ID) {
     return true;
   }
-  return Boolean(
-    state.consoleClient
-    && observation?.capability_id === "vision.capture"
-    && observation?.input?.vision_source_id === desktopVisionSourceId(),
-  );
+  if (observation?.capability_id !== "vision.capture") {
+    return false;
+  }
+  const sourceId = observation?.input?.vision_source_id;
+  if (typeof sourceId !== "string" || !sourceId) {
+    return false;
+  }
+  if (sourceId === desktopVisionSourceId()) {
+    return true;
+  }
+  // 保存済み ID の末尾が desktop なら同一観測項目として扱う。
+  return sourceId === "vision_source:desktop" || sourceId.endsWith(":desktop");
 }
 
 function renderPersona() {

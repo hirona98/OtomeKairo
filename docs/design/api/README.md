@@ -82,11 +82,13 @@ OtomeKairo設定の `selected_conversation_display_name_id` から解決した�
 アバターの VRM は、OtomeKairo が保持する `console_client_settings` の現在値を Web UI に disabled で表示する。表示・モーション・VRM の編集は CocoroConsole から端末設定 API へ保存する。
 `定期思考` は判断機会の有効化・間隔・発話頻度に加え、思考前のデスクトップ観測とカメラ観測の on/off を持つ。カメラの host や account など接続定義は `接続 → カメラ` に置く。
 ブラウザ UI は `/ui/api/docs` を通じて `GET /api/docs` と同じAPI説明を表示し、`console_access_token` をブラウザへ返さない。
-デスクトップ取得は最後に接続したCocoroConsole端末設定を編集する。
+デスクトップ取得方針（idle スキップ・除外タイトル）と定期思考のデスクトップ観測 on/off は、CocoroConsole 未接続でも Web UI から編集できる。
+最終接続端末があるときはその端末の `desktop_capture` を編集し、一度も接続していない間は `desktop_capture_defaults` を編集する。初回 connect で端末設定の初期 `desktop_capture` に渡す。
+`vision.capture_request` の実配送は、event stream 上に desktop vision source がある接続中だけ行う。未接続では request を送らず `source_unavailable` とする。
 モデル指定値と VRM は Web UI へ現在値を無効表示する。
 表示・モーションの通常編集は CocoroConsole から端末設定 API へ保存する。
 Web UI のアバター複製では、最終接続端末の `avatar_presentations` も同じ内容で複製し、設定保存時に `PATCH /ui/api/config/console-clients/{client_id}` へ含めて永続化する。
-最後に接続した端末が存在しない場合、端末依存の設定欄を無効にし、VRM 表示設定の複製対象も持たない。
+最後に接続した端末が存在しない場合、VRM など端末固有の表示設定欄だけを無効にし、VRM 表示設定の複製対象も持たない。
 記憶の `記憶複製` は client 下書きとして保持し、適用時に `POST /ui/api/config/memory-sets/clone` を呼んでから `editor-state` を保存する。
 ブラウザ UI は `/ui/api/config/avatar-speech/editor-state` を通じて、アバターごとの STT / TTS と保存するマイク入力元を編集する。
 ブラウザ UI は保存済み入力元を通常画面へ表示し、マイクアイコンで `stt.enabled`、隣のスピーカーアイコンで `tts.enabled` をトグルする。表示の正本は `audio_runtime_state.stt_enabled` / `tts_enabled` とする。`input_source=web_microphone` のときだけ STT ON に合わせて Web 入力 session とブラウザ capture を開始し、STT OFF または session 終了で capture を止める。`local_microphone` / `console_microphone` では STT トグルのみ行い、応答先の Web 入力 session は mic 操作に混ぜない。音声状態は statusbar に表示する。
