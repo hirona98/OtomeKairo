@@ -1389,7 +1389,15 @@ function renderWebMicrophoneControls() {
     "aria-label",
     ttsEnabled ? "音声合成をOFF" : "音声合成をON",
   );
-  if (!busy && !running) {
+  const conversationInputBlockedReason = (
+    state.audioRuntime?.conversation_input_blocked_reason || null
+  );
+  if (!busy && conversationInputBlockedReason) {
+    setWebMicrophoneStatus(
+      `入力確認中・${audioPauseLabel(conversationInputBlockedReason)}`,
+      "processing",
+    );
+  } else if (!busy && !running) {
     if (!source) {
       setWebMicrophoneStatus("停止中");
     } else if (!sttEnabled) {

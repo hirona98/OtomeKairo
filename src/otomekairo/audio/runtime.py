@@ -83,6 +83,7 @@ class AudioRuntime:
         self._waiting: deque[QueuedUtterance] = deque()
         self._processing: QueuedUtterance | None = None
         self._paused_reason: str | None = None
+        self._conversation_input_blocked_reason: str | None = None
         self._device_catalog_client_id: str | None = None
         self._input_device_catalog: list[dict[str, Any]] = []
         self._output_device_catalog: list[dict[str, Any]] = []
@@ -433,11 +434,11 @@ class AudioRuntime:
                     "The enrollment owner client is not connected.",
                 )
             active = self._active_connection
-            if active is None or self._input_owner_client_id_locked(active) != owner_client_id:
+            if active is None:
                 raise ServiceError(
                     409,
                     "speaker_enrollment_source_unavailable",
-                    "The enrollment owner does not own the current audio source.",
+                    "The current audio source is unavailable.",
                 )
 
             existing_person_ref = payload.get("person_ref")
@@ -668,6 +669,9 @@ class AudioRuntime:
                 "settings_generation": self._settings_generation,
                 "mode": "enrollment" if self._enrollment is not None else "normal",
                 "paused_reason": self._paused_reason,
+                "conversation_input_blocked_reason": (
+                    self._conversation_input_blocked_reason
+                ),
                 "vad": {
                     "speaking": self._vad_speaking,
                     "probability": self._vad_probability,
@@ -775,6 +779,11 @@ class AudioRuntime:
             ):
                 initial_pause_reason = "queue_full"
             self._paused_reason = initial_pause_reason
+            self._conversation_input_blocked_reason = (
+                self._evaluate_conversation_input_blocked_reason_locked()
+                if initial_pause_reason is None
+                else None
+            )
             connection.websocket.send_json(
                 {
                     "type": "audio_started",
@@ -975,6 +984,12 @@ class AudioRuntime:
         connection: AudioConnection,
         utterance: SegmentedUtterance,
     ) -> None:
+        # 話者未登録中もVADメーターは動かすが、STT以降の会話処理は開始しない。
+        if (
+            self._enrollment is None
+            and self._conversation_input_blocked_reason is not None
+        ):
+            return
         if len(self._waiting) >= MAX_WAITING_UTTERANCES:
             self._set_paused_locked("queue_full")
             return
@@ -1337,10 +1352,16 @@ class AudioRuntime:
         active = self._active_connection
         if active is None:
             self._paused_reason = None
+            self._conversation_input_blocked_reason = None
             return
         reason = self._evaluate_pause_reason_locked(active)
         if reason is None and len(self._waiting) >= MAX_WAITING_UTTERANCES:
             reason = "queue_full"
+        self._conversation_input_blocked_reason = (
+            self._evaluate_conversation_input_blocked_reason_locked()
+            if reason is None
+            else None
+        )
         if reason is None:
             if self._paused_reason is not None:
                 self._paused_reason = None
@@ -1377,6 +1398,11 @@ class AudioRuntime:
             return "stt_disabled"
         if not stt["api_key"]:
             return "stt_configuration_error"
+        return None
+
+    def _evaluate_conversation_input_blocked_reason_locked(self) -> str | None:
+        if self._enrollment is not None:
+            return None
         current_model_speakers = [
             speaker
             for speaker in self._service.store.list_voice_speakers(
@@ -1388,17 +1414,6 @@ class AudioRuntime:
         if not current_model_speakers:
             return "speaker_enrollment_required"
         return None
-
-    def _input_owner_client_id_locked(
-        self,
-        connection: AudioConnection,
-    ) -> str | None:
-        if self._web_input_session is not None:
-            return self._web_input_session["owner_client_id"]
-        if connection.endpoint_source == "console_microphone":
-            return connection.client_id
-        console = self._settings["microphone_settings"]["console"]
-        return console["client_id"] if console is not None else None
 
     def _set_paused_locked(self, reason: str) -> None:
         if self._paused_reason == reason:
@@ -1419,6 +1434,7 @@ class AudioRuntime:
             self._active_connection.lease_generation = None
         self._active_connection = None
         self._paused_reason = None
+        self._conversation_input_blocked_reason = None
         self._discard_audio_locked()
 
     def _revoke_active_locked(self, reason: str) -> None:
@@ -1434,6 +1450,7 @@ class AudioRuntime:
             active.lease_generation = None
         self._active_connection = None
         self._paused_reason = None
+        self._conversation_input_blocked_reason = None
         self._discard_audio_locked()
 
     def _effective_source_locked(self) -> str:

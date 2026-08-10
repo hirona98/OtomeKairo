@@ -105,6 +105,7 @@ server -> client:
 `audio_started` 前の binary message は protocol error とする。
 `paused_reason` は開始直後から送信可能な場合に `null`、開始時点で pause 中の場合に pause reason を持つ。
 client は `paused_reason=null` の `audio_started` または `audio_resumed` を受信した後だけ PCM を送る。
+登録済み話者がいない場合は pause にせず、`audio_runtime_state.conversation_input_blocked_reason` を `speaker_enrollment_required` とする。server は PCM を受理して VAD と入力音量を配信するが、発話を通常の会話処理へ渡さない。
 実効入力元と異なる source の `audio_start` は `audio_source_not_selected` とする。
 2 件目の Web 入力 session は `audio_input_busy` とする。
 通常入力と Web 入力 session の切替では旧 client へ `audio_paused` を送って generation を失効させてから、新しい source へ `audio_started` を送る。
@@ -336,7 +337,6 @@ server -> client:
 - `queue_full`
 - `stt_disabled`
 - `stt_configuration_error`
-- `speaker_enrollment_required`
 - `microphone_device_unavailable`
 - `audio_runtime_unavailable`
 - `settings_reloaded`
@@ -530,6 +530,7 @@ response:
 新規登録では未割当の `conversation_display_name_id` を必須とし、`person_ref` を送らない。
 再登録では `person_ref` を必須とし、`conversation_display_name_id` を送らない。
 `owner_client_id` は接続中 event stream client と一致させる。
+現在の音声入力リースが存在すれば、`owner_client_id` と入力元 client は一致しなくてよい。
 
 response:
 
@@ -613,7 +614,6 @@ request body は不要とする。
 | `409` | `speaker_enrollment_busy` | 別の登録 session が進行中 |
 | `409` | `speaker_enrollment_owner_mismatch` | owner 以外が中止を要求 |
 | `409` | `conversation_display_name_already_assigned` | 呼ばれ方定義が別の音声話者へ割当済み |
-| `422` | `speaker_enrollment_required` | active な話者 embedding が存在しない |
 | `422` | `microphone_device_unavailable` | 選択 device が存在しない |
 | `503` | `audio_runtime_unavailable` | model runtime を利用できない |
 | `503` | `stt_configuration_error` | STT 設定が成立しない |

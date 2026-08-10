@@ -151,6 +151,7 @@ response:
         "settings_generation": 4,
         "mode": "normal",
         "paused_reason": null,
+        "conversation_input_blocked_reason": null,
         "normal_activation": {
           "state": "waiting",
           "active_until": null

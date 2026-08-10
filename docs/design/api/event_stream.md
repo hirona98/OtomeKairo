@@ -382,6 +382,7 @@ server -> client の代表例:
     "settings_generation": 4,
     "mode": "normal",
     "paused_reason": null,
+    "conversation_input_blocked_reason": null,
     "vad": {
       "speaking": false,
       "probability": 0.03,

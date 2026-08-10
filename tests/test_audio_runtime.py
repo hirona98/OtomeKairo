@@ -58,6 +58,104 @@ class AudioSegmenterTests(unittest.TestCase):
 
 
 class AudioRuntimeControlTests(unittest.TestCase):
+    def test_unregistered_speaker_keeps_metering_and_allows_remote_enrollment(self) -> None:
+        # 話者未登録中はPCMを監視し、接続中UIから現在の入力元で登録を開始する。
+        with TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            try:
+                state = service.store.read_state()
+                state["console_access_token"] = "token"
+                state["microphone_settings"]["local_input_device"] = {
+                    "host_api": "ALSA",
+                    "name": "USB Audio Device",
+                }
+                selected_avatar = state["avatars"][state["selected_avatar_id"]]
+                selected_avatar["stt"]["enabled"] = True
+                selected_avatar["stt"]["api_key"] = "test-api-key"
+                service.store.write_state(state)
+                service._audio_runtime.reload_settings()
+
+                display_name = service.create_conversation_display_name(
+                    "token",
+                    {"display_name": "テスト"},
+                )
+                event_socket = FakeWebSocket()
+                event_session_id = service.register_event_stream_connection(
+                    event_socket
+                )
+                service.handle_event_stream_message(
+                    event_session_id,
+                    {
+                        "type": "hello",
+                        "client_id": "web-audio-test",
+                        "client_kind": "browser",
+                        "caps": [],
+                        "event_subscriptions": ["audio_runtime_state"],
+                    },
+                )
+
+                audio_socket = FakeWebSocket()
+                audio_session_id = service.register_audio_stream_connection(
+                    audio_socket,
+                    endpoint_source="local_microphone",
+                )
+                service.handle_audio_stream_message(
+                    audio_session_id,
+                    "text",
+                    json.dumps(
+                        {
+                            "type": "audio_start",
+                            "protocol_version": "2",
+                            "client_id": "microphone-connector-main",
+                            "input_source": "local_microphone",
+                            "input_session_id": None,
+                            "format": AUDIO_FORMAT,
+                            "device": {
+                                "host_api": "ALSA",
+                                "name": "USB Audio Device",
+                            },
+                            "capture_settings": {
+                                "source_sample_rate": 48000,
+                            },
+                        }
+                    ).encode("utf-8"),
+                )
+
+                runtime_state = service._audio_runtime.snapshot()
+                self.assertIsNone(audio_socket.sent[0]["paused_reason"])
+                self.assertEqual(
+                    runtime_state["conversation_input_blocked_reason"],
+                    "speaker_enrollment_required",
+                )
+
+                for _ in range(2):
+                    service.handle_audio_stream_message(
+                        audio_session_id,
+                        "binary",
+                        b"\x01\x00" * (FRAME_BYTES // 2),
+                    )
+                runtime_state = service._audio_runtime.snapshot()
+                self.assertIsNotNone(runtime_state["vad"]["probability"])
+                self.assertIsNotNone(runtime_state["vad"]["dbfs"])
+
+                enrollment = service.start_audio_speaker_enrollment(
+                    "token",
+                    {
+                        "owner_client_id": "web-audio-test",
+                        "conversation_display_name_id": display_name[
+                            "conversation_display_name_id"
+                        ],
+                    },
+                )
+                self.assertEqual(enrollment["owner_client_id"], "web-audio-test")
+                self.assertIsNone(
+                    service._audio_runtime.snapshot()[
+                        "conversation_input_blocked_reason"
+                    ]
+                )
+            finally:
+                service.close_audio_runtime()
+
     def test_local_microphone_starts_without_display_delivery_target(self) -> None:
         # チャット配送先とは独立してローカル入力leaseを開始する。
         with TemporaryDirectory() as temp_dir:
