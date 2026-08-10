@@ -20,7 +20,6 @@ class DummyStore:
         self.state = build_default_state()
         mcp_server = self.state["mcp_servers"]["e-stat"]
         mcp_server["enabled"] = True
-        mcp_server["enabled_tools"] = ["create_post", "get_information"]
 
     def read_state(self) -> dict:
         return deepcopy(self.state)
@@ -154,9 +153,9 @@ class McpCapabilityTests(unittest.TestCase):
         self.assertEqual(raised.exception.error_code, "invalid_mcp_servers")
         self.assertIn("assigned to another client_id", raised.exception.message)
 
-    def test_hello_rejects_tool_not_enabled_in_server_definition(self) -> None:
+    def test_hello_rejects_disabled_mcp_server(self) -> None:
         service = DummyService()
-        service.store.state["mcp_servers"]["e-stat"]["enabled_tools"] = ["get_information"]
+        service.store.state["mcp_servers"]["e-stat"]["enabled"] = False
         session_id = service.register_event_stream_connection(DummyWebSocket())
 
         with self.assertRaises(ServiceError) as raised:
@@ -173,8 +172,8 @@ class McpCapabilityTests(unittest.TestCase):
                             "transport": "stdio",
                             "tools": [
                                 {
-                                    "name": "create_post",
-                                    "description": "投稿する",
+                                    "name": "search_e_stat_tables",
+                                    "description": "統計表を検索する",
                                     "inputSchema": {"type": "object"},
                                 }
                             ],
@@ -184,7 +183,7 @@ class McpCapabilityTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.error_code, "invalid_mcp_servers")
-        self.assertIn("tool that is not enabled", raised.exception.message)
+        self.assertIn("not an enabled MCP server definition", raised.exception.message)
 
     def test_mcp_call_tool_result_drops_raw_content(self) -> None:
         service = DummyService()

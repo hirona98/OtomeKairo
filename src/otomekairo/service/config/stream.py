@@ -478,21 +478,8 @@ class ServiceConfigStreamMixin:
                     "invalid_mcp_servers",
                     "hello.mcp_servers[].transport does not match the MCP server definition.",
                 )
+            # enabled server なら tools/list で得た catalog をそのまま登録する。
             tools = self._normalize_hello_mcp_tools(raw_server.get("tools"))
-            enabled_tool_names = registered_server.get("enabled_tools")
-            if not isinstance(enabled_tool_names, list):
-                enabled_tool_names = []
-            unexpected_tool_names = sorted(
-                tool["name"]
-                for tool in tools
-                if tool["name"] not in enabled_tool_names
-            )
-            if unexpected_tool_names:
-                raise ServiceError(
-                    400,
-                    "invalid_mcp_servers",
-                    "hello.mcp_servers[].tools contains a tool that is not enabled.",
-                )
             normalized_servers.append(
                 {
                     "mcp_server_id": server_id,
@@ -882,20 +869,13 @@ class ServiceConfigStreamMixin:
                 continue
             normalized_server_id = server_id.strip()
             registered_server = registered_servers.get(normalized_server_id)
-            enabled_tool_names = (
-                registered_server.get("enabled_tools")
-                if isinstance(registered_server, dict)
+            server_is_active = (
+                isinstance(registered_server, dict)
                 and registered_server.get("enabled") is True
                 and registered_server.get("client_id") == server.get("client_id")
-                else []
             )
-            if not isinstance(enabled_tool_names, list):
-                enabled_tool_names = []
-            tools = [
-                tool
-                for tool in self._inspection_mcp_tools(server.get("tools"))
-                if tool["name"] in enabled_tool_names
-            ]
+            # 設定上無効な server は inspection の catalog から外す。
+            tools = self._inspection_mcp_tools(server.get("tools")) if server_is_active else []
             normalized.append(
                 {
                     "mcp_server_id": normalized_server_id,

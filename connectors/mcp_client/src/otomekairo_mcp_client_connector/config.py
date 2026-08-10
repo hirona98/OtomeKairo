@@ -32,7 +32,6 @@ class McpServerConfig:
     args: list[str]
     env: dict[str, str]
     cwd: str | None
-    enabled_tools: list[str]
 
 
 @dataclass(frozen=True)
@@ -109,10 +108,6 @@ def _mcp_server_configs(value: Any) -> list[McpServerConfig]:
                 args=_string_list(server.get("args", []), "mcp_servers[].args"),
                 env=env_values,
                 cwd=_optional_string(server.get("cwd"), "mcp_servers[].cwd"),
-                enabled_tools=_unique_string_list(
-                    server.get("enabled_tools", []),
-                    "mcp_servers[].enabled_tools",
-                ),
             )
         )
     return servers
@@ -280,13 +275,6 @@ def _string_list(value: Any, label: str) -> list[str]:
         if not isinstance(item, str) or not item.strip():
             raise ConfigError(f"{label} must contain non-empty strings.")
         values.append(item.strip())
-    return values
-
-
-def _unique_string_list(value: Any, label: str) -> list[str]:
-    values = _string_list(value, label)
-    if len(values) != len(set(values)):
-        raise ConfigError(f"{label} must not contain duplicate values.")
     return values
 
 

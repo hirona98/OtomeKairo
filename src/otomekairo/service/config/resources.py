@@ -1677,10 +1677,7 @@ class ServiceConfigResourcesMixin:
         return public_definition
 
     def _mcp_server_definition_for_read(self, definition: dict[str, Any]) -> dict[str, Any]:
-        # 省略時の deny-all をすべての read API で明示する。
-        readable_definition = deepcopy(definition)
-        readable_definition.setdefault("enabled_tools", [])
-        return readable_definition
+        return deepcopy(definition)
 
     def _normalize_mcp_server_definition(self, mcp_server_id: str, definition: dict[str, Any]) -> dict[str, Any]:
         normalized = {
@@ -1692,7 +1689,6 @@ class ServiceConfigResourcesMixin:
             "command": definition.get("command"),
             "args": definition.get("args", []),
             "cwd": definition.get("cwd"),
-            "enabled_tools": definition.get("enabled_tools", []),
             "env": definition.get("env", {}),
         }
         for field_name in ("mcp_server_id", "connector_kind", "client_id", "transport", "command", "cwd"):
@@ -1702,12 +1698,6 @@ class ServiceConfigResourcesMixin:
         args = normalized.get("args")
         if isinstance(args, list):
             normalized["args"] = [item.strip() if isinstance(item, str) else item for item in args]
-        enabled_tools = normalized.get("enabled_tools")
-        if isinstance(enabled_tools, list):
-            normalized["enabled_tools"] = [
-                item.strip() if isinstance(item, str) else item
-                for item in enabled_tools
-            ]
         env = normalized.get("env")
         if isinstance(env, dict):
             normalized["env"] = {
@@ -1732,7 +1722,6 @@ class ServiceConfigResourcesMixin:
             "command",
             "args",
             "cwd",
-            "enabled_tools",
             "env",
         }
         unsupported_fields = sorted(set(definition.keys()) - supported_fields)
@@ -1762,24 +1751,6 @@ class ServiceConfigResourcesMixin:
         cwd = definition.get("cwd")
         if cwd is not None and (not isinstance(cwd, str) or not cwd.strip()):
             raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.cwd must be a non-empty string or null.")
-        enabled_tools = definition.get("enabled_tools")
-        if not isinstance(enabled_tools, list):
-            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.enabled_tools must be an array.")
-        seen_tool_names: set[str] = set()
-        for tool_name in enabled_tools:
-            if not isinstance(tool_name, str) or not tool_name.strip():
-                raise ServiceError(
-                    400,
-                    "invalid_mcp_server_field",
-                    "mcp_server.enabled_tools must contain non-empty strings.",
-                )
-            if tool_name in seen_tool_names:
-                raise ServiceError(
-                    400,
-                    "invalid_mcp_server_field",
-                    "mcp_server.enabled_tools must not contain duplicate tool names.",
-                )
-            seen_tool_names.add(tool_name)
         env = definition.get("env")
         if not isinstance(env, dict):
             raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.env must be an object.")
@@ -1790,15 +1761,11 @@ class ServiceConfigResourcesMixin:
                 raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.env values must be strings.")
 
     def _mcp_tool_is_enabled(self, mcp_server_id: str, tool_name: str) -> bool:
-        # tool 実行権限は接続中 catalog ではなく保存済み設定で判定する。
+        # 実行可否の正本は MCP server の enabled。tool 実在は接続中 catalog で別途判定する。
+        _ = tool_name
         state = self.store.read_state()
         mcp_server = self._mcp_servers_from_state(state).get(mcp_server_id)
-        if not isinstance(mcp_server, dict) or mcp_server.get("enabled") is not True:
-            return False
-        enabled_tools = mcp_server.get("enabled_tools")
-        if not isinstance(enabled_tools, list):
-            return False
-        return tool_name in enabled_tools
+        return isinstance(mcp_server, dict) and mcp_server.get("enabled") is True
 
     def _validate_mcp_required_text_field(self, definition: dict[str, Any], key: str, label: str) -> None:
         value = definition.get(key)

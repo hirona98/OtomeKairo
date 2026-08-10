@@ -5,8 +5,8 @@ OtomeKairo server 本体へ MCP server 固有依存を入れない。
 
 ## 責務
 
-- 起動時に設定済み MCP server を `initialize` し、`tools/list` のうち `enabled_tools` に含まれる tool だけを hello の `mcp_servers` へ載せる
-- 設定済み `enabled_tools` に含まれる `mcp.call_tool_request` だけを MCP server の `tools/call` で実行する
+- 起動時に設定済み MCP server を `initialize` し、`tools/list` の tool を hello の `mcp_servers` へ載せる
+- 有効な MCP server への `mcp.call_tool_request` を MCP `tools/call` で実行する
 - `POST /api/capability/result` へ result を返す
 - MCP API key、token、内部 URL の秘密部分を通常ログや result に出さない
 
@@ -36,7 +36,6 @@ curl -k \
     "command": "uvx",
     "args": ["estat-mcp-server"],
     "cwd": null,
-    "enabled_tools": ["search_e_stat_tables", "get_e_stat_data_catalog"],
     "env": {
       "E_STAT_APP_ID": "..."
     }
@@ -81,7 +80,6 @@ curl -k \
     "command": "python3",
     "args": ["-m", "otomekairo_mcp_client_connector.elyth_fake_mcp_server"],
     "cwd": null,
-    "enabled_tools": ["get_information", "create_post"],
     "env": {
       "PYTHONPATH": "connectors/mcp_client/src"
     }

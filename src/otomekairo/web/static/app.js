@@ -3804,7 +3804,7 @@ function syncMcp() {
     return;
   }
   mcp.mcp_server_id = textValue("mcp-server-id");
-  // CocoroConsoleに表示しないconnector_kindとenabled_toolsは既存値を保持する。
+  // connector_kind は UI に出さず既存値を保持する。
   mcp.client_id = textValue("mcp-client-id");
   mcp.enabled = boolValue("mcp-enabled");
   mcp.transport = textValue("mcp-transport");
@@ -3813,6 +3813,8 @@ function syncMcp() {
   const cwd = textValue("mcp-cwd").trim();
   mcp.cwd = cwd || null;
   mcp.env = parseEnv(textValue("mcp-env"));
+  // 旧下書きに enabled_tools が残っていれば捨てる（設定正本から廃止済み）。
+  delete mcp.enabled_tools;
   state.selectedMcpId = mcp.mcp_server_id;
 }
 
@@ -4223,7 +4225,6 @@ function addMcp() {
     command: "uvx",
     args: ["estat-mcp-server"],
     cwd: null,
-    enabled_tools: [],
     env: {
       E_STAT_APP_ID: "",
     },

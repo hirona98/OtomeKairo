@@ -289,7 +289,6 @@ def build_default_estat_mcp_server() -> dict:
         "command": "uvx",
         "args": ["estat-mcp-server"],
         "cwd": None,
-        "enabled_tools": [],
         "env": {
             "E_STAT_APP_ID": "",
         },
