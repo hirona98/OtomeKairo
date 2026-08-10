@@ -3837,32 +3837,22 @@ function withSyncedCollection(run) {
   return run();
 }
 
-// 既存項目を clone して新規 ID / 表示名を付け、コレクションへ追加する。
-function addClonedCollectionItem({
+// 追加用: 選択中を clone せず、空テンプレを push する。
+function pushBlankCollectionItem({
   items,
   idKey,
-  selectedId,
   setSelectedId,
-  idPrefix,
-  displayName,
-  afterClone,
+  buildItem,
+  afterCreate,
   render,
 }) {
   withSyncedCollection(() => {
-    const source = arrayById(items, idKey, selectedId) || items[0];
-    if (!source) {
-      return;
-    }
-    const item = clone(source);
-    item[idKey] = `${idPrefix}:${idSuffix()}`;
-    item.display_name = typeof displayName === "function"
-      ? displayName(source, items)
-      : displayName;
-    if (afterClone) {
-      afterClone(item, source);
-    }
+    const item = buildItem(items);
     items.push(item);
     setSelectedId(item[idKey]);
+    if (afterCreate) {
+      afterCreate(item);
+    }
     render();
   });
 }
@@ -3996,15 +3986,24 @@ function deleteAvatar() {
 }
 
 function addPersona() {
-  addClonedCollectionItem({
+  pushBlankCollectionItem({
     items: state.editor.personas,
     idKey: "persona_id",
-    selectedId: state.selectedPersonaId,
     setSelectedId: (id) => {
       state.selectedPersonaId = id;
     },
-    idPrefix: "persona",
-    displayName: "新規人格設定",
+    buildItem: (items) => ({
+      persona_id: `persona:${idSuffix()}`,
+      display_name: uniqueDisplayName(
+        items.map((item) => item.display_name),
+        "新規人格設定",
+      ),
+      // UI に無い必須構造。選択中人格の本文等はコピーしない。
+      initiative_baseline: "medium",
+      persona_prompt: "",
+      expression_addon: "",
+      wake_words: [],
+    }),
     render: renderSettings,
   });
 }
@@ -4038,15 +4037,29 @@ function deletePersona() {
 }
 
 function addModel() {
-  addClonedCollectionItem({
+  pushBlankCollectionItem({
     items: state.editor.model_presets,
     idKey: "model_preset_id",
-    selectedId: state.selectedModelPresetId,
     setSelectedId: (id) => {
       state.selectedModelPresetId = id;
     },
-    idPrefix: "model_preset",
-    displayName: "新規モデルプリセット",
+    buildItem: (items) => ({
+      model_preset_id: `model_preset:${idSuffix()}`,
+      display_name: uniqueDisplayName(
+        items.map((item) => item.display_name),
+        "新規モデルプリセット",
+      ),
+      // モデル名・キー等は空。数値はシステム定数（選択中プリセットはコピーしない）。
+      model: "",
+      api_key: "",
+      max_output_tokens: 4000,
+      timeout_seconds: 90,
+      web_search_enabled: false,
+      prompt_window: {
+        recent_turn_limit: 30,
+        recent_turn_minutes: 30,
+      },
+    }),
     render: renderSettings,
   });
 }
@@ -4087,19 +4100,25 @@ function markMemoryDraft(item, { cloneSourceMemorySetId = null } = {}) {
 }
 
 function addMemory() {
-  addClonedCollectionItem({
+  pushBlankCollectionItem({
     items: state.editor.memory_sets,
     idKey: "memory_set_id",
-    selectedId: state.selectedMemorySetId,
     setSelectedId: (id) => {
       state.selectedMemorySetId = id;
     },
-    idPrefix: "memory_set",
-    displayName: (_source, items) => uniqueDisplayName(
-      items.map((item) => item.display_name),
-      "新規記憶集合",
-    ),
-    afterClone: (item) => markMemoryDraft(item),
+    buildItem: (items) => ({
+      memory_set_id: `memory_set:${idSuffix()}`,
+      display_name: uniqueDisplayName(
+        items.map((item) => item.display_name),
+        "新規記憶集合",
+      ),
+      embedding: {
+        model: "",
+        api_key: "",
+        embedding_dimension: 3072,
+      },
+    }),
+    afterCreate: (item) => markMemoryDraft(item),
     render: renderSettings,
   });
 }
@@ -4167,6 +4186,7 @@ function deleteMemory() {
 
 function addCamera() {
   syncAllForms();
+  // 接続情報は空。disabled の接続種別・クライアントと生成 ID 用の構造だけ残す。
   const camera = {
     display_name: uniqueDisplayName(
       state.camera.camera_sources.map((item) => item.display_name),
@@ -4179,7 +4199,7 @@ function addCamera() {
     source_owner: "self",
     enabled: false,
     connection: {
-      host: "127.0.0.1",
+      host: "",
       camera_username: "",
       camera_password: "",
     },
@@ -4211,7 +4231,7 @@ function deleteCamera() {
 
 function addMcp() {
   syncAllForms();
-  // 設定正本の mcp_server_id は接頭辞なしの名前。
+  // 名前以外の編集項目は空。接続クライアントと disabled の transport は残す。
   const id = uniqueDisplayName(
     state.mcp.mcp_servers.map((item) => item.mcp_server_id),
     "MCP",
@@ -4222,12 +4242,10 @@ function addMcp() {
     client_id: "mcp-client-connector-main",
     enabled: false,
     transport: "stdio",
-    command: "uvx",
-    args: ["estat-mcp-server"],
+    command: "",
+    args: [],
     cwd: null,
-    env: {
-      E_STAT_APP_ID: "",
-    },
+    env: {},
   });
   state.selectedMcpId = id;
   renderCapabilities();
