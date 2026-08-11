@@ -92,7 +92,6 @@ class McpClientConnector:
                     "request_id": request_id,
                     "mcp_server_id": mcp_server_id,
                     "tool_name": tool_name,
-                    "arguments": arguments,
                 },
             )
         server = self._servers_by_id.get(mcp_server_id)
