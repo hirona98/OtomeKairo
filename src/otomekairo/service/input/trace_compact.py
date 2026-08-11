@@ -566,10 +566,22 @@ class ServiceInputTraceCompactMixin:
         readiness_digest = summary.get("readiness_digest")
         if isinstance(readiness_digest, dict):
             payload["readiness_digest"] = readiness_digest
-        for key in ("vision_source_id", "source_kind", "source_owner", "source_label", "operation", "amount"):
+        for key in (
+            "vision_source_id",
+            "source_kind",
+            "source_owner",
+            "source_label",
+            "operation",
+            "amount",
+            "mcp_server_id",
+            "tool_name",
+        ):
             value = summary.get(key)
             if isinstance(value, str) and value.strip():
                 payload[key] = value.strip()
+        outbound_content_review = summary.get("outbound_content_review")
+        if isinstance(outbound_content_review, dict):
+            payload["outbound_content_review"] = outbound_content_review
         if not payload:
             return None
         return payload

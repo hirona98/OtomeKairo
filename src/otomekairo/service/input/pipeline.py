@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from otomekairo.llm.contexts import (
@@ -10,6 +11,7 @@ from otomekairo.llm.contexts import (
     build_persona_context_summary,
 )
 from otomekairo.interaction import InteractionContext
+from otomekairo.service.capability import OutboundContentReviewWithheldError
 from otomekairo.service.common import debug_log
 
 
@@ -49,6 +51,13 @@ PERSON_SCOPE_FIELDS = {
     "subject_hint",
     "focus_scope_key",
 }
+OUTBOUND_CONTENT_REVIEW_RETRY_FEEDBACK = (
+    "前の MCP request は外向き内容レビューで見送られた。"
+    "同じ目的の安全な別案または noop を選ぶ。"
+)
+OUTBOUND_CONTENT_REVIEW_WITHHELD_NOTICE = (
+    "外部送信候補に非公開情報が含まれる可能性があるため、送信しませんでした。"
+)
 
 
 class ServiceInputPipelineMixin:
@@ -188,39 +197,118 @@ class ServiceInputPipelineMixin:
             cycle_label=cycle_label,
         )
 
-        # 出力
-        output_result = self._run_pipeline_output(
-            state=state,
-            cycle_id=cycle_id,
-            input_text=input_text,
-            current_input=current_input,
-            recent_turns=recent_turns,
-            time_context=pipeline_contexts["time_context"],
-            affect_context=pipeline_contexts["affect_context"],
-            drive_state_summary=pipeline_contexts["drive_state_summary"],
-            foreground_world_state=pipeline_contexts["foreground_world_state"],
-            activity_context=pipeline_contexts["activity_context"],
-            ongoing_action_summary=pipeline_contexts["ongoing_action_summary"],
-            initiative_context=pipeline_contexts["initiative_context"],
-            self_state_context=pipeline_contexts["self_state_context"],
-            people_context=pipeline_contexts["people_context"],
-            relationship_context=pipeline_contexts["relationship_context"],
-            prediction_error_context=pipeline_contexts["prediction_error_context"],
-            workspace_context=pipeline_contexts["workspace_context"],
-            recall_hint=recall_hint,
-            recall_pack=recall_pack,
-            visual_observation_context=visual_observation_context,
-            reference_context=reference_context,
-            model_config=selected_preset,
-            persona_context=self._build_selected_persona_context(
+        # 最初の withhold だけは、候補や reviewer 理由を戻さず同一文脈で一度再判断する。
+        def run_output(
+            candidate_decision: dict[str, Any],
+            *,
+            review_attempt: int,
+            prior_attempts: list[dict[str, Any]] | None = None,
+        ) -> dict[str, Any]:
+            return self._run_pipeline_output(
                 state=state,
-                role="expression_generation",
-                include_expression=True,
-            ),
-            decision=decision,
-            assistant_message_target_client_id=pipeline_assistant_message_target_client_id,
-            cycle_label=cycle_label,
-        )
+                cycle_id=cycle_id,
+                input_text=input_text,
+                current_input=current_input,
+                recent_turns=recent_turns,
+                time_context=pipeline_contexts["time_context"],
+                affect_context=pipeline_contexts["affect_context"],
+                drive_state_summary=pipeline_contexts["drive_state_summary"],
+                foreground_world_state=pipeline_contexts["foreground_world_state"],
+                activity_context=pipeline_contexts["activity_context"],
+                ongoing_action_summary=pipeline_contexts["ongoing_action_summary"],
+                initiative_context=pipeline_contexts["initiative_context"],
+                self_state_context=pipeline_contexts["self_state_context"],
+                people_context=pipeline_contexts["people_context"],
+                relationship_context=pipeline_contexts["relationship_context"],
+                prediction_error_context=pipeline_contexts["prediction_error_context"],
+                workspace_context=pipeline_contexts["workspace_context"],
+                recall_hint=recall_hint,
+                recall_pack=recall_pack,
+                visual_observation_context=visual_observation_context,
+                reference_context=reference_context,
+                model_config=selected_preset,
+                persona_context=self._build_selected_persona_context(
+                    state=state,
+                    role="expression_generation",
+                    include_expression=True,
+                ),
+                decision=candidate_decision,
+                assistant_message_target_client_id=pipeline_assistant_message_target_client_id,
+                cycle_label=cycle_label,
+                outbound_content_review_attempt=review_attempt,
+                outbound_content_review_prior_attempts=prior_attempts,
+            )
+
+        system_notice: dict[str, Any] | None = None
+        try:
+            output_result = run_output(decision, review_attempt=1)
+        except OutboundContentReviewWithheldError as first_withhold:
+            first_attempt = deepcopy(first_withhold.audit_summary)
+            decision = self._run_pipeline_decision(
+                input_text=input_text,
+                current_input=current_input,
+                trigger_kind=trigger_kind,
+                recent_turns=recent_turns,
+                time_context=pipeline_contexts["time_context"],
+                affect_context=pipeline_contexts["affect_context"],
+                drive_state_summary=pipeline_contexts["drive_state_summary"],
+                foreground_world_state=pipeline_contexts["foreground_world_state"],
+                activity_context=pipeline_contexts["activity_context"],
+                ongoing_action_summary=pipeline_contexts["ongoing_action_summary"],
+                autonomous_run_summaries=pipeline_contexts["autonomous_run_summaries"],
+                capability_decision_view=pipeline_contexts["capability_decision_view"],
+                initiative_context=pipeline_contexts["initiative_context"],
+                capability_result_context=pipeline_contexts["capability_result_context"],
+                self_state_context=pipeline_contexts["self_state_context"],
+                people_context=pipeline_contexts["people_context"],
+                relationship_context=pipeline_contexts["relationship_context"],
+                prediction_error_context=pipeline_contexts["prediction_error_context"],
+                default_mode_context=pipeline_contexts["default_mode_context"],
+                workspace_context=pipeline_contexts["workspace_context"],
+                recall_hint=recall_hint,
+                recall_pack=recall_pack,
+                visual_observation_context=visual_observation_context,
+                reference_context=reference_context,
+                model_config=selected_preset,
+                persona_context=self._build_selected_persona_context(state=state, role="decision_generation"),
+                cycle_label=f"{cycle_label} outbound-review-retry",
+                outbound_content_review_feedback=OUTBOUND_CONTENT_REVIEW_RETRY_FEEDBACK,
+            )
+            if decision["kind"] == "noop":
+                decision = self._outbound_content_review_terminal_noop(
+                    attempts=[first_attempt],
+                    reason_code="outbound_content_review_retry_noop",
+                )
+                output_result = self._empty_pipeline_output_result()
+                system_notice = self._outbound_content_review_withheld_notice(current_input=current_input)
+            else:
+                try:
+                    output_result = run_output(
+                        decision,
+                        review_attempt=2,
+                        prior_attempts=[first_attempt],
+                    )
+                    capability_summary = output_result.get("capability_request_summary")
+                    review_summary = (
+                        capability_summary.get("outbound_content_review")
+                        if isinstance(capability_summary, dict)
+                        else None
+                    )
+                    decision["outbound_content_review"] = (
+                        deepcopy(review_summary)
+                        if isinstance(review_summary, dict)
+                        else {
+                            "result_status": "recovered",
+                            "attempts": [first_attempt],
+                        }
+                    )
+                except OutboundContentReviewWithheldError as second_withhold:
+                    decision = self._outbound_content_review_terminal_noop(
+                        attempts=[first_attempt, deepcopy(second_withhold.audit_summary)],
+                        reason_code="outbound_content_review_withheld",
+                    )
+                    output_result = self._empty_pipeline_output_result()
+                    system_notice = self._outbound_content_review_withheld_notice(current_input=current_input)
 
         # 結果
         debug_log("Pipeline", f"{cycle_label} done", level="DEBUG")
@@ -259,6 +347,7 @@ class ServiceInputPipelineMixin:
             "ongoing_action_transition_summary": output_result["ongoing_action_transition_summary"],
             "autonomous_run_summary": output_result["autonomous_run_summary"],
             "autonomous_run_step_result": output_result["autonomous_run_step_result"],
+            "system_notice": system_notice,
         }
 
     def _build_current_input(
@@ -303,6 +392,55 @@ class ServiceInputPipelineMixin:
             interaction_context=interaction_context,
             text=input_text,
         )
+
+    def _empty_pipeline_output_result(self) -> dict[str, Any]:
+        return {
+            "speech_payload": None,
+            "capability_request_summary": None,
+            "ongoing_action_transition_summary": None,
+            "autonomous_run_summary": None,
+            "autonomous_run_step_result": None,
+        }
+
+    def _outbound_content_review_terminal_noop(
+        self,
+        *,
+        attempts: list[dict[str, Any]],
+        reason_code: str,
+    ) -> dict[str, Any]:
+        return {
+            "kind": "noop",
+            "reason_code": reason_code,
+            "reason_summary": "外向き内容レビューの結果、外部送信を行わず終了した。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+            "capability_request": None,
+            "autonomous_run": None,
+            "outbound_content_review": {
+                "result_status": "withheld",
+                "attempts": deepcopy(attempts),
+            },
+        }
+
+    def _outbound_content_review_withheld_notice(
+        self,
+        *,
+        current_input: CurrentInput,
+    ) -> dict[str, Any]:
+        return {
+            "source_kind": "outbound_content_review",
+            "code": "outbound_content_review_withheld",
+            "message": OUTBOUND_CONTENT_REVIEW_WITHHELD_NOTICE,
+            "conversation_visible": (
+                current_input.sender_kind == "person"
+                or (
+                    current_input.source_kind == "capability_result"
+                    and current_input.interaction_ref is not None
+                )
+            ),
+            "interaction_ref": current_input.interaction_ref,
+            "recipient_person_refs": list(current_input.participant_refs),
+        }
 
     def _capability_result_response_target_refs(
         self,
@@ -1802,6 +1940,7 @@ class ServiceInputPipelineMixin:
         model_config: dict[str, Any],
         persona_context: Any,
         cycle_label: str,
+        outbound_content_review_feedback: str | None = None,
     ) -> dict[str, Any]:
         # decision生成
         debug_log("Pipeline", f"{cycle_label} decision start", level="DEBUG")
@@ -1830,6 +1969,7 @@ class ServiceInputPipelineMixin:
             recall_hint=recall_hint,
             recall_pack=recall_pack,
             reference_context=reference_context,
+            outbound_content_review_feedback=outbound_content_review_feedback,
         )
         decision = self.llm.generate_decision(
             model_config=model_config,
@@ -1871,6 +2011,8 @@ class ServiceInputPipelineMixin:
         decision: dict[str, Any],
         assistant_message_target_client_id: str | None,
         cycle_label: str,
+        outbound_content_review_attempt: int = 1,
+        outbound_content_review_prior_attempts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         # capability request
         dispatched_capability_request_summary: dict[str, Any] | None = None
@@ -1884,6 +2026,8 @@ class ServiceInputPipelineMixin:
                 source_current_input=current_input.to_prompt_payload(),
                 assistant_message_target_client_id=assistant_message_target_client_id,
                 decision=decision,
+                outbound_content_review_attempt=outbound_content_review_attempt,
+                outbound_content_review_prior_attempts=outbound_content_review_prior_attempts,
             )
             dispatched_capability_request_summary = dispatch_result.get("capability_request_summary")
             transition_summary = dispatch_result.get("ongoing_action_transition_summary")
@@ -2171,6 +2315,7 @@ class ServiceInputPipelineMixin:
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
         reference_context: dict[str, Any] | None = None,
+        outbound_content_review_feedback: str | None = None,
     ) -> DecisionContext:
         return DecisionContext(
             input_text=input_text,
@@ -2197,6 +2342,7 @@ class ServiceInputPipelineMixin:
             recall_hint=recall_hint,
             recall_pack=recall_pack,
             reference_context=reference_context,
+            outbound_content_review_feedback=outbound_content_review_feedback,
         )
 
     def _build_speech_context(

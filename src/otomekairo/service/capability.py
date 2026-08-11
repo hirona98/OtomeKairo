@@ -117,6 +117,8 @@ class ServiceCapabilityMixin:
         source_current_input: dict[str, Any],
         assistant_message_target_client_id: str | None,
         decision: dict[str, Any],
+        outbound_content_review_attempt: int = 1,
+        outbound_content_review_prior_attempts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         request_payload = decision.get("capability_request")
         if not isinstance(request_payload, dict):
@@ -138,6 +140,8 @@ class ServiceCapabilityMixin:
             component="Capability",
             source_current_input=source_current_input,
             assistant_message_target_client_id=assistant_message_target_client_id,
+            outbound_content_review_attempt=outbound_content_review_attempt,
+            outbound_content_review_prior_attempts=outbound_content_review_prior_attempts,
         )
         if result is None:
             raise ValueError("Capability request dispatch failed.")
@@ -158,6 +162,7 @@ class ServiceCapabilityMixin:
         track_ongoing_action: bool = True,
         autonomous_run_id: str | None = None,
         outbound_content_review_attempt: int = 1,
+        outbound_content_review_prior_attempts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         # manifest と input schema を先に確定する。
         manifests = capability_manifests()
@@ -203,11 +208,22 @@ class ServiceCapabilityMixin:
 
         outbound_content_review = None
         if capability_id == "mcp.call_tool":
-            outbound_content_review = self._review_mcp_outbound_content(
+            review_audit = self._review_mcp_outbound_content(
                 input_payload=input_payload,
                 mcp_tool=mcp_tool,
                 review_attempt=outbound_content_review_attempt,
             )
+            if isinstance(review_audit, dict):
+                attempts = [
+                    deepcopy(item)
+                    for item in (outbound_content_review_prior_attempts or [])
+                    if isinstance(item, dict)
+                ]
+                attempts.append(deepcopy(review_audit))
+                outbound_content_review = {
+                    "result_status": review_audit["result_status"],
+                    "attempts": attempts,
+                }
 
         action_seed = None
         if track_ongoing_action:
@@ -1214,6 +1230,9 @@ class ServiceCapabilityMixin:
                 value = input_payload.get(input_key)
                 if isinstance(value, str) and value.strip():
                     summary[input_key] = value.strip()
+            outbound_content_review = request_record.get("outbound_content_review")
+            if isinstance(outbound_content_review, dict):
+                summary["outbound_content_review"] = deepcopy(outbound_content_review)
         if capability_id == "mcp.call_tool":
             for input_key in ("mcp_server_id", "tool_name"):
                 value = request_record.get(input_key)

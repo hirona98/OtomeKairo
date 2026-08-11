@@ -125,6 +125,7 @@ class ServiceInputTraceBuildMixin:
         failure_reason: str | None = None,
         failure_event_kind: str = "recall_hint_failure",
         failure_event_payload: dict[str, Any] | None = None,
+        system_notice: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         # 入力イベント
         interaction_ref = interaction_context.interaction_ref if interaction_context is not None else None
@@ -166,29 +167,42 @@ class ServiceInputTraceBuildMixin:
                     **payload,
                 }
             )
+            if isinstance(system_notice, dict) and system_notice.get("conversation_visible") is True:
+                events.append(
+                    self._build_system_notice_conversation_event(
+                        cycle_id=cycle_id,
+                        memory_set_id=memory_set_id,
+                        interaction_ref=interaction_ref,
+                        participant_refs=participant_refs,
+                        created_at=finished_at,
+                        system_notice=system_notice,
+                    )
+                )
             return events
 
         # 決定イベント
         if decision is None or result_kind is None:
             raise ValueError("decision and result_kind are required for success events.")
-        events.append(
-            {
-                "event_id": f"event:{uuid.uuid4().hex}",
-                "cycle_id": cycle_id,
-                "memory_set_id": memory_set_id,
-                "kind": "decision",
-                "role": "system",
-                "interaction_ref": interaction_ref,
-                "speaker_ref": None,
-                "participant_refs": participant_refs,
-                "result_kind": decision["kind"],
-                "external_result_kind": result_kind,
-                "reason_code": decision["reason_code"],
-                "reason_summary": decision["reason_summary"],
-                "pending_intent_summary": pending_intent_summary,
-                "created_at": finished_at,
-            }
-        )
+        decision_event = {
+            "event_id": f"event:{uuid.uuid4().hex}",
+            "cycle_id": cycle_id,
+            "memory_set_id": memory_set_id,
+            "kind": "decision",
+            "role": "system",
+            "interaction_ref": interaction_ref,
+            "speaker_ref": None,
+            "participant_refs": participant_refs,
+            "result_kind": decision["kind"],
+            "external_result_kind": result_kind,
+            "reason_code": decision["reason_code"],
+            "reason_summary": decision["reason_summary"],
+            "pending_intent_summary": pending_intent_summary,
+            "created_at": finished_at,
+        }
+        outbound_content_review = decision.get("outbound_content_review")
+        if isinstance(outbound_content_review, dict):
+            decision_event["outbound_content_review"] = outbound_content_review
+        events.append(decision_event)
 
         # 応答イベント
         if speech_payload is not None:
@@ -206,7 +220,42 @@ class ServiceInputTraceBuildMixin:
                     "created_at": finished_at,
                 }
             )
+        if isinstance(system_notice, dict) and system_notice.get("conversation_visible") is True:
+            events.append(
+                self._build_system_notice_conversation_event(
+                    cycle_id=cycle_id,
+                    memory_set_id=memory_set_id,
+                    interaction_ref=interaction_ref,
+                    participant_refs=participant_refs,
+                    created_at=finished_at,
+                    system_notice=system_notice,
+                )
+            )
         return events
+
+    def _build_system_notice_conversation_event(
+        self,
+        *,
+        cycle_id: str,
+        memory_set_id: str,
+        interaction_ref: str | None,
+        participant_refs: list[str],
+        created_at: str,
+        system_notice: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "event_id": f"event:{uuid.uuid4().hex}",
+            "cycle_id": cycle_id,
+            "memory_set_id": memory_set_id,
+            "kind": "system_notice",
+            "role": "system",
+            "text": system_notice["message"],
+            "code": system_notice["code"],
+            "interaction_ref": interaction_ref,
+            "speaker_ref": None,
+            "participant_refs": participant_refs,
+            "created_at": created_at,
+        }
 
     def _build_retrieval_run_success(
         self,

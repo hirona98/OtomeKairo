@@ -104,6 +104,10 @@ mock 実行は暗黙の `allow` にせず、test double から結果を明示注
 2 回目も `withhold`、または再判断が `noop` の場合は外部送信なしで終了する。
 レビュー生成自体の失敗では candidate を再生成せず、cycle を `internal_failure` とする。
 
+`autonomous_run` の step では同じ一回制限を使い、固定 feedback は安全な `capability_request` または `action.kind=none` を求める。
+再生成が `action.kind=none`、または 2 回目も `withhold` の場合は当該 step の外部送信を行わず、audit event と `system_notice` を残す。
+安全な別 action が成立した場合も、最初の `withhold` を本文なしの audit event として残す。
+
 terminal な `withhold` またはレビュー失敗は候補本文を含まない `system_notice` で通知する。
 起点人物がいる場合は同じ定型通知を会話欄の system message として表示し、assistant 発話や音声にはしない。
 
@@ -120,4 +124,3 @@ terminal な `withhold` またはレビュー失敗は候補本文を含まな�
 
 candidate `arguments`、`reason_summary`、raw prompt、LLM 生 response、秘密値を保存しない。
 最初の `withhold` 後に安全な request が成功した場合も、本文を持たない attempt 要約だけを inspection へ残す。
-

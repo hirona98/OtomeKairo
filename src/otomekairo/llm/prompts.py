@@ -177,6 +177,7 @@ def build_decision_messages(
                 reference_context=context.reference_context,
                 recall_hint=context.recall_hint,
                 recall_pack=context.recall_pack,
+                outbound_content_review_feedback=context.outbound_content_review_feedback,
             ),
         },
         {
@@ -1111,6 +1112,7 @@ def _build_decision_context_prompt(
     reference_context: dict[str, Any] | None,
     recall_hint: dict,
     recall_pack: dict[str, Any],
+    outbound_content_review_feedback: str | None,
 ) -> str:
     payload = {
         "persona_context": persona_context.to_prompt_payload(),
@@ -1144,6 +1146,8 @@ def _build_decision_context_prompt(
     )
     if trigger_policy:
         payload["trigger_policy"] = trigger_policy
+    if outbound_content_review_feedback is not None:
+        payload["outbound_content_review_feedback"] = outbound_content_review_feedback
     return _format_named_json_prompt_payload("INTERNAL_CONTEXT", payload)
 
 

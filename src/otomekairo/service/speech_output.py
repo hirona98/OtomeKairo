@@ -7,6 +7,24 @@ from otomekairo.tts import TtsDeliveryReservation
 
 
 class ServiceSpeechOutputMixin:
+    def _broadcast_system_notice(self, notice: dict[str, Any] | None) -> bool:
+        if not isinstance(notice, dict):
+            return False
+        for field_name in ("source_kind", "code", "message"):
+            value = notice.get(field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"system_notice.{field_name} is required.")
+        event = {
+            "event_id": self._next_stream_event_id(),
+            "type": "system_notice",
+            "data": {
+                "notice_id": f"system_notice:{uuid.uuid4().hex}",
+                "created_at": self._now_iso(),
+                **notice,
+            },
+        }
+        return self._event_stream_registry.send_to_subscribers("system_notice", event) > 0
+
     def _reserve_speech_audio(
         self,
         *,

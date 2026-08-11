@@ -1,13 +1,20 @@
 import unittest
 from copy import deepcopy
+from unittest.mock import Mock
 
 from otomekairo.defaults import build_default_state
+from otomekairo.interaction import InteractionContext, ParticipantContext
 from otomekairo.llm.contracts import LLMError, validate_outbound_content_review_contract
 from otomekairo.service.capability import (
     OutboundContentReviewFailureError,
     OutboundContentReviewWithheldError,
     ServiceCapabilityMixin,
 )
+from otomekairo.service.input.pipeline import (
+    OUTBOUND_CONTENT_REVIEW_RETRY_FEEDBACK,
+    ServiceInputPipelineMixin,
+)
+from otomekairo.service.input.trace_build import ServiceInputTraceBuildMixin
 
 
 class _Store:
@@ -17,6 +24,9 @@ class _Store:
 
     def read_state(self) -> dict:
         return deepcopy(self.state)
+
+    def get_current_activity_state(self, **kwargs) -> None:
+        return None
 
 
 class _Reviewer:
@@ -36,6 +46,53 @@ class _Service(ServiceCapabilityMixin):
     def __init__(self, reviewer: _Reviewer) -> None:
         self.store = _Store()
         self.llm = reviewer
+
+
+class _PipelineService(ServiceInputPipelineMixin):
+    def __init__(self) -> None:
+        self.store = _Store()
+        self._debug_cycle_label = Mock(return_value="cycle:test")
+        self._short_identifier = Mock(return_value="memory:test")
+        self._pipeline_assistant_message_target_client_id = Mock(return_value=None)
+        self._pipeline_augmented_query_text = Mock(return_value="投稿して")
+        self._build_visual_observation_decision_context = Mock(return_value=None)
+        self._summarize_activity_context = Mock(return_value=None)
+        self._build_selected_persona_context = Mock(return_value=object())
+        self._persona_context_trace_summary = Mock(return_value={})
+        self._build_pipeline_recall_inputs = Mock(
+            return_value={
+                "recall_hint": {},
+                "recall_pack": {},
+                "answer_contract": {},
+                "evidence_pack": {},
+            }
+        )
+        self._build_pipeline_internal_contexts = Mock(
+            return_value={
+                "time_context": {},
+                "affect_context": {},
+                "drive_state_summary": None,
+                "foreground_world_state": None,
+                "activity_context": None,
+                "activity_trace": None,
+                "ongoing_action_summary": None,
+                "autonomous_run_summaries": None,
+                "capability_decision_view": None,
+                "initiative_context": None,
+                "capability_result_context": None,
+                "self_state_context": None,
+                "people_context": [],
+                "relationship_context": None,
+                "prediction_error_context": None,
+                "default_mode_context": None,
+                "workspace_context": None,
+                "world_state_trace": None,
+            }
+        )
+
+
+class _TraceService(ServiceInputTraceBuildMixin):
+    pass
 
 
 def _tool() -> dict:
@@ -152,6 +209,94 @@ class OutboundContentReviewTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.audit_summary["result_status"], "internal_failure")
+
+    def test_pipeline_regenerates_once_then_returns_noop_and_system_notice(self) -> None:
+        service = _PipelineService()
+        initial_decision = {
+            "kind": "capability_request",
+            "reason_code": "post",
+            "reason_summary": "投稿する",
+            "capability_request": {},
+        }
+        retry_decision = {
+            "kind": "noop",
+            "reason_code": "safe_noop",
+            "reason_summary": "送らない",
+            "capability_request": None,
+        }
+        service._run_pipeline_decision = Mock(side_effect=[initial_decision, retry_decision])
+        first_audit = {
+            "mcp_server_id": "e-stat",
+            "tool_name": "create_post",
+            "result_status": "withheld",
+            "outcome": "withhold",
+            "reason_code": "reviewer_withheld",
+            "review_attempt": 1,
+        }
+        service._run_pipeline_output = Mock(
+            side_effect=OutboundContentReviewWithheldError(audit_summary=first_audit)
+        )
+        interaction = InteractionContext(
+            interaction_ref="interaction:test",
+            speaker_ref="person:test",
+            participants=(ParticipantContext("person:test", "テスト"),),
+        )
+
+        result = service._run_input_pipeline(
+            state=service.store.read_state(),
+            started_at="2026-08-11T12:00:00+09:00",
+            input_text="投稿して",
+            recent_turns=[],
+            cycle_id="cycle:test",
+            interaction_context=interaction,
+        )
+
+        self.assertEqual(result["decision"]["kind"], "noop")
+        self.assertEqual(
+            result["decision"]["outbound_content_review"]["attempts"],
+            [first_audit],
+        )
+        self.assertEqual(result["system_notice"]["code"], "outbound_content_review_withheld")
+        self.assertTrue(result["system_notice"]["conversation_visible"])
+        self.assertEqual(service._run_pipeline_decision.call_count, 2)
+        self.assertEqual(
+            service._run_pipeline_decision.call_args.kwargs["outbound_content_review_feedback"],
+            OUTBOUND_CONTENT_REVIEW_RETRY_FEEDBACK,
+        )
+        self.assertEqual(service._run_pipeline_output.call_count, 1)
+
+    def test_system_notice_is_persisted_as_system_conversation_row(self) -> None:
+        interaction = InteractionContext(
+            interaction_ref="interaction:test",
+            speaker_ref="person:test",
+            participants=(ParticipantContext("person:test", "テスト"),),
+        )
+        events = _TraceService()._build_cycle_events(
+            cycle_id="cycle:test",
+            memory_set_id="memory_set:test",
+            input_event_kind="conversation_input",
+            input_event_role="person",
+            interaction_context=interaction,
+            input_text="投稿して",
+            started_at="2026-08-11T12:00:00+09:00",
+            finished_at="2026-08-11T12:00:01+09:00",
+            decision={
+                "kind": "noop",
+                "reason_code": "outbound_content_review_withheld",
+                "reason_summary": "送信しない",
+            },
+            result_kind="noop",
+            system_notice={
+                "code": "outbound_content_review_withheld",
+                "message": "外部送信を見送りました。",
+                "conversation_visible": True,
+            },
+        )
+
+        notice_event = next(event for event in events if event["kind"] == "system_notice")
+        self.assertEqual(notice_event["role"], "system")
+        self.assertEqual(notice_event["text"], "外部送信を見送りました。")
+        self.assertNotIn("arguments", str(notice_event))
 
 
 if __name__ == "__main__":

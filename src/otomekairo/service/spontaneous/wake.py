@@ -7,6 +7,7 @@ from typing import Any
 from otomekairo.llm.client import LLMError
 from otomekairo.interaction import InteractionContext
 from otomekairo.recall.builder import RecallPackSelectionError
+from otomekairo.service.capability import OutboundContentReviewFailureError
 from otomekairo.service.common import (
     BACKGROUND_THINKING_POLL_SECONDS,
     INITIAL_VISUAL_CAPTURE_DELAY_SECONDS,
@@ -254,6 +255,7 @@ class ServiceSpontaneousWakeMixin:
                     pending_intent_selection=pending_intent_selection,
                     observation_summary=observation_summary,
                 )
+                self._broadcast_system_notice(response.get("system_notice"))
 
                 # 発話後処理
                 self._record_wake_outcome(
@@ -340,6 +342,7 @@ class ServiceSpontaneousWakeMixin:
                     observation_summary=observation_summary,
                 )
             except (LLMError, KeyError, ValueError) as exc:
+                review_failure = isinstance(exc, OutboundContentReviewFailureError)
                 capability_request_summary, ongoing_action_transition_summary = self._exception_capability_dispatch_trace(
                     exc
                 )
@@ -348,7 +351,19 @@ class ServiceSpontaneousWakeMixin:
                     f"{self._short_cycle_id(cycle_id)} failed error={type(exc).__name__}: {self._clamp(str(exc))}",
                     level="ERROR",
                 )
-                return self._finalize_cycle_failure(
+                review_notice = (
+                    {
+                        "source_kind": "outbound_content_review",
+                        "code": "outbound_content_review_failure",
+                        "message": "外部送信内容の安全確認を完了できなかったため、送信しませんでした。",
+                        "conversation_visible": False,
+                        "interaction_ref": None,
+                        "recipient_person_refs": [],
+                    }
+                    if review_failure
+                    else None
+                )
+                response = self._finalize_cycle_failure(
                     cycle_id=cycle_id,
                     started_at=started_at,
                     state=state,
@@ -364,7 +379,20 @@ class ServiceSpontaneousWakeMixin:
                     observation_summary=observation_summary,
                     capability_request_summary=capability_request_summary,
                     ongoing_action_transition_summary=ongoing_action_transition_summary,
+                    failure_event_kind=(
+                        "outbound_content_review_failure"
+                        if review_failure
+                        else None
+                    ),
+                    failure_event_payload=(
+                        {"outbound_content_review": exc.audit_summary}
+                        if review_failure
+                        else None
+                    ),
+                    system_notice=review_notice,
                 )
+                self._broadcast_system_notice(review_notice)
+                return response
 
     def _background_thinking_loop(self, stop_event: threading.Event) -> None:
         # ループ

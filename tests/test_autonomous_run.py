@@ -1,11 +1,84 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 from otomekairo.service.app import OtomeKairoService
+from otomekairo.service.autonomous_run import AUTONOMOUS_OUTBOUND_REVIEW_RETRY_FEEDBACK
+from otomekairo.service.capability import OutboundContentReviewWithheldError
 
 
 class AutonomousRunRecoveryTests(unittest.TestCase):
+    def test_outbound_review_withhold_regenerates_autonomous_step_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
+            service.store.upsert_autonomous_run(autonomous_run=run)
+            step_context = SimpleNamespace(
+                current_input=SimpleNamespace(to_prompt_payload=lambda: {}),
+            )
+            service._build_autonomous_step_context = Mock(return_value=step_context)
+            service._autonomous_run_step_guard = Mock(return_value=None)
+            initial_step = {
+                "action": {
+                    "kind": "capability_request",
+                    "capability_request": {
+                        "capability_id": "mcp.call_tool",
+                        "input": {
+                            "mcp_server_id": "e-stat",
+                            "tool_name": "create_post",
+                            "arguments": {"content": "candidate"},
+                        },
+                    },
+                    "speech": None,
+                },
+                "transition": {"kind": "continue", "next_run_at": None},
+                "run_update": {"current_step_summary": "投稿する", "history_summary": "投稿する"},
+            }
+            retry_step = {
+                "action": {"kind": "none", "capability_request": None, "speech": None},
+                "transition": {"kind": "cancel", "next_run_at": None},
+                "run_update": {"current_step_summary": "送らない", "history_summary": "送らない"},
+            }
+            generate_autonomous_step = Mock(side_effect=[initial_step, retry_step])
+            service.llm = SimpleNamespace(generate_autonomous_step=generate_autonomous_step)
+            first_audit = {
+                "mcp_server_id": "e-stat",
+                "tool_name": "create_post",
+                "result_status": "withheld",
+                "outcome": "withhold",
+                "reason_code": "reviewer_withheld",
+                "review_attempt": 1,
+            }
+            service._dispatch_autonomous_run_capability_request = Mock(
+                side_effect=OutboundContentReviewWithheldError(audit_summary=first_audit)
+            )
+            service._record_autonomous_outbound_content_review_terminal = Mock()
+            cancelled = {**run, "status": "cancelled", "completed_at": "2026-08-11T12:00:01+09:00"}
+            service._apply_autonomous_step_transition = Mock(return_value=cancelled)
+            service._finalize_autonomous_run_commitments = Mock(return_value=cancelled)
+
+            result = service._execute_autonomous_run_step_locked(
+                state=state,
+                run_id=run["run_id"],
+                started_at="2026-08-11T12:00:00+09:00",
+                source_current_input=run["source_current_input"],
+                emit_speech_event=False,
+                allow_during_user_response=True,
+            )
+
+            self.assertEqual(result["status"], "cancelled")
+            self.assertEqual(generate_autonomous_step.call_count, 2)
+            self.assertEqual(
+                service._build_autonomous_step_context.call_args.kwargs[
+                    "outbound_content_review_feedback"
+                ],
+                AUTONOMOUS_OUTBOUND_REVIEW_RETRY_FEEDBACK,
+            )
+            service._record_autonomous_outbound_content_review_terminal.assert_called_once()
+
     def test_links_autonomous_run_to_commitment_created_by_source_cycle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))

@@ -9,7 +9,11 @@ from typing import Any
 from otomekairo.llm.client import LLMError
 from otomekairo.llm.contexts import AutonomousStepContext, CurrentInput
 from otomekairo.interaction import normalize_interaction_context
-from otomekairo.service.capability import CapabilityDispatchError
+from otomekairo.service.capability import (
+    CapabilityDispatchError,
+    OutboundContentReviewFailureError,
+    OutboundContentReviewWithheldError,
+)
 from otomekairo.service.common import ServiceError, debug_log
 
 
@@ -18,6 +22,16 @@ AUTONOMOUS_RUN_CONTINUE_DELAY_SECONDS = 1
 AUTONOMOUS_RUN_IDLE_CONTINUE_DELAY_SECONDS = 5
 AUTONOMOUS_RUN_ACTIVE_STATUSES = {"active", "waiting_timer", "waiting_result", "paused"}
 AUTONOMOUS_RUN_TERMINAL_STATUSES = {"completed", "cancelled"}
+AUTONOMOUS_OUTBOUND_REVIEW_RETRY_FEEDBACK = (
+    "前の MCP request は外向き内容レビューで見送られた。"
+    "同じ目的の安全な capability_request または action.kind=none を選ぶ。"
+)
+AUTONOMOUS_OUTBOUND_REVIEW_WITHHELD_NOTICE = (
+    "外部送信候補に非公開情報が含まれる可能性があるため、送信しませんでした。"
+)
+AUTONOMOUS_OUTBOUND_REVIEW_FAILURE_NOTICE = (
+    "外部送信内容の安全確認を完了できなかったため、送信しませんでした。"
+)
 
 
 class ServiceAutonomousRunMixin:
@@ -835,13 +849,135 @@ class ServiceAutonomousRunMixin:
                         "step": step,
                     }
                 run = self.store.get_autonomous_run(run_id=run_id) or run
-                capability_request_summary = self._dispatch_autonomous_run_capability_request(
-                    state=state,
-                    run=run,
-                    current_time=current_time,
-                    action=action,
-                    source_current_input=step_context.current_input.to_prompt_payload(),
-                )
+                try:
+                    capability_request_summary = self._dispatch_autonomous_run_capability_request(
+                        state=state,
+                        run=run,
+                        current_time=current_time,
+                        action=action,
+                        source_current_input=step_context.current_input.to_prompt_payload(),
+                    )
+                except OutboundContentReviewWithheldError as first_withhold:
+                    # autonomous step も候補本文を戻さず、同じ run 文脈で一度だけ再生成する。
+                    step_context = self._build_autonomous_step_context(
+                        state=state,
+                        run=run,
+                        current_time=self._now_iso(),
+                        source_current_input=source_current_input,
+                        last_result_context=last_result_context or run.get("last_result_context"),
+                        outbound_content_review_feedback=AUTONOMOUS_OUTBOUND_REVIEW_RETRY_FEEDBACK,
+                    )
+                    step = self.llm.generate_autonomous_step(
+                        model_config=selected_preset,
+                        persona_context=self._build_selected_persona_context(
+                            state=state,
+                            role="autonomous_step_generation",
+                        ),
+                        context=step_context,
+                    )
+                    action = step["action"]
+                    transition = step["transition"]
+                    action_kind = str(action.get("kind") or "").strip()
+                    current_time = self._now_iso()
+                    guard_result = self._autonomous_run_step_guard(
+                        run_id=run_id,
+                        current_time=current_time,
+                        allow_during_user_response=allow_during_user_response,
+                    )
+                    if guard_result is not None:
+                        previous_request_finished = self._finish_autonomous_source_request_on_hold(
+                            source_request_record=source_request_record,
+                            current_time=current_time,
+                            reason_summary="状態変更により outbound review 後の autonomous_run step を保留した。",
+                        )
+                        return {
+                            **guard_result,
+                            "speech_payload": None,
+                            "capability_request_summary": None,
+                            "previous_request_finished": previous_request_finished,
+                            "step": step,
+                        }
+                    run = self.store.get_autonomous_run(run_id=run_id) or run
+                    if action_kind == "capability_request":
+                        capability_request_summary = self._dispatch_autonomous_run_capability_request(
+                            state=state,
+                            run=run,
+                            current_time=current_time,
+                            action=action,
+                            source_current_input=step_context.current_input.to_prompt_payload(),
+                            outbound_content_review_attempt=2,
+                            outbound_content_review_prior_attempts=[deepcopy(first_withhold.audit_summary)],
+                        )
+                        if "outbound_content_review" not in capability_request_summary:
+                            self._persist_autonomous_outbound_content_review_audit(
+                                run=run,
+                                current_time=current_time,
+                                audit_summary={
+                                    "result_status": "recovered",
+                                    "attempts": [deepcopy(first_withhold.audit_summary)],
+                                },
+                            )
+                    elif action_kind == "speech":
+                        speech_payload = self._generate_autonomous_run_speech(
+                            state=state,
+                            selected_preset=selected_preset,
+                            step_context=step_context,
+                            step=step,
+                        )
+                        current_time = self._now_iso()
+                        guard_result = self._autonomous_run_step_guard(
+                            run_id=run_id,
+                            current_time=current_time,
+                            allow_during_user_response=allow_during_user_response,
+                        )
+                        if guard_result is not None:
+                            previous_request_finished = self._finish_autonomous_source_request_on_hold(
+                                source_request_record=source_request_record,
+                                current_time=current_time,
+                                reason_summary="状態変更により outbound review 後の autonomous_run speech を保留した。",
+                            )
+                            return {
+                                **guard_result,
+                                "speech_payload": None,
+                                "capability_request_summary": None,
+                                "previous_request_finished": previous_request_finished,
+                                "step": step,
+                            }
+                        run = self.store.get_autonomous_run(run_id=run_id) or run
+                        if emit_speech_event:
+                            self._emit_autonomous_run_assistant_message_event(
+                                state=state,
+                                run=run,
+                                speech_payload=speech_payload,
+                            )
+                            speech_event = self._persist_autonomous_run_speech_event(
+                                run=run,
+                                speech_payload=speech_payload,
+                                created_at=current_time,
+                                step=step,
+                                transition=transition,
+                            )
+                            if isinstance(speech_event, dict):
+                                speech_events.append(speech_event)
+                        self._persist_autonomous_outbound_content_review_audit(
+                            run=run,
+                            current_time=current_time,
+                            audit_summary={
+                                "result_status": "recovered",
+                                "attempts": [deepcopy(first_withhold.audit_summary)],
+                            },
+                        )
+                    elif action_kind == "none":
+                        self._record_autonomous_outbound_content_review_terminal(
+                            run=run,
+                            current_time=current_time,
+                            reason_code="outbound_content_review_retry_noop",
+                            audit_summary={
+                                "result_status": "withheld",
+                                "attempts": [deepcopy(first_withhold.audit_summary)],
+                            },
+                            message=AUTONOMOUS_OUTBOUND_REVIEW_WITHHELD_NOTICE,
+                        )
 
             current_time = self._now_iso()
             if action_kind == "none" or (action_kind == "speech" and not emit_speech_event):
@@ -899,6 +1035,69 @@ class ServiceAutonomousRunMixin:
                     current_time=current_time,
                     evidence_events=speech_events,
                 )
+        except (OutboundContentReviewWithheldError, OutboundContentReviewFailureError) as exc:
+            current_time = self._now_iso()
+            run = self.store.get_autonomous_run(run_id=run_id) or run
+            is_failure = isinstance(exc, OutboundContentReviewFailureError)
+            reason_code = (
+                "outbound_content_review_failure"
+                if is_failure
+                else "outbound_content_review_withheld"
+            )
+            updated_run = self._terminal_autonomous_run(
+                run=run,
+                current_time=current_time,
+                status="cancelled",
+                reason_summary="外向き内容レビューの結果、外部送信を行わず autonomous_run を終了した。",
+            )
+            self.store.upsert_autonomous_run(autonomous_run=updated_run)
+            updated_run = self._finalize_autonomous_run_commitments(
+                state=state,
+                run=updated_run,
+                terminal_status="cancelled",
+                current_time=current_time,
+                evidence_events=[],
+            )
+            self._record_autonomous_outbound_content_review_terminal(
+                run=updated_run,
+                current_time=current_time,
+                reason_code=reason_code,
+                audit_summary=exc.audit_summary,
+                message=(
+                    AUTONOMOUS_OUTBOUND_REVIEW_FAILURE_NOTICE
+                    if is_failure
+                    else AUTONOMOUS_OUTBOUND_REVIEW_WITHHELD_NOTICE
+                ),
+            )
+            if isinstance(source_request_record, dict):
+                previous_request_finished = True
+                self._finish_capability_ongoing_action(
+                    request_record=source_request_record,
+                    current_time=current_time,
+                    terminal_kind="interrupted",
+                    reason_code=reason_code,
+                    terminal_reason="外向き内容レビューのため autonomous_run を終了した。",
+                    final_step_summary="外部送信を行わず終了した。",
+                    transition_source="autonomous_run_step",
+                    decision_kind="autonomous_step:none",
+                    result_error=is_failure,
+                    detail_summary=reason_code,
+                )
+            debug_log(
+                "AutonomousRun",
+                f"step stopped run={run_id} reason={reason_code}",
+                level="WARNING" if not is_failure else "ERROR",
+            )
+            return {
+                "status": updated_run.get("status"),
+                "autonomous_run": updated_run,
+                "speech_payload": None,
+                "capability_request_summary": None,
+                "previous_request_finished": previous_request_finished,
+                "step": None,
+                "error": reason_code,
+                "outbound_content_review": deepcopy(exc.audit_summary),
+            }
         except (LLMError, KeyError, ValueError, CapabilityDispatchError) as exc:
             current_time = self._now_iso()
             run = self.store.get_autonomous_run(run_id=run_id) or run
@@ -968,6 +1167,7 @@ class ServiceAutonomousRunMixin:
         current_time: str,
         source_current_input: dict[str, Any] | None,
         last_result_context: dict[str, Any] | None,
+        outbound_content_review_feedback: str | None = None,
     ) -> AutonomousStepContext:
         current_input_payload = source_current_input if isinstance(source_current_input, dict) else None
         if current_input_payload is None:
@@ -1039,6 +1239,7 @@ class ServiceAutonomousRunMixin:
                 current_input=current_input,
                 structured_sources=[run, last_result_context],
             ),
+            outbound_content_review_feedback=outbound_content_review_feedback,
         )
 
     def _autonomous_run_activity_context(
@@ -1147,6 +1348,8 @@ class ServiceAutonomousRunMixin:
         current_time: str,
         action: dict[str, Any],
         source_current_input: dict[str, Any],
+        outbound_content_review_attempt: int = 1,
+        outbound_content_review_prior_attempts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         request_payload = action.get("capability_request")
         if not isinstance(request_payload, dict):
@@ -1169,6 +1372,8 @@ class ServiceAutonomousRunMixin:
             assistant_message_target_client_id=self._request_run_assistant_message_target_client_id(run),
             track_ongoing_action=True,
             autonomous_run_id=str(run.get("run_id") or "").strip(),
+            outbound_content_review_attempt=outbound_content_review_attempt,
+            outbound_content_review_prior_attempts=outbound_content_review_prior_attempts,
         )
         if not isinstance(result, dict):
             raise ValueError("Autonomous capability dispatch failed.")
@@ -1750,6 +1955,91 @@ class ServiceAutonomousRunMixin:
         }
         self.store.append_events(events=[event])
         return event
+
+    def _record_autonomous_outbound_content_review_terminal(
+        self,
+        *,
+        run: dict[str, Any],
+        current_time: str,
+        reason_code: str,
+        audit_summary: dict[str, Any],
+        message: str,
+    ) -> None:
+        interaction_ref = run.get("origin_interaction_ref")
+        participant_refs = run.get("participant_refs")
+        conversation_visible = (
+            isinstance(interaction_ref, str)
+            and bool(interaction_ref)
+            and isinstance(participant_refs, list)
+            and bool(participant_refs)
+        )
+        normalized_participants = participant_refs if isinstance(participant_refs, list) else []
+        notice = {
+            "source_kind": "outbound_content_review",
+            "code": reason_code,
+            "message": message,
+            "conversation_visible": conversation_visible,
+            "interaction_ref": interaction_ref if isinstance(interaction_ref, str) else None,
+            "recipient_person_refs": normalized_participants,
+        }
+        self._broadcast_system_notice(notice)
+        events = [
+            {
+                "event_id": f"event:{uuid.uuid4().hex}",
+                "cycle_id": self._autonomous_run_event_cycle_id(run),
+                "memory_set_id": run["memory_set_id"],
+                "kind": "outbound_content_review",
+                "role": "system",
+                "text": None,
+                "created_at": current_time,
+                "source_kind": "autonomous_run",
+                "run_id": run.get("run_id"),
+                "outbound_content_review": deepcopy(audit_summary),
+            }
+        ]
+        if conversation_visible:
+            events.append(
+                {
+                    "event_id": f"event:{uuid.uuid4().hex}",
+                    "cycle_id": self._autonomous_run_event_cycle_id(run),
+                    "memory_set_id": run["memory_set_id"],
+                    "kind": "system_notice",
+                    "role": "system",
+                    "text": message,
+                    "code": reason_code,
+                    "interaction_ref": interaction_ref,
+                    "speaker_ref": None,
+                    "participant_refs": normalized_participants,
+                    "created_at": current_time,
+                    "source_kind": "autonomous_run",
+                    "run_id": run.get("run_id"),
+                }
+            )
+        self.store.append_events(events=events)
+
+    def _persist_autonomous_outbound_content_review_audit(
+        self,
+        *,
+        run: dict[str, Any],
+        current_time: str,
+        audit_summary: dict[str, Any],
+    ) -> None:
+        self.store.append_events(
+            events=[
+                {
+                    "event_id": f"event:{uuid.uuid4().hex}",
+                    "cycle_id": self._autonomous_run_event_cycle_id(run),
+                    "memory_set_id": run["memory_set_id"],
+                    "kind": "outbound_content_review",
+                    "role": "system",
+                    "text": None,
+                    "created_at": current_time,
+                    "source_kind": "autonomous_run",
+                    "run_id": run.get("run_id"),
+                    "outbound_content_review": deepcopy(audit_summary),
+                }
+            ]
+        )
 
     def _append_autonomous_run_terminal_event(
         self,

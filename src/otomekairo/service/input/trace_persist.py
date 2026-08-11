@@ -32,6 +32,9 @@ class ServiceInputTracePersistMixin:
         # 結果選択
         decision = pipeline["decision"]
         speech_payload = pipeline["speech_payload"]
+        system_notice = pipeline.get("system_notice")
+        if not isinstance(system_notice, dict):
+            system_notice = None
         if capability_request_summary is None:
             candidate_summary = pipeline.get("capability_request_summary")
             if isinstance(candidate_summary, dict):
@@ -99,6 +102,7 @@ class ServiceInputTracePersistMixin:
             capability_request_summary=capability_request_summary,
             followup_capability_request_summary=followup_capability_request_summary,
             ongoing_action_transition_summary=ongoing_action_transition_summary,
+            system_notice=system_notice,
         )
         self._register_interaction_participants(
             memory_set_id=state["selected_memory_set_id"],
@@ -174,6 +178,7 @@ class ServiceInputTracePersistMixin:
             "autonomous_run": pipeline.get("autonomous_run_summary")
             if isinstance(pipeline.get("autonomous_run_summary"), dict)
             else None,
+            "system_notice": system_notice,
         }
 
     def _persist_cycle_success(
@@ -219,6 +224,7 @@ class ServiceInputTracePersistMixin:
         capability_request_summary: dict[str, Any] | None = None,
         followup_capability_request_summary: dict[str, Any] | None = None,
         ongoing_action_transition_summary: dict[str, Any] | None = None,
+        system_notice: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         memory_set_id = state["selected_memory_set_id"]
         events = self._build_cycle_events(
@@ -234,6 +240,7 @@ class ServiceInputTracePersistMixin:
             result_kind=result_kind,
             speech_payload=speech_payload,
             pending_intent_summary=pending_intent_summary,
+            system_notice=system_notice,
         )
         events.extend(
             self._build_event_evidence_audit_events(
@@ -398,6 +405,7 @@ class ServiceInputTracePersistMixin:
         capability_request_summary: dict[str, Any] | None = None,
         followup_capability_request_summary: dict[str, Any] | None = None,
         ongoing_action_transition_summary: dict[str, Any] | None = None,
+        system_notice: dict[str, Any] | None = None,
     ) -> None:
         memory_set_id = state["selected_memory_set_id"]
         events = self._build_cycle_events(
@@ -412,6 +420,7 @@ class ServiceInputTracePersistMixin:
             failure_reason=failure_reason,
             failure_event_kind=failure_event_kind,
             failure_event_payload=failure_event_payload,
+            system_notice=system_notice,
         )
         retrieval_run = self._build_retrieval_run_failure(
             cycle_id=cycle_id,

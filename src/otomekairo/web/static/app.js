@@ -1226,6 +1226,7 @@ function connectEventStream() {
         "assistant_message",
         "assistant_audio",
         "audio_runtime_state",
+        "system_notice",
       ],
     }));
     setEventStreamStatus("イベント: 接続済み");
@@ -1280,6 +1281,13 @@ function connectEventStream() {
         pending?.images || [],
         { displayName: payload.data.display_name },
       );
+      refreshDashboard({ silent: true });
+    } else if (
+      payload?.type === "system_notice"
+      && payload.data?.conversation_visible === true
+      && typeof payload.data?.message === "string"
+    ) {
+      addMessage("system", payload.data.message);
       refreshDashboard({ silent: true });
     } else if (payload?.type === "audio_runtime_state" && payload.data) {
       updateAudioRuntimeState(payload.data);
