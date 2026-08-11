@@ -204,7 +204,6 @@ class ServiceSpontaneousWakeMixin:
                     state=state,
                     trigger_kind=trigger_kind,
                     client_context=client_context,
-                    interaction_context=interaction_context,
                     recent_turns=recent_turns,
                     current_time=started_at,
                 )
