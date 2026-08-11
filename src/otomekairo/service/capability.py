@@ -62,6 +62,18 @@ class CapabilityResultValidationError(ValueError):
         self.error_code = error_code
 
 
+class OutboundContentReviewWithheldError(ValueError):
+    def __init__(self, *, audit_summary: dict[str, Any]) -> None:
+        super().__init__("MCP request was withheld by outbound content review.")
+        self.audit_summary = audit_summary
+
+
+class OutboundContentReviewFailureError(ValueError):
+    def __init__(self, *, audit_summary: dict[str, Any]) -> None:
+        super().__init__("MCP outbound content review failed.")
+        self.audit_summary = audit_summary
+
+
 class ServiceCapabilityMixin:
     def recover_capability_runtime_state_after_startup(self) -> None:
         # capability request の照合表は process-local なので、再起動後に結果待ちは成立しない。
@@ -145,6 +157,7 @@ class ServiceCapabilityMixin:
         assistant_message_target_client_id: str | None = None,
         track_ongoing_action: bool = True,
         autonomous_run_id: str | None = None,
+        outbound_content_review_attempt: int = 1,
     ) -> dict[str, Any] | None:
         # manifest と input schema を先に確定する。
         manifests = capability_manifests()
@@ -188,6 +201,14 @@ class ServiceCapabilityMixin:
         if timeout_ms <= 0:
             raise ValueError(f"Capability timeout_ms is invalid: {capability_id}")
 
+        outbound_content_review = None
+        if capability_id == "mcp.call_tool":
+            outbound_content_review = self._review_mcp_outbound_content(
+                input_payload=input_payload,
+                mcp_tool=mcp_tool,
+                review_attempt=outbound_content_review_attempt,
+            )
+
         action_seed = None
         if track_ongoing_action:
             action_seed = self._begin_capability_ongoing_action(
@@ -214,6 +235,7 @@ class ServiceCapabilityMixin:
             source_current_input=source_current_input,
             assistant_message_target_client_id=assistant_message_target_client_id,
             autonomous_run_id=autonomous_run_id,
+            outbound_content_review=outbound_content_review,
         )
         pending = {
             "event": threading.Event(),
@@ -536,6 +558,242 @@ class ServiceCapabilityMixin:
             "mcp_tool": tool,
         }
 
+    def _review_mcp_outbound_content(
+        self,
+        *,
+        input_payload: dict[str, Any],
+        mcp_tool: dict[str, Any] | None,
+        review_attempt: int,
+    ) -> dict[str, Any] | None:
+        # schema 検証済みの最終 arguments だけを、request record 作成前に審査する。
+        mcp_server_id = str(input_payload.get("mcp_server_id") or "").strip()
+        tool_name = str(input_payload.get("tool_name") or "").strip()
+        arguments = input_payload.get("arguments")
+        state = self.store.read_state()
+        mcp_servers = state.get("mcp_servers")
+        server_definition = mcp_servers.get(mcp_server_id) if isinstance(mcp_servers, dict) else None
+        if not isinstance(server_definition, dict):
+            raise OutboundContentReviewFailureError(
+                audit_summary=self._outbound_content_review_audit(
+                    mcp_server_id=mcp_server_id,
+                    tool_name=tool_name,
+                    result_status="internal_failure",
+                    outcome=None,
+                    reason_code="review_configuration_missing",
+                    review_attempt=review_attempt,
+                    failure_stage="configuration",
+                    failure_reason="mcp_server_definition_missing",
+                )
+            )
+        if server_definition.get("outbound_content_review_required") is False:
+            return None
+        if not isinstance(arguments, dict) or not isinstance(mcp_tool, dict):
+            raise OutboundContentReviewFailureError(
+                audit_summary=self._outbound_content_review_audit(
+                    mcp_server_id=mcp_server_id,
+                    tool_name=tool_name,
+                    result_status="internal_failure",
+                    outcome=None,
+                    reason_code="review_input_invalid",
+                    review_attempt=review_attempt,
+                    failure_stage="input",
+                    failure_reason="review_context_invalid",
+                )
+            )
+
+        if self._outbound_arguments_contain_known_secret(arguments=arguments, state=state):
+            audit = self._outbound_content_review_audit(
+                mcp_server_id=mcp_server_id,
+                tool_name=tool_name,
+                result_status="withheld",
+                outcome="withhold",
+                reason_code="known_secret_detected",
+                review_attempt=review_attempt,
+                failure_stage="local_secret_scan",
+                failure_reason="configured_secret_matched",
+            )
+            debug_log(
+                "Capability",
+                f"outbound content withheld server={mcp_server_id} tool={tool_name} stage=local_secret_scan",
+                level="WARNING",
+            )
+            raise OutboundContentReviewWithheldError(audit_summary=audit)
+
+        model_presets = state.get("model_presets")
+        model_preset_id = state.get("outbound_content_review_model_preset_id")
+        model_config = model_presets.get(model_preset_id) if isinstance(model_presets, dict) else None
+        if not isinstance(model_config, dict):
+            raise OutboundContentReviewFailureError(
+                audit_summary=self._outbound_content_review_audit(
+                    mcp_server_id=mcp_server_id,
+                    tool_name=tool_name,
+                    result_status="internal_failure",
+                    outcome=None,
+                    reason_code="review_configuration_missing",
+                    review_attempt=review_attempt,
+                    failure_stage="configuration",
+                    failure_reason="model_preset_missing",
+                )
+            )
+
+        review_context = {
+            "channel": {
+                "capability_id": "mcp.call_tool",
+                "mcp_server_id": mcp_server_id,
+                "tool_name": tool_name,
+            },
+            "tool": {
+                "name": mcp_tool.get("name"),
+                "description": mcp_tool.get("description"),
+                "input_schema": deepcopy(mcp_tool.get("inputSchema")),
+            },
+            "arguments": deepcopy(arguments),
+        }
+        try:
+            review = self.llm.generate_outbound_content_review(
+                model_config=model_config,
+                review_context=review_context,
+            )
+        except Exception as exc:
+            # raw prompt、response、例外文を audit に残さず fail closed にする。
+            debug_log(
+                "Capability",
+                f"outbound content review failed server={mcp_server_id} tool={tool_name} error={type(exc).__name__}",
+                level="ERROR",
+            )
+            raise OutboundContentReviewFailureError(
+                audit_summary=self._outbound_content_review_audit(
+                    mcp_server_id=mcp_server_id,
+                    tool_name=tool_name,
+                    result_status="internal_failure",
+                    outcome=None,
+                    reason_code="reviewer_failure",
+                    review_attempt=review_attempt,
+                    failure_stage="llm_review",
+                    failure_reason="transport_or_contract_error",
+                )
+            ) from exc
+
+        outcome = review.get("outcome") if isinstance(review, dict) else None
+        audit = self._outbound_content_review_audit(
+            mcp_server_id=mcp_server_id,
+            tool_name=tool_name,
+            result_status="allowed" if outcome == "allow" else "withheld",
+            outcome=outcome if isinstance(outcome, str) else None,
+            reason_code="reviewer_allowed" if outcome == "allow" else "reviewer_withheld",
+            review_attempt=review_attempt,
+        )
+        if outcome == "withhold":
+            debug_log(
+                "Capability",
+                f"outbound content withheld server={mcp_server_id} tool={tool_name} stage=llm_review",
+                level="WARNING",
+            )
+            raise OutboundContentReviewWithheldError(audit_summary=audit)
+        if outcome != "allow":
+            # LLMClient の契約検証を迂回する test double に対しても fail closed とする。
+            audit.update(
+                {
+                    "result_status": "internal_failure",
+                    "outcome": None,
+                    "reason_code": "reviewer_invalid_outcome",
+                    "failure_stage": "llm_review",
+                    "failure_reason": "contract_error",
+                }
+            )
+            raise OutboundContentReviewFailureError(audit_summary=audit)
+        return audit
+
+    def _outbound_arguments_contain_known_secret(
+        self,
+        *,
+        arguments: dict[str, Any],
+        state: dict[str, Any],
+    ) -> bool:
+        outgoing_strings = self._collect_outbound_string_values(arguments)
+        configured_secrets = self._collect_configured_secret_values(state)
+        return any(secret in value for secret in configured_secrets for value in outgoing_strings)
+
+    def _collect_outbound_string_values(self, value: Any) -> list[str]:
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, dict):
+            collected: list[str] = []
+            for child in value.values():
+                collected.extend(self._collect_outbound_string_values(child))
+            return collected
+        if isinstance(value, list):
+            collected = []
+            for child in value:
+                collected.extend(self._collect_outbound_string_values(child))
+            return collected
+        return []
+
+    def _collect_configured_secret_values(self, state: dict[str, Any]) -> set[str]:
+        # 秘密として定義された設定 path だけを列挙し、自然文の key 推測は行わない。
+        secrets: set[str] = set()
+
+        def add(value: Any) -> None:
+            if isinstance(value, str) and value:
+                secrets.add(value)
+
+        add(state.get("console_access_token"))
+        for definition in self._mapping_definitions(state.get("model_presets")):
+            add(definition.get("api_key"))
+        for definition in self._mapping_definitions(state.get("memory_sets")):
+            embedding = definition.get("embedding")
+            if isinstance(embedding, dict):
+                add(embedding.get("api_key"))
+        for definition in self._mapping_definitions(state.get("avatars")):
+            stt = definition.get("stt")
+            if isinstance(stt, dict):
+                add(stt.get("api_key"))
+            tts = definition.get("tts")
+            cloud = tts.get("aivis_cloud_config") if isinstance(tts, dict) else None
+            if isinstance(cloud, dict):
+                add(cloud.get("api_key"))
+        for definition in self._mapping_definitions(state.get("camera_sources")):
+            connection = definition.get("connection")
+            if isinstance(connection, dict):
+                add(connection.get("camera_password"))
+        for definition in self._mapping_definitions(state.get("mcp_servers")):
+            env = definition.get("env")
+            if isinstance(env, dict):
+                for env_value in env.values():
+                    add(env_value)
+        return secrets
+
+    def _mapping_definitions(self, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, dict):
+            return []
+        return [item for item in value.values() if isinstance(item, dict)]
+
+    def _outbound_content_review_audit(
+        self,
+        *,
+        mcp_server_id: str,
+        tool_name: str,
+        result_status: str,
+        outcome: str | None,
+        reason_code: str,
+        review_attempt: int,
+        failure_stage: str | None = None,
+        failure_reason: str | None = None,
+    ) -> dict[str, Any]:
+        summary: dict[str, Any] = {
+            "mcp_server_id": mcp_server_id,
+            "tool_name": tool_name,
+            "result_status": result_status,
+            "outcome": outcome,
+            "reason_code": reason_code,
+            "review_attempt": review_attempt,
+        }
+        if failure_stage is not None:
+            summary["failure_stage"] = failure_stage
+        if failure_reason is not None:
+            summary["failure_reason"] = failure_reason
+        return summary
+
     def _select_camera_ptz_target(self, *, input_payload: dict[str, Any]) -> dict[str, Any]:
         vision_source_id = input_payload.get("vision_source_id")
         if not isinstance(vision_source_id, str) or not vision_source_id.strip():
@@ -824,6 +1082,7 @@ class ServiceCapabilityMixin:
         source_current_input: dict[str, Any] | None = None,
         assistant_message_target_client_id: str | None = None,
         autonomous_run_id: str | None = None,
+        outbound_content_review: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         request_id = f"{capability_id.replace('.', '_')}_request:{uuid.uuid4().hex}"
         expires_at = self._capability_ongoing_action_expires_at(current_time=current_time, timeout_ms=timeout_ms)
@@ -846,6 +1105,8 @@ class ServiceCapabilityMixin:
             ),
             "wait_for_response": wait_for_response,
         }
+        if isinstance(outbound_content_review, dict):
+            record["outbound_content_review"] = deepcopy(outbound_content_review)
         if isinstance(source_current_input, dict):
             record["source_current_input"] = deepcopy(source_current_input)
             sender_ref = source_current_input.get("sender_ref")
