@@ -8,10 +8,10 @@ from typing import Any
 from otomekairo.defaults import (
     API_VERSION,
     DEFAULT_MODEL_PRESET_ID,
-    OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID,
+    PRE_SEND_CHECK_MODEL_PRESET_ID,
     build_default_console_client_settings,
     build_default_desktop_capture,
-    build_default_outbound_content_review_model_preset,
+    build_default_pre_send_check_model_preset,
 )
 from otomekairo.service.common import ServiceError
 from otomekairo.service.config.constants import (
@@ -217,7 +217,7 @@ class ServiceConfigResourcesMixin:
     def get_editor_state(self, token: str | None) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
-        if self._ensure_outbound_content_review_model_preset(state):
+        if self._ensure_pre_send_check_model_preset(state):
             self.store.write_state(state)
         self._append_editor_state_audit_event(state=state, operation="read")
         return self._build_editor_state(state)
@@ -599,7 +599,7 @@ class ServiceConfigResourcesMixin:
             "selected_persona_id",
             "selected_memory_set_id",
             "selected_model_preset_id",
-            "outbound_content_review_model_preset_id",
+            "pre_send_check_model_preset_id",
             "thinking_speech_level",
             "wake_policy",
             "selected_conversation_display_name_id",
@@ -635,31 +635,31 @@ class ServiceConfigResourcesMixin:
             model_preset_id = payload["selected_model_preset_id"]
             if model_preset_id not in state["model_presets"]:
                 raise ServiceError(404, "model_preset_not_found", "The requested model_preset_id does not exist.")
-            if model_preset_id == OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID:
+            if model_preset_id == PRE_SEND_CHECK_MODEL_PRESET_ID:
                 raise ServiceError(
                     400,
                     "invalid_selected_model_preset_id",
-                    "The dedicated outbound content review model preset cannot be selected for generation.",
+                    "The dedicated pre-send check model preset cannot be selected for generation.",
                 )
             self._validate_model_preset_definition(model_preset_id, state["model_presets"][model_preset_id])
             should_clear_runtime_layers = should_clear_runtime_layers or model_preset_id != state["selected_model_preset_id"]
             state["selected_model_preset_id"] = model_preset_id
 
-        # 外向き内容レビューは専用固定プリセットのみを使う。
-        if "outbound_content_review_model_preset_id" in payload:
-            review_model_preset_id = payload["outbound_content_review_model_preset_id"]
-            if review_model_preset_id != OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID:
+        # 送信前チェックは専用固定プリセットのみを使う。
+        if "pre_send_check_model_preset_id" in payload:
+            review_model_preset_id = payload["pre_send_check_model_preset_id"]
+            if review_model_preset_id != PRE_SEND_CHECK_MODEL_PRESET_ID:
                 raise ServiceError(
                     400,
-                    "invalid_outbound_content_review_model_preset_id",
-                    "outbound_content_review_model_preset_id must be the dedicated review model preset.",
+                    "invalid_pre_send_check_model_preset_id",
+                    "pre_send_check_model_preset_id must be the dedicated review model preset.",
                 )
-            self._ensure_outbound_content_review_model_preset(state)
+            self._ensure_pre_send_check_model_preset(state)
             self._validate_model_preset_definition(
-                OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID,
-                state["model_presets"][OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID],
+                PRE_SEND_CHECK_MODEL_PRESET_ID,
+                state["model_presets"][PRE_SEND_CHECK_MODEL_PRESET_ID],
             )
-            state["outbound_content_review_model_preset_id"] = OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID
+            state["pre_send_check_model_preset_id"] = PRE_SEND_CHECK_MODEL_PRESET_ID
 
         # 動作設定
         if "thinking_speech_level" in payload:
@@ -866,17 +866,17 @@ class ServiceConfigResourcesMixin:
 
     def delete_model_preset(self, token: str | None, model_preset_id: str) -> dict[str, Any]:
         state = self._require_token(token)
-        if model_preset_id == OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID:
+        if model_preset_id == PRE_SEND_CHECK_MODEL_PRESET_ID:
             raise ServiceError(
                 409,
-                "outbound_content_review_model_preset_delete_forbidden",
-                "The dedicated outbound content review model preset cannot be deleted.",
+                "pre_send_check_model_preset_delete_forbidden",
+                "The dedicated pre-send check model preset cannot be deleted.",
             )
-        if model_preset_id == state["outbound_content_review_model_preset_id"]:
+        if model_preset_id == state["pre_send_check_model_preset_id"]:
             raise ServiceError(
                 409,
-                "outbound_content_review_model_preset_delete_forbidden",
-                "The outbound content review model preset cannot be deleted while selected.",
+                "pre_send_check_model_preset_delete_forbidden",
+                "The pre-send check model preset cannot be deleted while selected.",
             )
         return self._delete_resource_entry(
             token=token,
@@ -1156,7 +1156,7 @@ class ServiceConfigResourcesMixin:
             "selected_persona_id",
             "selected_memory_set_id",
             "selected_model_preset_id",
-            "outbound_content_review_model_preset_id",
+            "pre_send_check_model_preset_id",
             "thinking_speech_level",
             "wake_policy",
             "selected_conversation_display_name_id",
@@ -1171,8 +1171,8 @@ class ServiceConfigResourcesMixin:
         selected_persona_id = current.get("selected_persona_id")
         selected_memory_set_id = current.get("selected_memory_set_id")
         selected_model_preset_id = current.get("selected_model_preset_id")
-        # レビュー用は専用固定プリセットのみ。UI からの付け替えは受け付けない。
-        outbound_content_review_model_preset_id = OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID
+        # 送信前チェック用は専用固定プリセットのみ。UI からの付け替えは受け付けない。
+        pre_send_check_model_preset_id = PRE_SEND_CHECK_MODEL_PRESET_ID
         thinking_speech_level = current.get("thinking_speech_level")
         if selected_persona_id not in personas:
             raise ServiceError(404, "persona_not_found", "The selected_persona_id does not exist in personas.")
@@ -1180,37 +1180,37 @@ class ServiceConfigResourcesMixin:
             raise ServiceError(404, "memory_set_not_found", "The selected_memory_set_id does not exist in memory_sets.")
         if selected_model_preset_id not in model_presets:
             raise ServiceError(404, "model_preset_not_found", "The selected_model_preset_id does not exist in model_presets.")
-        if selected_model_preset_id == OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID:
+        if selected_model_preset_id == PRE_SEND_CHECK_MODEL_PRESET_ID:
             raise ServiceError(
                 400,
                 "invalid_selected_model_preset_id",
-                "The dedicated outbound content review model preset cannot be selected for generation.",
+                "The dedicated pre-send check model preset cannot be selected for generation.",
             )
         # 専用プリセットが bundle に無い場合は、旧 review 指し先から値を引き継いで確保する。
-        previous_review_id = current.get("outbound_content_review_model_preset_id")
-        if OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID not in model_presets:
+        previous_review_id = current.get("pre_send_check_model_preset_id")
+        if PRE_SEND_CHECK_MODEL_PRESET_ID not in model_presets:
             source = model_presets.get(previous_review_id) if isinstance(previous_review_id, str) else None
             if isinstance(source, dict):
                 dedicated = deepcopy(source)
-                dedicated["model_preset_id"] = OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID
-                dedicated["display_name"] = "外向き内容レビュー"
+                dedicated["model_preset_id"] = PRE_SEND_CHECK_MODEL_PRESET_ID
+                dedicated["display_name"] = "送信前チェック"
                 dedicated["web_search_enabled"] = False
-                model_presets[OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID] = (
+                model_presets[PRE_SEND_CHECK_MODEL_PRESET_ID] = (
                     self._normalize_model_preset_definition(dedicated)
                 )
             else:
-                model_presets[OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID] = (
+                model_presets[PRE_SEND_CHECK_MODEL_PRESET_ID] = (
                     self._normalize_model_preset_definition(
-                        build_default_outbound_content_review_model_preset()
+                        build_default_pre_send_check_model_preset()
                     )
                 )
             self._validate_model_preset_definition(
-                OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID,
-                model_presets[OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID],
+                PRE_SEND_CHECK_MODEL_PRESET_ID,
+                model_presets[PRE_SEND_CHECK_MODEL_PRESET_ID],
             )
         else:
             # 専用プリセットは Web 検索を使わない。
-            model_presets[OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID]["web_search_enabled"] = False
+            model_presets[PRE_SEND_CHECK_MODEL_PRESET_ID]["web_search_enabled"] = False
 
         # 動作設定検証
         self._validate_thinking_speech_level(thinking_speech_level)
@@ -1236,7 +1236,7 @@ class ServiceConfigResourcesMixin:
         state["selected_persona_id"] = selected_persona_id
         state["selected_memory_set_id"] = selected_memory_set_id
         state["selected_model_preset_id"] = selected_model_preset_id
-        state["outbound_content_review_model_preset_id"] = outbound_content_review_model_preset_id
+        state["pre_send_check_model_preset_id"] = pre_send_check_model_preset_id
         state["thinking_speech_level"] = thinking_speech_level
         state["wake_policy"] = current["wake_policy"]
         state["selected_conversation_display_name_id"] = selected_display_name_id
@@ -1273,8 +1273,8 @@ class ServiceConfigResourcesMixin:
             "selected_memory_set_id": state["selected_memory_set_id"],
             "wake_policy": deepcopy(state["wake_policy"]),
             "selected_model_preset_id": state["selected_model_preset_id"],
-            "outbound_content_review_model_preset_id": state[
-                "outbound_content_review_model_preset_id"
+            "pre_send_check_model_preset_id": state[
+                "pre_send_check_model_preset_id"
             ],
             "thinking_speech_level": state["thinking_speech_level"],
             "selected_conversation_display_name_id": state[
@@ -1282,28 +1282,28 @@ class ServiceConfigResourcesMixin:
             ],
         }
 
-    def _ensure_outbound_content_review_model_preset(self, state: dict[str, Any]) -> bool:
+    def _ensure_pre_send_check_model_preset(self, state: dict[str, Any]) -> bool:
         # 既存 state に専用プリセットが無い場合、接続設定を引き継いで確保する。
         model_presets = state.get("model_presets")
         if not isinstance(model_presets, dict):
             return False
         changed = False
-        previous_id = state.get("outbound_content_review_model_preset_id")
-        if OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID not in model_presets:
+        previous_id = state.get("pre_send_check_model_preset_id")
+        if PRE_SEND_CHECK_MODEL_PRESET_ID not in model_presets:
             source = model_presets.get(previous_id) if isinstance(previous_id, str) else None
             if isinstance(source, dict):
                 dedicated = deepcopy(source)
-                dedicated["model_preset_id"] = OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID
-                dedicated["display_name"] = "外向き内容レビュー"
+                dedicated["model_preset_id"] = PRE_SEND_CHECK_MODEL_PRESET_ID
+                dedicated["display_name"] = "送信前チェック"
                 dedicated["web_search_enabled"] = False
             else:
-                dedicated = build_default_outbound_content_review_model_preset()
-            model_presets[OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID] = dedicated
+                dedicated = build_default_pre_send_check_model_preset()
+            model_presets[PRE_SEND_CHECK_MODEL_PRESET_ID] = dedicated
             changed = True
-        if state.get("outbound_content_review_model_preset_id") != OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID:
-            state["outbound_content_review_model_preset_id"] = OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID
+        if state.get("pre_send_check_model_preset_id") != PRE_SEND_CHECK_MODEL_PRESET_ID:
+            state["pre_send_check_model_preset_id"] = PRE_SEND_CHECK_MODEL_PRESET_ID
             changed = True
-        if state.get("selected_model_preset_id") == OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID:
+        if state.get("selected_model_preset_id") == PRE_SEND_CHECK_MODEL_PRESET_ID:
             if DEFAULT_MODEL_PRESET_ID in model_presets:
                 state["selected_model_preset_id"] = DEFAULT_MODEL_PRESET_ID
             else:
@@ -1311,7 +1311,7 @@ class ServiceConfigResourcesMixin:
                     (
                         preset_id
                         for preset_id in model_presets
-                        if preset_id != OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID
+                        if preset_id != PRE_SEND_CHECK_MODEL_PRESET_ID
                     ),
                     None,
                 )
@@ -1571,8 +1571,8 @@ class ServiceConfigResourcesMixin:
                     "selected_persona_id": state["selected_persona_id"],
                     "selected_memory_set_id": state["selected_memory_set_id"],
                     "selected_model_preset_id": state["selected_model_preset_id"],
-                    "outbound_content_review_model_preset_id": state[
-                        "outbound_content_review_model_preset_id"
+                    "pre_send_check_model_preset_id": state[
+                        "pre_send_check_model_preset_id"
                     ],
                     "persona_count": len(state["personas"]),
                     "memory_set_count": len(state["memory_sets"]),
@@ -1860,9 +1860,9 @@ class ServiceConfigResourcesMixin:
         return deepcopy(definition)
 
     def _mcp_server_definition_for_connector(self, definition: dict[str, Any]) -> dict[str, Any]:
-        # レビュー要否は server の dispatch 方針であり、実行 connector へ渡さない。
+        # 送信前チェック要否は server の dispatch 方針であり、実行 connector へ渡さない。
         connector_definition = self._mcp_server_definition_for_read(definition)
-        connector_definition.pop("outbound_content_review_required", None)
+        connector_definition.pop("pre_send_check_required", None)
         return connector_definition
 
     def _normalize_mcp_server_definition(self, mcp_server_id: str, definition: dict[str, Any]) -> dict[str, Any]:
@@ -1871,7 +1871,7 @@ class ServiceConfigResourcesMixin:
             "connector_kind": definition.get("connector_kind", MCP_DEFAULT_CONNECTOR_KIND),
             "client_id": definition.get("client_id", MCP_DEFAULT_CLIENT_ID),
             "enabled": definition.get("enabled"),
-            "outbound_content_review_required": definition.get("outbound_content_review_required"),
+            "pre_send_check_required": definition.get("pre_send_check_required"),
             "transport": definition.get("transport", "stdio"),
             "command": definition.get("command"),
             "args": definition.get("args", []),
@@ -1905,7 +1905,7 @@ class ServiceConfigResourcesMixin:
             "connector_kind",
             "client_id",
             "enabled",
-            "outbound_content_review_required",
+            "pre_send_check_required",
             "transport",
             "command",
             "args",
@@ -1926,11 +1926,11 @@ class ServiceConfigResourcesMixin:
         enabled = definition.get("enabled")
         if not isinstance(enabled, bool):
             raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.enabled must be a boolean.")
-        if not isinstance(definition.get("outbound_content_review_required"), bool):
+        if not isinstance(definition.get("pre_send_check_required"), bool):
             raise ServiceError(
                 400,
                 "invalid_mcp_server_field",
-                "mcp_server.outbound_content_review_required must be a boolean.",
+                "mcp_server.pre_send_check_required must be a boolean.",
             )
         transport = definition.get("transport")
         if transport not in MCP_TRANSPORTS:

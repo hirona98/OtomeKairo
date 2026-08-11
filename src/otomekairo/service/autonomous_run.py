@@ -11,8 +11,8 @@ from otomekairo.llm.contexts import AutonomousStepContext, CurrentInput
 from otomekairo.interaction import normalize_interaction_context
 from otomekairo.service.capability import (
     CapabilityDispatchError,
-    OutboundContentReviewFailureError,
-    OutboundContentReviewWithheldError,
+    PreSendCheckFailureError,
+    PreSendCheckWithheldError,
 )
 from otomekairo.service.common import ServiceError, debug_log
 
@@ -22,14 +22,14 @@ AUTONOMOUS_RUN_CONTINUE_DELAY_SECONDS = 1
 AUTONOMOUS_RUN_IDLE_CONTINUE_DELAY_SECONDS = 5
 AUTONOMOUS_RUN_ACTIVE_STATUSES = {"active", "waiting_timer", "waiting_result", "paused"}
 AUTONOMOUS_RUN_TERMINAL_STATUSES = {"completed", "cancelled"}
-AUTONOMOUS_OUTBOUND_REVIEW_RETRY_FEEDBACK = (
-    "前の MCP request は外向き内容レビューで見送られた。"
+AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK = (
+    "前の MCP request は送信前チェックで見送られた。"
     "同じ目的の安全な capability_request または action.kind=none を選ぶ。"
 )
-AUTONOMOUS_OUTBOUND_REVIEW_WITHHELD_NOTICE = (
+AUTONOMOUS_PRE_SEND_CHECK_WITHHELD_NOTICE = (
     "外部送信候補に非公開情報が含まれる可能性があるため、送信しませんでした。"
 )
-AUTONOMOUS_OUTBOUND_REVIEW_FAILURE_NOTICE = (
+AUTONOMOUS_PRE_SEND_CHECK_FAILURE_NOTICE = (
     "外部送信内容の安全確認を完了できなかったため、送信しませんでした。"
 )
 
@@ -857,7 +857,7 @@ class ServiceAutonomousRunMixin:
                         action=action,
                         source_current_input=step_context.current_input.to_prompt_payload(),
                     )
-                except OutboundContentReviewWithheldError as first_withhold:
+                except PreSendCheckWithheldError as first_withhold:
                     # autonomous step も候補本文を戻さず、同じ run 文脈で一度だけ再生成する。
                     step_context = self._build_autonomous_step_context(
                         state=state,
@@ -865,7 +865,7 @@ class ServiceAutonomousRunMixin:
                         current_time=self._now_iso(),
                         source_current_input=source_current_input,
                         last_result_context=last_result_context or run.get("last_result_context"),
-                        outbound_content_review_feedback=AUTONOMOUS_OUTBOUND_REVIEW_RETRY_FEEDBACK,
+                        pre_send_check_feedback=AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK,
                     )
                     step = self.llm.generate_autonomous_step(
                         model_config=selected_preset,
@@ -888,7 +888,7 @@ class ServiceAutonomousRunMixin:
                         previous_request_finished = self._finish_autonomous_source_request_on_hold(
                             source_request_record=source_request_record,
                             current_time=current_time,
-                            reason_summary="状態変更により outbound review 後の autonomous_run step を保留した。",
+                            reason_summary="状態変更により pre-send check 後の autonomous_run step を保留した。",
                         )
                         return {
                             **guard_result,
@@ -905,11 +905,11 @@ class ServiceAutonomousRunMixin:
                             current_time=current_time,
                             action=action,
                             source_current_input=step_context.current_input.to_prompt_payload(),
-                            outbound_content_review_attempt=2,
-                            outbound_content_review_prior_attempts=[deepcopy(first_withhold.audit_summary)],
+                            pre_send_check_attempt=2,
+                            pre_send_check_prior_attempts=[deepcopy(first_withhold.audit_summary)],
                         )
-                        if "outbound_content_review" not in capability_request_summary:
-                            self._persist_autonomous_outbound_content_review_audit(
+                        if "pre_send_check" not in capability_request_summary:
+                            self._persist_autonomous_pre_send_check_audit(
                                 run=run,
                                 current_time=current_time,
                                 audit_summary={
@@ -934,7 +934,7 @@ class ServiceAutonomousRunMixin:
                             previous_request_finished = self._finish_autonomous_source_request_on_hold(
                                 source_request_record=source_request_record,
                                 current_time=current_time,
-                                reason_summary="状態変更により outbound review 後の autonomous_run speech を保留した。",
+                                reason_summary="状態変更により pre-send check 後の autonomous_run speech を保留した。",
                             )
                             return {
                                 **guard_result,
@@ -959,7 +959,7 @@ class ServiceAutonomousRunMixin:
                             )
                             if isinstance(speech_event, dict):
                                 speech_events.append(speech_event)
-                        self._persist_autonomous_outbound_content_review_audit(
+                        self._persist_autonomous_pre_send_check_audit(
                             run=run,
                             current_time=current_time,
                             audit_summary={
@@ -968,15 +968,15 @@ class ServiceAutonomousRunMixin:
                             },
                         )
                     elif action_kind == "none":
-                        self._record_autonomous_outbound_content_review_terminal(
+                        self._record_autonomous_pre_send_check_terminal(
                             run=run,
                             current_time=current_time,
-                            reason_code="outbound_content_review_retry_noop",
+                            reason_code="pre_send_check_retry_noop",
                             audit_summary={
                                 "result_status": "withheld",
                                 "attempts": [deepcopy(first_withhold.audit_summary)],
                             },
-                            message=AUTONOMOUS_OUTBOUND_REVIEW_WITHHELD_NOTICE,
+                            message=AUTONOMOUS_PRE_SEND_CHECK_WITHHELD_NOTICE,
                         )
 
             current_time = self._now_iso()
@@ -1035,20 +1035,20 @@ class ServiceAutonomousRunMixin:
                     current_time=current_time,
                     evidence_events=speech_events,
                 )
-        except (OutboundContentReviewWithheldError, OutboundContentReviewFailureError) as exc:
+        except (PreSendCheckWithheldError, PreSendCheckFailureError) as exc:
             current_time = self._now_iso()
             run = self.store.get_autonomous_run(run_id=run_id) or run
-            is_failure = isinstance(exc, OutboundContentReviewFailureError)
+            is_failure = isinstance(exc, PreSendCheckFailureError)
             reason_code = (
-                "outbound_content_review_failure"
+                "pre_send_check_failure"
                 if is_failure
-                else "outbound_content_review_withheld"
+                else "pre_send_check_withheld"
             )
             updated_run = self._terminal_autonomous_run(
                 run=run,
                 current_time=current_time,
                 status="cancelled",
-                reason_summary="外向き内容レビューの結果、外部送信を行わず autonomous_run を終了した。",
+                reason_summary="送信前チェックの結果、外部送信を行わず autonomous_run を終了した。",
             )
             self.store.upsert_autonomous_run(autonomous_run=updated_run)
             updated_run = self._finalize_autonomous_run_commitments(
@@ -1058,15 +1058,15 @@ class ServiceAutonomousRunMixin:
                 current_time=current_time,
                 evidence_events=[],
             )
-            self._record_autonomous_outbound_content_review_terminal(
+            self._record_autonomous_pre_send_check_terminal(
                 run=updated_run,
                 current_time=current_time,
                 reason_code=reason_code,
                 audit_summary=exc.audit_summary,
                 message=(
-                    AUTONOMOUS_OUTBOUND_REVIEW_FAILURE_NOTICE
+                    AUTONOMOUS_PRE_SEND_CHECK_FAILURE_NOTICE
                     if is_failure
-                    else AUTONOMOUS_OUTBOUND_REVIEW_WITHHELD_NOTICE
+                    else AUTONOMOUS_PRE_SEND_CHECK_WITHHELD_NOTICE
                 ),
             )
             if isinstance(source_request_record, dict):
@@ -1076,7 +1076,7 @@ class ServiceAutonomousRunMixin:
                     current_time=current_time,
                     terminal_kind="interrupted",
                     reason_code=reason_code,
-                    terminal_reason="外向き内容レビューのため autonomous_run を終了した。",
+                    terminal_reason="送信前チェックのため autonomous_run を終了した。",
                     final_step_summary="外部送信を行わず終了した。",
                     transition_source="autonomous_run_step",
                     decision_kind="autonomous_step:none",
@@ -1096,7 +1096,7 @@ class ServiceAutonomousRunMixin:
                 "previous_request_finished": previous_request_finished,
                 "step": None,
                 "error": reason_code,
-                "outbound_content_review": deepcopy(exc.audit_summary),
+                "pre_send_check": deepcopy(exc.audit_summary),
             }
         except (LLMError, KeyError, ValueError, CapabilityDispatchError) as exc:
             current_time = self._now_iso()
@@ -1167,7 +1167,7 @@ class ServiceAutonomousRunMixin:
         current_time: str,
         source_current_input: dict[str, Any] | None,
         last_result_context: dict[str, Any] | None,
-        outbound_content_review_feedback: str | None = None,
+        pre_send_check_feedback: str | None = None,
     ) -> AutonomousStepContext:
         current_input_payload = source_current_input if isinstance(source_current_input, dict) else None
         if current_input_payload is None:
@@ -1239,7 +1239,7 @@ class ServiceAutonomousRunMixin:
                 current_input=current_input,
                 structured_sources=[run, last_result_context],
             ),
-            outbound_content_review_feedback=outbound_content_review_feedback,
+            pre_send_check_feedback=pre_send_check_feedback,
         )
 
     def _autonomous_run_activity_context(
@@ -1348,8 +1348,8 @@ class ServiceAutonomousRunMixin:
         current_time: str,
         action: dict[str, Any],
         source_current_input: dict[str, Any],
-        outbound_content_review_attempt: int = 1,
-        outbound_content_review_prior_attempts: list[dict[str, Any]] | None = None,
+        pre_send_check_attempt: int = 1,
+        pre_send_check_prior_attempts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         request_payload = action.get("capability_request")
         if not isinstance(request_payload, dict):
@@ -1372,8 +1372,8 @@ class ServiceAutonomousRunMixin:
             assistant_message_target_client_id=self._request_run_assistant_message_target_client_id(run),
             track_ongoing_action=True,
             autonomous_run_id=str(run.get("run_id") or "").strip(),
-            outbound_content_review_attempt=outbound_content_review_attempt,
-            outbound_content_review_prior_attempts=outbound_content_review_prior_attempts,
+            pre_send_check_attempt=pre_send_check_attempt,
+            pre_send_check_prior_attempts=pre_send_check_prior_attempts,
         )
         if not isinstance(result, dict):
             raise ValueError("Autonomous capability dispatch failed.")
@@ -1956,7 +1956,7 @@ class ServiceAutonomousRunMixin:
         self.store.append_events(events=[event])
         return event
 
-    def _record_autonomous_outbound_content_review_terminal(
+    def _record_autonomous_pre_send_check_terminal(
         self,
         *,
         run: dict[str, Any],
@@ -1975,7 +1975,7 @@ class ServiceAutonomousRunMixin:
         )
         normalized_participants = participant_refs if isinstance(participant_refs, list) else []
         notice = {
-            "source_kind": "outbound_content_review",
+            "source_kind": "pre_send_check",
             "code": reason_code,
             "message": message,
             "conversation_visible": conversation_visible,
@@ -1988,13 +1988,13 @@ class ServiceAutonomousRunMixin:
                 "event_id": f"event:{uuid.uuid4().hex}",
                 "cycle_id": self._autonomous_run_event_cycle_id(run),
                 "memory_set_id": run["memory_set_id"],
-                "kind": "outbound_content_review",
+                "kind": "pre_send_check",
                 "role": "system",
                 "text": None,
                 "created_at": current_time,
                 "source_kind": "autonomous_run",
                 "run_id": run.get("run_id"),
-                "outbound_content_review": deepcopy(audit_summary),
+                "pre_send_check": deepcopy(audit_summary),
             }
         ]
         if conversation_visible:
@@ -2017,7 +2017,7 @@ class ServiceAutonomousRunMixin:
             )
         self.store.append_events(events=events)
 
-    def _persist_autonomous_outbound_content_review_audit(
+    def _persist_autonomous_pre_send_check_audit(
         self,
         *,
         run: dict[str, Any],
@@ -2030,13 +2030,13 @@ class ServiceAutonomousRunMixin:
                     "event_id": f"event:{uuid.uuid4().hex}",
                     "cycle_id": self._autonomous_run_event_cycle_id(run),
                     "memory_set_id": run["memory_set_id"],
-                    "kind": "outbound_content_review",
+                    "kind": "pre_send_check",
                     "role": "system",
                     "text": None,
                     "created_at": current_time,
                     "source_kind": "autonomous_run",
                     "run_id": run.get("run_id"),
-                    "outbound_content_review": deepcopy(audit_summary),
+                    "pre_send_check": deepcopy(audit_summary),
                 }
             ]
         )

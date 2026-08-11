@@ -199,9 +199,9 @@ class ServiceInputTraceBuildMixin:
             "pending_intent_summary": pending_intent_summary,
             "created_at": finished_at,
         }
-        outbound_content_review = decision.get("outbound_content_review")
-        if isinstance(outbound_content_review, dict):
-            decision_event["outbound_content_review"] = outbound_content_review
+        pre_send_check = decision.get("pre_send_check")
+        if isinstance(pre_send_check, dict):
+            decision_event["pre_send_check"] = pre_send_check
         events.append(decision_event)
 
         # 応答イベント

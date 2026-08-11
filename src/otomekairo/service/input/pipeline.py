@@ -11,7 +11,7 @@ from otomekairo.llm.contexts import (
     build_persona_context_summary,
 )
 from otomekairo.interaction import InteractionContext
-from otomekairo.service.capability import OutboundContentReviewWithheldError
+from otomekairo.service.capability import PreSendCheckWithheldError
 from otomekairo.service.common import debug_log
 
 
@@ -51,11 +51,11 @@ PERSON_SCOPE_FIELDS = {
     "subject_hint",
     "focus_scope_key",
 }
-OUTBOUND_CONTENT_REVIEW_RETRY_FEEDBACK = (
-    "前の MCP request は外向き内容レビューで見送られた。"
+PRE_SEND_CHECK_RETRY_FEEDBACK = (
+    "前の MCP request は送信前チェックで見送られた。"
     "同じ目的の安全な別案または noop を選ぶ。"
 )
-OUTBOUND_CONTENT_REVIEW_WITHHELD_NOTICE = (
+PRE_SEND_CHECK_WITHHELD_NOTICE = (
     "外部送信候補に非公開情報が含まれる可能性があるため、送信しませんでした。"
 )
 
@@ -235,14 +235,14 @@ class ServiceInputPipelineMixin:
                 decision=candidate_decision,
                 assistant_message_target_client_id=pipeline_assistant_message_target_client_id,
                 cycle_label=cycle_label,
-                outbound_content_review_attempt=review_attempt,
-                outbound_content_review_prior_attempts=prior_attempts,
+                pre_send_check_attempt=review_attempt,
+                pre_send_check_prior_attempts=prior_attempts,
             )
 
         system_notice: dict[str, Any] | None = None
         try:
             output_result = run_output(decision, review_attempt=1)
-        except OutboundContentReviewWithheldError as first_withhold:
+        except PreSendCheckWithheldError as first_withhold:
             first_attempt = deepcopy(first_withhold.audit_summary)
             decision = self._run_pipeline_decision(
                 input_text=input_text,
@@ -271,16 +271,16 @@ class ServiceInputPipelineMixin:
                 reference_context=reference_context,
                 model_config=selected_preset,
                 persona_context=self._build_selected_persona_context(state=state, role="decision_generation"),
-                cycle_label=f"{cycle_label} outbound-review-retry",
-                outbound_content_review_feedback=OUTBOUND_CONTENT_REVIEW_RETRY_FEEDBACK,
+                cycle_label=f"{cycle_label} pre-send-check-retry",
+                pre_send_check_feedback=PRE_SEND_CHECK_RETRY_FEEDBACK,
             )
             if decision["kind"] == "noop":
-                decision = self._outbound_content_review_terminal_noop(
+                decision = self._pre_send_check_terminal_noop(
                     attempts=[first_attempt],
-                    reason_code="outbound_content_review_retry_noop",
+                    reason_code="pre_send_check_retry_noop",
                 )
                 output_result = self._empty_pipeline_output_result()
-                system_notice = self._outbound_content_review_withheld_notice(current_input=current_input)
+                system_notice = self._pre_send_check_withheld_notice(current_input=current_input)
             else:
                 try:
                     output_result = run_output(
@@ -290,11 +290,11 @@ class ServiceInputPipelineMixin:
                     )
                     capability_summary = output_result.get("capability_request_summary")
                     review_summary = (
-                        capability_summary.get("outbound_content_review")
+                        capability_summary.get("pre_send_check")
                         if isinstance(capability_summary, dict)
                         else None
                     )
-                    decision["outbound_content_review"] = (
+                    decision["pre_send_check"] = (
                         deepcopy(review_summary)
                         if isinstance(review_summary, dict)
                         else {
@@ -302,13 +302,13 @@ class ServiceInputPipelineMixin:
                             "attempts": [first_attempt],
                         }
                     )
-                except OutboundContentReviewWithheldError as second_withhold:
-                    decision = self._outbound_content_review_terminal_noop(
+                except PreSendCheckWithheldError as second_withhold:
+                    decision = self._pre_send_check_terminal_noop(
                         attempts=[first_attempt, deepcopy(second_withhold.audit_summary)],
-                        reason_code="outbound_content_review_withheld",
+                        reason_code="pre_send_check_withheld",
                     )
                     output_result = self._empty_pipeline_output_result()
-                    system_notice = self._outbound_content_review_withheld_notice(current_input=current_input)
+                    system_notice = self._pre_send_check_withheld_notice(current_input=current_input)
 
         # 結果
         debug_log("Pipeline", f"{cycle_label} done", level="DEBUG")
@@ -402,7 +402,7 @@ class ServiceInputPipelineMixin:
             "autonomous_run_step_result": None,
         }
 
-    def _outbound_content_review_terminal_noop(
+    def _pre_send_check_terminal_noop(
         self,
         *,
         attempts: list[dict[str, Any]],
@@ -411,26 +411,26 @@ class ServiceInputPipelineMixin:
         return {
             "kind": "noop",
             "reason_code": reason_code,
-            "reason_summary": "外向き内容レビューの結果、外部送信を行わず終了した。",
+            "reason_summary": "送信前チェックの結果、外部送信を行わず終了した。",
             "requires_confirmation": False,
             "pending_intent": None,
             "capability_request": None,
             "autonomous_run": None,
-            "outbound_content_review": {
+            "pre_send_check": {
                 "result_status": "withheld",
                 "attempts": deepcopy(attempts),
             },
         }
 
-    def _outbound_content_review_withheld_notice(
+    def _pre_send_check_withheld_notice(
         self,
         *,
         current_input: CurrentInput,
     ) -> dict[str, Any]:
         return {
-            "source_kind": "outbound_content_review",
-            "code": "outbound_content_review_withheld",
-            "message": OUTBOUND_CONTENT_REVIEW_WITHHELD_NOTICE,
+            "source_kind": "pre_send_check",
+            "code": "pre_send_check_withheld",
+            "message": PRE_SEND_CHECK_WITHHELD_NOTICE,
             "conversation_visible": (
                 current_input.sender_kind == "person"
                 or (
@@ -1940,7 +1940,7 @@ class ServiceInputPipelineMixin:
         model_config: dict[str, Any],
         persona_context: Any,
         cycle_label: str,
-        outbound_content_review_feedback: str | None = None,
+        pre_send_check_feedback: str | None = None,
     ) -> dict[str, Any]:
         # decision生成
         debug_log("Pipeline", f"{cycle_label} decision start", level="DEBUG")
@@ -1969,7 +1969,7 @@ class ServiceInputPipelineMixin:
             recall_hint=recall_hint,
             recall_pack=recall_pack,
             reference_context=reference_context,
-            outbound_content_review_feedback=outbound_content_review_feedback,
+            pre_send_check_feedback=pre_send_check_feedback,
         )
         decision = self.llm.generate_decision(
             model_config=model_config,
@@ -2011,8 +2011,8 @@ class ServiceInputPipelineMixin:
         decision: dict[str, Any],
         assistant_message_target_client_id: str | None,
         cycle_label: str,
-        outbound_content_review_attempt: int = 1,
-        outbound_content_review_prior_attempts: list[dict[str, Any]] | None = None,
+        pre_send_check_attempt: int = 1,
+        pre_send_check_prior_attempts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         # capability request
         dispatched_capability_request_summary: dict[str, Any] | None = None
@@ -2026,8 +2026,8 @@ class ServiceInputPipelineMixin:
                 source_current_input=current_input.to_prompt_payload(),
                 assistant_message_target_client_id=assistant_message_target_client_id,
                 decision=decision,
-                outbound_content_review_attempt=outbound_content_review_attempt,
-                outbound_content_review_prior_attempts=outbound_content_review_prior_attempts,
+                pre_send_check_attempt=pre_send_check_attempt,
+                pre_send_check_prior_attempts=pre_send_check_prior_attempts,
             )
             dispatched_capability_request_summary = dispatch_result.get("capability_request_summary")
             transition_summary = dispatch_result.get("ongoing_action_transition_summary")
@@ -2315,7 +2315,7 @@ class ServiceInputPipelineMixin:
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
         reference_context: dict[str, Any] | None = None,
-        outbound_content_review_feedback: str | None = None,
+        pre_send_check_feedback: str | None = None,
     ) -> DecisionContext:
         return DecisionContext(
             input_text=input_text,
@@ -2342,7 +2342,7 @@ class ServiceInputPipelineMixin:
             recall_hint=recall_hint,
             recall_pack=recall_pack,
             reference_context=reference_context,
-            outbound_content_review_feedback=outbound_content_review_feedback,
+            pre_send_check_feedback=pre_send_check_feedback,
         )
 
     def _build_speech_context(

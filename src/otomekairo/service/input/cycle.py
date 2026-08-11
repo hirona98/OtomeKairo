@@ -5,11 +5,11 @@ from typing import Any
 from otomekairo.llm.client import LLMError
 from otomekairo.interaction import InteractionContext, normalize_interaction_context
 from otomekairo.recall.builder import RecallPackSelectionError
-from otomekairo.service.capability import OutboundContentReviewFailureError
+from otomekairo.service.capability import PreSendCheckFailureError
 from otomekairo.service.common import ServiceError, debug_log
 
 
-OUTBOUND_CONTENT_REVIEW_FAILURE_NOTICE = (
+PRE_SEND_CHECK_FAILURE_NOTICE = (
     "外部送信内容の安全確認を完了できなかったため、送信しませんでした。"
 )
 
@@ -227,10 +227,10 @@ class ServiceInputCycleMixin:
                 },
                 observation_summary=observation_summary,
             )
-        except OutboundContentReviewFailureError as exc:
+        except PreSendCheckFailureError as exc:
             debug_log(
                 "Conversation",
-                f"{self._short_cycle_id(cycle_id)} failed stage=outbound_content_review",
+                f"{self._short_cycle_id(cycle_id)} failed stage=pre_send_check",
                 level="ERROR",
             )
             return self._finalize_cycle_failure(
@@ -241,14 +241,14 @@ class ServiceInputCycleMixin:
                 input_text=input_text,
                 client_context=current_client_context,
                 interaction_context=interaction_context,
-                failure_reason="MCP outbound content review failed.",
-                failure_event_kind="outbound_content_review_failure",
-                failure_event_payload={"outbound_content_review": exc.audit_summary},
+                failure_reason="MCP pre-send check failed.",
+                failure_event_kind="pre_send_check_failure",
+                failure_event_payload={"pre_send_check": exc.audit_summary},
                 observation_summary=observation_summary,
                 system_notice={
-                    "source_kind": "outbound_content_review",
-                    "code": "outbound_content_review_failure",
-                    "message": OUTBOUND_CONTENT_REVIEW_FAILURE_NOTICE,
+                    "source_kind": "pre_send_check",
+                    "code": "pre_send_check_failure",
+                    "message": PRE_SEND_CHECK_FAILURE_NOTICE,
                     "conversation_visible": True,
                     "interaction_ref": interaction_context.interaction_ref,
                     "recipient_person_refs": list(interaction_context.participant_refs),

@@ -9,8 +9,8 @@ from importlib import resources
 DEFAULT_PERSONA_ID = "persona:default"
 DEFAULT_MEMORY_SET_ID = "memory_set:default"
 DEFAULT_MODEL_PRESET_ID = "model_preset:default"
-# 外向き内容レビュー専用。生成用の selected_model_preset とは別定義として持つ。
-OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID = "model_preset:outbound_content_review"
+# 送信前チェック専用。生成用の selected_model_preset とは別定義として持つ。
+PRE_SEND_CHECK_MODEL_PRESET_ID = "model_preset:pre_send_check"
 DEFAULT_AVATAR_ID = "avatar:default"
 API_VERSION = "0.9.0"
 DEFAULT_THINKING_SPEECH_LEVEL = 5
@@ -176,7 +176,7 @@ def build_default_state() -> dict:
         "selected_persona_id": DEFAULT_PERSONA_ID,
         "selected_memory_set_id": DEFAULT_MEMORY_SET_ID,
         "selected_model_preset_id": DEFAULT_MODEL_PRESET_ID,
-        "outbound_content_review_model_preset_id": OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID,
+        "pre_send_check_model_preset_id": PRE_SEND_CHECK_MODEL_PRESET_ID,
         "selected_avatar_id": DEFAULT_AVATAR_ID,
         "thinking_speech_level": DEFAULT_THINKING_SPEECH_LEVEL,
         "selected_conversation_display_name_id": DEFAULT_CONVERSATION_DISPLAY_NAME_ID,
@@ -213,7 +213,7 @@ def build_default_state() -> dict:
         },
         "model_presets": {
             DEFAULT_MODEL_PRESET_ID: build_default_model_preset(),
-            OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID: build_default_outbound_content_review_model_preset(),
+            PRE_SEND_CHECK_MODEL_PRESET_ID: build_default_pre_send_check_model_preset(),
         },
         "avatars": {
             DEFAULT_AVATAR_ID: build_default_avatar(),
@@ -336,11 +336,11 @@ def build_default_model_preset() -> dict:
     }
 
 
-def build_default_outbound_content_review_model_preset() -> dict:
-    # 外向き内容レビュー専用。会話窓や Web 検索は使わない。
+def build_default_pre_send_check_model_preset() -> dict:
+    # 送信前チェック専用。会話窓や Web 検索は使わない。
     return {
-        "model_preset_id": OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID,
-        "display_name": "外向き内容レビュー",
+        "model_preset_id": PRE_SEND_CHECK_MODEL_PRESET_ID,
+        "display_name": "送信前チェック",
         "prompt_window": {
             "recent_turn_limit": DEFAULT_PROMPT_WINDOW_RECENT_TURN_LIMIT,
             "recent_turn_minutes": DEFAULT_PROMPT_WINDOW_RECENT_TURN_MINUTES,
@@ -361,7 +361,7 @@ def build_default_estat_mcp_server() -> dict:
         "client_id": "mcp-client-connector-main",
         "enabled": False,
         # 読み取り中心の政府統計 API なので既定は審査オフ。外向き write 系 MCP は true にする。
-        "outbound_content_review_required": False,
+        "pre_send_check_required": False,
         "transport": "stdio",
         "command": "uvx",
         "args": ["estat-mcp-server"],

@@ -166,7 +166,7 @@ DISCLOSURE_REVIEW_OUTCOMES = {
     "rewrite",
     "withhold",
 }
-OUTBOUND_CONTENT_REVIEW_OUTCOMES = {
+PRE_SEND_CHECK_OUTCOMES = {
     "allow",
     "withhold",
 }
@@ -455,18 +455,18 @@ def validate_disclosure_review_contract(payload: dict[str, Any]) -> None:
         raise LLMError("DisclosureReview.reason_code は空にできません。")
 
 
-def validate_outbound_content_review_contract(payload: dict[str, Any]) -> None:
+def validate_pre_send_check_contract(payload: dict[str, Any]) -> None:
     # 外部送信は許可か保留の二値とし、reviewer に本文を書き換えさせない。
     _validate_exact_keys(
         payload,
         {"outcome", "reason_summary"},
-        "OutboundContentReview",
+        "PreSendCheck",
     )
-    if payload["outcome"] not in OUTBOUND_CONTENT_REVIEW_OUTCOMES:
-        raise LLMError("OutboundContentReview.outcome が不正です。")
+    if payload["outcome"] not in PRE_SEND_CHECK_OUTCOMES:
+        raise LLMError("PreSendCheck.outcome が不正です。")
     reason_summary = payload["reason_summary"]
     if not isinstance(reason_summary, str) or not reason_summary.strip():
-        raise LLMError("OutboundContentReview.reason_summary は空にできません。")
+        raise LLMError("PreSendCheck.reason_summary は空にできません。")
 
 
 def validate_activity_state_contract(payload: dict[str, Any]) -> None:

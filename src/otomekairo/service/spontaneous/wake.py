@@ -7,7 +7,7 @@ from typing import Any
 from otomekairo.llm.client import LLMError
 from otomekairo.interaction import InteractionContext
 from otomekairo.recall.builder import RecallPackSelectionError
-from otomekairo.service.capability import OutboundContentReviewFailureError
+from otomekairo.service.capability import PreSendCheckFailureError
 from otomekairo.service.common import (
     BACKGROUND_THINKING_POLL_SECONDS,
     INITIAL_VISUAL_CAPTURE_DELAY_SECONDS,
@@ -342,7 +342,7 @@ class ServiceSpontaneousWakeMixin:
                     observation_summary=observation_summary,
                 )
             except (LLMError, KeyError, ValueError) as exc:
-                review_failure = isinstance(exc, OutboundContentReviewFailureError)
+                review_failure = isinstance(exc, PreSendCheckFailureError)
                 capability_request_summary, ongoing_action_transition_summary = self._exception_capability_dispatch_trace(
                     exc
                 )
@@ -353,8 +353,8 @@ class ServiceSpontaneousWakeMixin:
                 )
                 review_notice = (
                     {
-                        "source_kind": "outbound_content_review",
-                        "code": "outbound_content_review_failure",
+                        "source_kind": "pre_send_check",
+                        "code": "pre_send_check_failure",
                         "message": "外部送信内容の安全確認を完了できなかったため、送信しませんでした。",
                         "conversation_visible": False,
                         "interaction_ref": None,
@@ -380,12 +380,12 @@ class ServiceSpontaneousWakeMixin:
                     capability_request_summary=capability_request_summary,
                     ongoing_action_transition_summary=ongoing_action_transition_summary,
                     failure_event_kind=(
-                        "outbound_content_review_failure"
+                        "pre_send_check_failure"
                         if review_failure
                         else None
                     ),
                     failure_event_payload=(
-                        {"outbound_content_review": exc.audit_summary}
+                        {"pre_send_check": exc.audit_summary}
                         if review_failure
                         else None
                     ),

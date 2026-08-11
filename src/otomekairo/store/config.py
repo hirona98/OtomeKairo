@@ -13,7 +13,7 @@ from otomekairo.service.common import debug_log
 
 
 CONFIG_DB_FILE_NAME = "config.db"
-CURRENT_CONFIG_DB_VERSION = 16
+CURRENT_CONFIG_DB_VERSION = 17
 
 
 class ConfigStore:
@@ -42,7 +42,7 @@ class ConfigStore:
                     selected_persona_id,
                     selected_memory_set_id,
                     selected_model_preset_id,
-                    outbound_content_review_model_preset_id,
+                    pre_send_check_model_preset_id,
                     selected_avatar_id,
                     thinking_speech_level,
                     selected_conversation_display_name_id,
@@ -63,8 +63,8 @@ class ConfigStore:
                 "selected_persona_id": current["selected_persona_id"],
                 "selected_memory_set_id": current["selected_memory_set_id"],
                 "selected_model_preset_id": current["selected_model_preset_id"],
-                "outbound_content_review_model_preset_id": current[
-                    "outbound_content_review_model_preset_id"
+                "pre_send_check_model_preset_id": current[
+                    "pre_send_check_model_preset_id"
                 ],
                 "selected_avatar_id": current["selected_avatar_id"],
                 "thinking_speech_level": current[
@@ -420,7 +420,7 @@ class ConfigStore:
                 selected_persona_id TEXT NOT NULL,
                 selected_memory_set_id TEXT NOT NULL,
                 selected_model_preset_id TEXT NOT NULL,
-                outbound_content_review_model_preset_id TEXT NOT NULL,
+                pre_send_check_model_preset_id TEXT NOT NULL,
                 selected_avatar_id TEXT NOT NULL,
                 thinking_speech_level INTEGER NOT NULL DEFAULT 5,
                 selected_conversation_display_name_id TEXT,
@@ -546,7 +546,7 @@ class ConfigStore:
                 selected_persona_id,
                 selected_memory_set_id,
                 selected_model_preset_id,
-                outbound_content_review_model_preset_id,
+                pre_send_check_model_preset_id,
                 selected_avatar_id,
                 thinking_speech_level,
                 selected_conversation_display_name_id,
@@ -560,7 +560,7 @@ class ConfigStore:
                 state["selected_persona_id"],
                 state["selected_memory_set_id"],
                 state["selected_model_preset_id"],
-                state["outbound_content_review_model_preset_id"],
+                state["pre_send_check_model_preset_id"],
                 state["selected_avatar_id"],
                 state["thinking_speech_level"],
                 state["selected_conversation_display_name_id"],

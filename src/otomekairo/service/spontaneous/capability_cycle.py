@@ -7,7 +7,7 @@ from otomekairo.llm.client import LLMError
 from otomekairo.recall.builder import RecallPackSelectionError
 from otomekairo.service.capability import (
     CapabilityResultValidationError,
-    OutboundContentReviewFailureError,
+    PreSendCheckFailureError,
 )
 from otomekairo.service.common import ServiceError, debug_log
 
@@ -312,12 +312,12 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 failure_reason=str(exc),
             )
         except (LLMError, KeyError, ValueError) as exc:
-            review_failure = isinstance(exc, OutboundContentReviewFailureError)
+            review_failure = isinstance(exc, PreSendCheckFailureError)
             review_notice = None
             if review_failure:
                 review_notice = {
-                    "source_kind": "outbound_content_review",
-                    "code": "outbound_content_review_failure",
+                    "source_kind": "pre_send_check",
+                    "code": "pre_send_check_failure",
                     "message": "外部送信内容の安全確認を完了できなかったため、送信しませんでした。",
                     "conversation_visible": interaction_context is not None,
                     "interaction_ref": (
@@ -367,12 +367,12 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 followup_capability_request_summary=failed_followup_capability_request_summary,
                 ongoing_action_transition_summary=ongoing_action_transition_summary,
                 failure_event_kind=(
-                    "outbound_content_review_failure"
+                    "pre_send_check_failure"
                     if review_failure
                     else "recall_hint_failure"
                 ),
                 failure_event_payload=(
-                    {"outbound_content_review": exc.audit_summary}
+                    {"pre_send_check": exc.audit_summary}
                     if review_failure
                     else None
                 ),

@@ -6,15 +6,15 @@ from unittest.mock import Mock
 
 from otomekairo.defaults import build_default_state
 from otomekairo.interaction import InteractionContext, ParticipantContext
-from otomekairo.llm.contracts import LLMError, validate_outbound_content_review_contract
+from otomekairo.llm.contracts import LLMError, validate_pre_send_check_contract
 from otomekairo.service.capability import (
-    OUTBOUND_KNOWN_SECRET_MIN_LENGTH,
-    OutboundContentReviewFailureError,
-    OutboundContentReviewWithheldError,
+    PRE_SEND_CHECK_KNOWN_SECRET_MIN_LENGTH,
+    PreSendCheckFailureError,
+    PreSendCheckWithheldError,
     ServiceCapabilityMixin,
 )
 from otomekairo.service.input.pipeline import (
-    OUTBOUND_CONTENT_REVIEW_RETRY_FEEDBACK,
+    PRE_SEND_CHECK_RETRY_FEEDBACK,
     ServiceInputPipelineMixin,
 )
 from otomekairo.service.input.trace_build import ServiceInputTraceBuildMixin
@@ -26,7 +26,7 @@ class _Store:
         self.state = build_default_state()
         self.state["mcp_servers"]["e-stat"]["enabled"] = True
         # 既定 e-stat は読み取り向けに審査オフ。審査経路の試験では明示的に有効化する。
-        self.state["mcp_servers"]["e-stat"]["outbound_content_review_required"] = True
+        self.state["mcp_servers"]["e-stat"]["pre_send_check_required"] = True
 
     def read_state(self) -> dict:
         return deepcopy(self.state)
@@ -40,7 +40,7 @@ class _Reviewer:
         self.outcome = outcome
         self.calls: list[dict] = []
 
-    def generate_outbound_content_review(self, *, model_config: dict, review_context: dict) -> dict:
+    def generate_pre_send_check(self, *, model_config: dict, review_context: dict) -> dict:
         self.calls.append(deepcopy(review_context))
         return {
             "outcome": self.outcome,
@@ -131,20 +131,20 @@ def _input(content: str) -> dict:
     }
 
 
-class OutboundContentReviewTests(unittest.TestCase):
+class PreSendCheckTests(unittest.TestCase):
     def test_contract_accepts_allow_and_withhold(self) -> None:
         for outcome in ("allow", "withhold"):
-            validate_outbound_content_review_contract(
+            validate_pre_send_check_contract(
                 {"outcome": outcome, "reason_summary": "判定理由"}
             )
 
     def test_contract_rejects_rewrite_and_extra_fields(self) -> None:
         with self.assertRaises(LLMError):
-            validate_outbound_content_review_contract(
+            validate_pre_send_check_contract(
                 {"outcome": "rewrite", "reason_summary": "判定理由"}
             )
         with self.assertRaises(LLMError):
-            validate_outbound_content_review_contract(
+            validate_pre_send_check_contract(
                 {"outcome": "allow", "reason_summary": "判定理由", "arguments": {}}
             )
 
@@ -152,7 +152,7 @@ class OutboundContentReviewTests(unittest.TestCase):
         reviewer = _Reviewer("allow")
         service = _Service(reviewer)
 
-        audit = service._review_mcp_outbound_content(
+        audit = service._review_mcp_pre_send_check(
             input_payload=_input("公開情報だけの投稿"),
             mcp_tool=_tool(),
             review_attempt=1,
@@ -172,8 +172,8 @@ class OutboundContentReviewTests(unittest.TestCase):
         reviewer = _Reviewer("withhold")
         service = _Service(reviewer)
 
-        with self.assertRaises(OutboundContentReviewWithheldError) as raised:
-            service._review_mcp_outbound_content(
+        with self.assertRaises(PreSendCheckWithheldError) as raised:
+            service._review_mcp_pre_send_check(
                 input_payload=_input("審査対象の本文"),
                 mcp_tool=_tool(),
                 review_attempt=2,
@@ -188,11 +188,11 @@ class OutboundContentReviewTests(unittest.TestCase):
     def test_known_configured_secret_is_withheld_before_llm(self) -> None:
         reviewer = _Reviewer("allow")
         service = _Service(reviewer)
-        secret = "s" * OUTBOUND_KNOWN_SECRET_MIN_LENGTH
+        secret = "s" * PRE_SEND_CHECK_KNOWN_SECRET_MIN_LENGTH
         service.store.state["mcp_servers"]["e-stat"]["env"]["E_STAT_APP_ID"] = secret
 
-        with self.assertRaises(OutboundContentReviewWithheldError) as raised:
-            service._review_mcp_outbound_content(
+        with self.assertRaises(PreSendCheckWithheldError) as raised:
+            service._review_mcp_pre_send_check(
                 input_payload=_input(f"prefix {secret} suffix"),
                 mcp_tool=_tool(),
                 review_attempt=1,
@@ -205,10 +205,10 @@ class OutboundContentReviewTests(unittest.TestCase):
         # 短い値は日常語と衝突しやすいので局所照合せず、LLM 審査へ進む。
         reviewer = _Reviewer("allow")
         service = _Service(reviewer)
-        short_secret = "x" * (OUTBOUND_KNOWN_SECRET_MIN_LENGTH - 1)
+        short_secret = "x" * (PRE_SEND_CHECK_KNOWN_SECRET_MIN_LENGTH - 1)
         service.store.state["mcp_servers"]["e-stat"]["env"]["E_STAT_APP_ID"] = short_secret
 
-        audit = service._review_mcp_outbound_content(
+        audit = service._review_mcp_pre_send_check(
             input_payload=_input(f"prefix {short_secret} suffix"),
             mcp_tool=_tool(),
             review_attempt=1,
@@ -220,9 +220,9 @@ class OutboundContentReviewTests(unittest.TestCase):
     def test_disabled_policy_bypasses_review(self) -> None:
         reviewer = _Reviewer("withhold")
         service = _Service(reviewer)
-        service.store.state["mcp_servers"]["e-stat"]["outbound_content_review_required"] = False
+        service.store.state["mcp_servers"]["e-stat"]["pre_send_check_required"] = False
 
-        audit = service._review_mcp_outbound_content(
+        audit = service._review_mcp_pre_send_check(
             input_payload=_input("任意の本文"),
             mcp_tool=_tool(),
             review_attempt=1,
@@ -235,8 +235,8 @@ class OutboundContentReviewTests(unittest.TestCase):
         reviewer = _Reviewer("rewrite")
         service = _Service(reviewer)
 
-        with self.assertRaises(OutboundContentReviewFailureError) as raised:
-            service._review_mcp_outbound_content(
+        with self.assertRaises(PreSendCheckFailureError) as raised:
+            service._review_mcp_pre_send_check(
                 input_payload=_input("本文"),
                 mcp_tool=_tool(),
                 review_attempt=1,
@@ -268,7 +268,7 @@ class OutboundContentReviewTests(unittest.TestCase):
             "review_attempt": 1,
         }
         service._run_pipeline_output = Mock(
-            side_effect=OutboundContentReviewWithheldError(audit_summary=first_audit)
+            side_effect=PreSendCheckWithheldError(audit_summary=first_audit)
         )
         interaction = InteractionContext(
             interaction_ref="interaction:test",
@@ -287,15 +287,15 @@ class OutboundContentReviewTests(unittest.TestCase):
 
         self.assertEqual(result["decision"]["kind"], "noop")
         self.assertEqual(
-            result["decision"]["outbound_content_review"]["attempts"],
+            result["decision"]["pre_send_check"]["attempts"],
             [first_audit],
         )
-        self.assertEqual(result["system_notice"]["code"], "outbound_content_review_withheld")
+        self.assertEqual(result["system_notice"]["code"], "pre_send_check_withheld")
         self.assertTrue(result["system_notice"]["conversation_visible"])
         self.assertEqual(service._run_pipeline_decision.call_count, 2)
         self.assertEqual(
-            service._run_pipeline_decision.call_args.kwargs["outbound_content_review_feedback"],
-            OUTBOUND_CONTENT_REVIEW_RETRY_FEEDBACK,
+            service._run_pipeline_decision.call_args.kwargs["pre_send_check_feedback"],
+            PRE_SEND_CHECK_RETRY_FEEDBACK,
         )
         self.assertEqual(service._run_pipeline_output.call_count, 1)
 
@@ -316,12 +316,12 @@ class OutboundContentReviewTests(unittest.TestCase):
             finished_at="2026-08-11T12:00:01+09:00",
             decision={
                 "kind": "noop",
-                "reason_code": "outbound_content_review_withheld",
+                "reason_code": "pre_send_check_withheld",
                 "reason_summary": "送信しない",
             },
             result_kind="noop",
             system_notice={
-                "code": "outbound_content_review_withheld",
+                "code": "pre_send_check_withheld",
                 "message": "外部送信を見送りました。",
                 "conversation_visible": True,
             },
@@ -338,7 +338,7 @@ class OutboundContentReviewTests(unittest.TestCase):
             try:
                 state = service.store.read_state()
                 state["mcp_servers"]["e-stat"]["enabled"] = True
-                state["mcp_servers"]["e-stat"]["outbound_content_review_required"] = True
+                state["mcp_servers"]["e-stat"]["pre_send_check_required"] = True
                 service.store.write_state(state)
                 service.llm = _Reviewer("withhold")
                 websocket = _RecordingWebSocket()
@@ -360,7 +360,7 @@ class OutboundContentReviewTests(unittest.TestCase):
                     },
                 )
 
-                with self.assertRaises(OutboundContentReviewWithheldError):
+                with self.assertRaises(PreSendCheckWithheldError):
                     service._dispatch_capability_request(
                         memory_set_id=state["selected_memory_set_id"],
                         capability_id="mcp.call_tool",

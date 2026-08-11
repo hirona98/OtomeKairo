@@ -579,9 +579,9 @@ class ServiceInputTraceCompactMixin:
             value = summary.get(key)
             if isinstance(value, str) and value.strip():
                 payload[key] = value.strip()
-        outbound_content_review = summary.get("outbound_content_review")
-        if isinstance(outbound_content_review, dict):
-            payload["outbound_content_review"] = outbound_content_review
+        pre_send_check = summary.get("pre_send_check")
+        if isinstance(pre_send_check, dict):
+            payload["pre_send_check"] = pre_send_check
         if not payload:
             return None
         return payload

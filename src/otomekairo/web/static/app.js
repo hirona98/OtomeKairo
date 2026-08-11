@@ -2464,7 +2464,7 @@ function renderSettings() {
   renderModel();
   renderMemory();
   renderCapabilities();
-  renderOutboundReview();
+  renderPreSendCheck();
   renderApiDocumentation();
 }
 
@@ -3227,27 +3227,27 @@ function renderCurrent() {
     observations.some((observation) => isDesktopWakeObservation(observation));
 }
 
-const OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID = "model_preset:outbound_content_review";
+const PRE_SEND_CHECK_MODEL_PRESET_ID = "model_preset:pre_send_check";
 
 function generationModelPresets() {
   return (state.editor?.model_presets || []).filter(
-    (preset) => preset.model_preset_id !== OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID,
+    (preset) => preset.model_preset_id !== PRE_SEND_CHECK_MODEL_PRESET_ID,
   );
 }
 
-function outboundContentReviewModelPreset() {
+function preSendCheckModelPreset() {
   let preset = arrayById(
     state.editor?.model_presets || [],
     "model_preset_id",
-    OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID,
+    PRE_SEND_CHECK_MODEL_PRESET_ID,
   );
   if (preset) {
     return preset;
   }
   // editor-state に専用定義が無い旧下書き向けに、その場で確保する。
   preset = {
-    model_preset_id: OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID,
-    display_name: "外向き内容レビュー",
+    model_preset_id: PRE_SEND_CHECK_MODEL_PRESET_ID,
+    display_name: "送信前チェック",
     prompt_window: {
       recent_turn_limit: 30,
       recent_turn_minutes: 30,
@@ -3262,29 +3262,29 @@ function outboundContentReviewModelPreset() {
     state.editor.model_presets = state.editor.model_presets || [];
     state.editor.model_presets.push(preset);
     if (state.editor.current) {
-      state.editor.current.outbound_content_review_model_preset_id =
-        OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID;
+      state.editor.current.pre_send_check_model_preset_id =
+        PRE_SEND_CHECK_MODEL_PRESET_ID;
     }
   }
   return preset;
 }
 
-function renderOutboundReview() {
+function renderPreSendCheck() {
   if (!state.editor?.current || !state.mcp) {
     return;
   }
-  const preset = outboundContentReviewModelPreset();
-  element("outbound-review-model").value = preset.model || "";
-  element("outbound-review-api-base").value = preset.api_base || "";
-  element("outbound-review-api-key").value = preset.api_key || "";
-  element("outbound-review-reasoning-effort").value = preset.reasoning_effort || "";
-  element("outbound-review-max-output-tokens").value = preset.max_output_tokens || 4000;
-  element("outbound-review-timeout-seconds").value = preset.timeout_seconds || 90;
-  renderOutboundContentReviewMcpList();
+  const preset = preSendCheckModelPreset();
+  element("pre-send-check-model").value = preset.model || "";
+  element("pre-send-check-api-base").value = preset.api_base || "";
+  element("pre-send-check-api-key").value = preset.api_key || "";
+  element("pre-send-check-reasoning-effort").value = preset.reasoning_effort || "";
+  element("pre-send-check-max-output-tokens").value = preset.max_output_tokens || 4000;
+  element("pre-send-check-timeout-seconds").value = preset.timeout_seconds || 90;
+  renderPreSendCheckMcpList();
 }
 
-function renderOutboundContentReviewMcpList() {
-  const container = element("outbound-content-review-mcp-list");
+function renderPreSendCheckMcpList() {
+  const container = element("pre-send-check-mcp-list");
   if (!container) {
     return;
   }
@@ -3292,7 +3292,7 @@ function renderOutboundContentReviewMcpList() {
   const servers = state.mcp?.mcp_servers || [];
   if (!servers.length) {
     const empty = document.createElement("span");
-    empty.className = "outbound-content-review-mcp-empty";
+    empty.className = "pre-send-check-mcp-empty";
     empty.textContent = "MCP server がありません。接続の MCP タブで追加してください。";
     container.appendChild(empty);
     return;
@@ -3303,50 +3303,50 @@ function renderOutboundContentReviewMcpList() {
     const name = server.mcp_server_id || "(unnamed)";
     const enabledNote = server.enabled === true ? "" : "（無効）";
     label.appendChild(
-      document.createTextNode(`${name}${enabledNote}: 外向き内容レビューを必須にする`),
+      document.createTextNode(`${name}${enabledNote}: 送信前チェックを必須にする`),
     );
     const input = document.createElement("input");
     input.type = "checkbox";
     input.dataset.mcpServerId = server.mcp_server_id || "";
-    input.checked = server.outbound_content_review_required === true;
+    input.checked = server.pre_send_check_required === true;
     label.appendChild(input);
     container.appendChild(label);
   }
 }
 
-function syncOutboundReview() {
+function syncPreSendCheck() {
   if (!state.editor?.current) {
     return;
   }
-  const preset = outboundContentReviewModelPreset();
-  preset.model = textValue("outbound-review-model");
-  preset.api_key = textValue("outbound-review-api-key");
-  preset.max_output_tokens = intValue("outbound-review-max-output-tokens", 4000);
+  const preset = preSendCheckModelPreset();
+  preset.model = textValue("pre-send-check-model");
+  preset.api_key = textValue("pre-send-check-api-key");
+  preset.max_output_tokens = intValue("pre-send-check-max-output-tokens", 4000);
   preset.timeout_seconds = boundedIntValue(
-    "outbound-review-timeout-seconds",
+    "pre-send-check-timeout-seconds",
     "タイムアウト（秒）",
     1,
   );
   preset.web_search_enabled = false;
-  const apiBase = textValue("outbound-review-api-base").trim();
+  const apiBase = textValue("pre-send-check-api-base").trim();
   if (apiBase) {
     preset.api_base = apiBase;
   } else {
     delete preset.api_base;
   }
-  const reasoningEffort = textValue("outbound-review-reasoning-effort").trim();
+  const reasoningEffort = textValue("pre-send-check-reasoning-effort").trim();
   if (reasoningEffort) {
     preset.reasoning_effort = reasoningEffort;
   } else {
     delete preset.reasoning_effort;
   }
-  state.editor.current.outbound_content_review_model_preset_id =
-    OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID;
-  syncOutboundContentReviewMcpList();
+  state.editor.current.pre_send_check_model_preset_id =
+    PRE_SEND_CHECK_MODEL_PRESET_ID;
+  syncPreSendCheckMcpList();
 }
 
-function syncOutboundContentReviewMcpList() {
-  const container = element("outbound-content-review-mcp-list");
+function syncPreSendCheckMcpList() {
+  const container = element("pre-send-check-mcp-list");
   if (!container || !state.mcp) {
     return;
   }
@@ -3358,7 +3358,7 @@ function syncOutboundContentReviewMcpList() {
     }
     const server = arrayById(state.mcp.mcp_servers || [], "mcp_server_id", serverId);
     if (server) {
-      server.outbound_content_review_required = input.checked;
+      server.pre_send_check_required = input.checked;
     }
   }
 }
@@ -3460,7 +3460,7 @@ function syncPersona() {
 function renderModel() {
   const generationPresets = generationModelPresets();
   if (
-    state.selectedModelPresetId === OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID
+    state.selectedModelPresetId === PRE_SEND_CHECK_MODEL_PRESET_ID
     || !arrayById(generationPresets, "model_preset_id", state.selectedModelPresetId)
   ) {
     state.selectedModelPresetId = generationPresets[0]?.model_preset_id || "";
@@ -3826,9 +3826,9 @@ function syncMcp() {
   // connector_kind は UI に出さず既存値を保持する。
   mcp.client_id = textValue("mcp-client-id");
   mcp.enabled = boolValue("mcp-enabled");
-  // outbound_content_review_required は外向きレビュー専用タブが正とする。
-  if (typeof mcp.outbound_content_review_required !== "boolean") {
-    mcp.outbound_content_review_required = true;
+  // pre_send_check_required は送信前チェック専用タブが正とする。
+  if (typeof mcp.pre_send_check_required !== "boolean") {
+    mcp.pre_send_check_required = true;
   }
   mcp.transport = textValue("mcp-transport");
   mcp.command = textValue("mcp-command");
@@ -3852,7 +3852,7 @@ function syncAllForms() {
   syncCamera();
   syncWatcher();
   syncMcp();
-  syncOutboundReview();
+  syncPreSendCheck();
 }
 
 // 選択切替や追加前に、現在フォームの値を下書きへ戻す。
@@ -4089,8 +4089,8 @@ function addModel() {
 }
 
 function duplicateModel() {
-  if (state.selectedModelPresetId === OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID) {
-    showNotice("外向きレビュー用モデルはモデルタブから複製できません。", true);
+  if (state.selectedModelPresetId === PRE_SEND_CHECK_MODEL_PRESET_ID) {
+    showNotice("送信前チェック用モデルはモデルタブから複製できません。", true);
     return;
   }
   duplicateClonedCollectionItem({
@@ -4107,8 +4107,8 @@ function duplicateModel() {
 }
 
 function deleteModel() {
-  if (state.selectedModelPresetId === OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID) {
-    showNotice("外向きレビュー用モデルは削除できません。", true);
+  if (state.selectedModelPresetId === PRE_SEND_CHECK_MODEL_PRESET_ID) {
+    showNotice("送信前チェック用モデルは削除できません。", true);
     return;
   }
   if (generationModelPresets().length <= 1) {
@@ -4119,17 +4119,17 @@ function deleteModel() {
     items: state.editor.model_presets,
     idKey: "model_preset_id",
     selectedId: state.selectedModelPresetId,
-    // 専用レビュー定義を含む配列なので、生成用が 1 件残るまで許す。
+    // 送信前チェック専用定義を含む配列なので、生成用が 1 件残るまで許す。
     minCount: 2,
     setSelectedId: (id) => {
       const nextId =
-        id === OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID
+        id === PRE_SEND_CHECK_MODEL_PRESET_ID
           ? generationModelPresets()[0]?.model_preset_id || ""
           : id;
       state.selectedModelPresetId = nextId;
       state.editor.current.selected_model_preset_id = nextId;
-      state.editor.current.outbound_content_review_model_preset_id =
-        OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID;
+      state.editor.current.pre_send_check_model_preset_id =
+        PRE_SEND_CHECK_MODEL_PRESET_ID;
     },
     lastItemMessage: "最後のモデルプリセットは削除できません。",
     render: renderSettings,
@@ -4285,8 +4285,8 @@ function addMcp() {
     connector_kind: "mcp_client",
     client_id: "mcp-client-connector-main",
     enabled: false,
-    // 用途不明の新規 MCP は安全側でレビュー必須にする。
-    outbound_content_review_required: true,
+    // 用途不明の新規 MCP は安全側で送信前チェック必須にする。
+    pre_send_check_required: true,
     transport: "stdio",
     command: "",
     args: [],
@@ -4295,14 +4295,14 @@ function addMcp() {
   });
   state.selectedMcpId = id;
   renderCapabilities();
-  renderOutboundReview();
+  renderPreSendCheck();
 }
 
 function deleteMcp() {
   removeById(state.mcp.mcp_servers, "mcp_server_id", state.selectedMcpId);
   state.selectedMcpId = state.mcp.mcp_servers[0]?.mcp_server_id || "";
   renderCapabilities();
-  renderOutboundReview();
+  renderPreSendCheck();
 }
 
 function switchTab(tab) {

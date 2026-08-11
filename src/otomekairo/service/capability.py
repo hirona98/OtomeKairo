@@ -62,20 +62,20 @@ class CapabilityResultValidationError(ValueError):
         self.error_code = error_code
 
 
-class OutboundContentReviewWithheldError(ValueError):
+class PreSendCheckWithheldError(ValueError):
     def __init__(self, *, audit_summary: dict[str, Any]) -> None:
-        super().__init__("MCP request was withheld by outbound content review.")
+        super().__init__("MCP request was withheld by pre-send check.")
         self.audit_summary = audit_summary
 
 
-class OutboundContentReviewFailureError(ValueError):
+class PreSendCheckFailureError(ValueError):
     def __init__(self, *, audit_summary: dict[str, Any]) -> None:
-        super().__init__("MCP outbound content review failed.")
+        super().__init__("MCP pre-send check failed.")
         self.audit_summary = audit_summary
 
 
 # 日常語や短い設定値との衝突を避ける。資格情報として十分な長さだけを局所照合する。
-OUTBOUND_KNOWN_SECRET_MIN_LENGTH = 12
+PRE_SEND_CHECK_KNOWN_SECRET_MIN_LENGTH = 12
 
 
 class ServiceCapabilityMixin:
@@ -121,8 +121,8 @@ class ServiceCapabilityMixin:
         source_current_input: dict[str, Any],
         assistant_message_target_client_id: str | None,
         decision: dict[str, Any],
-        outbound_content_review_attempt: int = 1,
-        outbound_content_review_prior_attempts: list[dict[str, Any]] | None = None,
+        pre_send_check_attempt: int = 1,
+        pre_send_check_prior_attempts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         request_payload = decision.get("capability_request")
         if not isinstance(request_payload, dict):
@@ -144,8 +144,8 @@ class ServiceCapabilityMixin:
             component="Capability",
             source_current_input=source_current_input,
             assistant_message_target_client_id=assistant_message_target_client_id,
-            outbound_content_review_attempt=outbound_content_review_attempt,
-            outbound_content_review_prior_attempts=outbound_content_review_prior_attempts,
+            pre_send_check_attempt=pre_send_check_attempt,
+            pre_send_check_prior_attempts=pre_send_check_prior_attempts,
         )
         if result is None:
             raise ValueError("Capability request dispatch failed.")
@@ -165,8 +165,8 @@ class ServiceCapabilityMixin:
         assistant_message_target_client_id: str | None = None,
         track_ongoing_action: bool = True,
         autonomous_run_id: str | None = None,
-        outbound_content_review_attempt: int = 1,
-        outbound_content_review_prior_attempts: list[dict[str, Any]] | None = None,
+        pre_send_check_attempt: int = 1,
+        pre_send_check_prior_attempts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         # manifest と input schema を先に確定する。
         manifests = capability_manifests()
@@ -210,21 +210,21 @@ class ServiceCapabilityMixin:
         if timeout_ms <= 0:
             raise ValueError(f"Capability timeout_ms is invalid: {capability_id}")
 
-        outbound_content_review = None
+        pre_send_check = None
         if capability_id == "mcp.call_tool":
-            review_audit = self._review_mcp_outbound_content(
+            review_audit = self._review_mcp_pre_send_check(
                 input_payload=input_payload,
                 mcp_tool=mcp_tool,
-                review_attempt=outbound_content_review_attempt,
+                review_attempt=pre_send_check_attempt,
             )
             if isinstance(review_audit, dict):
                 attempts = [
                     deepcopy(item)
-                    for item in (outbound_content_review_prior_attempts or [])
+                    for item in (pre_send_check_prior_attempts or [])
                     if isinstance(item, dict)
                 ]
                 attempts.append(deepcopy(review_audit))
-                outbound_content_review = {
+                pre_send_check = {
                     "result_status": review_audit["result_status"],
                     "attempts": attempts,
                 }
@@ -255,7 +255,7 @@ class ServiceCapabilityMixin:
             source_current_input=source_current_input,
             assistant_message_target_client_id=assistant_message_target_client_id,
             autonomous_run_id=autonomous_run_id,
-            outbound_content_review=outbound_content_review,
+            pre_send_check=pre_send_check,
         )
         pending = {
             "event": threading.Event(),
@@ -578,7 +578,7 @@ class ServiceCapabilityMixin:
             "mcp_tool": tool,
         }
 
-    def _review_mcp_outbound_content(
+    def _review_mcp_pre_send_check(
         self,
         *,
         input_payload: dict[str, Any],
@@ -593,8 +593,8 @@ class ServiceCapabilityMixin:
         mcp_servers = state.get("mcp_servers")
         server_definition = mcp_servers.get(mcp_server_id) if isinstance(mcp_servers, dict) else None
         if not isinstance(server_definition, dict):
-            raise OutboundContentReviewFailureError(
-                audit_summary=self._outbound_content_review_audit(
+            raise PreSendCheckFailureError(
+                audit_summary=self._pre_send_check_audit(
                     mcp_server_id=mcp_server_id,
                     tool_name=tool_name,
                     result_status="internal_failure",
@@ -605,11 +605,11 @@ class ServiceCapabilityMixin:
                     failure_reason="mcp_server_definition_missing",
                 )
             )
-        if server_definition.get("outbound_content_review_required") is False:
+        if server_definition.get("pre_send_check_required") is False:
             return None
         if not isinstance(arguments, dict) or not isinstance(mcp_tool, dict):
-            raise OutboundContentReviewFailureError(
-                audit_summary=self._outbound_content_review_audit(
+            raise PreSendCheckFailureError(
+                audit_summary=self._pre_send_check_audit(
                     mcp_server_id=mcp_server_id,
                     tool_name=tool_name,
                     result_status="internal_failure",
@@ -621,8 +621,8 @@ class ServiceCapabilityMixin:
                 )
             )
 
-        if self._outbound_arguments_contain_known_secret(arguments=arguments, state=state):
-            audit = self._outbound_content_review_audit(
+        if self._pre_send_arguments_contain_known_secret(arguments=arguments, state=state):
+            audit = self._pre_send_check_audit(
                 mcp_server_id=mcp_server_id,
                 tool_name=tool_name,
                 result_status="withheld",
@@ -634,17 +634,17 @@ class ServiceCapabilityMixin:
             )
             debug_log(
                 "Capability",
-                f"outbound content withheld server={mcp_server_id} tool={tool_name} stage=local_secret_scan",
+                f"pre-send check withheld server={mcp_server_id} tool={tool_name} stage=local_secret_scan",
                 level="WARNING",
             )
-            raise OutboundContentReviewWithheldError(audit_summary=audit)
+            raise PreSendCheckWithheldError(audit_summary=audit)
 
         model_presets = state.get("model_presets")
-        model_preset_id = state.get("outbound_content_review_model_preset_id")
+        model_preset_id = state.get("pre_send_check_model_preset_id")
         model_config = model_presets.get(model_preset_id) if isinstance(model_presets, dict) else None
         if not isinstance(model_config, dict):
-            raise OutboundContentReviewFailureError(
-                audit_summary=self._outbound_content_review_audit(
+            raise PreSendCheckFailureError(
+                audit_summary=self._pre_send_check_audit(
                     mcp_server_id=mcp_server_id,
                     tool_name=tool_name,
                     result_status="internal_failure",
@@ -670,7 +670,7 @@ class ServiceCapabilityMixin:
             "arguments": deepcopy(arguments),
         }
         try:
-            review = self.llm.generate_outbound_content_review(
+            review = self.llm.generate_pre_send_check(
                 model_config=model_config,
                 review_context=review_context,
             )
@@ -678,11 +678,11 @@ class ServiceCapabilityMixin:
             # raw prompt、response、例外文を audit に残さず fail closed にする。
             debug_log(
                 "Capability",
-                f"outbound content review failed server={mcp_server_id} tool={tool_name} error={type(exc).__name__}",
+                f"pre-send check failed server={mcp_server_id} tool={tool_name} error={type(exc).__name__}",
                 level="ERROR",
             )
-            raise OutboundContentReviewFailureError(
-                audit_summary=self._outbound_content_review_audit(
+            raise PreSendCheckFailureError(
+                audit_summary=self._pre_send_check_audit(
                     mcp_server_id=mcp_server_id,
                     tool_name=tool_name,
                     result_status="internal_failure",
@@ -695,7 +695,7 @@ class ServiceCapabilityMixin:
             ) from exc
 
         outcome = review.get("outcome") if isinstance(review, dict) else None
-        audit = self._outbound_content_review_audit(
+        audit = self._pre_send_check_audit(
             mcp_server_id=mcp_server_id,
             tool_name=tool_name,
             result_status="allowed" if outcome == "allow" else "withheld",
@@ -706,10 +706,10 @@ class ServiceCapabilityMixin:
         if outcome == "withhold":
             debug_log(
                 "Capability",
-                f"outbound content withheld server={mcp_server_id} tool={tool_name} stage=llm_review",
+                f"pre-send check withheld server={mcp_server_id} tool={tool_name} stage=llm_review",
                 level="WARNING",
             )
-            raise OutboundContentReviewWithheldError(audit_summary=audit)
+            raise PreSendCheckWithheldError(audit_summary=audit)
         if outcome != "allow":
             # LLMClient の契約検証を迂回する test double に対しても fail closed とする。
             audit.update(
@@ -721,31 +721,31 @@ class ServiceCapabilityMixin:
                     "failure_reason": "contract_error",
                 }
             )
-            raise OutboundContentReviewFailureError(audit_summary=audit)
+            raise PreSendCheckFailureError(audit_summary=audit)
         return audit
 
-    def _outbound_arguments_contain_known_secret(
+    def _pre_send_arguments_contain_known_secret(
         self,
         *,
         arguments: dict[str, Any],
         state: dict[str, Any],
     ) -> bool:
-        outgoing_strings = self._collect_outbound_string_values(arguments)
+        outgoing_strings = self._collect_pre_send_string_values(arguments)
         configured_secrets = self._collect_configured_secret_values(state)
         return any(secret in value for secret in configured_secrets for value in outgoing_strings)
 
-    def _collect_outbound_string_values(self, value: Any) -> list[str]:
+    def _collect_pre_send_string_values(self, value: Any) -> list[str]:
         if isinstance(value, str):
             return [value]
         if isinstance(value, dict):
             collected: list[str] = []
             for child in value.values():
-                collected.extend(self._collect_outbound_string_values(child))
+                collected.extend(self._collect_pre_send_string_values(child))
             return collected
         if isinstance(value, list):
             collected = []
             for child in value:
-                collected.extend(self._collect_outbound_string_values(child))
+                collected.extend(self._collect_pre_send_string_values(child))
             return collected
         return []
 
@@ -755,7 +755,7 @@ class ServiceCapabilityMixin:
         secrets: set[str] = set()
 
         def add(value: Any) -> None:
-            if isinstance(value, str) and len(value) >= OUTBOUND_KNOWN_SECRET_MIN_LENGTH:
+            if isinstance(value, str) and len(value) >= PRE_SEND_CHECK_KNOWN_SECRET_MIN_LENGTH:
                 secrets.add(value)
 
         add(state.get("console_access_token"))
@@ -789,7 +789,7 @@ class ServiceCapabilityMixin:
             return []
         return [item for item in value.values() if isinstance(item, dict)]
 
-    def _outbound_content_review_audit(
+    def _pre_send_check_audit(
         self,
         *,
         mcp_server_id: str,
@@ -1103,7 +1103,7 @@ class ServiceCapabilityMixin:
         source_current_input: dict[str, Any] | None = None,
         assistant_message_target_client_id: str | None = None,
         autonomous_run_id: str | None = None,
-        outbound_content_review: dict[str, Any] | None = None,
+        pre_send_check: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         request_id = f"{capability_id.replace('.', '_')}_request:{uuid.uuid4().hex}"
         expires_at = self._capability_ongoing_action_expires_at(current_time=current_time, timeout_ms=timeout_ms)
@@ -1126,8 +1126,8 @@ class ServiceCapabilityMixin:
             ),
             "wait_for_response": wait_for_response,
         }
-        if isinstance(outbound_content_review, dict):
-            record["outbound_content_review"] = deepcopy(outbound_content_review)
+        if isinstance(pre_send_check, dict):
+            record["pre_send_check"] = deepcopy(pre_send_check)
         if isinstance(source_current_input, dict):
             record["source_current_input"] = deepcopy(source_current_input)
             sender_ref = source_current_input.get("sender_ref")
@@ -1235,9 +1235,9 @@ class ServiceCapabilityMixin:
                 value = input_payload.get(input_key)
                 if isinstance(value, str) and value.strip():
                     summary[input_key] = value.strip()
-            outbound_content_review = request_record.get("outbound_content_review")
-            if isinstance(outbound_content_review, dict):
-                summary["outbound_content_review"] = deepcopy(outbound_content_review)
+            pre_send_check = request_record.get("pre_send_check")
+            if isinstance(pre_send_check, dict):
+                summary["pre_send_check"] = deepcopy(pre_send_check)
         if capability_id == "mcp.call_tool":
             for input_key in ("mcp_server_id", "tool_name"):
                 value = request_record.get(input_key)

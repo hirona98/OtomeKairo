@@ -5,12 +5,12 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from otomekairo.service.app import OtomeKairoService
-from otomekairo.service.autonomous_run import AUTONOMOUS_OUTBOUND_REVIEW_RETRY_FEEDBACK
-from otomekairo.service.capability import OutboundContentReviewWithheldError
+from otomekairo.service.autonomous_run import AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK
+from otomekairo.service.capability import PreSendCheckWithheldError
 
 
 class AutonomousRunRecoveryTests(unittest.TestCase):
-    def test_outbound_review_withhold_regenerates_autonomous_step_once(self) -> None:
+    def test_pre_send_check_withhold_regenerates_autonomous_step_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))
             state = service.store.read_state()
@@ -53,9 +53,9 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 "review_attempt": 1,
             }
             service._dispatch_autonomous_run_capability_request = Mock(
-                side_effect=OutboundContentReviewWithheldError(audit_summary=first_audit)
+                side_effect=PreSendCheckWithheldError(audit_summary=first_audit)
             )
-            service._record_autonomous_outbound_content_review_terminal = Mock()
+            service._record_autonomous_pre_send_check_terminal = Mock()
             cancelled = {**run, "status": "cancelled", "completed_at": "2026-08-11T12:00:01+09:00"}
             service._apply_autonomous_step_transition = Mock(return_value=cancelled)
             service._finalize_autonomous_run_commitments = Mock(return_value=cancelled)
@@ -73,11 +73,11 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             self.assertEqual(generate_autonomous_step.call_count, 2)
             self.assertEqual(
                 service._build_autonomous_step_context.call_args.kwargs[
-                    "outbound_content_review_feedback"
+                    "pre_send_check_feedback"
                 ],
-                AUTONOMOUS_OUTBOUND_REVIEW_RETRY_FEEDBACK,
+                AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK,
             )
-            service._record_autonomous_outbound_content_review_terminal.assert_called_once()
+            service._record_autonomous_pre_send_check_terminal.assert_called_once()
 
     def test_links_autonomous_run_to_commitment_created_by_source_cycle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

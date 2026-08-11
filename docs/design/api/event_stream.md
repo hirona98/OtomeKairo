@@ -172,8 +172,8 @@ server -> client の代表例（capability request 1 件と通知系）:
   "data": {
     "notice_id": "system_notice:...",
     "created_at": "2026-08-11T12:00:00+09:00",
-    "source_kind": "outbound_content_review",
-    "code": "outbound_content_review_withheld",
+    "source_kind": "pre_send_check",
+    "code": "pre_send_check_withheld",
     "message": "外部送信候補に非公開情報が含まれる可能性があるため、送信しませんでした。",
     "conversation_visible": true,
     "interaction_ref": "interaction:discord:channel-123",
@@ -257,7 +257,7 @@ server -> client の代表例（capability request 1 件と通知系）:
 
 `assistant_message.data.source_kind` は `conversation / capability_result / wake / background_thinking / autonomous_run` のいずれかであり、capability result follow-up の場合だけ `request_id / capability_id` を持つ。
 `system_notice.data` は `notice_id / created_at / source_kind / code / message / conversation_visible / interaction_ref / recipient_person_refs` を持つ。
-`outbound_content_review` の notice は candidate、LLM 理由、秘密値を含めない。
+`pre_send_check` の notice は candidate、LLM 理由、秘密値を含めない。
 起点人物がいる場合だけ `conversation_visible=true` とし、client は assistant message ではなく system message として会話欄にも表示する。
 `assistant_message.data.message_id / created_at / message / persona_id / persona_display_name / interaction_ref / recipient_person_refs` は全発話通知で必須とする。
 `persona_id / persona_display_name` はその発話生成で使った人格設定の ID とプリセット名であり、client は受信時の現在設定から再解決しない。

@@ -20,7 +20,7 @@
 - `memory_reflection_summary`
 - `memory_correction_reconciliation`
 - `disclosure_review`
-- `outbound_content_review`
+- `pre_send_check`
 - `world_state` 候補抽出
 - `activity_state` 候補抽出
 - `visual_observation` 要約
@@ -52,8 +52,8 @@ JSON payload は `<<<OTOMEKAIRO_SOURCE_PACK>>>` や `<<<OTOMEKAIRO_JSON_PAYLOAD>
 `persona_context` は候補集合、観測事実、ユーザー発話、根拠 ID、scope、memory_type、state_type を上書きする入力ではない。
 `expression_addon` は `expression_generation` にだけ渡し、補助 role の `persona_context` には入れない。
 
-外部送信の安全境界である `outbound_content_review` は例外とし、送信候補、送信先、tool metadata 以外の文脈を追加しない。
-この例外の入力と failure 境界は [outbound_content_review.md](outbound_content_review.md) を正とする。
+外部送信の安全境界である `pre_send_check` は例外とし、送信候補、送信先、tool metadata 以外の文脈を追加しない。
+この例外の入力と failure 境界は [pre_send_check.md](pre_send_check.md) を正とする。
 
 人物同一性は各 role の入力に含まれる構造化済みの `person_ref` で扱う。
 `people_context` は、選択済みの構造化文脈に現れる人物だけを `person_ref / display_name` の組で持つ。

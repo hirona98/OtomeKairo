@@ -195,7 +195,7 @@
           <option value="desktop">デスクトップ</option>
           <option value="camera">カメラ</option>
           <option value="mcp">MCP</option>
-          <option value="outbound-review">外向きレビュー</option>
+          <option value="pre-send-check">送信前チェック</option>
         </optgroup>
         <optgroup label="情報">
           <option value="api">API説明</option>
@@ -220,7 +220,7 @@
         <button type="button" class="settings-nav-button" data-tab="desktop">デスクトップ</button>
         <button type="button" class="settings-nav-button" data-tab="camera">カメラ</button>
         <button type="button" class="settings-nav-button" data-tab="mcp">MCP</button>
-        <button type="button" class="settings-nav-button" data-tab="outbound-review">外向きレビュー</button>
+        <button type="button" class="settings-nav-button" data-tab="pre-send-check">送信前チェック</button>
         <div class="settings-navigation-category">情報</div>
         <button type="button" class="settings-nav-button" data-tab="api">API説明</button>
       </nav>
@@ -1007,39 +1007,39 @@
             </fieldset>
           </section>
 
-          <section class="tab-page" data-page="outbound-review">
+          <section class="tab-page" data-page="pre-send-check">
             <fieldset class="settings-group">
-              <legend>レビュー用モデル</legend>
+              <legend>チェック用モデル</legend>
               <div class="settings-list">
                 <div class="setting-row">
-                  <label for="outbound-review-model">モデル:</label>
-                  <input id="outbound-review-model" class="field-width-long">
+                  <label for="pre-send-check-model">モデル:</label>
+                  <input id="pre-send-check-model" class="field-width-long">
                 </div>
                 <div class="setting-row">
-                  <label for="outbound-review-api-base">エンドポイントURL:</label>
-                  <input id="outbound-review-api-base">
+                  <label for="pre-send-check-api-base">エンドポイントURL:</label>
+                  <input id="pre-send-check-api-base">
                 </div>
                 <div class="setting-row">
-                  <label for="outbound-review-api-key">APIキー:</label>
+                  <label for="pre-send-check-api-key">APIキー:</label>
                   <div class="inline-control-row secret-field-controls">
-                    <input id="outbound-review-api-key" type="password" autocomplete="new-password">
+                    <input id="pre-send-check-api-key" type="password" autocomplete="new-password">
                     <button type="button" class="plain-button" data-secret-action="copy"
-                      data-secret-input="outbound-review-api-key" data-secret-label="外向きレビューのAPIキー">コピー</button>
+                      data-secret-input="pre-send-check-api-key" data-secret-label="送信前チェックのAPIキー">コピー</button>
                     <button type="button" class="plain-button" data-secret-action="paste"
-                      data-secret-input="outbound-review-api-key" data-secret-label="外向きレビューのAPIキー">上書き貼り付け</button>
+                      data-secret-input="pre-send-check-api-key" data-secret-label="送信前チェックのAPIキー">上書き貼り付け</button>
                   </div>
                 </div>
                 <div class="setting-row">
-                  <label for="outbound-review-reasoning-effort">推論の深さ:</label>
-                  <input id="outbound-review-reasoning-effort" class="field-width-medium">
+                  <label for="pre-send-check-reasoning-effort">推論の深さ:</label>
+                  <input id="pre-send-check-reasoning-effort" class="field-width-medium">
                 </div>
                 <div class="setting-row">
-                  <label for="outbound-review-max-output-tokens">最大出力トークン:</label>
-                  <input id="outbound-review-max-output-tokens" class="field-width-short" type="number" min="1">
+                  <label for="pre-send-check-max-output-tokens">最大出力トークン:</label>
+                  <input id="pre-send-check-max-output-tokens" class="field-width-short" type="number" min="1">
                 </div>
                 <div class="setting-row">
-                  <label for="outbound-review-timeout-seconds">タイムアウト（秒）:</label>
-                  <input id="outbound-review-timeout-seconds" class="field-width-short" type="number" min="1" step="1">
+                  <label for="pre-send-check-timeout-seconds">タイムアウト（秒）:</label>
+                  <input id="pre-send-check-timeout-seconds" class="field-width-short" type="number" min="1" step="1">
                 </div>
               </div>
             </fieldset>
@@ -1049,8 +1049,8 @@
                 <div class="setting-row setting-row-top">
                   <label>対象 MCP:</label>
                   <div class="console-control-with-hint">
-                    <div id="outbound-content-review-mcp-list" class="outbound-content-review-mcp-list"></div>
-                    <span class="field-hint">オンにすると、その MCP server の tool 呼び出し前に内容レビューを必須にします。投稿など外向き書き込み向けです。読み取り専用の MCP はオフで構いません。MCP server の追加・接続定義は MCP タブで行います。</span>
+                    <div id="pre-send-check-mcp-list" class="pre-send-check-mcp-list"></div>
+                    <span class="field-hint">オンにすると、その MCP server の tool 呼び出し前に送信前チェックを必須にします。投稿など外向き書き込み向けです。読み取り専用の MCP はオフで構いません。MCP server の追加・接続定義は MCP タブで行います。</span>
                   </div>
                 </div>
               </div>
