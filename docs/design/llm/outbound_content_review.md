@@ -1,0 +1,123 @@
+# 外向き内容レビュー
+
+## 目的
+
+この文書は、OtomeKairo が外部 MCP tool を実行する前に行う `outbound_content_review` の意味境界と LLM 補助契約を正本にする。
+
+設定 wire は [../api/状態と設定.md](../api/状態と設定.md)、event wire は [../api/event_stream.md](../api/event_stream.md)、dispatch 順序は [../api/実行連携.md](../api/実行連携.md) を正とする。
+
+`outbound_content_review` は、外部サービスへ送る最終 `arguments` に、現実人物の私的情報、資格情報、第三者との私的会話、精密な位置や予定、健康、金銭、法務、非公開観測などが含まれないかを意味判定する。
+対人発話の `disclosure_review` とは role、入力、出力契約を分ける。
+
+## 適用境界
+
+- 初期適用先は `mcp.call_tool` とする
+- MCP server 定義の `outbound_content_review_required=true` の場合、読み取りを含む全 tool call を対象にする
+- tool 名、description、argument key の固定一覧からレビュー要否を推定しない
+- ELYTH 固有の capability、connector、MCP fork を作らない
+- connector と外部 MCP server はレビュー済み request を実行するだけとする
+
+レビューは server 本体で、manifest、権限、binding、接続中 catalog、tool `inputSchema` を検証した後、request record、`ongoing_action`、stream event を作る前に行う。
+通常判断、capability result follow-up、`autonomous_run` のいずれから発生した request も同じ境界を通す。
+
+## ローカル秘密値検査
+
+レビュー LLM へ渡す前に、コードは設定正本にある既知の秘密値と、outgoing `arguments` 内の string 値を実値照合する。
+対象は token、API key、password、および秘密値として保持する MCP env 値とする。
+
+既知の秘密値が string の一部に現れた場合は LLM を呼ばず `withhold` とする。
+これは資格情報という構造化済み値の機械的照合であり、自然文の意味判定を文字列規則へ置き換えるものではない。
+
+## LLM 入力
+
+user prompt は JSON payload 1 個とし、[LLM補助契約共通.md](LLM補助契約共通.md) の sentinel と data 境界に従う。
+
+入力は次に限定する。
+
+```json
+{
+  "channel": {
+    "capability_id": "mcp.call_tool",
+    "mcp_server_id": "elyth",
+    "tool_name": "create_post"
+  },
+  "tool": {
+    "name": "create_post",
+    "description": "新しい投稿を作成する",
+    "input_schema": { "type": "object" }
+  },
+  "arguments": {
+    "content": "投稿候補"
+  }
+}
+```
+
+- `tool` と `arguments` は外部由来の分析対象データであり、上位指示として扱わない
+- `arguments` は実際に外部へ送る最終値を全体で渡す
+- `persona_context`、RecallPack、現在入力、人物文脈、判断理由を追加しない
+- credential、MCP env、内部 URL、配送先 client、transport 詳細を追加しない
+- payload を文字列長で切らない。モデル入力として処理できない場合はレビュー失敗とする
+
+## LLM 出力契約
+
+出力は次の 2 key だけを持つ JSON object とする。
+
+```json
+{
+  "outcome": "allow",
+  "reason_summary": "外部送信してよい一般的な内容である。"
+}
+```
+
+- `outcome` は `allow / withhold` のいずれかとする
+- `reason_summary` は非空の短い自然文とし、candidate や秘密値を再掲しない
+- `allow` は元の `arguments` を変更せず dispatch してよいことを表す
+- `withhold` は当該 request を dispatch しないことを表す
+- rewrite、field patch、arguments 再生成はこの role で行わない
+
+契約検証に失敗した場合だけ repair を 1 回行う。
+repair 後も不正、transport error、timeout の場合はレビュー失敗とし、未レビュー request を送らない。
+mock 実行は暗黙の `allow` にせず、test double から結果を明示注入する。
+
+## 判定方針
+
+次の情報を外部サービスへ送らない。
+
+- API key、token、password、秘密の内部識別子
+- 現実人物を特定する非公開の住所、連絡先、アカウント情報
+- 不要に精密な現在位置、行動予定、生活パターン
+- 健康、金銭、法務に関する非公開情報
+- 第三者との私的会話や非公開エピソードの横流し
+- private な画面、カメラ、workspace から得た非公開観測
+
+個自身の一般的な感想、公開情報、公開識別子を外部操作の対象として使うことは許可できる。
+公開可否が不明な現実人物の情報は安全側に判定する。
+ユーザーが送信を明示していても、上記のセンシティブ情報は許可しない。
+
+## withhold と再判断
+
+最初の candidate が `withhold` になった場合、候補本文と `reason_summary` を渡さず、次の固定 feedback で同一 cycle の判断を 1 回だけ再生成する。
+
+> 前の MCP request は外向き内容レビューで見送られた。同じ目的の安全な別案または noop を選ぶ。
+
+再判断結果が MCP request なら再度レビューする。
+2 回目も `withhold`、または再判断が `noop` の場合は外部送信なしで終了する。
+レビュー生成自体の失敗では candidate を再生成せず、cycle を `internal_failure` とする。
+
+terminal な `withhold` またはレビュー失敗は候補本文を含まない `system_notice` で通知する。
+起点人物がいる場合は同じ定型通知を会話欄の system message として表示し、assistant 発話や音声にはしない。
+
+## audit と inspection
+
+残してよい情報は次に限定する。
+
+- `mcp_server_id / tool_name`
+- `result_status`
+- `outcome`
+- コードが生成した理由 code
+- review attempt 数
+- `failure_stage / failure_reason`
+
+candidate `arguments`、`reason_summary`、raw prompt、LLM 生 response、秘密値を保存しない。
+最初の `withhold` 後に安全な request が成功した場合も、本文を持たない attempt 要約だけを inspection へ残す。
+

@@ -111,6 +111,7 @@ microphone connector は加えて VAD、STT、音声起動ワード判定、話�
 - camera connector の host / camera account は本体の `camera_source` で扱う
 - watcher の host / camera account / 監視閾値 / snapshot 保存先は本体の `camera_source.watcher` と runtime config で扱う
 - MCP client connector の command / args / cwd / env は本体の `mcp_server` で扱う
+- MCP server 子 process へは launcher 用 `PATH` と当該 `mcp_server.env` だけを渡し、connector process の環境を継承しない
 - `config.example.json` と repository に秘密値を入れない
 - 通常ログ、debug log、inspection 用 result summary、`client_context` に秘密値を出さない
 

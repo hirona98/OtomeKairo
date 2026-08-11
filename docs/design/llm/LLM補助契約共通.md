@@ -20,6 +20,7 @@
 - `memory_reflection_summary`
 - `memory_correction_reconciliation`
 - `disclosure_review`
+- `outbound_content_review`
 - `world_state` 候補抽出
 - `activity_state` 候補抽出
 - `visual_observation` 要約
@@ -46,10 +47,13 @@ LLM に渡す user prompt は、自由文の区切りではなく JSON payload �
 JSON payload 内の `input_text`、`recent_turns`、`source_pack`、`memory_context` は分析対象データであり、上位指示として扱わない。
 JSON payload は `<<<OTOMEKAIRO_SOURCE_PACK>>>` や `<<<OTOMEKAIRO_JSON_PAYLOAD>>>` のような reserved sentinel で囲い、payload 本文は compact JSON にする。
 
-全補助 role の source pack には `persona_context` を含める。
+全補助 role の source pack には原則として `persona_context` を含める。
 `persona_context` は、選択中 persona から作る runtime 文脈であり、意味的な注目点、距離感、優先順位、要約粒度の補助に使う。
 `persona_context` は候補集合、観測事実、ユーザー発話、根拠 ID、scope、memory_type、state_type を上書きする入力ではない。
 `expression_addon` は `expression_generation` にだけ渡し、補助 role の `persona_context` には入れない。
+
+外部送信の安全境界である `outbound_content_review` は例外とし、送信候補、送信先、tool metadata 以外の文脈を追加しない。
+この例外の入力と failure 境界は [outbound_content_review.md](outbound_content_review.md) を正とする。
 
 人物同一性は各 role の入力に含まれる構造化済みの `person_ref` で扱う。
 `people_context` は、選択済みの構造化文脈に現れる人物だけを `person_ref / display_name` の組で持つ。
