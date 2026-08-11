@@ -2,268 +2,78 @@
 
 ## 目的
 
-この文書は、Webカメラ、各種センサ、外部サービス、物理デバイスを OtomeKairo へ接続する外部接続 process の配置方針を定める。
+この文書は、外部接続 process（connector / watcher）をどの repository 階層に置き、OtomeKairo 本体とどこで分けるかを正本にする。
 
-capability の意味境界、manifest、availability、decision view は [../capability/capability_manifest.md](../capability/capability_manifest.md) を正とする。
-capability request / result の wire 契約は [../api/実行連携.md](../api/実行連携.md) を正とする。
-この文書は、connector と watcher の実装をどの repository 階層に置き、OtomeKairo 本体とどこで分けるかを正本にする。
+capability の意味境界は [../capability/capability_manifest.md](../capability/capability_manifest.md)、wire は [../api/実行連携.md](../api/実行連携.md) を正とする。
+各 connector / watcher の起動手順と機器固有の既定値は、対象ディレクトリの `README.md` を正とする。
 
 ## 基本方針
 
-外部接続 connector は、OtomeKairo 本体とは別の実行 client として扱う。
-OtomeKairo 本体は capability manifest、判断、状態、記憶、inspection の正本を持つ。
-capability connector は接続先の機器、サービス、OS API を扱い、capability request を実行し、result を返す。
-microphone connector は capability binding を持たず、OS audio API から取得した PCM を音声入力 stream へ送る。
-外部 watcher は、OtomeKairo 本体とは別の実行 process として扱う。
-watcher は軽量な外部監視を行い、変化時に `/api/wake` へ参照付き wake を送る。
-watcher は capability request を受けず、hello を送らず、capability binding 候補を持たない。
-
-最初の connector 群はこの repository 内の `connectors/` 配下に置く。
-最初の watcher 群はこの repository 内の `watchers/` 配下に置く。
-connector 実装を `src/otomekairo/` 配下へ入れない。
-watcher 実装を `src/otomekairo/` 配下へ入れない。
-`src/otomekairo/` は OtomeKairo server 本体の package とする。
-
-外部接続 connector は capability manifest を定義しない。
-connector は `hello.caps` と必要な source metadata を送る。
-server は既知の manifest、binding、state、権限から availability と dispatch 先を決める。
-camera connector は機器接続に必要な host と camera account を OtomeKairo の runtime config API から取得する。
-camera connector は host と camera account をローカル設定の正本として持たない。
-watcher は機器接続に必要な host と camera account、監視閾値、snapshot 保存先を OtomeKairo の runtime config API から取得する。
-watcher は host、camera account、監視閾値をローカル設定の正本として持たない。
+- 外部接続 connector は OtomeKairo 本体とは別の実行 client である
+- OtomeKairo 本体は capability manifest、判断、状態、記憶、inspection の正本を持つ
+- capability connector は接続先を扱い、capability request を実行し result を返す
+- microphone connector は capability binding を持たず、PCM を音声入力 stream へ送る
+- watcher は軽量外部監視を行い、変化時に `/api/wake` へ参照付き wake を送る。capability request / hello / binding を持たない
+- connector / watcher 実装を `src/otomekairo/` に入れない
+- 最初の connector 群は `connectors/`、watcher 群は `watchers/` に置く
+- connector は capability manifest を定義しない。`hello.caps` と必要な source metadata だけを送る
+- camera connector / watcher の host・camera account・監視閾値は OtomeKairo の runtime config を正本とし、ローカル設定の正本にしない
 
 ## repository 配置
 
-外部接続 connector は次の配置を基準にする。
-
 ```text
-connectors/
-  microphone/
-    pyproject.toml
-    README.md
-    config.example.json
-    src/
-      otomekairo_microphone_connector/
-        __main__.py
-        config.py
-        stream.py
-        capture.py
-  webcam/
-    pyproject.toml
-    README.md
-    config.example.json
-    src/
-      otomekairo_webcam_connector/
-        __main__.py
-        config.py
-        stream.py
-        capture.py
+connectors/<name>/
+  pyproject.toml
+  README.md
+  config.example.json
+  src/otomekairo_<name>_connector/
+
+watchers/<name>/
+  pyproject.toml
+  README.md
+  src/otomekairo_<name>_watcher/
 ```
 
-外部 watcher は次の配置を基準にする。
+- connector / watcher ごとに独立した `pyproject.toml` を置く
+- 固有依存を repository root の `pyproject.toml` へ入れない
+- 2 個以上の connector で同じ処理が継続して必要になった段階で共通 package の要否を判断する
+- 共通 package を作る場合も、server 本体 package へ connector 実装依存を入れない
 
-```text
-watchers/
-  tapo_c220/
-    pyproject.toml
-    README.md
-    src/
-      otomekairo_tapo_c220_watcher/
-        __main__.py
-        config.py
-        app.py
-        capture.py
-        diff.py
-```
+初期対象の配置は次である。
 
-connector ごとに独立した `pyproject.toml` を置く。
-watcher ごとに独立した `pyproject.toml` を置く。
-connector 固有の依存関係を repository root の `pyproject.toml` へ入れない。
-watcher 固有の依存関係を repository root の `pyproject.toml` へ入れない。
-OpenCV、デバイス SDK、外部サービス SDK、OS 固有ライブラリは対象 connector の package 依存に閉じる。
-軽量 CV、デバイス SDK、OS 固有ライブラリは対象 watcher の package 依存に閉じる。
+| 種別 | パス | 役割の要約 |
+| --- | --- | --- |
+| connector | `connectors/microphone/` | OS audio から PCM を `/api/audio/stream` へ送る |
+| connector | `connectors/tapo_c220/` | camera source の `vision.capture` / `camera.ptz` |
+| connector | `connectors/mcp_client/` | 許可済み MCP tool を `mcp.call_tool` として実行する |
+| watcher | `watchers/tapo_c220/` | 軽量 CV 監視し、変化時に参照付き `/api/wake` を送る |
 
-2 個以上の connector で同じ処理が継続して必要になった段階で、共通 package の要否を判断する。
-共通 package を作る場合も、OtomeKairo server 本体 package へ connector 実装依存を入れない。
+Webカメラは新しい capability id にせず、`vision.capture` の `VisionSource(kind=camera, source_owner=self)` として登録する。
+制御可能な pan / tilt / zoom は `camera.ptz` とする（[../capability/camera_ptz.md](../capability/camera_ptz.md)）。
+音声入力の意味規則は [../audio/音声入力と話者識別.md](../audio/音声入力と話者識別.md)、wire は [../api/audio_stream.md](../api/audio_stream.md) を正とする。
 
 ## 簡易常駐起動
 
-専用 PC で運用する場合、repository を `/opt/OtomeKairo` に固定し、OtomeKairo server、microphone connector、Tapo C220 connector、Tapo C220 watcher、MCP client connector を単一の systemd service lifecycle でまとめて起動する。
-これは運用上の process 管理単位であり、connector の実行 client 境界、watcher の外部監視境界、hello、capability request / result、runtime config API、wake reference API の意味境界は変更しない。
+専用 PC では repository を `/opt/OtomeKairo` に固定し、server と connector / watcher を単一の systemd service lifecycle でまとめて起動してよい。
+これは運用上の process 管理単位であり、client 境界、hello、capability request / result、runtime config API、wake reference API の意味境界は変えない。
 
-この単一 service は、server を `0.0.0.0:55601` で listen させ、同一 PC 上の connector と watcher は `https://127.0.0.1:55601` へ接続する。
-どれか 1 つの process が終了した場合は service 全体を終了させ、systemd の restart に任せる。
-microphone connector は音声入力が無効でも idle process として起動する。
-camera source または MCP server の runtime config が未登録の場合、connector は起動しない。
-watcher runtime config が未登録または無効の場合、watcher は起動しない。
-
-## Webカメラ connector
-
-Webカメラは新しい capability id として定義しない。
-Webカメラは `vision.capture` の `VisionSource(kind=camera)` として登録する。
-camera source は OtomeKairo の視覚なので、採用した camera source は `source_owner=self` とし、`camera_source.enabled=true` のとき定期思考処理の観測対象に含める。
-
-Webカメラ connector は、server から `vision.capture_request` を受けたときだけ still image を 1 枚取得する。
-connector は常時録画、常時監視、独自周期での撮影を行わない。
-定期観測は server の定期思考処理が有効な camera source を解決し、`vision.capture` として発行する。
-制御可能な camera の pan / tilt / zoom は `camera.ptz` として扱う。
-`camera.ptz` の意味境界は [../capability/camera_ptz.md](../capability/camera_ptz.md) を正とする。
-privacy mode は connector capability として実装しない。
-
-Webカメラ connector の hello は次の形を基準にする。
-
-```json
-{
-  "type": "hello",
-  "client_id": "webcam-connector-main",
-  "caps": [
-    { "id": "vision.capture", "version": "1" }
-  ],
-  "vision_sources": [
-    {
-      "vision_source_id": "vision_source:Webカメラ",
-      "kind": "camera",
-      "label": "Webカメラ",
-      "aliases": ["カメラ", "Webカメラ", "部屋のカメラ"],
-      "default_for": ["camera"],
-      "capability_id": "vision.capture",
-      "required_permissions": ["observe_vision", "observe_camera"],
-      "source_owner": "self"
-    }
-  ]
-}
-```
-
-`vision_source_id` は `camera_source.display_name` から生成する。
-複数の Webカメラを扱う場合は、区別できる `display_name` を `camera_source` 設定定義に保存する。
-source が一意に定まらない状態で connector は登録しない。
-固定 Webカメラのように向きや画角を制御できない source は `supported_controls` を出さない。
-
-## Tapo C220 connector
-
-Tapo C220 connector は、制御可能な camera connector の初期対象である。
-C220 は `vision.capture` の `VisionSource(kind=camera, source_owner=self)` として登録し、pan / tilt は同じ source の `camera.ptz` として登録する。
-同じ物理 camera に対して、観測用 source id と制御用 source id を分けない。
-この repository 内の初期実装は `connectors/tapo_c220/` に置く。
-
-C220 connector の hello は次の形を基準にする。
-
-```json
-{
-  "type": "hello",
-  "client_id": "tapo-c220-connector-main",
-  "caps": [
-    { "id": "vision.capture", "version": "1" },
-    { "id": "camera.ptz", "version": "1" }
-  ],
-  "vision_sources": [
-    {
-      "vision_source_id": "vision_source:C220",
-      "kind": "camera",
-      "label": "C220",
-      "aliases": ["カメラ", "部屋のカメラ", "C220"],
-      "default_for": ["visual", "camera"],
-      "capability_id": "vision.capture",
-      "required_permissions": ["observe_vision", "observe_camera"],
-      "source_owner": "self",
-      "supported_controls": {
-        "camera.ptz": {
-          "operations": ["move_up", "move_down", "move_left", "move_right"],
-          "amounts": ["small", "medium"]
-        }
-      }
-    }
-  ]
-}
-```
-
-C220 の capture backend は `rtsp`、control backend は `onvif` を初期基準にする。
-connector は `vision.capture_request` では RTSP から still image を 1 枚取得し、`camera.ptz_request` では `operation / amount` を ONVIF `ContinuousMove` と `Stop` へ変換する。
-`operation` は現在の映像に対する相対方向として扱い、ONVIF の座標符号と設置向きの対応は connector 実装の既定値で吸収する。
-C220 connector の初期 `operation_vectors` は実機で確認した ONVIF `ContinuousMove` の符号に合わせる。
-ONVIF port、移動時間、設置向きの対応は connector 実装の既定値で扱う。
-pan / tilt velocity は `1.0` に固定する。
-server、decision view、inspection へ角度や生 API 名を出さない。
-C220 は物理ズームと ONVIF Zoom capability を持たないため、zoom 操作を `supported_controls` に含めない。
-
-C220 の host と camera account は OtomeKairo の `camera_source` 設定定義で保持する。
-connector は起動時に `GET /api/config/connectors/{client_id}/runtime-config` を呼び、自分に割り当てられた C220 の runtime config を取得する。
-OtomeKairo access token は API の `console_access_token` とする。
-connector は明示設定または環境変数の token を優先し、未設定の場合は同一 PC 内の `config.db` から `console_access_token` を読む。
-`console_access_token` が未発行の場合は bootstrap API で初回発行する。
-host、camera account、OtomeKairo access token を repository、docs のサンプル、debug log、inspection、capability result に保存しない。
-privacy mode、録画、検知設定、アラーム、再起動は C220 connector の OtomeKairo capability として実装しない。
-失敗時は `camera.ptz` result に `status=failed` と短い `error` を返す。
-
-## Tapo C220 watcher
-
-Tapo C220 watcher は、C220 の RTSP 映像を軽量 CV で高頻度監視し、画像差分が閾値を超えたときだけ OtomeKairo の `/api/wake` へ参照付き wake を送る外部 process である。
-この repository 内の初期実装は `watchers/tapo_c220/` に置く。
-
-watcher は起動時と監視中に `GET /api/config/watchers/{watcher_id}/runtime-config` を呼び、自分に割り当てられた camera source、監視閾値、snapshot 保存先を取得する。
-watcher は `config.local.json` を使わない。
-watcher は `config.db` から `console_access_token` と有効な `watcher_id` を読む。
-有効な watcher が複数存在する場合は `OTOMEKAIRO_WATCHER_ID` で対象を明示する。
-server URL、TLS 検証、再接続間隔、token 明示上書きは環境変数で扱う。
-C220 の host、camera account、監視閾値、snapshot 保存先は OtomeKairo 本体の `camera_source.watcher` と runtime config が正本である。
-
-watcher は RTSP から frame を取得し、縮小済み grayscale 画像の前回差分を計算する。
-差分比が `motion_ratio_threshold` 以上で、前回 wake から `min_wake_interval_seconds` 以上経過している場合、watcher は snapshot を `snapshot_dir` へ保存し、`/api/wake` に `reference.uri` として snapshot path を渡す。
-watcher は snapshot 画像本体を wake payload に埋め込まない。
-watcher は camera account、OtomeKairo access token、内部 URL の秘密部分を repository、docs のサンプル、debug log、wake payload に保存しない。
-
-## 汎用 MCP client connector
-
-MCP client connector は、stdio MCP server を OtomeKairo の `mcp.call_tool` capability として接続する汎用 connector である。
-e-Stat は MCP server 設定例の 1 つとして扱い、OtomeKairo server 本体へ e-Stat 固有コードを入れない。
-この repository 内の初期実装は `connectors/mcp_client/` に置く。
-
-MCP client connector は起動時に `GET /api/config/connectors/{client_id}/runtime-config` から設定済み MCP server を取得する。
-MCP client connector は取得した MCP server を `initialize` し、`tools/list` の結果を `hello.mcp_servers` へ載せる。
-server は `mcp_server_id / tool_name / inputSchema` を判断 view、inspection、dispatch 検証に使う。
-server は hello 登録時と dispatch 時に保存済み MCP server の `enabled` を照合する。
-connector は有効な MCP server への `mcp.call_tool_request` を受けたとき MCP `tools/call` を実行し、`POST /api/capability/result` へ result を返す。
-
-e-Stat の接続は `PUT /api/config/mcp-servers/e-stat` で次の設定を登録する。
-
-```json
-{
-  "enabled": true,
-  "command": "uvx",
-  "args": ["estat-mcp-server"],
-  "cwd": null,
-  "env": {
-    "E_STAT_APP_ID": "..."
-  }
-}
-```
-
-`E_STAT_APP_ID` は設定値として OtomeKairo 本体に保持する。
-MCP server の API key、token、command env、内部 URL の秘密部分を `hello`、result、inspection、通常ログへ入れない。
-MCP server の tool 名、description、input schema は capability manifest の正本ではなく、接続中 MCP server の tool catalog として扱う。
-
-## microphone connector
-
-microphone connector の初期実装は `connectors/microphone/` に置く。
-Ubuntu の PortAudio / ALSA input device を列挙し、server へ device catalog を送る。
-server が選択した device だけを開き、PCM16LE 16000 Hz mono 20 ms frame を `/api/audio/stream` へ送る。
-VAD、STT、音声起動ワード判定、話者識別、話者登録の完成判定は server が実行する。
-音声入力の意味規則は [../audio/音声入力と話者識別.md](../audio/音声入力と話者識別.md)、wire は [../api/audio_stream.md](../api/audio_stream.md) を正とする。
+- server は `0.0.0.0:55601` で listen し、同一 PC 上の connector / watcher は `https://127.0.0.1:55601` へ接続する
+- どれか 1 つの process が終了した場合は service 全体を終了し、systemd の restart に任せる
+- microphone connector は音声入力が無効でも idle process として起動する
+- camera source または MCP server の runtime config が未登録の場合、対象 connector は起動しない
+- watcher runtime config が未登録または無効の場合、watcher は起動しない
 
 ## connector の責務
 
-connector は少なくとも次を担う。
+担うこと:
 
-- server への認証済み接続
-- `GET /api/events/stream` への接続維持
-- 起動時 hello による capability binding 候補の通知
-- source metadata の通知
-- server から届く capability request の受信
-- 対象機器または外部サービスの実行
+- server への認証済み接続と `GET /api/events/stream` の維持
+- 起動時 hello による capability binding 候補と source metadata の通知
+- capability request の受信、対象機器 / 外部サービスの実行
 - `POST /api/capability/result` への result 返却
-- 接続、権限、デバイス取得失敗の短い error 返却
+- 接続・権限・デバイス取得失敗の短い error 返却
 
-connector は次を担わない。
+担わないこと:
 
 - capability manifest の定義
 - 判断結果の生成
@@ -272,32 +82,22 @@ connector は次を担わない。
 - OtomeKairo server の設定定義編集
 - LLM role、API key、記憶集合の管理
 
-microphone connector は上記に加えて、次を担わない。
-
-- VAD
-- STT
-- 音声起動ワード判定
-- 話者 embedding の生成、保存、照合
-- `person_ref` と `interaction_ref` の決定
-- raw音声の保存
+microphone connector は加えて VAD、STT、音声起動ワード判定、話者 embedding の生成・保存・照合、`person_ref` / `interaction_ref` の決定、raw 音声の保存を担わない。
 
 ## watcher の責務
 
-watcher は少なくとも次を担う。
+担うこと:
 
-- server への認証済み HTTP 接続
-- `GET /api/config/watchers/{watcher_id}/runtime-config` による runtime config 取得
-- 対象機器からの軽量観測取得
-- ローカル画像差分などの軽量判定
-- wake reference snapshot の保存
-- 変化時の `POST /api/wake` 送信
+- 認証済み HTTP 接続と `GET /api/config/watchers/{watcher_id}/runtime-config` による runtime config 取得
+- 対象機器からの軽量観測とローカル判定
+- wake reference snapshot の保存と、変化時の `POST /api/wake`
 - snapshot の世代管理
 
-watcher は次を担わない。
+担わないこと:
 
 - capability manifest の定義
-- hello による capability binding 候補の通知
-- server からの capability request 受信
+- hello による binding 候補通知
+- capability request の受信
 - 判断結果の生成
 - raw 動画の常時録画
 - OtomeKairo server の設定定義編集
@@ -305,30 +105,24 @@ watcher は次を担わない。
 
 ## 設定と秘密情報
 
-connector のローカル設定は server URL、TLS 検証、再接続間隔、`client_id`、token 明示上書きなど、OtomeKairo へ接続するための項目に限定する。
-microphone device、物理入力の有効状態、応答先 client は OtomeKairo 本体の `microphone_settings` に置く。
-watcher はローカル設定ファイルを持たず、`config.db` から `console_access_token` と有効な `watcher_id` を読む。
-watcher の server URL、TLS 検証、再接続間隔、token 明示上書きは環境変数で扱う。
-camera connector の host と camera account は OtomeKairo 本体の `camera_source` 設定定義で扱う。
-watcher の host、camera account、監視閾値、snapshot 保存先は OtomeKairo 本体の `camera_source.watcher` と runtime config で扱う。
-MCP client connector の command、args、cwd、env は OtomeKairo 本体の `mcp_server` 設定定義で扱う。
-`config.example.json` には秘密値を入れない。
-実 token、API key、password、内部 URL の秘密部分を repository に保存しない。
-
-connector は通常ログ、debug log、inspection 用 result summary に秘密値を出さない。
-server へ返す `client_context` には、判断と inspection に必要な短い状態だけを入れる。
-credential、内部 URL、token、raw device path のうち秘匿が必要な値を `client_context` に入れない。
+- connector のローカル設定は server URL、TLS 検証、再接続間隔、`client_id`、token 明示上書きなど接続項目に限定する
+- microphone device、物理入力の有効状態、応答先 client は本体の `microphone_settings` に置く
+- watcher はローカル設定ファイルを持たず、`config.db` から `console_access_token` と有効な `watcher_id` を読む。server URL 等は環境変数で扱う
+- camera connector の host / camera account は本体の `camera_source` で扱う
+- watcher の host / camera account / 監視閾値 / snapshot 保存先は本体の `camera_source.watcher` と runtime config で扱う
+- MCP client connector の command / args / cwd / env は本体の `mcp_server` で扱う
+- `config.example.json` と repository に秘密値を入れない
+- 通常ログ、debug log、inspection 用 result summary、`client_context` に秘密値を出さない
 
 ## 別 repository への切り出し基準
 
-connector は、この repository 内で server との契約整合を確認する段階から始める。
 次の状態になった connector は別 repository への切り出し対象にする。
 
-- 配布、更新、権限付与の単位が OtomeKairo server と分かれる
+- 配布、更新、権限付与の単位が server と分かれる
 - OS 固有依存や大型 SDK により server 開発環境から分離する必要がある
 - 複数の実行端末へ個別配布する
-- connector の release cycle が server と分かれる
+- release cycle が server と分かれる
 - 外部サービス資格や運用手順を connector 単位で管理する
 
-別 repository へ切り出した後も、server 側の capability manifest と wire 契約はこの repository の docs を正本にする。
-この repository には、参照実装または起動手順へのリンクだけを残す。
+切り出し後も、server 側の capability manifest と wire 契約はこの repository の docs を正本にする。
+この repository には参照実装または起動手順へのリンクだけを残す。

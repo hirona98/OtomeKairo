@@ -6,106 +6,31 @@
 path、method、認証、request / response、error code はこのフォルダで定める。
 意味境界、状態遷移、capability、記憶、LLM role の規則は対応する design 文書を正とする。
 
-API 仕様は次のように分ける。
+| 文書 | 内容 |
+| --- | --- |
+| [共通ルール.md](共通ルール.md) | 共通ルール、認証、共通エラー |
+| [bootstrapと入力.md](bootstrapと入力.md) | bootstrap、会話入力、`wake` |
+| [event_stream.md](event_stream.md) | `events/stream`、capability binding 提示 |
+| [audio_stream.md](audio_stream.md) | 音声 PCM stream、STT/TTS トグル、話者管理 |
+| [状態と設定.md](状態と設定.md) | `status`、`config`、設定定義の read / replace / delete |
+| [列挙とinspection.md](列挙とinspection.md) | `catalog`、`docs`、`inspection`、`logs/stream` |
+| [実行連携.md](実行連携.md) | capability 実行要求・結果・state 操作 |
 
-- [共通ルール.md](共通ルール.md)
-  - 共通ルール
-  - 認証の基本
-  - 共通エラー
-- [bootstrapと入力.md](bootstrapと入力.md)
-  - bootstrap
-  - 会話入力
-  - `wake` API起床要求
-- [event_stream.md](event_stream.md)
-  - `events/stream`
-  - 接続 client の capability binding 提示
-- [audio_stream.md](audio_stream.md)
-  - microphone connector、CocoroConsole、Web microphone の PCM stream
-  - Web 入力 session と実効入力状態
-  - STT 運用トグル（`stt-enabled`）
-  - TTS 運用トグル（`tts-enabled`）
-  - input device catalog
-  - 話者登録と話者管理
-- [状態と設定.md](状態と設定.md)
-  - `status`
-  - `config`
-  - 設定定義の read / replace / delete
-- [列挙とinspection.md](列挙とinspection.md)
-  - `catalog`
-  - `docs`
-  - `inspection`
-  - capability availability の確認
-  - `logs/stream`
-- [実行連携.md](実行連携.md)
-  - capability 実行要求
-  - capability 実行結果
-  - capability binding と HTTP / WebSocket 通信仕様
-  - capability state 操作
+## ブラウザ UI 配信面
 
-## ブラウザUI配信面
-
-`GET /ui/` とその静的 asset は、同一 HTTPS server から配信するブラウザ UI である。
+`GET /ui/` とその静的 asset は同一 HTTPS server から配信するブラウザ UI である。
 `/ui/` は API wire 契約の正本ではなく、既存 `/api/...` endpoint を呼び出す client 実装として扱う。
-設定パネルの見た目とフォームマークアップ規約は [../integration/WebUI設定フォーム規約.md](../integration/WebUI設定フォーム規約.md) を正とする。
-通常画面の見た目規約は [../integration/WebUI通常画面規約.md](../integration/WebUI通常画面規約.md) を正とする。
 `GET /` は `/ui/` へリダイレクトする。
 `/ui/api/...` はブラウザ UI 専用の同一 server 内部呼び出し面であり、外部接点向け API として扱わない。
-ブラウザ UI は `/ui/api/conversation` を通じて既存の会話入力処理を呼び出す。
-ブラウザ UI はブラウザstorageへ永続化した `person_ref / interaction_ref` と、
-OtomeKairo設定の `selected_conversation_display_name_id` から解決した表示名を `interaction_context` として送る。
-ブラウザ UI は `/ui/api/config/...` を通じて既存設定操作を呼び出す。
-確認系 UI は次の 3 つに揃える（見方の正本は [../runtime/デバッグ可能性.md](../runtime/デバッグ可能性.md)）。
-
-- **いま**: メイン画面左パネル。`/ui/api/inspection/current-state` などの要約
-- **判断**: `GET /ui/cycles`。`/ui/api/inspection/cycle-summaries` と `/ui/api/inspection/cycles/{cycle_id}` および `cognitive-context`
-- **ログ**: `GET /ui/logs`。`/ui/api/logs/stream` で `debug_log` を live 購読
-
-`GET /ui/logs` と `GET /ui/cycles` は会話 UI とは別の専用画面である。
-`/ui/api/logs/stream` と `/ui/api/inspection/cycles/...` は server が保持する `console_access_token` で認可し、token をブラウザへ返さない。
-`/ui/api/logs/stream` は `Origin` と `Host` が一致する同一 origin の接続だけを受理する。
-ログの wire は `GET /api/logs/stream`、判断詳細の wire は `GET /api/inspection/cycles/...` と同じであり、正本は [列挙とinspection.md](列挙とinspection.md) とする。
-メイン画面 topbar の「状態」メニューから、いま / 判断 / ログへ辿れる。
-ナビは次の分類とする。
-
-- 表現: `アバター`
-- 入力: `会話入力`
-- 人格と記憶: `人格設定`、`モデル`、`記憶`
-- 自律動作: `定期思考`（本体とデスクトップ観測・カメラ観測）、`Watcher`
-- 接続: `デスクトップ`、`カメラ`、`MCP`
-- 情報: `API説明`
-
-設定編集の役割は次のように分ける。
-
-- Web UI: 人格（本文・表現補助・音声起動ワード）、モデル、記憶、会話入力（呼ばれ方・STT 詳細）、定期思考（思考前観測を含む）、Watcher、デスクトップ取得方針、カメラ接続、MCP、API説明、アバター音声を含む本体設定。アバターの VRM は最終接続端末の現在値を読み取り専用で表示する
-- CocoroConsole: 表示、アバター（プリセットと VRM）、モーション、マイク（入力元と Console デバイス）、ライセンス。メイン画面のマイクボタンは `stt.enabled`、Speaker ボタンは `tts.enabled` の運用トグルであり、デスクトップ観測と並べる。音声合成 engine 詳細と音声起動ワードは Web UI で編集する
-
-アバターの VRM は、OtomeKairo が保持する `console_client_settings` の現在値を Web UI に disabled で表示する。表示・モーション・VRM の編集は CocoroConsole から端末設定 API へ保存する。
-`定期思考` は判断機会の有効化・間隔・発話頻度に加え、思考前のデスクトップ観測とカメラ観測の on/off を持つ。カメラの host や account など接続定義は `接続 → カメラ` に置く。
-ブラウザ UI は `/ui/api/docs` を通じて `GET /api/docs` と同じAPI説明を表示し、`console_access_token` をブラウザへ返さない。
-デスクトップ取得方針（idle スキップ・除外タイトル）と定期思考のデスクトップ観測 on/off は、CocoroConsole 未接続でも Web UI から編集できる。
-最終接続端末があるときはその端末の `desktop_capture` を編集し、一度も接続していない間は `desktop_capture_defaults` を編集する。初回 connect で端末設定の初期 `desktop_capture` に渡す。
-`vision.capture_request` の実配送は、event stream 上に desktop vision source がある接続中だけ行う。未接続では request を送らず `source_unavailable` とする。
-モデル指定値と VRM は Web UI へ現在値を無効表示する。
-表示・モーションの通常編集は CocoroConsole から端末設定 API へ保存する。
-Web UI のアバター複製では、最終接続端末の `avatar_presentations` も同じ内容で複製し、設定保存時に `PATCH /ui/api/config/console-clients/{client_id}` へ含めて永続化する。
-最後に接続した端末が存在しない場合、VRM など端末固有の表示設定欄だけを無効にし、VRM 表示設定の複製対象も持たない。
-記憶の `記憶複製` は client 下書きとして保持し、適用時に `POST /ui/api/config/memory-sets/clone` を呼んでから `editor-state` を保存する。
-ブラウザ UI は `/ui/api/config/avatar-speech/editor-state` を通じて、アバターごとの STT / TTS と保存するマイク入力元を編集する。
-ブラウザ UI は保存済み入力元を通常画面へ表示し、マイクアイコンで `stt.enabled`、隣のスピーカーアイコンで `tts.enabled` をトグルする。表示の正本は `audio_runtime_state.stt_enabled` / `tts_enabled` とする。`input_source=web_microphone` のときだけ STT ON に合わせて Web 入力 session とブラウザ capture を開始し、STT OFF または session 終了で capture を止める。`local_microphone` / `console_microphone` では STT トグルのみ行い、応答先の Web 入力 session は mic 操作に混ぜない。音声状態は statusbar に表示する。
-ブラウザ UI はVAD、STT、音声起動ワード判定、話者識別を実行しない。
-ブラウザ UI は `/ui/api/audio/...` を通じて input device 確認と話者管理を行う。
-ブラウザ UI は TTS providerへ接続せず、OtomeKairoから受信した`assistant_audio`のWAVをブラウザ音声出力で直接再生する。
-ブラウザの直接会話入力はOtomeKairoの選択中 `conversation_display_name` 定義の表示名を
-`participants[].display_name` に使用し、呼び名をブラウザstorageへ保存しない。
-ブラウザ UI は「内部状態」パネルを常設し、`/ui/api/inspection/current-state`、`/ui/api/inspection/cycle-summaries`、`/ui/api/inspection/memory-snapshot` を 5 秒周期で読み取る。
-「内部状態」パネルは設計語の現在の個に対応する UI 表示であり、パネル見出しは置かず、いま動いていること、内面（動機・気分・感情）、外界前景、記憶要約、直近の判断、接続と能力・健全性を表示する。
-気分は意味表示と VAD 生値を併記する。記憶は読み取り専用の要約表示であり、行単位の編集面ではない。
-自律実行の pause / resume / cancel は `/ui/api/autonomous-runs/{run_id}/{operation}` を通じて既存の autonomous run 操作を呼び出す。
-ブラウザ UI は対話入力と同じ session-scoped `client_id` で `/ui/api/events/stream` へ接続し、`conversation_input`、`assistant_message`、`assistant_audio`、`audio_runtime_state` を受信する。
-`/ui/api/events/stream` は server が保持する `console_access_token` で認可し、token をブラウザへ返さない。
-`/ui/api/events/stream` は `Origin` と `Host` が一致する同一 origin の接続だけを受理する。
-ブラウザ UI は画面上で `console_access_token` の入力を要求しない。
+`/ui/api/...` は server が保持する `console_access_token` で認可し、token をブラウザへ返さない。
+WebSocket 系の `/ui/api/...` は `Origin` と `Host` が一致する同一 origin の接続だけを受理する。
 `/ui/` と `/ui/api/...` の追加は `/api/...` の path、method、認証、request / response 形式を変更しない。
+
+見た目規約は次を正とする。
+
+- 設定パネル: [../integration/WebUI設定フォーム規約.md](../integration/WebUI設定フォーム規約.md)
+- 通常画面: [../integration/WebUI通常画面規約.md](../integration/WebUI通常画面規約.md)
+- 確認系 UI（いま / 判断 / ログ）: [../runtime/デバッグ可能性.md](../runtime/デバッグ可能性.md)
 
 ## 更新ルール
 
@@ -123,7 +48,7 @@ API を実装または変更する場合は、少なくとも次を同じ変更�
 
 この API 仕様ファミリーで正本として定めるのは、`docs/design/api/` 配下の path、method、認証、request / response 形式である。
 
-一方で、上位の責務境界は次の文書を正とする。
+上位の責務境界は次の文書を正とする。
 
 - [../integration/外部接点とAPI概念.md](../integration/外部接点とAPI概念.md)
 - [../integration/接続と権限境界.md](../integration/接続と権限境界.md)

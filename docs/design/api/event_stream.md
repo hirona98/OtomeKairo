@@ -143,7 +143,7 @@ event type の分類軸は次に固定する。
 `spontaneous_speech` は event type として使わない。自発発話も `assistant_message` に統一し、起点は `source_kind` で表す。
 音声入力の状態遷移と配送規則は [../audio/音声入力と話者識別.md](../audio/音声入力と話者識別.md) を正とする。
 
-server -> client の代表例:
+server -> client の代表例（capability request 1 件と通知系）:
 
 ```json
 {
@@ -164,114 +164,6 @@ server -> client の代表例:
 ```json
 {
   "event_id": 1,
-  "type": "camera.ptz_request",
-  "data": {
-    "request_id": "camera_ptz_request:...",
-    "capability_id": "camera.ptz",
-    "vision_source_id": "vision_source:room_camera",
-    "source_kind": "camera",
-    "source_label": "部屋のカメラ",
-    "operation": "move_up",
-    "amount": "small",
-    "timeout_ms": 5000
-  }
-}
-```
-
-```json
-{
-  "event_id": 2,
-  "type": "external.status_request",
-  "data": {
-    "request_id": "external_status_request:...",
-    "capability_id": "external.status",
-    "service": "calendar",
-    "timeout_ms": 5000
-  }
-}
-```
-
-```json
-{
-  "event_id": 3,
-  "type": "schedule.status_request",
-  "data": {
-    "request_id": "schedule_status_request:...",
-    "capability_id": "schedule.status",
-    "range": "このあと",
-    "timeout_ms": 5000
-  }
-}
-```
-
-```json
-{
-  "event_id": 4,
-  "type": "device.status_request",
-  "data": {
-    "request_id": "device_status_request:...",
-    "capability_id": "device.status",
-    "scope": "connectivity",
-    "timeout_ms": 5000
-  }
-}
-```
-
-```json
-{
-  "event_id": 5,
-  "type": "body.status_request",
-  "data": {
-    "request_id": "body_status_request:...",
-    "capability_id": "body.status",
-    "scope": "body",
-    "timeout_ms": 5000
-  }
-}
-```
-
-```json
-{
-  "event_id": 6,
-  "type": "environment.status_request",
-  "data": {
-    "request_id": "environment_status_request:...",
-    "capability_id": "environment.status",
-    "scope": "workspace",
-    "timeout_ms": 5000
-  }
-}
-```
-
-```json
-{
-  "event_id": 7,
-  "type": "location.status_request",
-  "data": {
-    "request_id": "location_status_request:...",
-    "capability_id": "location.status",
-    "scope": "current",
-    "timeout_ms": 5000
-  }
-}
-```
-
-```json
-{
-  "event_id": 8,
-  "type": "social.status_request",
-  "data": {
-    "request_id": "social_status_request:...",
-    "capability_id": "social.status",
-    "scope": "current_social_context",
-    "timeout_ms": 5000
-  }
-}
-```
-
-```json
-{
-  "event_id": 9,
   "type": "assistant_message",
   "data": {
     "message_id": "chat_message:...",
@@ -292,27 +184,7 @@ server -> client の代表例:
 
 ```json
 {
-  "event_id": 10,
-  "type": "assistant_message",
-  "data": {
-    "message_id": "chat_message:...",
-    "created_at": "2026-03-31T09:00:00+09:00",
-    "cycle_id": "cycle:...",
-    "source_kind": "wake",
-    "trigger_kind": "wake",
-    "persona_id": "persona:default",
-    "persona_display_name": "初音ミク",
-    "interaction_ref": "interaction:discord:channel-123",
-    "recipient_person_refs": ["person:external-123"],
-    "system_text": "[wake]",
-    "message": "このあと 22 時の予定が近づいています。今の作業を切り上げる目安にしてください。"
-  }
-}
-```
-
-```json
-{
-  "event_id": 11,
+  "event_id": 2,
   "type": "assistant_audio",
   "data": {
     "delivery_id": "tts_delivery:...",
@@ -333,7 +205,7 @@ server -> client の代表例:
 
 ```json
 {
-  "event_id": 12,
+  "event_id": 3,
   "type": "conversation_input",
   "data": {
     "message_id": "chat_message:...",
@@ -353,82 +225,17 @@ server -> client の代表例:
 }
 ```
 
-```json
-{
-  "event_id": 13,
-  "type": "audio_runtime_state",
-  "data": {
-    "available": true,
-    "unavailable_reason": null,
-    "model_ids": {
-      "silero_vad": "silero-vad-v5",
-      "wespeaker": "wespeaker-resnet34-voxceleb-v1"
-    },
-    "configured_source": "local_microphone",
-    "effective_source": "local_microphone",
-    "stt_enabled": true,
-    "tts_enabled": true,
-    "selected_avatar_id": "avatar:default",
-    "audio_output_destination": "cocoro_console",
-    "local_output_device": null,
-    "audio_output_client_count": 2,
-    "selected_device": {
-      "host_api": "ALSA",
-      "name": "USB Audio Device"
-    },
-    "connector": {
-      "client_id": "microphone-connector-main",
-      "connected": true
-    },
-    "active_source": "local_microphone",
-    "lease_generation": 12,
-    "last_heartbeat_at": "2026-03-31T09:00:00+09:00",
-    "settings_generation": 4,
-    "mode": "normal",
-    "paused_reason": null,
-    "conversation_input_blocked_reason": null,
-    "vad": {
-      "speaking": false,
-      "probability": 0.03,
-      "dbfs": -42.1
-    },
-    "normal_activation": {
-      "state": "waiting",
-      "active_until": null
-    },
-    "queue": {
-      "processing": null,
-      "waiting": []
-    },
-    "enrollment": null,
-    "last_utterance_result": null
-  }
-}
-```
-
 少なくとも次の event type を持つ。
 
-- `vision.capture_request`: 視覚 source の画像取得を client に要求する
-- `camera.ptz_request`: camera source の向きや画角調整を client に要求する
-- `external.status_request`: 外部 service の状態取得を client に要求する
-- `schedule.status_request`: 予定情報の取得を client に要求する
-- `device.status_request`: device 状態の取得を client に要求する
-- `body.status_request`: body 状態の取得を client に要求する
-- `environment.status_request`: 周辺環境状態の取得を client に要求する
-- `location.status_request`: 位置状態の取得を client に要求する
-- `social.status_request`: 社会的文脈の状態取得を client に要求する
-- `mcp.call_tool_request`: MCP server の tool 実行を client に要求する
-- `conversation_input`: テキストまたは音声入力から確定したユーザー発話を全購読 client に表示させる
-- `assistant_message`: server が生成した assistant 発話を client に表示させる
-- `assistant_audio`: server が生成した assistant 発話の合成結果を metadata と WAV で配送する
-- `audio_runtime_state`: 音声 runtime の完全 snapshot を表示させる
+- capability 実行要求: `vision.capture_request`、`camera.ptz_request`、`external.status_request`、`schedule.status_request`、`device.status_request`、`body.status_request`、`environment.status_request`、`location.status_request`、`social.status_request`、`mcp.call_tool_request`（payload の正本は [実行連携.md](実行連携.md)）
+- `conversation_input`: 確定したユーザー発話を購読 client に表示する
+- `assistant_message`: server が生成した assistant 発話を表示する
+- `assistant_audio`: 合成結果の metadata と WAV を配送する
+- `audio_runtime_state`: 音声 runtime の完全 snapshot（shape は [列挙とinspection.md](列挙とinspection.md) の `runtime_detail.audio_runtime_state` と同じ。差分 event にしない）
 
-`vision.capture_request`、`camera.ptz_request`、`external.status_request`、`schedule.status_request`、`device.status_request`、`body.status_request`、`environment.status_request`、`location.status_request`、`social.status_request`、`mcp.call_tool_request` は capability 実行要求である。
-`assistant_message` は server が生成した assistant 発話を client へ表示させる通知である。
 `assistant_message.data.source_kind` は `conversation / capability_result / wake / background_thinking / autonomous_run` のいずれかであり、capability result follow-up の場合だけ `request_id / capability_id` を持つ。
-`assistant_message.data.message_id / created_at / message / persona_id / persona_display_name` は全発話通知で必須とする。
+`assistant_message.data.message_id / created_at / message / persona_id / persona_display_name / interaction_ref / recipient_person_refs` は全発話通知で必須とする。
 `persona_id / persona_display_name` はその発話生成で使った人格設定の ID とプリセット名であり、client は受信時の現在設定から再解決しない。
-`assistant_message.data.interaction_ref / recipient_person_refs` は全発話通知で必須とする。
 `assistant_message.data.audio_delivery` と HTTP response の `speech.audio_delivery` は `delivery_id / status / error_code` を持つ。
 `audio_delivery.status` は `queued / disabled / failed` のいずれかとする。
 `queued` のときだけ `delivery_id` を返し、`disabled` のときは `error_code=null`、`failed` のときは `tts_target_unavailable / tts_queue_full` のいずれかを返す。
@@ -447,8 +254,6 @@ TTS入力では発話本文先頭の`[face:Joy] / [face:Angry] / [face:Sorrow] /
 server はTTS入力を文字列長で切り詰めない。
 音声合成失敗は先行する発話本文の成功を取り消さない。
 `conversation_input.data.message_id / cycle_id / created_at / message / interaction_ref / speaker_ref / participant_refs / display_name / source_kind` は必須とする。`utterance_seq` は音声入力時だけ持つ。
-`audio_runtime_state.data` は [列挙とinspection.md](列挙とinspection.md) の `runtime_detail.audio_runtime_state` と同じ shape にする。
-`audio_runtime_state` は完全 snapshot とし、差分 event にしない。
 チャット event は保存済み履歴を再送せず、event 発生時に接続・購読中の client だけへ配送する。画像 Data URI は `conversation_input` に含めず、送信元 UI だけがローカル保持して表示する。
 音声出力の意味規則は [../audio/音声出力.md](../audio/音声出力.md) を正とする。
 capability 実行要求と結果の対応は [実行連携.md](実行連携.md) を正とする。

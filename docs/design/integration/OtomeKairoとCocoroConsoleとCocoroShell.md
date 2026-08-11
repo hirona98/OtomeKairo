@@ -232,4 +232,4 @@ OtomeKairo には Console 以外の外部接点もある。
 | マイク PCM | [../api/audio_stream.md](../api/audio_stream.md) |
 | 端末設定・Shell 配送 | [../api/状態と設定.md](../api/状態と設定.md) |
 | capability 実行 | [../api/実行連携.md](../api/実行連携.md) |
-| 用語 | [../../reference/用語表.md](../../reference/用語表.md) |
+| 用語 | [../../用語表.md](../../用語表.md) |
