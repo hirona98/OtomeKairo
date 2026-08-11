@@ -31,6 +31,23 @@ class DummyService(ServiceConfigMixin):
 
 
 class McpConfigApiTests(unittest.TestCase):
+    def _elyth_definition(self) -> dict:
+        return {
+            "enabled": True,
+            "pre_send_check_enabled": True,
+            "transport": "streamable_http",
+            "url": "https://elythworld.com/api/mcp/remote",
+            "headers": {"Authorization": "Bearer test-token"},
+            "skill_bundle_id": "elyth-remote-mcp-skills@0.1.0",
+            "autonomous_session": {
+                "enabled": True,
+                "entry_skill": "elyth-run-session",
+                "min_interval_seconds": 3600,
+                "max_tool_calls": 10,
+                "max_mutating_calls": 3,
+            },
+        }
+
     def test_default_state_contains_disabled_estat_mcp_template(self) -> None:
         service = DummyService()
 
@@ -157,6 +174,63 @@ class McpConfigApiTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.error_code, "unsupported_mcp_transport")
+
+    def test_streamable_http_public_api_masks_headers_and_runtime_keeps_them(self) -> None:
+        service = DummyService()
+        service.replace_mcp_server("token", "elyth", self._elyth_definition())
+
+        public = service.get_mcp_server("token", "elyth")["mcp_server"]
+        runtime = service.get_connector_runtime_config(
+            "token", "mcp-client-connector-main"
+        )["mcp_servers"][0]
+
+        self.assertEqual(public["transport"], "streamable_http")
+        self.assertEqual(public["headers"]["Authorization"], {"value_present": True})
+        self.assertNotIn("command", public)
+        self.assertEqual(runtime["headers"]["Authorization"], "Bearer test-token")
+        self.assertNotIn("pre_send_check_enabled", runtime)
+        self.assertNotIn("skill_bundle_id", runtime)
+        self.assertNotIn("autonomous_session", runtime)
+
+    def test_streamable_http_rejects_stdio_fields(self) -> None:
+        service = DummyService()
+        definition = self._elyth_definition()
+        definition["command"] = "must-not-be-accepted"
+
+        with self.assertRaises(ServiceError) as raised:
+            service.replace_mcp_server("token", "elyth", definition)
+
+        self.assertEqual(raised.exception.error_code, "invalid_mcp_server_field")
+
+    def test_streamable_http_rejects_protocol_managed_header(self) -> None:
+        service = DummyService()
+        definition = self._elyth_definition()
+        definition["headers"]["Mcp-Session-Id"] = "caller-owned"
+
+        with self.assertRaises(ServiceError) as raised:
+            service.replace_mcp_server("token", "elyth", definition)
+
+        self.assertEqual(raised.exception.error_code, "invalid_mcp_server_field")
+
+    def test_elyth_bundle_rejects_non_official_endpoint(self) -> None:
+        service = DummyService()
+        definition = self._elyth_definition()
+        definition["url"] = "https://example.com/mcp"
+
+        with self.assertRaises(ServiceError) as raised:
+            service.replace_mcp_server("token", "elyth", definition)
+
+        self.assertEqual(raised.exception.error_code, "invalid_mcp_server_field")
+
+    def test_elyth_bundle_rejects_disabled_pre_send_check(self) -> None:
+        service = DummyService()
+        definition = self._elyth_definition()
+        definition["pre_send_check_enabled"] = False
+
+        with self.assertRaises(ServiceError) as raised:
+            service.replace_mcp_server("token", "elyth", definition)
+
+        self.assertEqual(raised.exception.error_code, "invalid_mcp_server_field")
 
 
 if __name__ == "__main__":

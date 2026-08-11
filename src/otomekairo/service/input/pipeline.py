@@ -13,6 +13,7 @@ from otomekairo.llm.contexts import (
 from otomekairo.interaction import InteractionContext
 from otomekairo.service.capability import PreSendCheckWithheldError
 from otomekairo.service.common import debug_log
+from otomekairo.skills import load_skill_bundle
 
 
 WORKSPACE_CANDIDATE_LIMIT = 24
@@ -1944,6 +1945,11 @@ class ServiceInputPipelineMixin:
     ) -> dict[str, Any]:
         # decision生成
         debug_log("Pipeline", f"{cycle_label} decision start", level="DEBUG")
+        operational_skill_context = self._select_operational_skill_context(
+            model_config=model_config,
+            current_input=current_input.to_prompt_payload(),
+            capability_decision_view=capability_decision_view,
+        )
         decision_context = self._build_decision_context(
             input_text=input_text,
             current_input=current_input,
@@ -1968,6 +1974,7 @@ class ServiceInputPipelineMixin:
             workspace_context=workspace_context,
             recall_hint=recall_hint,
             recall_pack=recall_pack,
+            operational_skill_context=operational_skill_context,
             reference_context=reference_context,
             pre_send_check_feedback=pre_send_check_feedback,
         )
@@ -1975,6 +1982,12 @@ class ServiceInputPipelineMixin:
             model_config=model_config,
             persona_context=persona_context,
             context=decision_context,
+        )
+        self._bind_operational_skill_to_decision(
+            decision=decision,
+            operational_skill_context=operational_skill_context,
+            capability_decision_view=capability_decision_view,
+            trigger_kind=trigger_kind,
         )
         debug_log(
             "Pipeline",
@@ -2314,6 +2327,7 @@ class ServiceInputPipelineMixin:
         workspace_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
+        operational_skill_context: dict[str, Any] | None = None,
         reference_context: dict[str, Any] | None = None,
         pre_send_check_feedback: str | None = None,
     ) -> DecisionContext:
@@ -2341,9 +2355,78 @@ class ServiceInputPipelineMixin:
             workspace_context=workspace_context,
             recall_hint=recall_hint,
             recall_pack=recall_pack,
+            operational_skill_context=operational_skill_context,
             reference_context=reference_context,
             pre_send_check_feedback=pre_send_check_feedback,
         )
+
+    def _bind_operational_skill_to_decision(
+        self,
+        *,
+        decision: dict[str, Any],
+        operational_skill_context: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+        trigger_kind: str,
+    ) -> None:
+        if decision.get("kind") == "capability_request":
+            request = decision.get("capability_request")
+            input_payload = request.get("input") if isinstance(request, dict) else None
+            if isinstance(request, dict) and request.get("capability_id") == "mcp.call_tool" and isinstance(input_payload, dict):
+                server_id = str(input_payload.get("mcp_server_id") or "").strip()
+                tool_name = str(input_payload.get("tool_name") or "").strip()
+                skill_id = self._decision_view_mcp_tool_skill_id(
+                    capability_decision_view=capability_decision_view,
+                    mcp_server_id=server_id,
+                    tool_name=tool_name,
+                )
+                if skill_id is not None:
+                    if (
+                        not isinstance(operational_skill_context, dict)
+                        or operational_skill_context.get("mcp_server_id") != server_id
+                        or operational_skill_context.get("skill_id") != skill_id
+                    ):
+                        raise ValueError("Skill-backed MCP request requires its selected operational skill.")
+                    bundle = load_skill_bundle(str(operational_skill_context.get("bundle_id") or ""))
+                    if tool_name in bundle.mutating_tools and trigger_kind != "user_message":
+                        raise ValueError("Mutating skill-backed MCP requests require a user request or bounded session.")
+                    decision["operational_skill"] = self._operational_skill_summary(operational_skill_context)
+            return
+        if decision.get("kind") == "autonomous_run" and isinstance(operational_skill_context, dict):
+            bundle = load_skill_bundle(str(operational_skill_context.get("bundle_id") or ""))
+            if operational_skill_context.get("skill_id") != bundle.session_skill:
+                raise ValueError("Skill-backed autonomous_run requires the bundle session skill.")
+            decision["operational_skill"] = self._operational_skill_summary(operational_skill_context)
+
+    def _decision_view_mcp_tool_skill_id(
+        self,
+        *,
+        capability_decision_view: list[dict[str, Any]] | None,
+        mcp_server_id: str,
+        tool_name: str,
+    ) -> str | None:
+        for capability in capability_decision_view or []:
+            if not isinstance(capability, dict) or capability.get("id") != "mcp.call_tool":
+                continue
+            for server in capability.get("mcp_servers", []):
+                if not isinstance(server, dict) or server.get("mcp_server_id") != mcp_server_id:
+                    continue
+                if not isinstance(server.get("skill_bundle"), dict):
+                    return None
+                for tool in server.get("tools", []):
+                    if isinstance(tool, dict) and tool.get("name") == tool_name:
+                        skill_id = tool.get("skill_id")
+                        return skill_id if isinstance(skill_id, str) else None
+                raise ValueError("Skill-backed MCP tool is unavailable.")
+        return None
+
+    def _operational_skill_summary(self, context: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "mcp_server_id": context.get("mcp_server_id"),
+            "bundle_id": context.get("bundle_id"),
+            "skill_id": context.get("skill_id"),
+            "reason_summary": context.get("reason_summary"),
+            "host_policy": deepcopy(context.get("host_policy")),
+        }
 
     def _build_speech_context(
         self,

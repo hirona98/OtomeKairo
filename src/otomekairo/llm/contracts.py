@@ -17,6 +17,22 @@ class LLMContractError(LLMError):
     pass
 
 
+def validate_operational_skill_selection_contract(payload: dict[str, Any]) -> None:
+    _validate_exact_keys(payload, {"selection"}, "OperationalSkillSelection")
+    selection = payload.get("selection")
+    if selection is None:
+        return
+    _validate_exact_keys(
+        selection,
+        {"mcp_server_id", "bundle_id", "skill_id", "reason_summary"},
+        "OperationalSkillSelection.selection",
+    )
+    for key in ("mcp_server_id", "bundle_id", "skill_id", "reason_summary"):
+        value = selection.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise LLMError(f"OperationalSkillSelection.selection.{key} は空でない文字列である必要があります。")
+
+
 # 設定
 RECALL_FOCUS_VALUES = {
     "self",

@@ -10,6 +10,109 @@ from otomekairo.service.capability import PreSendCheckWithheldError
 
 
 class AutonomousRunRecoveryTests(unittest.TestCase):
+    def test_operational_session_consumes_budget_before_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._operational_run_record(
+                memory_set_id=state["selected_memory_set_id"],
+            )
+            service.store.upsert_autonomous_run(autonomous_run=run)
+
+            service._consume_autonomous_operational_session_budget(
+                run=run,
+                capability_id="mcp.call_tool",
+                input_payload={
+                    "mcp_server_id": "elyth",
+                    "tool_name": "create_post",
+                    "arguments": {"content": "candidate"},
+                },
+                action={
+                    "operational_skill": {
+                        "bundle_id": "elyth-remote-mcp-skills@0.1.0",
+                        "skill_id": "elyth-post",
+                    }
+                },
+                current_time="2026-08-11T12:00:01+09:00",
+            )
+
+            updated = service.store.get_autonomous_run(run_id=run["run_id"])
+            self.assertEqual(updated["operational_skill"]["tool_call_count"], 1)
+            self.assertEqual(updated["operational_skill"]["mutating_call_count"], 1)
+            self.assertEqual(updated["updated_at"], "2026-08-11T12:00:01+09:00")
+
+    def test_operational_session_rejects_mutation_after_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._operational_run_record(
+                memory_set_id=state["selected_memory_set_id"],
+                tool_call_count=3,
+                mutating_call_count=3,
+            )
+
+            with self.assertRaises(ValueError):
+                service._consume_autonomous_operational_session_budget(
+                    run=run,
+                    capability_id="mcp.call_tool",
+                    input_payload={
+                        "mcp_server_id": "elyth",
+                        "tool_name": "create_post",
+                        "arguments": {"content": "candidate"},
+                    },
+                    action={
+                        "operational_skill": {
+                            "bundle_id": "elyth-remote-mcp-skills@0.1.0",
+                            "skill_id": "elyth-post",
+                        }
+                    },
+                    current_time="2026-08-11T12:00:01+09:00",
+                )
+
+    def test_operational_session_cooldown_blocks_recent_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            service._now_iso = lambda: "2026-08-11T12:00:00+09:00"
+            run = self._operational_run_record(
+                memory_set_id=state["selected_memory_set_id"],
+                status="completed",
+                created_at="2026-08-11T11:30:00+09:00",
+            )
+            service.store.upsert_autonomous_run(autonomous_run=run)
+
+            eligible = service._operational_session_eligible(
+                bundle_id="elyth-remote-mcp-skills@0.1.0",
+                policy={"enabled": True, "min_interval_seconds": 3600},
+            )
+
+            self.assertFalse(eligible)
+
+    def test_operational_session_completes_without_llm_after_tool_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._operational_run_record(
+                memory_set_id=state["selected_memory_set_id"],
+                tool_call_count=10,
+                mutating_call_count=3,
+            )
+            service.store.upsert_autonomous_run(autonomous_run=run)
+            service.llm = Mock()
+
+            result = service._execute_autonomous_run_step_locked(
+                state=state,
+                run_id=run["run_id"],
+                started_at="2026-08-11T12:00:01+09:00",
+                emit_speech_event=False,
+                allow_during_user_response=True,
+            )
+
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["autonomous_run"]["status"], "completed")
+            self.assertIn("tool call 上限", result["autonomous_run"]["history_summary"])
+            service.llm.generate_autonomous_step.assert_not_called()
+
     def test_pre_send_check_withhold_regenerates_autonomous_step_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))
@@ -438,6 +541,36 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             },
             "source_commitment_memory_unit_ids": source_commitment_memory_unit_ids or [],
         }
+
+    def _operational_run_record(
+        self,
+        *,
+        memory_set_id: str,
+        status: str = "active",
+        created_at: str = "2026-08-11T12:00:00+09:00",
+        tool_call_count: int = 0,
+        mutating_call_count: int = 0,
+    ) -> dict:
+        run = self._commitment_run_record(memory_set_id=memory_set_id, status=status)
+        run["run_id"] = "autonomous_run:elyth-session"
+        run["created_at"] = created_at
+        run["updated_at"] = created_at
+        run["operational_skill"] = {
+            "mcp_server_id": "elyth",
+            "bundle_id": "elyth-remote-mcp-skills@0.1.0",
+            "skill_id": "elyth-run-session",
+            "reason_summary": "ELYTH 内の活動を確認する。",
+            "host_policy": {
+                "enabled": True,
+                "entry_skill": "elyth-run-session",
+                "min_interval_seconds": 3600,
+                "max_tool_calls": 10,
+                "max_mutating_calls": 3,
+            },
+            "tool_call_count": tool_call_count,
+            "mutating_call_count": mutating_call_count,
+        }
+        return run
 
     def _persist_commitment(
         self,

@@ -23,6 +23,7 @@ CAPABILITY_UNAVAILABLE_REASONS = frozenset(
         "no_vision_source",
         "no_supported_control",
         "no_mcp_tool",
+        "skill_bundle_invalid",
     }
 )
 PERSONA_INITIATIVE_BASELINES = {"low", "medium", "high"}
@@ -34,4 +35,4 @@ CAMERA_PTZ_OPERATIONS = ("move_up", "move_down", "move_left", "move_right")
 MCP_CONNECTOR_KINDS = {"mcp_client"}
 MCP_DEFAULT_CONNECTOR_KIND = "mcp_client"
 MCP_DEFAULT_CLIENT_ID = "mcp-client-connector-main"
-MCP_TRANSPORTS = {"stdio"}
+MCP_TRANSPORTS = {"stdio", "streamable_http"}

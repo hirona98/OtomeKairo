@@ -28,6 +28,7 @@ from otomekairo.llm.contracts import (
     validate_memory_correction_reconciliation_contract,
     validate_memory_interpretation_contract,
     validate_memory_reflection_summary_contract,
+    validate_operational_skill_selection_contract,
     validate_pre_send_check_contract,
     validate_pending_intent_selection_contract,
     validate_recall_pack_selection_contract,
@@ -60,6 +61,8 @@ from otomekairo.llm.prompts import (
     build_memory_interpretation_repair_prompt,
     build_memory_reflection_summary_messages,
     build_memory_reflection_summary_repair_prompt,
+    build_operational_skill_selection_messages,
+    build_operational_skill_selection_repair_prompt,
     build_pre_send_check_messages,
     build_pre_send_check_repair_prompt,
     build_pending_intent_selection_messages,
@@ -266,6 +269,25 @@ class LLMClient:
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
             raise
+
+    def generate_operational_skill_selection(
+        self,
+        *,
+        model_config: dict[str, Any],
+        selection_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        operation = "operational_skill_selection"
+        if self._is_mock_model_config(model_config):
+            return {"selection": None}
+        messages = build_operational_skill_selection_messages(selection_context=selection_context)
+        return self._generate_structured_payload(
+            model_config=model_config,
+            messages=messages,
+            validator=validate_operational_skill_selection_contract,
+            repair_prompt_builder=build_operational_skill_selection_repair_prompt,
+            failure_message="Operational skill の選択に失敗しました。",
+            operation=operation,
+        )
 
     def generate_decision(
         self,

@@ -782,6 +782,10 @@ class ServiceCapabilityMixin:
             if isinstance(env, dict):
                 for env_value in env.values():
                     add(env_value)
+            headers = definition.get("headers")
+            if isinstance(headers, dict):
+                for header_value in headers.values():
+                    add(header_value)
         return secrets
 
     def _mapping_definitions(self, value: Any) -> list[dict[str, Any]]:

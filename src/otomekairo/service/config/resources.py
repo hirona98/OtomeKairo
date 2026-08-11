@@ -4,6 +4,7 @@ import uuid
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from otomekairo.defaults import (
     API_VERSION,
@@ -20,6 +21,7 @@ from otomekairo.service.config.constants import (
     MCP_DEFAULT_CONNECTOR_KIND,
     MCP_TRANSPORTS,
 )
+from otomekairo.skills import SkillBundleError, load_skill_bundle
 
 
 class ServiceConfigResourcesMixin:
@@ -1854,6 +1856,12 @@ class ServiceConfigResourcesMixin:
                 key: {"value_present": bool(value)}
                 for key, value in sorted(env.items())
             }
+        headers = public_definition.get("headers")
+        if isinstance(headers, dict):
+            public_definition["headers"] = {
+                key: {"value_present": bool(value)}
+                for key, value in sorted(headers.items())
+            }
         return public_definition
 
     def _mcp_server_definition_for_read(self, definition: dict[str, Any]) -> dict[str, Any]:
@@ -1863,22 +1871,30 @@ class ServiceConfigResourcesMixin:
         # 送信前チェック要否は server の dispatch 方針であり、実行 connector へ渡さない。
         connector_definition = self._mcp_server_definition_for_read(definition)
         connector_definition.pop("pre_send_check_enabled", None)
+        connector_definition.pop("skill_bundle_id", None)
+        connector_definition.pop("autonomous_session", None)
         return connector_definition
 
     def _normalize_mcp_server_definition(self, mcp_server_id: str, definition: dict[str, Any]) -> dict[str, Any]:
-        normalized = {
-            "mcp_server_id": definition.get("mcp_server_id", mcp_server_id),
-            "connector_kind": definition.get("connector_kind", MCP_DEFAULT_CONNECTOR_KIND),
-            "client_id": definition.get("client_id", MCP_DEFAULT_CLIENT_ID),
-            "enabled": definition.get("enabled"),
-            "pre_send_check_enabled": definition.get("pre_send_check_enabled"),
-            "transport": definition.get("transport", "stdio"),
-            "command": definition.get("command"),
-            "args": definition.get("args", []),
-            "cwd": definition.get("cwd"),
-            "env": definition.get("env", {}),
-        }
-        for field_name in ("mcp_server_id", "connector_kind", "client_id", "transport", "command", "cwd"):
+        if not isinstance(definition, dict):
+            raise ServiceError(400, "invalid_mcp_server", "mcp_server must be an object.")
+        transport = definition.get("transport", "stdio")
+        # 未知フィールドと transport 非互換フィールドを検証側で確実に拒否できるよう、
+        # 入力を落とさずに既定値だけを補う。
+        normalized = deepcopy(definition)
+        normalized.setdefault("mcp_server_id", mcp_server_id)
+        normalized.setdefault("connector_kind", MCP_DEFAULT_CONNECTOR_KIND)
+        normalized.setdefault("client_id", MCP_DEFAULT_CLIENT_ID)
+        normalized.setdefault("transport", transport)
+        if transport == "stdio":
+            normalized.setdefault("command", None)
+            normalized.setdefault("args", [])
+            normalized.setdefault("cwd", None)
+            normalized.setdefault("env", {})
+        elif transport == "streamable_http":
+            normalized.setdefault("url", None)
+            normalized.setdefault("headers", {})
+        for field_name in ("mcp_server_id", "connector_kind", "client_id", "transport", "command", "cwd", "url", "skill_bundle_id"):
             value = normalized.get(field_name)
             if isinstance(value, str):
                 normalized[field_name] = value.strip()
@@ -1890,6 +1906,12 @@ class ServiceConfigResourcesMixin:
             normalized["env"] = {
                 key.strip() if isinstance(key, str) else key: value
                 for key, value in env.items()
+            }
+        headers = normalized.get("headers")
+        if isinstance(headers, dict):
+            normalized["headers"] = {
+                key.strip() if isinstance(key, str) else key: value
+                for key, value in headers.items()
             }
         return normalized
 
@@ -1911,6 +1933,10 @@ class ServiceConfigResourcesMixin:
             "args",
             "cwd",
             "env",
+            "url",
+            "headers",
+            "skill_bundle_id",
+            "autonomous_session",
         }
         unsupported_fields = sorted(set(definition.keys()) - supported_fields)
         if unsupported_fields:
@@ -1935,6 +1961,20 @@ class ServiceConfigResourcesMixin:
         transport = definition.get("transport")
         if transport not in MCP_TRANSPORTS:
             raise ServiceError(400, "unsupported_mcp_transport", "mcp_server.transport is not supported.")
+        if transport == "stdio":
+            self._validate_stdio_mcp_server_definition(definition)
+        else:
+            self._validate_streamable_http_mcp_server_definition(definition)
+        self._validate_mcp_skill_settings(definition)
+
+    def _validate_stdio_mcp_server_definition(self, definition: dict[str, Any]) -> None:
+        incompatible = sorted(set(definition) & {"url", "headers"})
+        if incompatible:
+            raise ServiceError(
+                400,
+                "invalid_mcp_server_field",
+                f"stdio mcp_server cannot contain: {', '.join(incompatible)}.",
+            )
         self._validate_mcp_required_text_field(definition, "command", "mcp_server.command")
         args = definition.get("args")
         if not isinstance(args, list):
@@ -1954,12 +1994,100 @@ class ServiceConfigResourcesMixin:
             if not isinstance(value, str):
                 raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.env values must be strings.")
 
+    def _validate_streamable_http_mcp_server_definition(self, definition: dict[str, Any]) -> None:
+        incompatible = sorted(set(definition) & {"command", "args", "cwd", "env"})
+        if incompatible:
+            raise ServiceError(
+                400,
+                "invalid_mcp_server_field",
+                f"streamable_http mcp_server cannot contain: {', '.join(incompatible)}.",
+            )
+        self._validate_mcp_required_text_field(definition, "url", "mcp_server.url")
+        parsed = urlparse(str(definition["url"]))
+        if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password or parsed.fragment:
+            raise ServiceError(
+                400,
+                "invalid_mcp_server_field",
+                "mcp_server.url must be an HTTPS URL without userinfo or fragment.",
+            )
+        headers = definition.get("headers")
+        if not isinstance(headers, dict):
+            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.headers must be an object.")
+        reserved = {"accept", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id"}
+        for key, value in headers.items():
+            if not isinstance(key, str) or not key.strip() or any(character in key for character in "\r\n:"):
+                raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.headers contains an invalid name.")
+            if key.strip().lower() in reserved:
+                raise ServiceError(400, "invalid_mcp_server_field", f"mcp_server.headers.{key} is protocol-managed.")
+            if not isinstance(value, str) or not value.strip() or "\r" in value or "\n" in value:
+                raise ServiceError(400, "invalid_mcp_server_field", f"mcp_server.headers.{key} must be a non-empty string.")
+
+    def _validate_mcp_skill_settings(self, definition: dict[str, Any]) -> None:
+        bundle_id = definition.get("skill_bundle_id")
+        if bundle_id is not None and (not isinstance(bundle_id, str) or not bundle_id.strip()):
+            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.skill_bundle_id must be a non-empty string.")
+        bundle = None
+        if isinstance(bundle_id, str):
+            try:
+                bundle = load_skill_bundle(bundle_id)
+            except SkillBundleError as exc:
+                raise ServiceError(400, "invalid_mcp_server_field", str(exc)) from exc
+            if bundle.bundle_id == "elyth-remote-mcp-skills@0.1.0":
+                headers = definition.get("headers")
+                authorization = headers.get("Authorization") if isinstance(headers, dict) else None
+                if (
+                    definition.get("transport") != "streamable_http"
+                    or definition.get("url") != "https://elythworld.com/api/mcp/remote"
+                    or definition.get("pre_send_check_enabled") is not True
+                    or not isinstance(authorization, str)
+                    or not authorization.startswith("Bearer ")
+                    or not authorization.removeprefix("Bearer ").strip()
+                ):
+                    raise ServiceError(
+                        400,
+                        "invalid_mcp_server_field",
+                        "ELYTH Remote MCP requires the official HTTPS endpoint, Bearer authorization, and pre_send_check_enabled=true.",
+                    )
+        session = definition.get("autonomous_session")
+        if session is None:
+            return
+        if not isinstance(session, dict) or set(session) != {
+            "enabled",
+            "entry_skill",
+            "min_interval_seconds",
+            "max_tool_calls",
+            "max_mutating_calls",
+        }:
+            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.autonomous_session has invalid fields.")
+        if not isinstance(session.get("enabled"), bool):
+            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.autonomous_session.enabled must be a boolean.")
+        entry_skill = session.get("entry_skill")
+        if not isinstance(entry_skill, str) or not entry_skill.strip():
+            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.autonomous_session.entry_skill must be a non-empty string.")
+        for key in ("min_interval_seconds", "max_tool_calls", "max_mutating_calls"):
+            value = session.get(key)
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise ServiceError(400, "invalid_mcp_server_field", f"mcp_server.autonomous_session.{key} must be a positive integer.")
+        if session["max_mutating_calls"] > session["max_tool_calls"]:
+            raise ServiceError(400, "invalid_mcp_server_field", "max_mutating_calls must not exceed max_tool_calls.")
+        if session["enabled"] and not isinstance(bundle_id, str):
+            raise ServiceError(400, "invalid_mcp_server_field", "enabled autonomous_session requires skill_bundle_id.")
+        if bundle is not None and session["entry_skill"] != bundle.session_skill:
+            raise ServiceError(400, "invalid_mcp_server_field", "autonomous_session.entry_skill does not match the bundle session skill.")
+
     def _mcp_tool_is_enabled(self, mcp_server_id: str, tool_name: str) -> bool:
-        # 実行可否の正本は MCP server の enabled。tool 実在は接続中 catalog で別途判定する。
-        _ = tool_name
+        # skill bundle 付き server は bundle が宣言する tool だけを許可する。
         state = self.store.read_state()
         mcp_server = self._mcp_servers_from_state(state).get(mcp_server_id)
-        return isinstance(mcp_server, dict) and mcp_server.get("enabled") is True
+        if not isinstance(mcp_server, dict) or mcp_server.get("enabled") is not True:
+            return False
+        bundle_id = mcp_server.get("skill_bundle_id")
+        if not isinstance(bundle_id, str):
+            return True
+        try:
+            return tool_name in load_skill_bundle(bundle_id).declared_tools
+        except SkillBundleError:
+            return False
 
     def _validate_mcp_required_text_field(self, definition: dict[str, Any], key: str, label: str) -> None:
         value = definition.get(key)

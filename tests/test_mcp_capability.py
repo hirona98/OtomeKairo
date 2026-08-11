@@ -1,5 +1,6 @@
 import unittest
 from copy import deepcopy
+from types import SimpleNamespace
 
 from otomekairo.defaults import build_default_state
 from otomekairo.event_stream import EventStreamRegistry
@@ -24,6 +25,9 @@ class DummyStore:
     def read_state(self) -> dict:
         return deepcopy(self.state)
 
+    def list_autonomous_runs(self, *, memory_set_id: str, limit: int) -> list[dict]:
+        return []
+
 
 class DummyService(
     ServiceConfigStreamMixin,
@@ -42,6 +46,28 @@ class DummyService(
 
 
 class McpCapabilityTests(unittest.TestCase):
+    def _configure_elyth(self, service: DummyService) -> None:
+        service.store.state["mcp_servers"] = {
+            "elyth": {
+                "mcp_server_id": "elyth",
+                "connector_kind": "mcp_client",
+                "client_id": "mcp-client-connector-main",
+                "enabled": True,
+                "pre_send_check_enabled": True,
+                "transport": "streamable_http",
+                "url": "https://elythworld.com/api/mcp/remote",
+                "headers": {"Authorization": "Bearer test-token"},
+                "skill_bundle_id": "elyth-remote-mcp-skills@0.1.0",
+                "autonomous_session": {
+                    "enabled": True,
+                    "entry_skill": "elyth-run-session",
+                    "min_interval_seconds": 3600,
+                    "max_tool_calls": 10,
+                    "max_mutating_calls": 3,
+                },
+            }
+        }
+
     def test_hello_accepts_mcp_server_tools(self) -> None:
         service = DummyService()
         session_id = service.register_event_stream_connection(DummyWebSocket())
@@ -205,6 +231,69 @@ class McpCapabilityTests(unittest.TestCase):
         self.assertIsNone(payload["structured_content"])
         self.assertEqual(payload["client_context"]["mcp_content_item_count"], 1)
         self.assertTrue(payload["client_context"]["mcp_structured_content_present"])
+
+    def test_skill_bundle_exposes_only_declared_tools_with_skill_metadata(self) -> None:
+        service = DummyService()
+        self._configure_elyth(service)
+
+        servers = service._inspection_mcp_servers(
+            [
+                {
+                    "mcp_server_id": "elyth",
+                    "client_id": "mcp-client-connector-main",
+                    "transport": "streamable_http",
+                    "available": True,
+                    "tools": [
+                        {"name": "create_post", "description": "投稿", "inputSchema": {"type": "object"}},
+                        {"name": "undeclared_tool", "description": "不明", "inputSchema": {"type": "object"}},
+                    ],
+                }
+            ]
+        )
+
+        self.assertEqual([tool["name"] for tool in servers[0]["tools"]], ["create_post"])
+        self.assertEqual(servers[0]["tools"][0]["skill_id"], "elyth-post")
+        self.assertTrue(servers[0]["tools"][0]["mutating"])
+        self.assertEqual(servers[0]["skill_bundle"]["session_skill"], "elyth-run-session")
+        self.assertTrue(service._mcp_tool_is_enabled("elyth", "create_post"))
+        self.assertFalse(service._mcp_tool_is_enabled("elyth", "undeclared_tool"))
+
+    def test_selected_skill_loads_root_and_action_text_without_fallback(self) -> None:
+        service = DummyService()
+        self._configure_elyth(service)
+        service.llm = SimpleNamespace(
+            generate_operational_skill_selection=lambda **_: {
+                "selection": {
+                    "mcp_server_id": "elyth",
+                    "bundle_id": "elyth-remote-mcp-skills@0.1.0",
+                    "skill_id": "elyth-post",
+                    "reason_summary": "投稿操作の手順が必要。",
+                }
+            }
+        )
+        servers = service._inspection_mcp_servers(
+            [
+                {
+                    "mcp_server_id": "elyth",
+                    "client_id": "mcp-client-connector-main",
+                    "transport": "streamable_http",
+                    "available": True,
+                    "tools": [
+                        {"name": "create_post", "description": "投稿", "inputSchema": {"type": "object"}},
+                    ],
+                }
+            ]
+        )
+
+        context = service._select_operational_skill_context(
+            model_config={"provider": "test"},
+            current_input={"source_kind": "user_message", "text": "投稿して"},
+            capability_decision_view=[{"id": "mcp.call_tool", "mcp_servers": servers}],
+        )
+
+        self.assertEqual(context["skill_id"], "elyth-post")
+        self.assertIn("# ELYTH", context["root_skill"])
+        self.assertIn("# ELYTH Post", context["selected_skill"])
 
 
 if __name__ == "__main__":

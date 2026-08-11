@@ -1,6 +1,10 @@
 import unittest
 
-from otomekairo.llm.contracts import LLMError, validate_decision_contract
+from otomekairo.llm.contracts import (
+    LLMError,
+    validate_decision_contract,
+    validate_operational_skill_selection_contract,
+)
 
 
 class DecisionContractTests(unittest.TestCase):
@@ -36,6 +40,24 @@ class DecisionContractTests(unittest.TestCase):
         }
 
         validate_decision_contract(payload)
+
+    def test_operational_skill_selection_accepts_exact_selection(self) -> None:
+        validate_operational_skill_selection_contract(
+            {
+                "selection": {
+                    "mcp_server_id": "elyth",
+                    "bundle_id": "elyth-remote-mcp-skills@0.1.0",
+                    "skill_id": "elyth-post",
+                    "reason_summary": "投稿依頼に対応する手順を使う。",
+                }
+            }
+        )
+
+    def test_operational_skill_selection_rejects_extra_fields(self) -> None:
+        with self.assertRaises(LLMError):
+            validate_operational_skill_selection_contract(
+                {"selection": None, "fallback_skill": "elyth"}
+            )
 
 
 if __name__ == "__main__":
