@@ -41,6 +41,7 @@ client -> server:
   "event_subscriptions": [
     "conversation_input",
     "assistant_message",
+    "system_notice",
     "assistant_audio",
     "audio_runtime_state"
   ],
@@ -92,6 +93,7 @@ client -> server:
 - `caps` はその client が現在受けられる capability binding 候補の一覧である
 - `event_subscriptions` はその client が受信して処理する server-driven event の一覧である
 - `assistant_message` を表示できる client だけが `event_subscriptions` に `assistant_message` を入れる
+- 安全境界や運用上の定型通知を表示できる client だけが `event_subscriptions` に `system_notice` を入れる
 - `assistant_audio` の直後の binary WAV を再生できる client だけが `event_subscriptions` に `assistant_audio` を入れる
 - ユーザー発話を表示できる client は入力元にかかわらず `conversation_input` を入れる
 - 音声 runtime を表示できる client だけが `audio_runtime_state` を入れる
@@ -131,8 +133,10 @@ event type の分類軸は次に固定する。
 - `assistant_message` は server が生成した assistant 発話を client に表示させる通知である
 - `assistant_audio` は server が合成した assistant 発話音声の配送 metadata である
 - `audio_runtime_state` は音声 runtime の process-local snapshot を表示させる通知である
+- `system_notice` は assistant 発話ではない server 定型通知である
 - server は `event_subscriptions` に `assistant_message` を宣言した client だけへ `assistant_message` を送る
 - server は `assistant_message` と `conversation_input` を、それぞれを購読する起動中の全 client へ履歴再送なしで配信する
+- server は `system_notice` を購読中の全 client へ履歴再送なしで配信する
 - server は `audio_output_settings.destination` が示す `client_kind` のうち、`assistant_audio` を購読する起動中の全 client へ同じ合成済み WAV を配信する
 - `assistant_message.data.source_kind` は発話生成の起点を示し、event type を増やして起点ごとの発話通知を分けない
 - `assistant_message.data.interaction_ref / recipient_person_refs` は論理配送先を示す
@@ -157,6 +161,23 @@ server -> client の代表例（capability request 1 件と通知系）:
     "source_label": "メイン画面",
     "mode": "still",
     "timeout_ms": 5000
+  }
+}
+```
+
+```json
+{
+  "event_id": 4,
+  "type": "system_notice",
+  "data": {
+    "notice_id": "system_notice:...",
+    "created_at": "2026-08-11T12:00:00+09:00",
+    "source_kind": "pre_send_check",
+    "code": "pre_send_check_withheld",
+    "message": "外部送信候補に非公開情報が含まれる可能性があるため、送信しませんでした。",
+    "conversation_visible": true,
+    "interaction_ref": "interaction:discord:channel-123",
+    "recipient_person_refs": ["person:external-123"]
   }
 }
 ```
@@ -230,10 +251,14 @@ server -> client の代表例（capability request 1 件と通知系）:
 - capability 実行要求: `vision.capture_request`、`camera.ptz_request`、`external.status_request`、`schedule.status_request`、`device.status_request`、`body.status_request`、`environment.status_request`、`location.status_request`、`social.status_request`、`mcp.call_tool_request`（payload の正本は [実行連携.md](実行連携.md)）
 - `conversation_input`: 確定したユーザー発話を購読 client に表示する
 - `assistant_message`: server が生成した assistant 発話を表示する
+- `system_notice`: 安全境界と運用上の定型通知を表示する
 - `assistant_audio`: 合成結果の metadata と WAV を配送する
 - `audio_runtime_state`: 音声 runtime の完全 snapshot（shape は [列挙とinspection.md](列挙とinspection.md) の `runtime_detail.audio_runtime_state` と同じ。差分 event にしない）
 
 `assistant_message.data.source_kind` は `conversation / capability_result / wake / background_thinking / autonomous_run` のいずれかであり、capability result follow-up の場合だけ `request_id / capability_id` を持つ。
+`system_notice.data` は `notice_id / created_at / source_kind / code / message / conversation_visible / interaction_ref / recipient_person_refs` を持つ。
+`pre_send_check` の notice は candidate、LLM 理由、秘密値を含めない。
+起点人物がいる場合だけ `conversation_visible=true` とし、client は assistant message ではなく system message として会話欄にも表示する。
 `assistant_message.data.message_id / created_at / message / persona_id / persona_display_name / interaction_ref / recipient_person_refs` は全発話通知で必須とする。
 `persona_id / persona_display_name` はその発話生成で使った人格設定の ID とプリセット名であり、client は受信時の現在設定から再解決しない。
 `assistant_message.data.audio_delivery` と HTTP response の `speech.audio_delivery` は `delivery_id / status / error_code` を持つ。

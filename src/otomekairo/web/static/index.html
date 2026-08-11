@@ -195,6 +195,7 @@
           <option value="desktop">デスクトップ</option>
           <option value="camera">カメラ</option>
           <option value="mcp">MCP</option>
+          <option value="pre-send-check">送信前チェック</option>
         </optgroup>
         <optgroup label="情報">
           <option value="api">API説明</option>
@@ -219,6 +220,7 @@
         <button type="button" class="settings-nav-button" data-tab="desktop">デスクトップ</button>
         <button type="button" class="settings-nav-button" data-tab="camera">カメラ</button>
         <button type="button" class="settings-nav-button" data-tab="mcp">MCP</button>
+        <button type="button" class="settings-nav-button" data-tab="pre-send-check">送信前チェック</button>
         <div class="settings-navigation-category">情報</div>
         <button type="button" class="settings-nav-button" data-tab="api">API説明</button>
       </nav>
@@ -777,7 +779,10 @@
                 </div>
                 <div class="setting-row">
                   <label for="model-reasoning-effort">推論の深さ:</label>
-                  <input id="model-reasoning-effort" class="field-width-medium">
+                  <div class="console-control-with-hint">
+                    <input id="model-reasoning-effort" class="field-width-medium">
+                    <span class="field-hint">空欄のときは provider と model の既定動作を使う</span>
+                  </div>
                 </div>
                 <div class="setting-row">
                   <label for="model-max-output-tokens">最大出力トークン:</label>
@@ -877,7 +882,8 @@
             <fieldset class="settings-group">
               <legend>デスクトップの観測</legend>
               <div class="settings-list">
-                <p class="field-hint">定期思考の前にデスクトップを観測するかを設定します。CocoroConsole 未接続でも設定できます。実際の取得要求は接続中だけ送ります。取得の除外条件は「接続 → デスクトップ」で設定します。</p>
+                <p class="field-hint">定期思考の前にデスクトップを観測するかを設定します。CocoroConsole 未接続でも設定できます。実際の取得要求は接続中だけ送ります。取得の除外条件は「接続
+                  → デスクトップ」で設定します。</p>
                 <label class="checkbox-field">思考前にデスクトップを観測する
                   <input id="current-wake-desktop-observation" type="checkbox">
                 </label>
@@ -999,6 +1005,62 @@
                   <div class="console-control-with-hint">
                     <textarea id="mcp-env" rows="5" spellcheck="false"></textarea>
                     <span class="field-hint">KEY=VALUE を1行ずつ入力します。</span>
+                  </div>
+                </div>
+              </div>
+            </fieldset>
+          </section>
+
+          <section class="tab-page" data-page="pre-send-check">
+            <fieldset class="settings-group">
+              <legend>チェック用モデル</legend>
+              <div class="settings-list">
+                <div class="setting-row">
+                  <label for="pre-send-check-model">モデル:</label>
+                  <input id="pre-send-check-model" class="field-width-long">
+                </div>
+                <div class="setting-row">
+                  <label for="pre-send-check-api-base">エンドポイントURL:</label>
+                  <input id="pre-send-check-api-base">
+                </div>
+                <div class="setting-row">
+                  <label for="pre-send-check-api-key">APIキー:</label>
+                  <div class="inline-control-row secret-field-controls">
+                    <input id="pre-send-check-api-key" type="password" autocomplete="new-password">
+                    <button type="button" class="plain-button" data-secret-action="copy"
+                      data-secret-input="pre-send-check-api-key" data-secret-label="送信前チェックのAPIキー">コピー</button>
+                    <button type="button" class="plain-button" data-secret-action="paste"
+                      data-secret-input="pre-send-check-api-key" data-secret-label="送信前チェックのAPIキー">上書き貼り付け</button>
+                    <button type="button" class="plain-button" data-secret-action="paste-from-llm"
+                      data-secret-input="pre-send-check-api-key"
+                      data-secret-label="送信前チェックのAPIキー">LLMモデルのAPIキーを貼り付け</button>
+                  </div>
+                </div>
+                <div class="setting-row">
+                  <label for="pre-send-check-reasoning-effort">推論の深さ:</label>
+                  <div class="console-control-with-hint">
+                    <input id="pre-send-check-reasoning-effort" class="field-width-medium">
+                    <span class="field-hint">空欄のときは provider と model の既定動作を使う</span>
+                  </div>
+                </div>
+                <div class="setting-row">
+                  <label for="pre-send-check-max-output-tokens">最大出力トークン:</label>
+                  <input id="pre-send-check-max-output-tokens" class="field-width-short" type="number" min="1">
+                </div>
+                <div class="setting-row">
+                  <label for="pre-send-check-timeout-seconds">タイムアウト（秒）:</label>
+                  <input id="pre-send-check-timeout-seconds" class="field-width-short" type="number" min="1" step="1">
+                </div>
+              </div>
+            </fieldset>
+            <fieldset class="settings-group">
+              <legend>MCP server ごとのチェック対象</legend>
+              <div class="settings-list">
+                <p class="field-hint">呼び出し前に個人情報やセンシティブな内容が含まれていないかLLMでチェックします。</p>
+                <div class="setting-row setting-row-top">
+                  <label>対象 MCP:</label>
+                  <div class="console-control-with-hint">
+                    <div id="pre-send-check-mcp-list" class="pre-send-check-mcp-list"></div>
                   </div>
                 </div>
               </div>

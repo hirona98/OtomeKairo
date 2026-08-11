@@ -62,7 +62,8 @@ async def call_tool(server: McpServerConfig, *, tool_name: str, arguments: dict[
 
 
 def _server_params(server: McpServerConfig) -> StdioServerParameters:
-    env = dict(os.environ)
+    # MCP child へ親 process の credential を継承せず、実行に必要な PATH と server 固有値だけを渡す。
+    env = {"PATH": os.environ["PATH"]}
     env.update(server.env)
     return StdioServerParameters(command=server.command, args=server.args, env=env)
 

@@ -1226,6 +1226,7 @@ function connectEventStream() {
         "assistant_message",
         "assistant_audio",
         "audio_runtime_state",
+        "system_notice",
       ],
     }));
     setEventStreamStatus("イベント: 接続済み");
@@ -1280,6 +1281,13 @@ function connectEventStream() {
         pending?.images || [],
         { displayName: payload.data.display_name },
       );
+      refreshDashboard({ silent: true });
+    } else if (
+      payload?.type === "system_notice"
+      && payload.data?.conversation_visible === true
+      && typeof payload.data?.message === "string"
+    ) {
+      addMessage("system", payload.data.message);
       refreshDashboard({ silent: true });
     } else if (payload?.type === "audio_runtime_state" && payload.data) {
       updateAudioRuntimeState(payload.data);
@@ -2456,6 +2464,7 @@ function renderSettings() {
   renderModel();
   renderMemory();
   renderCapabilities();
+  renderPreSendCheck();
   renderApiDocumentation();
 }
 
@@ -3218,6 +3227,141 @@ function renderCurrent() {
     observations.some((observation) => isDesktopWakeObservation(observation));
 }
 
+const PRE_SEND_CHECK_MODEL_PRESET_ID = "model_preset:pre_send_check";
+
+function generationModelPresets() {
+  return (state.editor?.model_presets || []).filter(
+    (preset) => preset.model_preset_id !== PRE_SEND_CHECK_MODEL_PRESET_ID,
+  );
+}
+
+function preSendCheckModelPreset() {
+  let preset = arrayById(
+    state.editor?.model_presets || [],
+    "model_preset_id",
+    PRE_SEND_CHECK_MODEL_PRESET_ID,
+  );
+  if (preset) {
+    return preset;
+  }
+  // editor-state に専用定義が無い旧下書き向けに、その場で確保する。
+  preset = {
+    model_preset_id: PRE_SEND_CHECK_MODEL_PRESET_ID,
+    display_name: "送信前チェック",
+    prompt_window: {
+      recent_turn_limit: 30,
+      recent_turn_minutes: 30,
+    },
+    model: "",
+    api_key: "",
+    max_output_tokens: 4000,
+    timeout_seconds: 90,
+    web_search_enabled: false,
+  };
+  if (state.editor) {
+    state.editor.model_presets = state.editor.model_presets || [];
+    state.editor.model_presets.push(preset);
+    if (state.editor.current) {
+      state.editor.current.pre_send_check_model_preset_id =
+        PRE_SEND_CHECK_MODEL_PRESET_ID;
+    }
+  }
+  return preset;
+}
+
+function renderPreSendCheck() {
+  if (!state.editor?.current || !state.mcp) {
+    return;
+  }
+  const preset = preSendCheckModelPreset();
+  element("pre-send-check-model").value = preset.model || "";
+  element("pre-send-check-api-base").value = preset.api_base || "";
+  element("pre-send-check-api-key").value = preset.api_key || "";
+  element("pre-send-check-reasoning-effort").value = preset.reasoning_effort || "";
+  element("pre-send-check-max-output-tokens").value = preset.max_output_tokens || 4000;
+  element("pre-send-check-timeout-seconds").value = preset.timeout_seconds || 90;
+  renderPreSendCheckMcpList();
+}
+
+function renderPreSendCheckMcpList() {
+  const container = element("pre-send-check-mcp-list");
+  if (!container) {
+    return;
+  }
+  container.replaceChildren();
+  const servers = state.mcp?.mcp_servers || [];
+  if (!servers.length) {
+    const empty = document.createElement("span");
+    empty.className = "pre-send-check-mcp-empty";
+    empty.textContent = "MCP server がありません。接続の MCP タブで追加してください。";
+    container.appendChild(empty);
+    return;
+  }
+  for (const server of servers) {
+    const label = document.createElement("label");
+    label.className = "checkbox-field";
+    const name = server.mcp_server_id || "(unnamed)";
+    label.appendChild(
+      document.createTextNode(`${name}`),
+    );
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.dataset.mcpServerId = server.mcp_server_id || "";
+    input.checked = server.pre_send_check_enabled === true;
+    label.appendChild(input);
+    container.appendChild(label);
+  }
+}
+
+function syncPreSendCheck() {
+  if (!state.editor?.current) {
+    return;
+  }
+  const preset = preSendCheckModelPreset();
+  preset.model = textValue("pre-send-check-model");
+  preset.api_key = textValue("pre-send-check-api-key");
+  preset.max_output_tokens = intValue("pre-send-check-max-output-tokens", 4000);
+  preset.timeout_seconds = boundedIntValue(
+    "pre-send-check-timeout-seconds",
+    "タイムアウト（秒）",
+    1,
+  );
+  preset.web_search_enabled = false;
+  const apiBase = textValue("pre-send-check-api-base").trim();
+  if (apiBase) {
+    preset.api_base = apiBase;
+  } else {
+    delete preset.api_base;
+  }
+  const reasoningEffort = textValue("pre-send-check-reasoning-effort").trim();
+  if (reasoningEffort) {
+    preset.reasoning_effort = reasoningEffort;
+  } else {
+    delete preset.reasoning_effort;
+  }
+  state.editor.current.pre_send_check_model_preset_id =
+    PRE_SEND_CHECK_MODEL_PRESET_ID;
+  syncPreSendCheckMcpList();
+}
+
+function syncPreSendCheckMcpList() {
+  const container = element("pre-send-check-mcp-list");
+  if (!container || !state.mcp) {
+    return;
+  }
+  const inputs = container.querySelectorAll("input[type='checkbox'][data-mcp-server-id]");
+  for (const input of inputs) {
+    const serverId = input.dataset.mcpServerId || "";
+    if (!serverId) {
+      continue;
+    }
+    const server = arrayById(state.mcp.mcp_servers || [], "mcp_server_id", serverId);
+    if (server) {
+      server.pre_send_check_enabled = input.checked;
+    }
+  }
+}
+
 function syncCurrent() {
   state.editor.current.selected_persona_id = state.selectedPersonaId;
   state.editor.current.selected_memory_set_id = state.selectedMemorySetId;
@@ -3313,9 +3457,28 @@ function syncPersona() {
 }
 
 function renderModel() {
-  state.selectedModelPresetId = selectedOrFirst(state.editor.model_presets, "model_preset_id", state.selectedModelPresetId);
-  setSelectOptions(element("model-select"), state.editor.model_presets, "model_preset_id", state.selectedModelPresetId);
-  const preset = arrayById(state.editor.model_presets, "model_preset_id", state.selectedModelPresetId);
+  const generationPresets = generationModelPresets();
+  if (
+    state.selectedModelPresetId === PRE_SEND_CHECK_MODEL_PRESET_ID
+    || !arrayById(generationPresets, "model_preset_id", state.selectedModelPresetId)
+  ) {
+    state.selectedModelPresetId = generationPresets[0]?.model_preset_id || "";
+    if (state.editor?.current && state.selectedModelPresetId) {
+      state.editor.current.selected_model_preset_id = state.selectedModelPresetId;
+    }
+  }
+  state.selectedModelPresetId = selectedOrFirst(
+    generationPresets,
+    "model_preset_id",
+    state.selectedModelPresetId,
+  );
+  setSelectOptions(
+    element("model-select"),
+    generationPresets,
+    "model_preset_id",
+    state.selectedModelPresetId,
+  );
+  const preset = arrayById(generationPresets, "model_preset_id", state.selectedModelPresetId);
   if (!preset) {
     return;
   }
@@ -3392,13 +3555,13 @@ function syncMemory() {
   memory.embedding.api_key = textValue("memory-api-key");
 }
 
-function pasteLlmApiKeyToMemory() {
+function pasteLlmApiKey(inputId) {
   const apiKey = preferredLlmApiKey();
   if (!apiKey) {
     showNotice("貼り付け元の LLM モデル API キーが空です。", true);
     return;
   }
-  element("memory-api-key").value = apiKey;
+  element(inputId).value = apiKey;
   showNotice("LLMモデルのAPIキーを貼り付けました。");
 }
 
@@ -3662,6 +3825,10 @@ function syncMcp() {
   // connector_kind は UI に出さず既存値を保持する。
   mcp.client_id = textValue("mcp-client-id");
   mcp.enabled = boolValue("mcp-enabled");
+  // pre_send_check_enabled は送信前チェック専用タブが正とする。
+  if (typeof mcp.pre_send_check_enabled !== "boolean") {
+    mcp.pre_send_check_enabled = true;
+  }
   mcp.transport = textValue("mcp-transport");
   mcp.command = textValue("mcp-command");
   mcp.args = parseLines(textValue("mcp-args"));
@@ -3684,6 +3851,7 @@ function syncAllForms() {
   syncCamera();
   syncWatcher();
   syncMcp();
+  syncPreSendCheck();
 }
 
 // 選択切替や追加前に、現在フォームの値を下書きへ戻す。
@@ -3898,10 +4066,10 @@ function addModel() {
     setSelectedId: (id) => {
       state.selectedModelPresetId = id;
     },
-    buildItem: (items) => ({
+    buildItem: () => ({
       model_preset_id: `model_preset:${idSuffix()}`,
       display_name: uniqueDisplayName(
-        items.map((item) => item.display_name),
+        generationModelPresets().map((item) => item.display_name),
         "新規モデルプリセット",
       ),
       // モデル名・キー等は空。数値はシステム定数（選択中プリセットはコピーしない）。
@@ -3920,6 +4088,10 @@ function addModel() {
 }
 
 function duplicateModel() {
+  if (state.selectedModelPresetId === PRE_SEND_CHECK_MODEL_PRESET_ID) {
+    showNotice("送信前チェック用モデルはモデルタブから複製できません。", true);
+    return;
+  }
   duplicateClonedCollectionItem({
     items: state.editor.model_presets,
     idKey: "model_preset_id",
@@ -3934,13 +4106,29 @@ function duplicateModel() {
 }
 
 function deleteModel() {
+  if (state.selectedModelPresetId === PRE_SEND_CHECK_MODEL_PRESET_ID) {
+    showNotice("送信前チェック用モデルは削除できません。", true);
+    return;
+  }
+  if (generationModelPresets().length <= 1) {
+    showNotice("最後のモデルプリセットは削除できません。", true);
+    return;
+  }
   deleteCollectionItem({
     items: state.editor.model_presets,
     idKey: "model_preset_id",
     selectedId: state.selectedModelPresetId,
+    // 送信前チェック専用定義を含む配列なので、生成用が 1 件残るまで許す。
+    minCount: 2,
     setSelectedId: (id) => {
-      state.selectedModelPresetId = id;
-      state.editor.current.selected_model_preset_id = id;
+      const nextId =
+        id === PRE_SEND_CHECK_MODEL_PRESET_ID
+          ? generationModelPresets()[0]?.model_preset_id || ""
+          : id;
+      state.selectedModelPresetId = nextId;
+      state.editor.current.selected_model_preset_id = nextId;
+      state.editor.current.pre_send_check_model_preset_id =
+        PRE_SEND_CHECK_MODEL_PRESET_ID;
     },
     lastItemMessage: "最後のモデルプリセットは削除できません。",
     render: renderSettings,
@@ -4096,6 +4284,7 @@ function addMcp() {
     connector_kind: "mcp_client",
     client_id: "mcp-client-connector-main",
     enabled: false,
+    pre_send_check_enabled: false,
     transport: "stdio",
     command: "",
     args: [],
@@ -4104,12 +4293,14 @@ function addMcp() {
   });
   state.selectedMcpId = id;
   renderCapabilities();
+  renderPreSendCheck();
 }
 
 function deleteMcp() {
   removeById(state.mcp.mcp_servers, "mcp_server_id", state.selectedMcpId);
   state.selectedMcpId = state.mcp.mcp_servers[0]?.mcp_server_id || "";
   renderCapabilities();
+  renderPreSendCheck();
 }
 
 function switchTab(tab) {
@@ -4355,7 +4546,7 @@ function bindEvents() {
     } else if (secretAction === "paste") {
       pasteApiKey(inputId, label);
     } else if (secretAction === "paste-from-llm") {
-      pasteLlmApiKeyToMemory();
+      pasteLlmApiKey(inputId);
     }
   });
 

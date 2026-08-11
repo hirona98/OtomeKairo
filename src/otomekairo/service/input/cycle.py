@@ -5,7 +5,13 @@ from typing import Any
 from otomekairo.llm.client import LLMError
 from otomekairo.interaction import InteractionContext, normalize_interaction_context
 from otomekairo.recall.builder import RecallPackSelectionError
+from otomekairo.service.capability import PreSendCheckFailureError
 from otomekairo.service.common import ServiceError, debug_log
+
+
+PRE_SEND_CHECK_FAILURE_NOTICE = (
+    "外部送信内容の安全確認を完了できなかったため、送信しませんでした。"
+)
 
 
 class ServiceInputCycleMixin:
@@ -24,6 +30,7 @@ class ServiceInputCycleMixin:
         finally:
             self._cycle_coordinator.leave_foreground()
 
+        self._broadcast_system_notice(response.get("system_notice"))
         # 音声入力経路はassistant_message eventとの順序を保つため呼び出し側で配送する。
         if not defer_audio_delivery:
             self._attach_response_audio_delivery(
@@ -220,6 +227,33 @@ class ServiceInputCycleMixin:
                 },
                 observation_summary=observation_summary,
             )
+        except PreSendCheckFailureError as exc:
+            debug_log(
+                "Conversation",
+                f"{self._short_cycle_id(cycle_id)} failed stage=pre_send_check",
+                level="ERROR",
+            )
+            return self._finalize_cycle_failure(
+                cycle_id=cycle_id,
+                started_at=started_at,
+                state=state,
+                runtime_summary=runtime_summary,
+                input_text=input_text,
+                client_context=current_client_context,
+                interaction_context=interaction_context,
+                failure_reason="MCP pre-send check failed.",
+                failure_event_kind="pre_send_check_failure",
+                failure_event_payload={"pre_send_check": exc.audit_summary},
+                observation_summary=observation_summary,
+                system_notice={
+                    "source_kind": "pre_send_check",
+                    "code": "pre_send_check_failure",
+                    "message": PRE_SEND_CHECK_FAILURE_NOTICE,
+                    "conversation_visible": True,
+                    "interaction_ref": interaction_context.interaction_ref,
+                    "recipient_person_refs": list(interaction_context.participant_refs),
+                },
+            )
         except (LLMError, KeyError, ValueError) as exc:
             debug_log(
                 "Conversation",
@@ -290,6 +324,7 @@ class ServiceInputCycleMixin:
         pending_intent_selection: dict[str, Any] | None = None,
         capability_request_summary: dict[str, Any] | None = None,
         ongoing_action_transition_summary: dict[str, Any] | None = None,
+        system_notice: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         finished_at = self._now_iso()
         persist_kwargs: dict[str, Any] = {
@@ -309,6 +344,7 @@ class ServiceInputCycleMixin:
             "trigger_kind": trigger_kind,
             "input_event_kind": input_event_kind,
             "input_event_role": input_event_role,
+            "system_notice": system_notice,
         }
         if recall_trace is not None:
             persist_kwargs["recall_trace"] = recall_trace
@@ -338,4 +374,5 @@ class ServiceInputCycleMixin:
             "speech": None,
             "capability_request": None,
             "autonomous_run": None,
+            "system_notice": system_notice,
         }

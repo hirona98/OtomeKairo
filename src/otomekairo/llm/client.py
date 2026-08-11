@@ -28,6 +28,7 @@ from otomekairo.llm.contracts import (
     validate_memory_correction_reconciliation_contract,
     validate_memory_interpretation_contract,
     validate_memory_reflection_summary_contract,
+    validate_pre_send_check_contract,
     validate_pending_intent_selection_contract,
     validate_recall_pack_selection_contract,
     validate_recall_hint_contract,
@@ -59,6 +60,8 @@ from otomekairo.llm.prompts import (
     build_memory_interpretation_repair_prompt,
     build_memory_reflection_summary_messages,
     build_memory_reflection_summary_repair_prompt,
+    build_pre_send_check_messages,
+    build_pre_send_check_repair_prompt,
     build_pending_intent_selection_messages,
     build_pending_intent_selection_repair_prompt,
     build_recall_pack_selection_messages,
@@ -777,6 +780,25 @@ class LLMClient:
             validator=validate_disclosure_review_contract,
             repair_prompt_builder=build_disclosure_review_repair_prompt,
             failure_message="DisclosureReview の生成に失敗しました。",
+            operation=operation,
+        )
+
+    def generate_pre_send_check(
+        self,
+        *,
+        model_config: dict,
+        review_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        operation = "pre_send_check"
+        # 外部送信の安全境界では、開発用 mock を暗黙の許可として扱わない。
+        if self._is_mock_model_config(model_config):
+            raise LLMError("PreSendCheck requires an explicit reviewer test double for mock models.")
+        return self._generate_structured_payload(
+            model_config=model_config,
+            messages=build_pre_send_check_messages(review_context=review_context),
+            validator=validate_pre_send_check_contract,
+            repair_prompt_builder=build_pre_send_check_repair_prompt,
+            failure_message="PreSendCheck の生成に失敗しました。",
             operation=operation,
         )
 

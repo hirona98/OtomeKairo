@@ -30,6 +30,7 @@ EVENT_STREAM_EVENT_SUBSCRIPTIONS = {
     "assistant_message",
     "audio_runtime_state",
     "conversation_input",
+    "system_notice",
 }
 MCP_TRANSPORTS = {"stdio"}
 EVENT_STREAM_CLIENT_KINDS = {

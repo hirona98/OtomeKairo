@@ -5,7 +5,10 @@ from typing import Any
 
 from otomekairo.llm.client import LLMError
 from otomekairo.recall.builder import RecallPackSelectionError
-from otomekairo.service.capability import CapabilityResultValidationError
+from otomekairo.service.capability import (
+    CapabilityResultValidationError,
+    PreSendCheckFailureError,
+)
 from otomekairo.service.common import ServiceError, debug_log
 
 
@@ -234,6 +237,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 capability_request_summary=capability_request_summary,
                 ongoing_action_transition_summary=ongoing_action_transition_summary,
             )
+            self._broadcast_system_notice(response.get("system_notice"))
             self._emit_capability_result_assistant_message_event(
                 cycle_id=cycle_id,
                 capability_response=capability_response,
@@ -308,6 +312,25 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 failure_reason=str(exc),
             )
         except (LLMError, KeyError, ValueError) as exc:
+            review_failure = isinstance(exc, PreSendCheckFailureError)
+            review_notice = None
+            if review_failure:
+                review_notice = {
+                    "source_kind": "pre_send_check",
+                    "code": "pre_send_check_failure",
+                    "message": "外部送信内容の安全確認を完了できなかったため、送信しませんでした。",
+                    "conversation_visible": interaction_context is not None,
+                    "interaction_ref": (
+                        interaction_context.interaction_ref
+                        if interaction_context is not None
+                        else None
+                    ),
+                    "recipient_person_refs": (
+                        list(interaction_context.participant_refs)
+                        if interaction_context is not None
+                        else []
+                    ),
+                }
             failed_followup_capability_request_summary, failed_transition_summary = (
                 self._exception_capability_dispatch_trace(exc)
             )
@@ -343,7 +366,19 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 capability_request_summary=capability_request_summary,
                 followup_capability_request_summary=failed_followup_capability_request_summary,
                 ongoing_action_transition_summary=ongoing_action_transition_summary,
+                failure_event_kind=(
+                    "pre_send_check_failure"
+                    if review_failure
+                    else "recall_hint_failure"
+                ),
+                failure_event_payload=(
+                    {"pre_send_check": exc.audit_summary}
+                    if review_failure
+                    else None
+                ),
+                system_notice=review_notice,
             )
+            self._broadcast_system_notice(review_notice)
             self._emit_input_failure_logs(
                 cycle_id=cycle_id,
                 trigger_kind="capability_result",

@@ -34,6 +34,18 @@ class CurrentConfigApiTests(unittest.TestCase):
         self.assertEqual(preset["timeout_seconds"], 90)
         self.assertFalse(preset["web_search_enabled"])
         self.assertNotIn("reasoning_effort", preset)
+        self.assertEqual(
+            state["pre_send_check_model_preset_id"],
+            "model_preset:pre_send_check",
+        )
+        self.assertIn(
+            "model_preset:pre_send_check",
+            state["model_presets"],
+        )
+        self.assertNotEqual(
+            state["pre_send_check_model_preset_id"],
+            state["selected_model_preset_id"],
+        )
 
     def test_model_preset_read_masks_top_level_api_key(self) -> None:
         service = DummyService()
@@ -105,6 +117,40 @@ class CurrentConfigApiTests(unittest.TestCase):
 
         response = service.patch_current("token", {"thinking_speech_level": 10})
         self.assertEqual(response["settings_snapshot"]["thinking_speech_level"], 10)
+
+    def test_pre_send_check_uses_dedicated_model_preset(self) -> None:
+        service = DummyService()
+        state = service.store.read_state()
+        source_id = state["selected_model_preset_id"]
+        review_id = "model_preset:pre_send_check"
+
+        response = service.patch_current(
+            "token",
+            {"pre_send_check_model_preset_id": review_id},
+        )
+
+        self.assertEqual(
+            response["settings_snapshot"]["pre_send_check_model_preset_id"],
+            review_id,
+        )
+        self.assertEqual(response["settings_snapshot"]["selected_model_preset_id"], source_id)
+
+        with self.assertRaises(ServiceError) as raised:
+            service.patch_current(
+                "token",
+                {"pre_send_check_model_preset_id": source_id},
+            )
+        self.assertEqual(
+            raised.exception.error_code,
+            "invalid_pre_send_check_model_preset_id",
+        )
+
+        with self.assertRaises(ServiceError) as raised:
+            service.delete_model_preset("token", review_id)
+        self.assertEqual(
+            raised.exception.error_code,
+            "pre_send_check_model_preset_delete_forbidden",
+        )
 
     def test_patch_current_rejects_invalid_thinking_speech_level(self) -> None:
         service = DummyService()

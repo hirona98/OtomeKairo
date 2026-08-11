@@ -263,6 +263,7 @@ class DecisionContext:
     recall_pack: dict[str, Any]
     reference_context: dict[str, Any] | None = None
     people_context: list[dict[str, str]] | None = None
+    pre_send_check_feedback: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,9 +278,10 @@ class AutonomousStepContext:
     capability_decision_view: list[dict[str, Any]] | None
     last_result_context: dict[str, Any] | None
     people_context: list[dict[str, str]] | None = None
+    pre_send_check_feedback: str | None = None
 
     def to_prompt_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "run": self.run,
             "current_input": self.current_input.to_prompt_payload(),
             "recent_turns": self.recent_turns,
@@ -291,6 +293,9 @@ class AutonomousStepContext:
             "last_result_context": self.last_result_context,
             "people_context": self.people_context or [],
         }
+        if self.pre_send_check_feedback is not None:
+            payload["pre_send_check_feedback"] = self.pre_send_check_feedback
+        return payload
 
 
 @dataclass(frozen=True, slots=True)

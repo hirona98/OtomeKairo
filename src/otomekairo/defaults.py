@@ -9,6 +9,8 @@ from importlib import resources
 DEFAULT_PERSONA_ID = "persona:default"
 DEFAULT_MEMORY_SET_ID = "memory_set:default"
 DEFAULT_MODEL_PRESET_ID = "model_preset:default"
+# 送信前チェック専用。生成用の selected_model_preset とは別定義として持つ。
+PRE_SEND_CHECK_MODEL_PRESET_ID = "model_preset:pre_send_check"
 DEFAULT_AVATAR_ID = "avatar:default"
 API_VERSION = "0.9.0"
 DEFAULT_THINKING_SPEECH_LEVEL = 5
@@ -174,6 +176,7 @@ def build_default_state() -> dict:
         "selected_persona_id": DEFAULT_PERSONA_ID,
         "selected_memory_set_id": DEFAULT_MEMORY_SET_ID,
         "selected_model_preset_id": DEFAULT_MODEL_PRESET_ID,
+        "pre_send_check_model_preset_id": PRE_SEND_CHECK_MODEL_PRESET_ID,
         "selected_avatar_id": DEFAULT_AVATAR_ID,
         "thinking_speech_level": DEFAULT_THINKING_SPEECH_LEVEL,
         "selected_conversation_display_name_id": DEFAULT_CONVERSATION_DISPLAY_NAME_ID,
@@ -210,6 +213,7 @@ def build_default_state() -> dict:
         },
         "model_presets": {
             DEFAULT_MODEL_PRESET_ID: build_default_model_preset(),
+            PRE_SEND_CHECK_MODEL_PRESET_ID: build_default_pre_send_check_model_preset(),
         },
         "avatars": {
             DEFAULT_AVATAR_ID: build_default_avatar(),
@@ -332,6 +336,23 @@ def build_default_model_preset() -> dict:
     }
 
 
+def build_default_pre_send_check_model_preset() -> dict:
+    # 送信前チェック専用。会話窓や Web 検索は使わない。
+    return {
+        "model_preset_id": PRE_SEND_CHECK_MODEL_PRESET_ID,
+        "display_name": "送信前チェック",
+        "prompt_window": {
+            "recent_turn_limit": DEFAULT_PROMPT_WINDOW_RECENT_TURN_LIMIT,
+            "recent_turn_minutes": DEFAULT_PROMPT_WINDOW_RECENT_TURN_MINUTES,
+        },
+        "model": DEFAULT_GEMINI_GENERATION_MODEL,
+        "api_key": "",
+        "max_output_tokens": DEFAULT_GENERATION_MAX_OUTPUT_TOKENS,
+        "timeout_seconds": DEFAULT_GENERATION_TIMEOUT_SECONDS,
+        "web_search_enabled": False,
+    }
+
+
 def build_default_estat_mcp_server() -> dict:
     # 総務省 e-Stat（政府統計）API 向け stdio MCP の雛形。APP ID は空で保持し秘密値は入れない。
     return {
@@ -339,6 +360,8 @@ def build_default_estat_mcp_server() -> dict:
         "connector_kind": "mcp_client",
         "client_id": "mcp-client-connector-main",
         "enabled": False,
+        # 読み取り中心の政府統計 API なので既定は審査オフ。外向き write 系 MCP は true にする。
+        "pre_send_check_enabled": False,
         "transport": "stdio",
         "command": "uvx",
         "args": ["estat-mcp-server"],
