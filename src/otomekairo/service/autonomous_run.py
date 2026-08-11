@@ -3,7 +3,6 @@ from __future__ import annotations
 import threading
 import uuid
 from copy import deepcopy
-from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
@@ -16,7 +15,6 @@ from otomekairo.service.capability import (
     PreSendCheckWithheldError,
 )
 from otomekairo.service.common import ServiceError, debug_log
-from otomekairo.skills import load_skill_bundle
 
 
 AUTONOMOUS_RUN_POLL_SECONDS = 1.0
@@ -562,13 +560,6 @@ class ServiceAutonomousRunMixin:
         if not current_step_summary:
             current_step_summary = "autonomous_run の最初の一手を判断する。"
         origin_kind = str(source_current_input.get("source_kind") or "user_message").strip() or "user_message"
-        if coordination["mode"] == "replace_existing":
-            self._replace_existing_autonomous_runs_from_decision(
-                state=state,
-                target_runs=coordination["target_runs"],
-                current_time=current_time,
-                reason_summary=str(coordination["reason_summary"]),
-            )
         run = {
             "run_id": f"autonomous_run:{uuid.uuid4().hex}",
             "memory_set_id": state["selected_memory_set_id"],
@@ -590,24 +581,54 @@ class ServiceAutonomousRunMixin:
                 "reason_summary": coordination["reason_summary"],
             },
         }
-        operational_skill = decision.get("operational_skill")
-        if isinstance(operational_skill, dict):
-            policy = operational_skill.get("host_policy")
-            if not isinstance(policy, dict):
-                raise ValueError("Skill-backed autonomous_run requires host policy.")
-            run["operational_skill"] = {
-                "mcp_server_id": operational_skill.get("mcp_server_id"),
-                "bundle_id": operational_skill.get("bundle_id"),
-                "skill_id": operational_skill.get("skill_id"),
-                "reason_summary": operational_skill.get("reason_summary"),
-                "host_policy": {
-                    key: value
-                    for key, value in policy.items()
-                    if key != "session_eligible"
-                },
-                "tool_call_count": 0,
-                "mutating_call_count": 0,
+        mcp_server_id = run_payload.get("mcp_server_id")
+        if mcp_server_id is not None:
+            normalized_mcp_server_id = str(mcp_server_id).strip()
+            server = self._mcp_servers_from_state(state).get(normalized_mcp_server_id)
+            session = server.get("autonomous_session") if isinstance(server, dict) else None
+            if (
+                not normalized_mcp_server_id
+                or not isinstance(server, dict)
+                or server.get("enabled") is not True
+                or not isinstance(session, dict)
+                or session.get("enabled") is not True
+            ):
+                raise ValueError("Finite MCP session target is unavailable or disabled.")
+            if origin_kind not in {"user_message", "background_thinking"}:
+                raise ValueError("Finite MCP sessions can only start from user_message or background_thinking.")
+            matching_runs = [
+                candidate
+                for candidate in self._mcp_session_runs(normalized_mcp_server_id)
+                if candidate.get("status") in AUTONOMOUS_RUN_ACTIVE_STATUSES
+            ]
+            matching_run_ids = {
+                str(candidate.get("run_id") or "")
+                for candidate in matching_runs
+                if str(candidate.get("run_id") or "")
             }
+            if origin_kind == "background_thinking" and not self._mcp_background_session_eligible(
+                mcp_server_id=normalized_mcp_server_id,
+                policy=session,
+                matching_runs=self._mcp_session_runs(normalized_mcp_server_id),
+            ):
+                raise ValueError("Background finite MCP session is not eligible.")
+            if matching_run_ids and (
+                coordination["mode"] != "replace_existing"
+                or not matching_run_ids.issubset(set(coordination["target_run_ids"]))
+            ):
+                raise ValueError("A nonterminal finite MCP session for the target server must be replaced explicitly.")
+            run["mcp_session"] = {
+                "mcp_server_id": normalized_mcp_server_id,
+                "policy": deepcopy(session),
+                "tool_call_count": 0,
+            }
+        if coordination["mode"] == "replace_existing":
+            self._replace_existing_autonomous_runs_from_decision(
+                state=state,
+                target_runs=coordination["target_runs"],
+                current_time=current_time,
+                reason_summary=str(coordination["reason_summary"]),
+            )
         requested_by_person_ref = source_current_input.get("sender_ref")
         if (
             isinstance(requested_by_person_ref, str)
@@ -765,8 +786,47 @@ class ServiceAutonomousRunMixin:
 
         try:
             current_time = started_at
-            if self._autonomous_operational_session_limit_reached(run):
-                reason_summary = "operational session の tool call 上限に達したため完了した。"
+            unavailable_reason = self._mcp_session_unavailable_reason(state=state, run=run)
+            if unavailable_reason is not None:
+                reason_summary = unavailable_reason
+                updated_run = self._terminal_autonomous_run(
+                    run=run,
+                    current_time=current_time,
+                    status="cancelled",
+                    reason_summary=reason_summary,
+                )
+                self.store.upsert_autonomous_run(autonomous_run=updated_run)
+                updated_run = self._finalize_autonomous_run_commitments(
+                    state=state,
+                    run=updated_run,
+                    terminal_status="cancelled",
+                    current_time=current_time,
+                    evidence_events=[],
+                )
+                if isinstance(source_request_record, dict):
+                    previous_request_finished = True
+                    self._finish_capability_ongoing_action(
+                        request_record=source_request_record,
+                        current_time=current_time,
+                        terminal_kind="cancelled",
+                        reason_code="autonomous_run:cancel",
+                        terminal_reason=reason_summary,
+                        final_step_summary=reason_summary,
+                        transition_source="autonomous_run_step",
+                        decision_kind="autonomous_step:none",
+                        result_error=True,
+                        detail_summary=reason_summary,
+                    )
+                return {
+                    "status": "cancelled",
+                    "autonomous_run": updated_run,
+                    "speech_payload": None,
+                    "capability_request_summary": None,
+                    "previous_request_finished": previous_request_finished,
+                    "step": None,
+                }
+            if self._mcp_session_limit_reached(run):
+                reason_summary = "有限 MCP セッションの tool call 上限に達したため完了した。"
                 updated_run = self._terminal_autonomous_run(
                     run={
                         **run,
@@ -826,16 +886,6 @@ class ServiceAutonomousRunMixin:
                 source_current_input=source_current_input,
                 last_result_context=last_result_context or run.get("last_result_context"),
             )
-            step_capability_view = getattr(step_context, "capability_decision_view", None)
-            operational_skill_context = None
-            if step_capability_view is not None:
-                operational_skill_context = self._select_operational_skill_context(
-                    model_config=selected_preset,
-                    current_input=step_context.current_input.to_prompt_payload(),
-                    capability_decision_view=step_capability_view,
-                    active_run=run,
-                )
-                step_context = replace(step_context, operational_skill_context=operational_skill_context)
             step = self.llm.generate_autonomous_step(
                 model_config=selected_preset,
                 persona_context=self._build_selected_persona_context(
@@ -844,12 +894,7 @@ class ServiceAutonomousRunMixin:
                 ),
                 context=step_context,
             )
-            self._bind_operational_skill_to_autonomous_step(
-                step=step,
-                operational_skill_context=operational_skill_context,
-                capability_decision_view=step_capability_view,
-                run=run,
-            )
+            self._validate_mcp_session_step(step=step, run=run)
             action = step["action"]
             transition = step["transition"]
             action_kind = str(action.get("kind") or "").strip()
@@ -956,16 +1001,6 @@ class ServiceAutonomousRunMixin:
                         last_result_context=last_result_context or run.get("last_result_context"),
                         pre_send_check_feedback=AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK,
                     )
-                    step_capability_view = getattr(step_context, "capability_decision_view", None)
-                    operational_skill_context = None
-                    if step_capability_view is not None:
-                        operational_skill_context = self._select_operational_skill_context(
-                            model_config=selected_preset,
-                            current_input=step_context.current_input.to_prompt_payload(),
-                            capability_decision_view=step_capability_view,
-                            active_run=run,
-                        )
-                        step_context = replace(step_context, operational_skill_context=operational_skill_context)
                     step = self.llm.generate_autonomous_step(
                         model_config=selected_preset,
                         persona_context=self._build_selected_persona_context(
@@ -974,12 +1009,7 @@ class ServiceAutonomousRunMixin:
                         ),
                         context=step_context,
                     )
-                    self._bind_operational_skill_to_autonomous_step(
-                        step=step,
-                        operational_skill_context=operational_skill_context,
-                        capability_decision_view=step_capability_view,
-                        run=run,
-                    )
+                    self._validate_mcp_session_step(step=step, run=run)
                     action = step["action"]
                     transition = step["transition"]
                     action_kind = str(action.get("kind") or "").strip()
@@ -1320,7 +1350,7 @@ class ServiceAutonomousRunMixin:
             ),
             current_time=current_time,
         )
-        capability_decision_view = self._operational_session_capability_decision_view(
+        capability_decision_view = self._mcp_session_capability_decision_view(
             run=run,
             capability_decision_view=self._build_capability_decision_view(
                 state=state,
@@ -1469,11 +1499,10 @@ class ServiceAutonomousRunMixin:
             raise ValueError("Autonomous step capability_id is invalid.")
         if not isinstance(input_payload, dict):
             raise ValueError("Autonomous step capability input must be an object.")
-        self._consume_autonomous_operational_session_budget(
+        self._consume_mcp_session_budget(
             run=run,
             capability_id=capability_id.strip(),
             input_payload=input_payload,
-            action=action,
             current_time=current_time,
         )
         run = self.store.get_autonomous_run(run_id=str(run.get("run_id") or "")) or run
@@ -1499,129 +1528,110 @@ class ServiceAutonomousRunMixin:
             raise ValueError("Autonomous capability dispatch summary is missing.")
         return summary
 
-    def _bind_operational_skill_to_autonomous_step(
+    def _validate_mcp_session_step(
         self,
         *,
         step: dict[str, Any],
-        operational_skill_context: dict[str, Any] | None,
-        capability_decision_view: list[dict[str, Any]] | None,
         run: dict[str, Any],
     ) -> None:
+        session = run.get("mcp_session")
+        if not isinstance(session, dict):
+            return
         action = step.get("action")
         request = action.get("capability_request") if isinstance(action, dict) else None
-        if not isinstance(request, dict) or request.get("capability_id") != "mcp.call_tool":
+        if not isinstance(action, dict) or action.get("kind") != "capability_request":
             return
+        if not isinstance(request, dict) or request.get("capability_id") != "mcp.call_tool":
+            raise ValueError("Finite MCP session may execute only mcp.call_tool.")
         input_payload = request.get("input")
         if not isinstance(input_payload, dict):
-            raise ValueError("Skill-backed autonomous MCP request input is invalid.")
+            raise ValueError("Finite MCP session request input is invalid.")
         server_id = str(input_payload.get("mcp_server_id") or "").strip()
-        tool_name = str(input_payload.get("tool_name") or "").strip()
-        skill_id = self._decision_view_mcp_tool_skill_id(
-            capability_decision_view=capability_decision_view,
-            mcp_server_id=server_id,
-            tool_name=tool_name,
-        )
-        run_skill = run.get("operational_skill")
-        if skill_id is None and not isinstance(run_skill, dict):
-            return
-        if (
-            skill_id is None
-            or not isinstance(operational_skill_context, dict)
-            or operational_skill_context.get("mcp_server_id") != server_id
-            or operational_skill_context.get("skill_id") != skill_id
-        ):
-            raise ValueError("Skill-backed autonomous MCP request requires its selected action skill.")
-        action["operational_skill"] = self._operational_skill_summary(operational_skill_context)
+        if server_id != session.get("mcp_server_id"):
+            raise ValueError("Finite MCP session request must target its configured MCP server.")
 
-    def _autonomous_operational_session_limit_reached(self, run: dict[str, Any]) -> bool:
-        operational = run.get("operational_skill")
-        if not isinstance(operational, dict):
+    def _mcp_session_limit_reached(self, run: dict[str, Any]) -> bool:
+        session = run.get("mcp_session")
+        if not isinstance(session, dict):
             return False
-        policy = operational.get("host_policy")
+        policy = session.get("policy")
         if not isinstance(policy, dict):
-            raise ValueError("Operational session host policy is missing.")
-        return int(operational.get("tool_call_count") or 0) >= int(policy.get("max_tool_calls") or 0)
+            raise ValueError("Finite MCP session policy is missing.")
+        return int(session.get("tool_call_count") or 0) >= int(policy.get("max_tool_calls") or 0)
 
-    def _consume_autonomous_operational_session_budget(
+    def _mcp_session_unavailable_reason(
+        self,
+        *,
+        state: dict[str, Any],
+        run: dict[str, Any],
+    ) -> str | None:
+        session = run.get("mcp_session")
+        if not isinstance(session, dict):
+            return None
+        mcp_server_id = session.get("mcp_server_id")
+        server = self._mcp_servers_from_state(state).get(mcp_server_id)
+        if not isinstance(server, dict):
+            return "対象 MCP server が削除されたため、有限 MCP セッションを終了した。"
+        if server.get("enabled") is not True:
+            return "対象 MCP server が無効になったため、有限 MCP セッションを終了した。"
+        policy = server.get("autonomous_session")
+        if not isinstance(policy, dict) or policy.get("enabled") is not True:
+            return "対象 MCP server の有限セッションが無効になったため終了した。"
+        return None
+
+    def _consume_mcp_session_budget(
         self,
         *,
         run: dict[str, Any],
         capability_id: str,
         input_payload: dict[str, Any],
-        action: dict[str, Any],
         current_time: str,
     ) -> None:
-        operational = run.get("operational_skill")
-        if not isinstance(operational, dict):
+        session = run.get("mcp_session")
+        if not isinstance(session, dict):
             return
         if capability_id != "mcp.call_tool":
-            raise ValueError("Operational session may execute only its skill-backed MCP tools.")
+            raise ValueError("Finite MCP session may execute only mcp.call_tool.")
         server_id = str(input_payload.get("mcp_server_id") or "").strip()
-        tool_name = str(input_payload.get("tool_name") or "").strip()
-        if server_id != operational.get("mcp_server_id"):
-            raise ValueError("Operational session MCP server does not match its bundle.")
-        bundle = load_skill_bundle(str(operational.get("bundle_id") or ""))
-        expected_skill_id = bundle.tool_skills.get(tool_name)
-        action_skill = action.get("operational_skill")
-        if (
-            expected_skill_id is None
-            or not isinstance(action_skill, dict)
-            or action_skill.get("bundle_id") != bundle.bundle_id
-            or action_skill.get("skill_id") != expected_skill_id
-        ):
-            raise ValueError("Operational session tool is not covered by its selected skill.")
-        policy = operational.get("host_policy")
+        if server_id != session.get("mcp_server_id"):
+            raise ValueError("Finite MCP session request must target its configured MCP server.")
+        policy = session.get("policy")
         if not isinstance(policy, dict):
-            raise ValueError("Operational session host policy is missing.")
-        tool_count = int(operational.get("tool_call_count") or 0)
-        mutating_count = int(operational.get("mutating_call_count") or 0)
+            raise ValueError("Finite MCP session policy is missing.")
+        tool_count = int(session.get("tool_call_count") or 0)
         if tool_count >= int(policy.get("max_tool_calls") or 0):
-            raise ValueError("Operational session tool call limit reached.")
-        mutating = tool_name in bundle.mutating_tools
-        if mutating and mutating_count >= int(policy.get("max_mutating_calls") or 0):
-            raise ValueError("Operational session mutating call limit reached.")
+            raise ValueError("Finite MCP session tool call limit reached.")
         updated = deepcopy(run)
-        updated_operational = deepcopy(operational)
-        updated_operational["tool_call_count"] = tool_count + 1
-        if mutating:
-            updated_operational["mutating_call_count"] = mutating_count + 1
-        updated["operational_skill"] = updated_operational
+        updated_session = deepcopy(session)
+        updated_session["tool_call_count"] = tool_count + 1
+        updated["mcp_session"] = updated_session
         updated["updated_at"] = current_time
         self.store.upsert_autonomous_run(autonomous_run=updated)
 
-    def _operational_session_capability_decision_view(
+    def _mcp_session_capability_decision_view(
         self,
         *,
         run: dict[str, Any],
         capability_decision_view: list[dict[str, Any]] | None,
     ) -> list[dict[str, Any]] | None:
-        operational = run.get("operational_skill")
-        if not isinstance(operational, dict) or not capability_decision_view:
+        session = run.get("mcp_session")
+        if not isinstance(session, dict) or not capability_decision_view:
             return capability_decision_view
-        policy = operational.get("host_policy")
-        if not isinstance(policy, dict):
-            raise ValueError("Operational session host policy is missing.")
-        mutation_limit_reached = int(operational.get("mutating_call_count") or 0) >= int(
-            policy.get("max_mutating_calls") or 0
-        )
         normalized = deepcopy(capability_decision_view)
         for capability in normalized:
-            if not isinstance(capability, dict) or capability.get("id") != "mcp.call_tool":
+            if not isinstance(capability, dict):
+                continue
+            if capability.get("id") != "mcp.call_tool":
+                capability["available"] = False
                 continue
             for server in capability.get("mcp_servers", []):
                 if not isinstance(server, dict):
                     continue
-                if server.get("mcp_server_id") != operational.get("mcp_server_id"):
+                if server.get("mcp_server_id") != session.get("mcp_server_id"):
                     server["available"] = False
                     server["tools"] = []
                     continue
-                if mutation_limit_reached:
-                    server["tools"] = [
-                        tool
-                        for tool in server.get("tools", [])
-                        if isinstance(tool, dict) and tool.get("mutating") is not True
-                    ]
-                server["available"] = bool(server.get("tools"))
+                server["available"] = server.get("available") is True and bool(server.get("tools"))
             capability["available"] = any(
                 isinstance(server, dict) and server.get("available") is True
                 for server in capability.get("mcp_servers", [])
@@ -1641,7 +1651,7 @@ class ServiceAutonomousRunMixin:
         run_update = step["run_update"]
         transition_kind = str(transition.get("kind") or "").strip()
         if (
-            isinstance(run.get("operational_skill"), dict)
+            isinstance(run.get("mcp_session"), dict)
             and action_kind != "capability_request"
             and transition_kind in {"wait_until", "continue"}
         ):
@@ -2508,9 +2518,9 @@ class ServiceAutonomousRunMixin:
             "created_at": run.get("created_at"),
             "updated_at": run.get("updated_at"),
         }
-        operational = self._autonomous_run_operational_skill_summary(run)
-        if operational is not None:
-            summary["operational_skill"] = operational
+        mcp_session = self._autonomous_run_mcp_session_summary(run)
+        if mcp_session is not None:
+            summary["mcp_session"] = mcp_session
         return summary
 
     def _autonomous_run_public_summary(self, run: dict[str, Any], *, current_time: str) -> dict[str, Any]:
@@ -2532,22 +2542,19 @@ class ServiceAutonomousRunMixin:
             "updated_at": run.get("updated_at"),
             "completed_at": run.get("completed_at"),
         }
-        operational = self._autonomous_run_operational_skill_summary(run)
-        if operational is not None:
-            summary["operational_skill"] = operational
+        mcp_session = self._autonomous_run_mcp_session_summary(run)
+        if mcp_session is not None:
+            summary["mcp_session"] = mcp_session
         return summary
 
-    def _autonomous_run_operational_skill_summary(self, run: dict[str, Any]) -> dict[str, Any] | None:
-        operational = run.get("operational_skill")
-        if not isinstance(operational, dict):
+    def _autonomous_run_mcp_session_summary(self, run: dict[str, Any]) -> dict[str, Any] | None:
+        session = run.get("mcp_session")
+        if not isinstance(session, dict):
             return None
-        policy = operational.get("host_policy")
+        policy = session.get("policy")
         return {
-            "mcp_server_id": operational.get("mcp_server_id"),
-            "bundle_id": operational.get("bundle_id"),
-            "skill_id": operational.get("skill_id"),
-            "tool_call_count": operational.get("tool_call_count"),
-            "mutating_call_count": operational.get("mutating_call_count"),
+            "mcp_server_id": session.get("mcp_server_id"),
+            "tool_call_count": session.get("tool_call_count"),
             "max_tool_calls": policy.get("max_tool_calls") if isinstance(policy, dict) else None,
-            "max_mutating_calls": policy.get("max_mutating_calls") if isinstance(policy, dict) else None,
+            "background_enabled": policy.get("background_enabled") if isinstance(policy, dict) else None,
         }

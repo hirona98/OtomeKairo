@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import Any
 
 from otomekairo.capabilities import (
@@ -15,7 +14,6 @@ from otomekairo.service.config.constants import (
     VISION_SOURCE_KINDS,
 )
 from otomekairo.service.input.source_owner import visual_source_owner
-from otomekairo.skills import SkillBundleError, load_skill_bundle
 
 
 CAMERA_PTZ_OPERATIONS = {
@@ -877,45 +875,35 @@ class ServiceConfigStreamMixin:
                 and registered_server.get("enabled") is True
                 and registered_server.get("client_id") == server.get("client_id")
             )
-            skill_bundle_view: dict[str, Any] | None = None
-            skill_bundle_error = False
-            bundle_id = registered_server.get("skill_bundle_id") if isinstance(registered_server, dict) else None
-            bundle = None
-            if isinstance(bundle_id, str) and bundle_id.strip():
-                try:
-                    bundle = load_skill_bundle(bundle_id.strip())
-                    session = registered_server.get("autonomous_session")
-                    skill_bundle_view = {
-                        "bundle_id": bundle.bundle_id,
-                        "version": bundle.version,
-                        "upstream_commit": bundle.upstream_commit,
-                        "root_skill": bundle.root_skill,
-                        "session_skill": bundle.session_skill,
-                        "catalog": bundle.catalog(),
-                        "autonomous_session": deepcopy(session) if isinstance(session, dict) else None,
+            session_view = None
+            if isinstance(registered_server, dict):
+                session = registered_server.get("autonomous_session")
+                if isinstance(session, dict):
+                    matching_runs = self._mcp_session_runs(normalized_server_id)
+                    session_view = {
+                        **session,
+                        "background_eligible": self._mcp_background_session_eligible(
+                            mcp_server_id=normalized_server_id,
+                            policy=session,
+                            matching_runs=matching_runs,
+                        ),
+                        "active_run_ids": [
+                            str(run.get("run_id") or "")
+                            for run in matching_runs
+                            if run.get("status") in {"active", "waiting_timer", "waiting_result", "paused"}
+                            and str(run.get("run_id") or "")
+                        ],
                     }
-                except SkillBundleError:
-                    skill_bundle_error = True
-            # 設定上無効または skill bundle が壊れた server は catalog から外す。
+            # 設定上無効な server は catalog から外す。
             tools = self._inspection_mcp_tools(server.get("tools")) if server_is_active else []
-            if bundle is not None:
-                tools = [tool for tool in tools if tool.get("name") in bundle.declared_tools]
-                for tool in tools:
-                    tool_name = str(tool["name"])
-                    skill_id = bundle.tool_skills[tool_name]
-                    tool["skill_id"] = skill_id
-                    tool["skill_description"] = bundle.skills[skill_id].description
-                    tool["mutating"] = tool_name in bundle.mutating_tools
-            if skill_bundle_error:
-                tools = []
             normalized.append(
                 {
                     "mcp_server_id": normalized_server_id,
                     "transport": transport.strip() if isinstance(transport, str) and transport.strip() else "stdio",
-                    "available": server.get("available") is True and bool(tools) and not skill_bundle_error,
-                    "unavailable_reason": "skill_bundle_invalid" if skill_bundle_error else ("no_mcp_tool" if not tools else None),
+                    "available": server.get("available") is True and bool(tools),
+                    "unavailable_reason": "no_mcp_tool" if not tools else None,
                     "tools": tools,
-                    "skill_bundle": skill_bundle_view,
+                    "autonomous_session": session_view,
                 }
             )
         return normalized
@@ -945,129 +933,42 @@ class ServiceConfigStreamMixin:
             )
         return tools
 
-    def _select_operational_skill_context(
-        self,
-        *,
-        model_config: dict[str, Any],
-        current_input: dict[str, Any],
-        capability_decision_view: list[dict[str, Any]] | None,
-        active_run: dict[str, Any] | None = None,
-    ) -> dict[str, Any] | None:
-        catalogs: list[dict[str, Any]] = []
-        for capability in capability_decision_view or []:
-            if not isinstance(capability, dict) or capability.get("id") != "mcp.call_tool":
-                continue
-            for server in capability.get("mcp_servers", []):
-                if not isinstance(server, dict) or server.get("available") is not True:
-                    continue
-                bundle_view = server.get("skill_bundle")
-                if not isinstance(bundle_view, dict):
-                    continue
-                host_policy = deepcopy(bundle_view.get("autonomous_session"))
-                if isinstance(host_policy, dict):
-                    host_policy["session_eligible"] = self._operational_session_eligible(
-                        bundle_id=str(bundle_view.get("bundle_id") or ""),
-                        policy=host_policy,
-                    )
-                catalogs.append(
-                    {
-                        "mcp_server_id": server.get("mcp_server_id"),
-                        "bundle_id": bundle_view.get("bundle_id"),
-                        "root_skill": bundle_view.get("root_skill"),
-                        "session_skill": bundle_view.get("session_skill"),
-                        "host_policy": host_policy,
-                        "skills": bundle_view.get("catalog", []),
-                        "available_tools": [
-                            {
-                                "name": tool.get("name"),
-                                "skill_id": tool.get("skill_id"),
-                                "mutating": tool.get("mutating"),
-                            }
-                            for tool in server.get("tools", [])
-                            if isinstance(tool, dict)
-                        ],
-                    }
-                )
-        if not catalogs:
-            return None
-        selection_result = self.llm.generate_operational_skill_selection(
-            model_config=model_config,
-            selection_context={
-                "current_input": deepcopy(current_input),
-                "active_run": deepcopy(active_run) if isinstance(active_run, dict) else None,
-                "skill_bundles": catalogs,
-            },
-        )
-        selection = selection_result.get("selection") if isinstance(selection_result, dict) else None
-        if selection is None:
-            return None
-        if not isinstance(selection, dict):
-            raise SkillBundleError("Operational skill selection is invalid.")
-        server_id = str(selection.get("mcp_server_id") or "").strip()
-        bundle_id = str(selection.get("bundle_id") or "").strip()
-        skill_id = str(selection.get("skill_id") or "").strip()
-        catalog = next(
-            (
-                item
-                for item in catalogs
-                if item.get("mcp_server_id") == server_id and item.get("bundle_id") == bundle_id
-            ),
-            None,
-        )
-        if catalog is None:
-            raise SkillBundleError("Operational skill selection references an unavailable bundle.")
-        bundle = load_skill_bundle(bundle_id)
-        catalog_skill_ids = {
-            str(item.get("skill_id") or "")
-            for item in catalog.get("skills", [])
-            if isinstance(item, dict)
-        }
-        if skill_id not in catalog_skill_ids or skill_id not in bundle.skills:
-            raise SkillBundleError("Operational skill selection references an unavailable skill.")
-        policy = catalog.get("host_policy")
-        if skill_id == bundle.session_skill and (
-            not isinstance(policy, dict)
-            or policy.get("enabled") is not True
-            or policy.get("session_eligible") is not True
-        ):
-            raise SkillBundleError("Operational session skill is not eligible.")
-        return {
-            "mcp_server_id": server_id,
-            "bundle_id": bundle_id,
-            "skill_id": skill_id,
-            "reason_summary": str(selection.get("reason_summary") or "").strip(),
-            "root_skill_id": bundle.root_skill,
-            "root_skill": bundle.skills[bundle.root_skill].content,
-            "selected_skill": bundle.skills[skill_id].content,
-            "host_policy": deepcopy(policy) if isinstance(policy, dict) else None,
-        }
-
-    def _operational_session_eligible(self, *, bundle_id: str, policy: dict[str, Any]) -> bool:
-        if policy.get("enabled") is not True:
-            return False
+    def _mcp_session_runs(self, mcp_server_id: str) -> list[dict[str, Any]]:
         state = self.store.read_state()
         memory_set_id = state.get("selected_memory_set_id")
         if not isinstance(memory_set_id, str):
-            return False
+            return []
         runs = self.store.list_autonomous_runs(memory_set_id=memory_set_id, limit=50)
-        matching = [
+        return [
             run
             for run in runs
             if isinstance(run, dict)
-            and isinstance(run.get("operational_skill"), dict)
-            and run["operational_skill"].get("bundle_id") == bundle_id
+            and isinstance(run.get("mcp_session"), dict)
+            and run["mcp_session"].get("mcp_server_id") == mcp_server_id
         ]
+
+    def _mcp_background_session_eligible(
+        self,
+        *,
+        mcp_server_id: str,
+        policy: dict[str, Any],
+        matching_runs: list[dict[str, Any]] | None = None,
+    ) -> bool:
+        if policy.get("enabled") is not True or policy.get("background_enabled") is not True:
+            return False
+        matching = matching_runs if matching_runs is not None else self._mcp_session_runs(mcp_server_id)
         if any(run.get("status") in {"active", "waiting_timer", "waiting_result", "paused"} for run in matching):
             return False
         if not matching:
             return True
-        latest_created_at = max(
-            (str(run.get("created_at") or "") for run in matching),
-            default="",
-        )
-        if not latest_created_at:
+        created_at_values = [
+            self._parse_iso(str(run["created_at"]))
+            for run in matching
+            if isinstance(run.get("created_at"), str) and run["created_at"].strip()
+        ]
+        if not created_at_values:
             return True
-        elapsed = (self._parse_iso(self._now_iso()) - self._parse_iso(latest_created_at)).total_seconds()
+        elapsed = (self._parse_iso(self._now_iso()) - max(created_at_values)).total_seconds()
         return elapsed >= int(policy.get("min_interval_seconds") or 0)
 
     def _inspection_vision_sources(self, vision_sources: list[dict[str, Any]] | None) -> list[dict[str, Any]]:

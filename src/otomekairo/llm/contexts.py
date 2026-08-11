@@ -261,7 +261,6 @@ class DecisionContext:
     workspace_context: dict[str, Any] | None
     recall_hint: dict[str, Any]
     recall_pack: dict[str, Any]
-    operational_skill_context: dict[str, Any] | None = None
     reference_context: dict[str, Any] | None = None
     people_context: list[dict[str, str]] | None = None
     pre_send_check_feedback: str | None = None
@@ -278,7 +277,6 @@ class AutonomousStepContext:
     ongoing_action_summary: dict[str, Any] | None
     capability_decision_view: list[dict[str, Any]] | None
     last_result_context: dict[str, Any] | None
-    operational_skill_context: dict[str, Any] | None = None
     people_context: list[dict[str, str]] | None = None
     pre_send_check_feedback: str | None = None
 
@@ -293,7 +291,6 @@ class AutonomousStepContext:
             "ongoing_action_summary": self.ongoing_action_summary,
             "capability_decision_view": self.capability_decision_view,
             "last_result_context": self.last_result_context,
-            "operational_skill_context": self.operational_skill_context,
             "people_context": self.people_context or [],
         }
         if self.pre_send_check_feedback is not None:

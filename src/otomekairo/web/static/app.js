@@ -3816,16 +3816,13 @@ function renderMcp() {
   element("mcp-env").value = formatEnv(mcp?.env || {});
   element("mcp-url").value = mcp?.url || "";
   element("mcp-headers").value = formatEnv(mcp?.headers || {});
-  element("mcp-skill-bundle").value = mcp?.skill_bundle_id || "";
   element("mcp-autonomous-enabled").checked = mcp?.autonomous_session?.enabled === true;
+  element("mcp-autonomous-background-enabled").checked = mcp?.autonomous_session?.background_enabled === true;
   element("mcp-session-interval").value = mcp?.autonomous_session?.min_interval_seconds || 3600;
   element("mcp-session-calls").value = mcp?.autonomous_session?.max_tool_calls || 10;
-  element("mcp-session-mutations").value = mcp?.autonomous_session?.max_mutating_calls || 3;
   const remote = mcp?.transport === "streamable_http";
   document.querySelectorAll("[data-mcp-stdio-field]").forEach((row) => { row.hidden = remote; });
   document.querySelectorAll("[data-mcp-http-field]").forEach((row) => { row.hidden = !remote; });
-  const hasSkill = Boolean(mcp?.skill_bundle_id);
-  document.querySelectorAll("[data-mcp-skill-field]").forEach((row) => { row.hidden = !hasSkill; });
 }
 
 function syncMcp() {
@@ -3858,26 +3855,12 @@ function syncMcp() {
     delete mcp.url;
     delete mcp.headers;
   }
-  const skillBundleId = textValue("mcp-skill-bundle");
-  if (skillBundleId) {
-    const maxToolCalls = boundedIntValue("mcp-session-calls", "tool call上限", 1, 1000);
-    const maxMutatingCalls = boundedIntValue("mcp-session-mutations", "外部変更上限", 1, 1000);
-    if (maxMutatingCalls > maxToolCalls) {
-      throw new Error("外部変更上限はtool call上限以下にしてください。");
-    }
-    mcp.skill_bundle_id = skillBundleId;
-    mcp.pre_send_check_enabled = true;
-    mcp.autonomous_session = {
-      enabled: boolValue("mcp-autonomous-enabled"),
-      entry_skill: "elyth-run-session",
-      min_interval_seconds: boundedIntValue("mcp-session-interval", "最短間隔", 1, 31536000),
-      max_tool_calls: maxToolCalls,
-      max_mutating_calls: maxMutatingCalls,
-    };
-  } else {
-    delete mcp.skill_bundle_id;
-    delete mcp.autonomous_session;
-  }
+  mcp.autonomous_session = {
+    enabled: boolValue("mcp-autonomous-enabled"),
+    background_enabled: boolValue("mcp-autonomous-background-enabled"),
+    min_interval_seconds: boundedIntValue("mcp-session-interval", "最短間隔", 1, 31536000),
+    max_tool_calls: boundedIntValue("mcp-session-calls", "tool call上限", 1, 1000),
+  };
   // 旧下書きに enabled_tools が残っていれば捨てる（設定正本から廃止済み）。
   delete mcp.enabled_tools;
   state.selectedMcpId = mcp.mcp_server_id;
@@ -4333,6 +4316,12 @@ function addMcp() {
     args: [],
     cwd: null,
     env: {},
+    autonomous_session: {
+      enabled: false,
+      background_enabled: false,
+      min_interval_seconds: 3600,
+      max_tool_calls: 10,
+    },
   });
   state.selectedMcpId = id;
   renderCapabilities();
@@ -4546,15 +4535,6 @@ function bindEvents() {
     syncMcp();
     renderMcp();
   });
-  element("mcp-skill-bundle").addEventListener("change", () => {
-    if (textValue("mcp-skill-bundle") === "elyth-remote-mcp-skills@0.1.0") {
-      element("mcp-transport").value = "streamable_http";
-      element("mcp-url").value = "https://elythworld.com/api/mcp/remote";
-    }
-    syncMcp();
-    renderMcp();
-  });
-
   // 設定パネル内のコレクション操作と秘密入力欄を委譲で共通処理する。
   const settingsActions = {
     "duplicate-avatar": duplicateAvatar,

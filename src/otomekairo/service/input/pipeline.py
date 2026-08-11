@@ -13,7 +13,6 @@ from otomekairo.llm.contexts import (
 from otomekairo.interaction import InteractionContext
 from otomekairo.service.capability import PreSendCheckWithheldError
 from otomekairo.service.common import debug_log
-from otomekairo.skills import load_skill_bundle
 
 
 WORKSPACE_CANDIDATE_LIMIT = 24
@@ -1945,11 +1944,6 @@ class ServiceInputPipelineMixin:
     ) -> dict[str, Any]:
         # decision生成
         debug_log("Pipeline", f"{cycle_label} decision start", level="DEBUG")
-        operational_skill_context = self._select_operational_skill_context(
-            model_config=model_config,
-            current_input=current_input.to_prompt_payload(),
-            capability_decision_view=capability_decision_view,
-        )
         decision_context = self._build_decision_context(
             input_text=input_text,
             current_input=current_input,
@@ -1974,7 +1968,6 @@ class ServiceInputPipelineMixin:
             workspace_context=workspace_context,
             recall_hint=recall_hint,
             recall_pack=recall_pack,
-            operational_skill_context=operational_skill_context,
             reference_context=reference_context,
             pre_send_check_feedback=pre_send_check_feedback,
         )
@@ -1983,9 +1976,8 @@ class ServiceInputPipelineMixin:
             persona_context=persona_context,
             context=decision_context,
         )
-        self._bind_operational_skill_to_decision(
+        self._validate_mcp_session_decision(
             decision=decision,
-            operational_skill_context=operational_skill_context,
             capability_decision_view=capability_decision_view,
             trigger_kind=trigger_kind,
         )
@@ -2327,7 +2319,6 @@ class ServiceInputPipelineMixin:
         workspace_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
-        operational_skill_context: dict[str, Any] | None = None,
         reference_context: dict[str, Any] | None = None,
         pre_send_check_feedback: str | None = None,
     ) -> DecisionContext:
@@ -2355,78 +2346,53 @@ class ServiceInputPipelineMixin:
             workspace_context=workspace_context,
             recall_hint=recall_hint,
             recall_pack=recall_pack,
-            operational_skill_context=operational_skill_context,
             reference_context=reference_context,
             pre_send_check_feedback=pre_send_check_feedback,
         )
 
-    def _bind_operational_skill_to_decision(
+    def _validate_mcp_session_decision(
         self,
         *,
         decision: dict[str, Any],
-        operational_skill_context: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         trigger_kind: str,
     ) -> None:
-        if decision.get("kind") == "capability_request":
-            request = decision.get("capability_request")
-            input_payload = request.get("input") if isinstance(request, dict) else None
-            if isinstance(request, dict) and request.get("capability_id") == "mcp.call_tool" and isinstance(input_payload, dict):
-                server_id = str(input_payload.get("mcp_server_id") or "").strip()
-                tool_name = str(input_payload.get("tool_name") or "").strip()
-                skill_id = self._decision_view_mcp_tool_skill_id(
-                    capability_decision_view=capability_decision_view,
-                    mcp_server_id=server_id,
-                    tool_name=tool_name,
-                )
-                if skill_id is not None:
-                    if (
-                        not isinstance(operational_skill_context, dict)
-                        or operational_skill_context.get("mcp_server_id") != server_id
-                        or operational_skill_context.get("skill_id") != skill_id
-                    ):
-                        raise ValueError("Skill-backed MCP request requires its selected operational skill.")
-                    bundle = load_skill_bundle(str(operational_skill_context.get("bundle_id") or ""))
-                    if tool_name in bundle.mutating_tools and trigger_kind != "user_message":
-                        raise ValueError("Mutating skill-backed MCP requests require a user request or bounded session.")
-                    decision["operational_skill"] = self._operational_skill_summary(operational_skill_context)
+        if decision.get("kind") != "autonomous_run":
             return
-        if decision.get("kind") == "autonomous_run" and isinstance(operational_skill_context, dict):
-            bundle = load_skill_bundle(str(operational_skill_context.get("bundle_id") or ""))
-            if operational_skill_context.get("skill_id") != bundle.session_skill:
-                raise ValueError("Skill-backed autonomous_run requires the bundle session skill.")
-            decision["operational_skill"] = self._operational_skill_summary(operational_skill_context)
-
-    def _decision_view_mcp_tool_skill_id(
-        self,
-        *,
-        capability_decision_view: list[dict[str, Any]] | None,
-        mcp_server_id: str,
-        tool_name: str,
-    ) -> str | None:
+        run_payload = decision.get("autonomous_run")
+        if not isinstance(run_payload, dict):
+            return
+        mcp_server_id = run_payload.get("mcp_server_id")
+        if mcp_server_id is None:
+            return
+        if trigger_kind not in {"user_message", "background_thinking"}:
+            raise ValueError("Finite MCP sessions can only start from user_message or background_thinking.")
+        server_view = None
         for capability in capability_decision_view or []:
             if not isinstance(capability, dict) or capability.get("id") != "mcp.call_tool":
                 continue
             for server in capability.get("mcp_servers", []):
-                if not isinstance(server, dict) or server.get("mcp_server_id") != mcp_server_id:
-                    continue
-                if not isinstance(server.get("skill_bundle"), dict):
-                    return None
-                for tool in server.get("tools", []):
-                    if isinstance(tool, dict) and tool.get("name") == tool_name:
-                        skill_id = tool.get("skill_id")
-                        return skill_id if isinstance(skill_id, str) else None
-                raise ValueError("Skill-backed MCP tool is unavailable.")
-        return None
-
-    def _operational_skill_summary(self, context: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "mcp_server_id": context.get("mcp_server_id"),
-            "bundle_id": context.get("bundle_id"),
-            "skill_id": context.get("skill_id"),
-            "reason_summary": context.get("reason_summary"),
-            "host_policy": deepcopy(context.get("host_policy")),
+                if isinstance(server, dict) and server.get("mcp_server_id") == mcp_server_id:
+                    server_view = server
+                    break
+        if not isinstance(server_view, dict) or server_view.get("available") is not True:
+            raise ValueError("Finite MCP session target is unavailable.")
+        session = server_view.get("autonomous_session")
+        if not isinstance(session, dict) or session.get("enabled") is not True:
+            raise ValueError("Finite MCP session is disabled for the target server.")
+        active_run_ids = {
+            run_id
+            for run_id in session.get("active_run_ids", [])
+            if isinstance(run_id, str) and run_id
         }
+        coordination = run_payload.get("coordination")
+        mode = coordination.get("mode") if isinstance(coordination, dict) else None
+        target_run_ids = set(coordination.get("target_run_ids", [])) if isinstance(coordination, dict) else set()
+        if active_run_ids and (mode != "replace_existing" or not active_run_ids.issubset(target_run_ids)):
+            raise ValueError("A nonterminal finite MCP session for the target server must be replaced explicitly.")
+        if trigger_kind == "background_thinking":
+            if session.get("background_enabled") is not True or session.get("background_eligible") is not True:
+                raise ValueError("Background finite MCP session is not eligible.")
 
     def _build_speech_context(
         self,

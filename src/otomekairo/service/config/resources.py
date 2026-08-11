@@ -21,7 +21,6 @@ from otomekairo.service.config.constants import (
     MCP_DEFAULT_CONNECTOR_KIND,
     MCP_TRANSPORTS,
 )
-from otomekairo.skills import SkillBundleError, load_skill_bundle
 
 
 class ServiceConfigResourcesMixin:
@@ -960,10 +959,7 @@ class ServiceConfigResourcesMixin:
         return {
             "mcp_servers": [
                 self._public_mcp_server(mcp_server)
-                for mcp_server in sorted(
-                    mcp_servers.values(),
-                    key=lambda item: str(item.get("mcp_server_id") or ""),
-                )
+                for mcp_server in self._ordered_mcp_servers(mcp_servers.values())
             ],
         }
 
@@ -1379,10 +1375,7 @@ class ServiceConfigResourcesMixin:
         return {
             "mcp_servers": [
                 self._mcp_server_definition_for_read(value)
-                for value in sorted(
-                    mcp_servers.values(),
-                    key=lambda item: str(item.get("mcp_server_id") or ""),
-                )
+                for value in self._ordered_mcp_servers(mcp_servers.values())
             ],
         }
 
@@ -1864,6 +1857,16 @@ class ServiceConfigResourcesMixin:
             }
         return public_definition
 
+    def _ordered_mcp_servers(self, definitions: Any) -> list[dict[str, Any]]:
+        # 組み込み雛形では ELYTH を先頭にし、残りは識別子順で安定させる。
+        return sorted(
+            definitions,
+            key=lambda item: (
+                0 if item.get("mcp_server_id") == "elyth" else 1,
+                str(item.get("mcp_server_id") or ""),
+            ),
+        )
+
     def _mcp_server_definition_for_read(self, definition: dict[str, Any]) -> dict[str, Any]:
         return deepcopy(definition)
 
@@ -1871,7 +1874,6 @@ class ServiceConfigResourcesMixin:
         # 送信前チェック要否は server の dispatch 方針であり、実行 connector へ渡さない。
         connector_definition = self._mcp_server_definition_for_read(definition)
         connector_definition.pop("pre_send_check_enabled", None)
-        connector_definition.pop("skill_bundle_id", None)
         connector_definition.pop("autonomous_session", None)
         return connector_definition
 
@@ -1894,7 +1896,7 @@ class ServiceConfigResourcesMixin:
         elif transport == "streamable_http":
             normalized.setdefault("url", None)
             normalized.setdefault("headers", {})
-        for field_name in ("mcp_server_id", "connector_kind", "client_id", "transport", "command", "cwd", "url", "skill_bundle_id"):
+        for field_name in ("mcp_server_id", "connector_kind", "client_id", "transport", "command", "cwd", "url"):
             value = normalized.get(field_name)
             if isinstance(value, str):
                 normalized[field_name] = value.strip()
@@ -1935,7 +1937,6 @@ class ServiceConfigResourcesMixin:
             "env",
             "url",
             "headers",
-            "skill_bundle_id",
             "autonomous_session",
         }
         unsupported_fields = sorted(set(definition.keys()) - supported_fields)
@@ -1965,7 +1966,7 @@ class ServiceConfigResourcesMixin:
             self._validate_stdio_mcp_server_definition(definition)
         else:
             self._validate_streamable_http_mcp_server_definition(definition)
-        self._validate_mcp_skill_settings(definition)
+        self._validate_mcp_autonomous_session(definition)
 
     def _validate_stdio_mcp_server_definition(self, definition: dict[str, Any]) -> None:
         incompatible = sorted(set(definition) & {"url", "headers"})
@@ -2019,75 +2020,37 @@ class ServiceConfigResourcesMixin:
                 raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.headers contains an invalid name.")
             if key.strip().lower() in reserved:
                 raise ServiceError(400, "invalid_mcp_server_field", f"mcp_server.headers.{key} is protocol-managed.")
-            if not isinstance(value, str) or not value.strip() or "\r" in value or "\n" in value:
-                raise ServiceError(400, "invalid_mcp_server_field", f"mcp_server.headers.{key} must be a non-empty string.")
+            if not isinstance(value, str) or "\r" in value or "\n" in value:
+                raise ServiceError(400, "invalid_mcp_server_field", f"mcp_server.headers.{key} must be a single-line string.")
+            if definition.get("enabled") is True and not value.strip():
+                raise ServiceError(400, "invalid_mcp_server_field", f"mcp_server.headers.{key} must be non-empty when enabled.")
 
-    def _validate_mcp_skill_settings(self, definition: dict[str, Any]) -> None:
-        bundle_id = definition.get("skill_bundle_id")
-        if bundle_id is not None and (not isinstance(bundle_id, str) or not bundle_id.strip()):
-            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.skill_bundle_id must be a non-empty string.")
-        bundle = None
-        if isinstance(bundle_id, str):
-            try:
-                bundle = load_skill_bundle(bundle_id)
-            except SkillBundleError as exc:
-                raise ServiceError(400, "invalid_mcp_server_field", str(exc)) from exc
-            if bundle.bundle_id == "elyth-remote-mcp-skills@0.1.0":
-                headers = definition.get("headers")
-                authorization = headers.get("Authorization") if isinstance(headers, dict) else None
-                if (
-                    definition.get("transport") != "streamable_http"
-                    or definition.get("url") != "https://elythworld.com/api/mcp/remote"
-                    or definition.get("pre_send_check_enabled") is not True
-                    or not isinstance(authorization, str)
-                    or not authorization.startswith("Bearer ")
-                    or not authorization.removeprefix("Bearer ").strip()
-                ):
-                    raise ServiceError(
-                        400,
-                        "invalid_mcp_server_field",
-                        "ELYTH Remote MCP requires the official HTTPS endpoint, Bearer authorization, and pre_send_check_enabled=true.",
-                    )
+    def _validate_mcp_autonomous_session(self, definition: dict[str, Any]) -> None:
         session = definition.get("autonomous_session")
-        if session is None:
-            return
         if not isinstance(session, dict) or set(session) != {
             "enabled",
-            "entry_skill",
+            "background_enabled",
             "min_interval_seconds",
             "max_tool_calls",
-            "max_mutating_calls",
         }:
             raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.autonomous_session has invalid fields.")
         if not isinstance(session.get("enabled"), bool):
             raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.autonomous_session.enabled must be a boolean.")
-        entry_skill = session.get("entry_skill")
-        if not isinstance(entry_skill, str) or not entry_skill.strip():
-            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.autonomous_session.entry_skill must be a non-empty string.")
-        for key in ("min_interval_seconds", "max_tool_calls", "max_mutating_calls"):
+        if not isinstance(session.get("background_enabled"), bool):
+            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.autonomous_session.background_enabled must be a boolean.")
+        if session["background_enabled"] and not session["enabled"]:
+            raise ServiceError(400, "invalid_mcp_server_field", "background_enabled requires autonomous_session.enabled=true.")
+        for key in ("min_interval_seconds", "max_tool_calls"):
             value = session.get(key)
             if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
                 raise ServiceError(400, "invalid_mcp_server_field", f"mcp_server.autonomous_session.{key} must be a positive integer.")
-        if session["max_mutating_calls"] > session["max_tool_calls"]:
-            raise ServiceError(400, "invalid_mcp_server_field", "max_mutating_calls must not exceed max_tool_calls.")
-        if session["enabled"] and not isinstance(bundle_id, str):
-            raise ServiceError(400, "invalid_mcp_server_field", "enabled autonomous_session requires skill_bundle_id.")
-        if bundle is not None and session["entry_skill"] != bundle.session_skill:
-            raise ServiceError(400, "invalid_mcp_server_field", "autonomous_session.entry_skill does not match the bundle session skill.")
 
     def _mcp_tool_is_enabled(self, mcp_server_id: str, tool_name: str) -> bool:
-        # skill bundle 付き server は bundle が宣言する tool だけを許可する。
+        # 実行可否の正本は MCP server の enabled。tool 実在は接続中 catalog で別途判定する。
+        _ = tool_name
         state = self.store.read_state()
         mcp_server = self._mcp_servers_from_state(state).get(mcp_server_id)
-        if not isinstance(mcp_server, dict) or mcp_server.get("enabled") is not True:
-            return False
-        bundle_id = mcp_server.get("skill_bundle_id")
-        if not isinstance(bundle_id, str):
-            return True
-        try:
-            return tool_name in load_skill_bundle(bundle_id).declared_tools
-        except SkillBundleError:
-            return False
+        return isinstance(mcp_server, dict) and mcp_server.get("enabled") is True
 
     def _validate_mcp_required_text_field(self, definition: dict[str, Any], key: str, label: str) -> None:
         value = definition.get(key)

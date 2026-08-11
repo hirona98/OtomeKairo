@@ -732,6 +732,7 @@ class ServiceInputTraceBuildMixin:
         payload: dict[str, Any] = {
             "objective_summary": autonomous_run.get("objective_summary"),
             "initial_step_summary": autonomous_run.get("initial_step_summary"),
+            "mcp_server_id": autonomous_run.get("mcp_server_id"),
         }
         if isinstance(coordination, dict):
             payload["coordination"] = {

@@ -23,7 +23,6 @@ CAPABILITY_UNAVAILABLE_REASONS = frozenset(
         "no_vision_source",
         "no_supported_control",
         "no_mcp_tool",
-        "skill_bundle_invalid",
     }
 )
 PERSONA_INITIATIVE_BASELINES = {"low", "medium", "high"}

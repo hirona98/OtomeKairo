@@ -1024,32 +1024,24 @@
                     <span class="field-hint">この MCP server を起動する MCP client connector の client_id。通常は既定値を使う。</span>
                   </div>
                 </div>
-                <div class="setting-row setting-row-top">
-                  <label for="mcp-skill-bundle">skill bundle:</label>
-                  <div class="console-control-with-hint">
-                    <select id="mcp-skill-bundle" class="field-width-long">
-                      <option value="">なし</option>
-                      <option value="elyth-remote-mcp-skills@0.1.0">ELYTH Remote MCP Skills v0.1.0</option>
-                    </select>
-                    <span class="field-hint">固定同梱した信頼済み操作手順を選ぶ。</span>
-                  </div>
-                </div>
-                <label class="checkbox-field" data-mcp-skill-field>有限セッションを自律実行
+                <label class="checkbox-field">有限 MCP セッションを有効化
                   <input id="mcp-autonomous-enabled" type="checkbox">
                 </label>
-                <div class="setting-row setting-row-top" data-mcp-skill-field>
+                <label class="checkbox-field">バックグラウンドから開始
+                  <input id="mcp-autonomous-background-enabled" type="checkbox">
+                </label>
+                <div class="setting-row setting-row-top">
                   <label for="mcp-session-interval">最短間隔:</label>
                   <div class="console-control-with-hint">
                     <input id="mcp-session-interval" type="number" min="1">
-                    <span class="field-hint">秒。ELYTH の既定は 3600。</span>
+                    <span class="field-hint">バックグラウンド開始どうしの最短間隔（秒）。</span>
                   </div>
                 </div>
-                <div class="setting-row setting-row-top" data-mcp-skill-field>
-                  <label for="mcp-session-calls">call / change上限:</label>
+                <div class="setting-row setting-row-top">
+                  <label for="mcp-session-calls">tool call上限:</label>
                   <div class="console-control-with-hint">
                     <input id="mcp-session-calls" type="number" min="1">
-                    <input id="mcp-session-mutations" type="number" min="1">
-                    <span class="field-hint">1セッションの全tool call数と外部変更数。</span>
+                    <span class="field-hint">1セッションで試行できる対象 MCP の tool call 数。</span>
                   </div>
                 </div>
               </div>

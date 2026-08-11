@@ -26,6 +26,7 @@ DEFAULT_PERSONA_DISPLAY_NAME = "初音ミク"
 DEFAULT_PERSONA_INITIATIVE_BASELINE = "medium"
 DEFAULT_CONVERSATION_DISPLAY_NAME_ID = "conversation_display_name:default"
 DEFAULT_CONVERSATION_DISPLAY_NAME = "マスター"
+DEFAULT_ELYTH_MCP_SERVER_ID = "elyth"
 DEFAULT_ESTAT_MCP_SERVER_ID = "e-stat"
 # 既定の音声起動ワード。prefix 一致で会話入力を開始する。
 DEFAULT_PERSONA_WAKE_WORDS = ["ミク", "ミクさん", "ミクちゃん"]
@@ -220,6 +221,7 @@ def build_default_state() -> dict:
         },
         "camera_sources": {},
         "mcp_servers": {
+            DEFAULT_ELYTH_MCP_SERVER_ID: build_default_elyth_mcp_server(),
             DEFAULT_ESTAT_MCP_SERVER_ID: build_default_estat_mcp_server(),
         },
         # 一度も connect していない間の desktop 取得方針。初回 connect で端末設定へ渡す。
@@ -353,6 +355,28 @@ def build_default_pre_send_check_model_preset() -> dict:
     }
 
 
+def build_default_elyth_mcp_server() -> dict:
+    # ELYTH Remote MCP の雛形。Bearer token は空で保持し、enabled にする前の明示入力を求める。
+    return {
+        "mcp_server_id": DEFAULT_ELYTH_MCP_SERVER_ID,
+        "connector_kind": "mcp_client",
+        "client_id": "mcp-client-connector-main",
+        "enabled": False,
+        "pre_send_check_enabled": True,
+        "transport": "streamable_http",
+        "url": "https://elythworld.com/api/mcp/remote",
+        "headers": {
+            "Authorization": "",
+        },
+        "autonomous_session": {
+            "enabled": True,
+            "background_enabled": True,
+            "min_interval_seconds": 3600,
+            "max_tool_calls": 10,
+        },
+    }
+
+
 def build_default_estat_mcp_server() -> dict:
     # 総務省 e-Stat（政府統計）API 向け stdio MCP の雛形。APP ID は空で保持し秘密値は入れない。
     return {
@@ -368,5 +392,11 @@ def build_default_estat_mcp_server() -> dict:
         "cwd": None,
         "env": {
             "E_STAT_APP_ID": "",
+        },
+        "autonomous_session": {
+            "enabled": False,
+            "background_enabled": False,
+            "min_interval_seconds": 3600,
+            "max_tool_calls": 10,
         },
     }

@@ -17,22 +17,6 @@ class LLMContractError(LLMError):
     pass
 
 
-def validate_operational_skill_selection_contract(payload: dict[str, Any]) -> None:
-    _validate_exact_keys(payload, {"selection"}, "OperationalSkillSelection")
-    selection = payload.get("selection")
-    if selection is None:
-        return
-    _validate_exact_keys(
-        selection,
-        {"mcp_server_id", "bundle_id", "skill_id", "reason_summary"},
-        "OperationalSkillSelection.selection",
-    )
-    for key in ("mcp_server_id", "bundle_id", "skill_id", "reason_summary"):
-        value = selection.get(key)
-        if not isinstance(value, str) or not value.strip():
-            raise LLMError(f"OperationalSkillSelection.selection.{key} は空でない文字列である必要があります。")
-
-
 # 設定
 RECALL_FOCUS_VALUES = {
     "self",
@@ -723,6 +707,7 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
         required_autonomous_run_keys = {
             "objective_summary",
             "initial_step_summary",
+            "mcp_server_id",
             "coordination",
         }
         if not isinstance(autonomous_run, dict) or set(autonomous_run.keys()) != required_autonomous_run_keys:
@@ -731,6 +716,9 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
             value = autonomous_run.get(key)
             if not isinstance(value, str) or not value.strip():
                 raise LLMError(f"Decision autonomous_run.{key} は空でない文字列である必要があります。")
+        mcp_server_id = autonomous_run.get("mcp_server_id")
+        if mcp_server_id is not None and (not isinstance(mcp_server_id, str) or not mcp_server_id.strip()):
+            raise LLMError("Decision autonomous_run.mcp_server_id は null または空でない文字列です。")
         coordination = autonomous_run.get("coordination")
         required_coordination_keys = {
             "mode",

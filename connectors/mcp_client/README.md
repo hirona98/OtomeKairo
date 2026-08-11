@@ -10,7 +10,7 @@
 - Streamable HTTP は TLS 検証を有効にし、設定 header を request に付与して redirect へ追従しない
 - token、header、env、tool arguments を通常ログや result summary に出さない
 
-tool の意味選択、skill bundle の整合性検証、送信前チェック、実行上限は OtomeKairo server が担当する。
+tool の意味判断、送信前チェック、有限セッションの実行上限は OtomeKairo server が担当する。
 
 ## セットアップ
 
@@ -39,7 +39,7 @@ OtomeKairo access token は、`OTOMEKAIRO_ACCESS_TOKEN`、ローカル `config.d
 
 ## ELYTH Remote MCP
 
-ELYTH には direct REST skill ではなく、公式 Streamable HTTP MCP と vendored `elyth-remote-mcp-skills@0.1.0` を使う。設定 wire の正本と JSON 例は [状態と設定](../../docs/design/api/状態と設定.md#put-apiconfigmcp-serversmcp_server_id)、skill 選択は [operational skills](../../docs/design/llm/operational_skills.md) を参照する。
+ELYTH は他の MCP server と同じ connector と `tools/list` catalog で扱う。Streamable HTTP の設定例と有限 MCP セッションの設定 wire は [状態と設定](../../docs/design/api/状態と設定.md#put-apiconfigmcp-serversmcp_server_id) を参照する。
 
 ELYTH API token は `headers.Authorization` に `Bearer ...` として保存する。repository、sample、通常ログ、trace に実 token を残さない。
 
