@@ -3224,12 +3224,82 @@ function renderCurrent() {
   element("current-wake-interval").value = wakePolicy.interval_seconds;
   element("current-wake-desktop-observation").checked =
     observations.some((observation) => isDesktopWakeObservation(observation));
+  renderOutboundContentReviewSettings();
+}
+
+function renderOutboundContentReviewSettings() {
+  if (!state.editor?.current || !state.mcp) {
+    return;
+  }
   setSelectOptions(
     element("outbound-content-review-model-select"),
     state.editor.model_presets,
     "model_preset_id",
     state.editor.current.outbound_content_review_model_preset_id,
   );
+  renderOutboundContentReviewMcpList();
+}
+
+function renderOutboundContentReviewMcpList() {
+  const container = element("outbound-content-review-mcp-list");
+  if (!container) {
+    return;
+  }
+  container.replaceChildren();
+  const servers = state.mcp?.mcp_servers || [];
+  if (!servers.length) {
+    const empty = document.createElement("span");
+    empty.className = "outbound-content-review-mcp-empty";
+    empty.textContent = "MCP server がありません。接続の MCP タブで追加してください。";
+    container.appendChild(empty);
+    return;
+  }
+  for (const server of servers) {
+    const label = document.createElement("label");
+    label.className = "checkbox-field";
+    const name = server.mcp_server_id || "(unnamed)";
+    const enabledNote = server.enabled === true ? "" : "（無効）";
+    label.appendChild(
+      document.createTextNode(`${name}${enabledNote}: 外向き内容レビューを必須にする`),
+    );
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.dataset.mcpServerId = server.mcp_server_id || "";
+    input.checked = server.outbound_content_review_required === true;
+    input.addEventListener("change", () => {
+      setOutboundContentReviewRequired(server.mcp_server_id, input.checked);
+    });
+    label.appendChild(input);
+    container.appendChild(label);
+  }
+}
+
+function setOutboundContentReviewRequired(mcpServerId, required) {
+  const server = arrayById(state.mcp?.mcp_servers || [], "mcp_server_id", mcpServerId);
+  if (!server) {
+    return;
+  }
+  server.outbound_content_review_required = required === true;
+  // MCP タブの同一項目を同期する。
+  if (state.selectedMcpId === mcpServerId) {
+    const formInput = element("mcp-outbound-content-review-required");
+    if (formInput) {
+      formInput.checked = required === true;
+    }
+  }
+  const listInput = document.querySelector(
+    `#outbound-content-review-mcp-list input[data-mcp-server-id="${cssEscapeAttribute(mcpServerId)}"]`,
+  );
+  if (listInput) {
+    listInput.checked = required === true;
+  }
+}
+
+function cssEscapeAttribute(value) {
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+    return CSS.escape(String(value || ""));
+  }
+  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 function syncCurrent() {
@@ -3669,11 +3739,15 @@ function renderMcp() {
   element("mcp-args").value = (mcp?.args || []).join("\n");
   element("mcp-cwd").value = mcp?.cwd || "";
   element("mcp-env").value = formatEnv(mcp?.env || {});
+  // モデルタブの一覧も同じ下書きを見る。
+  renderOutboundContentReviewMcpList();
 }
 
 function syncMcp() {
   const mcp = arrayById(state.mcp.mcp_servers, "mcp_server_id", state.selectedMcpId);
   if (!mcp) {
+    // 選択中が無いときも、モデルタブ一覧の必須化フラグは取り込む。
+    syncOutboundContentReviewMcpList();
     return;
   }
   mcp.mcp_server_id = textValue("mcp-server-id");
@@ -3692,6 +3766,26 @@ function syncMcp() {
   // 旧下書きに enabled_tools が残っていれば捨てる（設定正本から廃止済み）。
   delete mcp.enabled_tools;
   state.selectedMcpId = mcp.mcp_server_id;
+  // モデルタブ一覧から、選択中以外の server の必須化フラグも取り込む。
+  syncOutboundContentReviewMcpList({ excludeServerId: state.selectedMcpId });
+}
+
+function syncOutboundContentReviewMcpList({ excludeServerId = null } = {}) {
+  const container = element("outbound-content-review-mcp-list");
+  if (!container) {
+    return;
+  }
+  const inputs = container.querySelectorAll("input[type='checkbox'][data-mcp-server-id]");
+  for (const input of inputs) {
+    const serverId = input.dataset.mcpServerId || "";
+    if (!serverId || (excludeServerId != null && serverId === excludeServerId)) {
+      continue;
+    }
+    const server = arrayById(state.mcp?.mcp_servers || [], "mcp_server_id", serverId);
+    if (server) {
+      server.outbound_content_review_required = input.checked;
+    }
+  }
 }
 
 function syncAllForms() {
@@ -4079,7 +4173,6 @@ function addCamera() {
     kind: "camera",
     source_owner: "self",
     enabled: false,
-    outbound_content_review_required: true,
     connection: {
       host: "",
       camera_username: "",
@@ -4123,6 +4216,8 @@ function addMcp() {
     connector_kind: "mcp_client",
     client_id: "mcp-client-connector-main",
     enabled: false,
+    // 用途不明の新規 MCP は安全側でレビュー必須にする。
+    outbound_content_review_required: true,
     transport: "stdio",
     command: "",
     args: [],
@@ -4301,6 +4396,15 @@ function bindEvents() {
       state.selectedModelPresetId = id;
     },
     render: renderModel,
+  });
+  element("mcp-outbound-content-review-required").addEventListener("change", () => {
+    if (!state.selectedMcpId) {
+      return;
+    }
+    setOutboundContentReviewRequired(
+      state.selectedMcpId,
+      element("mcp-outbound-content-review-required").checked,
+    );
   });
   bindCollectionSelect("memory-select", {
     sync: syncMemory,

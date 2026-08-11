@@ -752,13 +752,6 @@
                   <label for="model-display-name">プリセット名:</label>
                   <input id="model-display-name" class="field-width-medium">
                 </div>
-                <div class="setting-row setting-row-top">
-                  <label for="outbound-content-review-model-select">外向き内容レビュー:</label>
-                  <div class="console-control-with-hint">
-                    <select id="outbound-content-review-model-select" class="field-width-medium"></select>
-                    <span class="field-hint">MCPから外部へ送る内容の安全確認に使うモデルプリセット</span>
-                  </div>
-                </div>
               </div>
             </fieldset>
             <fieldset class="settings-group model-settings-group">
@@ -809,6 +802,25 @@
                 <div class="setting-row">
                   <label for="model-recent-turn-minutes">時間（分）:</label>
                   <input id="model-recent-turn-minutes" class="field-width-short" type="number" min="1">
+                </div>
+              </div>
+            </fieldset>
+            <fieldset class="settings-group model-settings-group">
+              <legend>外向き内容レビュー</legend>
+              <div class="settings-list">
+                <div class="setting-row setting-row-top">
+                  <label for="outbound-content-review-model-select">レビュー用モデル:</label>
+                  <div class="console-control-with-hint">
+                    <select id="outbound-content-review-model-select" class="field-width-medium"></select>
+                    <span class="field-hint">MCP から外部へ送る内容の安全確認に使うモデルプリセット。通常の生成モデルとは別に選べます。</span>
+                  </div>
+                </div>
+                <div class="setting-row setting-row-top">
+                  <label>MCP server ごとの必須化:</label>
+                  <div class="console-control-with-hint">
+                    <div id="outbound-content-review-mcp-list" class="outbound-content-review-mcp-list"></div>
+                    <span class="field-hint">オンにすると、その MCP server の tool 呼び出し前に内容レビューを必須にします。投稿など外向き書き込み向けです。読み取り専用の MCP はオフで構いません。MCP タブの同じ項目と連動します。</span>
+                  </div>
                 </div>
               </div>
             </fieldset>

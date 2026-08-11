@@ -1396,6 +1396,23 @@ input[type="checkbox"]:disabled {
   order: -1;
 }
 
+.outbound-content-review-mcp-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.outbound-content-review-mcp-list .checkbox-field {
+  width: 100%;
+}
+
+.outbound-content-review-mcp-empty {
+  color: var(--muted);
+  font-size: var(--label-size);
+  line-height: 1.4;
+}
+
 .field-hint {
   align-self: center;
   margin: 0;
