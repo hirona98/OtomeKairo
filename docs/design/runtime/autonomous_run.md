@@ -139,7 +139,7 @@ timeout 後に再試行、待機、完了、cancel のどれを選ぶかは `aut
 
 ## 有限 MCP セッション
 
-有限 MCP セッションは、1 件の MCP server を対象に複数の tool call を連鎖させ、設定された回数内で終了する `autonomous_run` である。ELYTH 固有の機能ではなく、`autonomous_session.enabled=true` を持つ任意の MCP server で利用できる。tool の意味と入力 schema は通常どおり接続中の `tools/list` catalog を使い、別の skill、tool 対応表、更新系分類を持たない。
+有限 MCP セッションは、1 件の MCP server を対象に複数の tool call を連鎖させ、設定された回数内で終了する `autonomous_run` である。ELYTH 固有の機能ではなく、`autonomous_session.enabled=true` を持つ任意の MCP server で利用できる。tool の意味と入力 schema は通常どおり接続中の `tools/list` catalog を使い、skill と tool の固定対応表や更新系分類を持たない。通常の autonomous step と同様に Agent Skill instructions を選択できるが、有限 MCP セッション内の実行 capability は対象 server の `mcp.call_tool` に限定する。
 
 開始時に server は `decision.autonomous_run.mcp_server_id` の設定を検証し、run へ次を保存する。
 

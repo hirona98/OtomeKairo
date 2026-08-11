@@ -13,7 +13,7 @@ from otomekairo.service.common import debug_log
 
 
 CONFIG_DB_FILE_NAME = "config.db"
-CURRENT_CONFIG_DB_VERSION = 17
+CURRENT_CONFIG_DB_VERSION = 18
 
 
 class ConfigStore:
@@ -85,6 +85,11 @@ class ConfigStore:
                 "avatars": self._read_payload_table(conn, "avatars", "avatar_id"),
                 "camera_sources": self._read_payload_table(conn, "camera_sources", "vision_source_id"),
                 "mcp_servers": self._read_payload_table(conn, "mcp_servers", "mcp_server_id"),
+                "agent_skill_sources": self._read_payload_table(
+                    conn,
+                    "agent_skill_sources",
+                    "source_id",
+                ),
                 "desktop_capture_defaults": self._read_desktop_capture_defaults(conn),
                 "console_client_settings": self._read_console_client_settings(conn),
             }
@@ -462,6 +467,11 @@ class ConfigStore:
                 payload_json TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS agent_skill_sources (
+                source_id TEXT PRIMARY KEY,
+                payload_json TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS console_client_settings (
                 client_id TEXT PRIMARY KEY,
                 last_connected_at TEXT,
@@ -521,6 +531,7 @@ class ConfigStore:
             "avatars",
             "camera_sources",
             "mcp_servers",
+            "agent_skill_sources",
             "console_client_settings",
         ):
             conn.execute(f"DELETE FROM {table_name}")
@@ -575,6 +586,12 @@ class ConfigStore:
         self._write_payload_table(conn, "avatars", "avatar_id", state["avatars"])
         self._write_payload_table(conn, "camera_sources", "vision_source_id", state.get("camera_sources", {}))
         self._write_payload_table(conn, "mcp_servers", "mcp_server_id", state.get("mcp_servers", {}))
+        self._write_payload_table(
+            conn,
+            "agent_skill_sources",
+            "source_id",
+            state.get("agent_skill_sources", {}),
+        )
         self._write_desktop_capture_defaults(conn, state.get("desktop_capture_defaults"))
         self._write_console_client_settings(conn, state.get("console_client_settings", {}))
 

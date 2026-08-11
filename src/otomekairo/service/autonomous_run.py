@@ -984,12 +984,18 @@ class ServiceAutonomousRunMixin:
                     }
                 run = self.store.get_autonomous_run(run_id=run_id) or run
                 try:
+                    step_source_current_input = step_context.current_input.to_prompt_payload()
+                    step_activation = self._agent_skill_activation_summary(
+                        getattr(step_context, "agent_skill_context", None)
+                    )
+                    if step_activation is not None:
+                        step_source_current_input["agent_skill_activation"] = step_activation
                     capability_request_summary = self._dispatch_autonomous_run_capability_request(
                         state=state,
                         run=run,
                         current_time=current_time,
                         action=action,
-                        source_current_input=step_context.current_input.to_prompt_payload(),
+                        source_current_input=step_source_current_input,
                     )
                 except PreSendCheckWithheldError as first_withhold:
                     # autonomous step も候補本文を戻さず、同じ run 文脈で一度だけ再生成する。
@@ -1034,12 +1040,18 @@ class ServiceAutonomousRunMixin:
                         }
                     run = self.store.get_autonomous_run(run_id=run_id) or run
                     if action_kind == "capability_request":
+                        step_source_current_input = step_context.current_input.to_prompt_payload()
+                        step_activation = self._agent_skill_activation_summary(
+                            getattr(step_context, "agent_skill_context", None)
+                        )
+                        if step_activation is not None:
+                            step_source_current_input["agent_skill_activation"] = step_activation
                         capability_request_summary = self._dispatch_autonomous_run_capability_request(
                             state=state,
                             run=run,
                             current_time=current_time,
                             action=action,
-                            source_current_input=step_context.current_input.to_prompt_payload(),
+                            source_current_input=step_source_current_input,
                             pre_send_check_attempt=2,
                             pre_send_check_prior_attempts=[deepcopy(first_withhold.audit_summary)],
                         )
@@ -1357,6 +1369,19 @@ class ServiceAutonomousRunMixin:
                 current_time=current_time,
             ),
         )
+        agent_skill_context = self._build_agent_skill_context(
+            model_config=state["model_presets"][state["selected_model_preset_id"]],
+            current_input=current_input,
+            trigger_kind="autonomous_run",
+            capability_decision_view=capability_decision_view,
+            run=self._autonomous_run_prompt_summary(run),
+            prior_activation=(
+                source_current_input.get("agent_skill_activation")
+                if isinstance(source_current_input, dict)
+                and isinstance(source_current_input.get("agent_skill_activation"), dict)
+                else None
+            ),
+        )
         return AutonomousStepContext(
             run=self._autonomous_run_prompt_summary(run),
             current_input=current_input,
@@ -1379,6 +1404,7 @@ class ServiceAutonomousRunMixin:
                 structured_sources=[run, last_result_context],
             ),
             pre_send_check_feedback=pre_send_check_feedback,
+            agent_skill_context=agent_skill_context,
         )
 
     def _autonomous_run_activity_context(
@@ -1468,6 +1494,7 @@ class ServiceAutonomousRunMixin:
             recall_hint=self._empty_recall_hint(),
             recall_pack=self._empty_recall_pack(),
             decision=decision,
+            agent_skill_context=step_context.agent_skill_context,
         )
         return self.llm.generate_speech(
             model_config=selected_preset,

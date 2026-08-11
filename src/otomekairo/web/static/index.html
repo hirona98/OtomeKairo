@@ -195,6 +195,7 @@
           <option value="desktop">デスクトップ</option>
           <option value="camera">カメラ</option>
           <option value="mcp">MCP</option>
+          <option value="agent-skills">Agent Skills</option>
           <option value="pre-send-check">送信前チェック</option>
         </optgroup>
         <optgroup label="情報">
@@ -220,6 +221,7 @@
         <button type="button" class="settings-nav-button" data-tab="desktop">デスクトップ</button>
         <button type="button" class="settings-nav-button" data-tab="camera">カメラ</button>
         <button type="button" class="settings-nav-button" data-tab="mcp">MCP</button>
+        <button type="button" class="settings-nav-button" data-tab="agent-skills">Agent Skills</button>
         <button type="button" class="settings-nav-button" data-tab="pre-send-check">送信前チェック</button>
         <div class="settings-navigation-category">情報</div>
         <button type="button" class="settings-nav-button" data-tab="api">API説明</button>
@@ -1045,6 +1047,51 @@
                   </div>
                 </div>
               </div>
+            </fieldset>
+          </section>
+
+          <section class="tab-page" data-page="agent-skills">
+            <div class="selector-row">
+              <select id="agent-skill-source-select"></select>
+              <button type="button" data-action="add-agent-skill-source">追加</button>
+              <button type="button" class="danger-button" data-action="delete-agent-skill-source">削除</button>
+              <button type="button" data-action="reload-agent-skills">再読込</button>
+            </div>
+            <fieldset class="settings-group capability-group">
+              <legend>Trusted Agent Skill source</legend>
+              <div class="settings-list">
+                <p class="console-info-box">有効な source はコード実行を含めて信頼されます。root_path 直下の各ディレクトリから SKILL.md を読み込みます。</p>
+                <label class="checkbox-field">有効
+                  <input id="agent-skill-source-enabled" type="checkbox">
+                </label>
+                <div class="setting-row setting-row-top">
+                  <label for="agent-skill-source-id">source ID:</label>
+                  <input id="agent-skill-source-id" class="field-width-medium">
+                </div>
+                <div class="setting-row setting-row-top">
+                  <label for="agent-skill-source-name">表示名:</label>
+                  <input id="agent-skill-source-name" class="field-width-medium">
+                </div>
+                <div class="setting-row setting-row-top">
+                  <label for="agent-skill-root-path">root path:</label>
+                  <input id="agent-skill-root-path" class="field-width-long">
+                </div>
+                <label class="checkbox-field">script 実行を許可
+                  <input id="agent-skill-script-enabled" type="checkbox">
+                </label>
+                <div class="setting-row setting-row-top">
+                  <label for="agent-skill-runtimes">runtimes JSON:</label>
+                  <textarea id="agent-skill-runtimes" rows="6" spellcheck="false"></textarea>
+                </div>
+                <div class="setting-row setting-row-top">
+                  <label for="agent-skill-limits">limits JSON:</label>
+                  <textarea id="agent-skill-limits" rows="10" spellcheck="false"></textarea>
+                </div>
+              </div>
+            </fieldset>
+            <fieldset class="settings-group">
+              <legend>読込状態</legend>
+              <pre id="agent-skill-inspection" class="api-document"></pre>
             </fieldset>
           </section>
 

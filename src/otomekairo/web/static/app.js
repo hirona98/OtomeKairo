@@ -11,6 +11,8 @@ const state = {
   desktopCaptureDefaults: null,
   camera: null,
   mcp: null,
+  agentSkills: null,
+  agentSkillInspection: null,
   apiDocs: null,
   audioInputDevices: null,
   audioOutputDevices: null,
@@ -26,6 +28,7 @@ const state = {
   selectedCameraId: "",
   selectedWatcherSourceId: "",
   selectedMcpId: "",
+  selectedAgentSkillSourceId: "",
   attachment: null,
   settingsOpen: false,
   sending: false,
@@ -111,6 +114,15 @@ const RESULT_KIND_LABELS = {
 
 const DESKTOP_WAKE_OBSERVATION_ID = "observation:main_desktop";
 const DEFAULT_WAKE_INTERVAL_SECONDS = 300;
+const DEFAULT_AGENT_SKILL_LIMITS = {
+  wall_time_seconds: 30,
+  cpu_time_seconds: 20,
+  memory_bytes: 536870912,
+  max_processes: 16,
+  max_open_files: 128,
+  max_file_bytes: 10485760,
+  max_output_bytes: 1048576,
+};
 const WEB_MICROPHONE_DEVICE_KEY = "otomekairo.web_microphone_device_id";
 const MICROPHONE_SOURCE_LABELS = {
   local_microphone: "OtomeKairo",
@@ -2274,6 +2286,8 @@ async function loadSettingsDrafts() {
       avatarSpeech,
       camera,
       mcp,
+      agentSkills,
+      agentSkillInspection,
       apiDocs,
       audioInputDevices,
       audioOutputDevices,
@@ -2284,6 +2298,8 @@ async function loadSettingsDrafts() {
       apiRequest("/ui/api/config/avatar-speech/editor-state"),
       apiRequest("/ui/api/config/camera-sources/editor-state"),
       apiRequest("/ui/api/config/mcp-servers/editor-state"),
+      apiRequest("/ui/api/config/agent-skill-sources/editor-state"),
+      apiRequest("/ui/api/agent-skills"),
       apiRequest("/ui/api/docs"),
       apiRequest("/ui/api/audio/input-devices"),
       apiRequest("/ui/api/audio/output-devices"),
@@ -2312,6 +2328,8 @@ async function loadSettingsDrafts() {
     );
     state.camera = clone(camera);
     state.mcp = clone(mcp);
+    state.agentSkills = clone(agentSkills);
+    state.agentSkillInspection = clone(agentSkillInspection);
     state.apiDocs = clone(apiDocs);
     state.audioInputDevices = clone(audioInputDevices);
     state.audioOutputDevices = clone(audioOutputDevices);
@@ -2326,6 +2344,7 @@ async function loadSettingsDrafts() {
     state.selectedMemorySetId = state.editor.current.selected_memory_set_id;
     state.selectedCameraId = state.camera.camera_sources[0]?.vision_source_id || "";
     state.selectedMcpId = state.mcp.mcp_servers[0]?.mcp_server_id || "";
+    state.selectedAgentSkillSourceId = state.agentSkills.agent_skill_sources[0]?.source_id || "";
     renderSettings();
   } catch (error) {
     showNotice(error.message, true);
@@ -2365,6 +2384,13 @@ async function saveSettings({ closeAfterSave = false } = {}) {
       showNotice(`MCP の名前「${duplicateMcpName}」が重複しています。`, true);
       return;
     }
+    const duplicateAgentSkillSourceId = findDuplicateName(
+      (state.agentSkills?.agent_skill_sources || []).map((source) => source.source_id),
+    );
+    if (duplicateAgentSkillSourceId) {
+      showNotice(`Agent Skill source ID「${duplicateAgentSkillSourceId}」が重複しています。`, true);
+      return;
+    }
     // 記憶実体の clone は editor-state 置換の前に専用 endpoint で確定する。
     const pendingClones = (state.editor.memory_sets || []).filter((memory) => {
       const meta = memoryDraftMeta(memory.memory_set_id);
@@ -2396,6 +2422,10 @@ async function saveSettings({ closeAfterSave = false } = {}) {
     const mcp = await apiRequest("/ui/api/config/mcp-servers/editor-state", {
       method: "PUT",
       body: JSON.stringify(state.mcp),
+    });
+    const agentSkills = await apiRequest("/ui/api/config/agent-skill-sources/editor-state", {
+      method: "PUT",
+      body: JSON.stringify(state.agentSkills),
     });
     let consoleClient = state.consoleClient;
     if (consoleClient) {
@@ -2429,6 +2459,8 @@ async function saveSettings({ closeAfterSave = false } = {}) {
     state.avatarSpeech = clone(avatarSpeech);
     state.camera = clone(camera);
     state.mcp = clone(mcp);
+    state.agentSkills = clone(agentSkills);
+    state.agentSkillInspection = clone(await apiRequest("/ui/api/agent-skills"));
     state.consoleClient = consoleClient ? clone(consoleClient) : null;
     if (consoleClient?.settings?.desktop_capture) {
       state.desktopCaptureDefaults = clone(consoleClient.settings.desktop_capture);
@@ -2453,7 +2485,7 @@ async function saveSettings({ closeAfterSave = false } = {}) {
 }
 
 function renderSettings() {
-  if (!state.editor || !state.avatarSpeech || !state.camera || !state.mcp) {
+  if (!state.editor || !state.avatarSpeech || !state.camera || !state.mcp || !state.agentSkills) {
     return;
   }
   renderAvatar();
@@ -3574,6 +3606,7 @@ function preferredLlmApiKey() {
 function renderCapabilities() {
   renderCamera();
   renderMcp();
+  renderAgentSkills();
   renderWatcher();
 }
 
@@ -3866,6 +3899,84 @@ function syncMcp() {
   state.selectedMcpId = mcp.mcp_server_id;
 }
 
+function renderAgentSkills() {
+  const sources = state.agentSkills?.agent_skill_sources || [];
+  const hasSources = sources.length > 0;
+  state.selectedAgentSkillSourceId = selectedOrFirst(
+    sources,
+    "source_id",
+    state.selectedAgentSkillSourceId,
+  );
+  setSelectOptions(
+    element("agent-skill-source-select"),
+    sources,
+    "source_id",
+    state.selectedAgentSkillSourceId,
+  );
+  setCollectionEditorEnabled(
+    "agent-skill-source-select",
+    "fieldset.capability-group",
+    "delete-agent-skill-source",
+    hasSources,
+  );
+  const source = arrayById(sources, "source_id", state.selectedAgentSkillSourceId);
+  element("agent-skill-source-enabled").checked = source?.enabled === true;
+  element("agent-skill-source-id").value = source?.source_id || "";
+  element("agent-skill-source-name").value = source?.display_name || "";
+  element("agent-skill-root-path").value = source?.root_path || "";
+  element("agent-skill-script-enabled").checked = source?.script_execution?.enabled === true;
+  element("agent-skill-runtimes").value = JSON.stringify(
+    source?.script_execution?.runtimes || [],
+    null,
+    2,
+  );
+  element("agent-skill-limits").value = JSON.stringify(
+    source?.script_execution?.limits || DEFAULT_AGENT_SKILL_LIMITS,
+    null,
+    2,
+  );
+  element("agent-skill-inspection").textContent = JSON.stringify(
+    state.agentSkillInspection || { skill_count: 0, sources: [] },
+    null,
+    2,
+  );
+}
+
+function parseAgentSkillJson(id, label) {
+  const text = textValue(id).trim();
+  try {
+    return JSON.parse(text);
+  } catch (_error) {
+    throw new Error(`${label} は有効な JSON で入力してください。`);
+  }
+}
+
+function syncAgentSkills() {
+  const source = arrayById(
+    state.agentSkills?.agent_skill_sources || [],
+    "source_id",
+    state.selectedAgentSkillSourceId,
+  );
+  if (!source) {
+    return;
+  }
+  source.source_id = textValue("agent-skill-source-id").trim();
+  source.display_name = textValue("agent-skill-source-name").trim();
+  source.enabled = boolValue("agent-skill-source-enabled");
+  source.root_path = textValue("agent-skill-root-path").trim();
+  const executionEnabled = boolValue("agent-skill-script-enabled");
+  source.script_execution = {
+    enabled: executionEnabled,
+    runtimes: executionEnabled
+      ? parseAgentSkillJson("agent-skill-runtimes", "runtimes")
+      : [],
+    limits: executionEnabled
+      ? parseAgentSkillJson("agent-skill-limits", "limits")
+      : null,
+  };
+  state.selectedAgentSkillSourceId = source.source_id;
+}
+
 function syncAllForms() {
   syncAvatar();
   syncMicrophoneSettings();
@@ -3877,6 +3988,7 @@ function syncAllForms() {
   syncCamera();
   syncWatcher();
   syncMcp();
+  syncAgentSkills();
   syncPreSendCheck();
 }
 
@@ -4335,6 +4447,50 @@ function deleteMcp() {
   renderPreSendCheck();
 }
 
+function addAgentSkillSource() {
+  syncAllForms();
+  const sourceId = uniqueDisplayName(
+    (state.agentSkills.agent_skill_sources || []).map((item) => item.source_id),
+    "agent-skills",
+  );
+  state.agentSkills.agent_skill_sources.push({
+    source_id: sourceId,
+    display_name: "Agent Skills",
+    enabled: false,
+    root_path: "",
+    script_execution: {
+      enabled: false,
+      runtimes: [],
+      limits: null,
+    },
+  });
+  state.selectedAgentSkillSourceId = sourceId;
+  renderAgentSkills();
+}
+
+function deleteAgentSkillSource() {
+  removeById(
+    state.agentSkills.agent_skill_sources,
+    "source_id",
+    state.selectedAgentSkillSourceId,
+  );
+  state.selectedAgentSkillSourceId = state.agentSkills.agent_skill_sources[0]?.source_id || "";
+  renderAgentSkills();
+}
+
+async function reloadAgentSkills() {
+  try {
+    state.agentSkillInspection = clone(await apiRequest("/ui/api/agent-skills/reload", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }));
+    renderAgentSkills();
+    showNotice("Agent Skills を再読込しました。");
+  } catch (error) {
+    showNotice(error.message, true);
+  }
+}
+
 function switchTab(tab) {
   document.querySelectorAll(".settings-nav-button").forEach((button) => {
     button.classList.toggle("active", button.dataset.tab === tab);
@@ -4531,6 +4687,13 @@ function bindEvents() {
     },
     render: renderMcp,
   });
+  bindCollectionSelect("agent-skill-source-select", {
+    sync: syncAgentSkills,
+    setSelected: (id) => {
+      state.selectedAgentSkillSourceId = id;
+    },
+    render: renderAgentSkills,
+  });
   element("mcp-transport").addEventListener("change", () => {
     syncMcp();
     renderMcp();
@@ -4553,6 +4716,9 @@ function bindEvents() {
     "delete-camera": deleteCamera,
     "add-mcp": addMcp,
     "delete-mcp": deleteMcp,
+    "add-agent-skill-source": addAgentSkillSource,
+    "delete-agent-skill-source": deleteAgentSkillSource,
+    "reload-agent-skills": reloadAgentSkills,
   };
   element("settings-panel").addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target : null;

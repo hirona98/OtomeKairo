@@ -740,6 +740,75 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "error",
         ],
     },
+    "agent_skill.run_script": {
+        "id": "agent_skill.run_script",
+        "version": "1",
+        "kind": "action",
+        "decision_description": "選択中の trusted Agent Skill に同梱された script を専用 runner process で実行する",
+        "when_to_use": [
+            "選択中の Agent Skill が目的達成に必要な script 実行を明示している",
+            "対象 source の script_execution と runtime が available である",
+        ],
+        "do_not_use_when": [
+            "Agent Skill の instructions と resource catalog に対象 script がない",
+            "skill digest、runtime、引数を確定できない",
+            "script を実行せずに判断や発話だけで目的を達成できる",
+        ],
+        "required_permissions": [],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "source_id": {"type": "string"},
+                "skill_id": {"type": "string"},
+                "skill_sha256": {"type": "string"},
+                "script_path": {"type": "string"},
+                "runtime_id": {"type": "string"},
+                "args": {"type": "array", "items": {"type": "string"}},
+                "stdin_text": {"type": ["string", "null"]},
+            },
+            "required": [
+                "source_id", "skill_id", "skill_sha256", "script_path", "runtime_id", "args", "stdin_text"
+            ],
+            "additionalProperties": False,
+        },
+        "result_schema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["completed", "failed"]},
+                "exit_code": {"type": ["integer", "null"]},
+                "status_text": {"type": "string"},
+                "stdout": {"type": "string"},
+                "stderr": {"type": "string"},
+                "client_context": {"type": ["object", "null"]},
+                "error": {"type": ["string", "null"]},
+            },
+            "required": ["status", "exit_code", "status_text", "stdout", "stderr", "client_context", "error"],
+            "additionalProperties": False,
+        },
+        "side_effects": {
+            "external_world": True,
+            "user_visible": False,
+            "stores_raw_payload": True,
+        },
+        "timeout_ms": 300000,
+        "risk_level": "high",
+        "memory_policy": {
+            "record_result_event": True,
+            "allow_memory_update": False,
+        },
+        "state_policy": {
+            "creates_ongoing_action": True,
+            "blocks_parallel_capability": True,
+            "result_context_hook": None,
+            "followup_hint_hook": None,
+            "unavailable_seconds_on_dispatch_failure": 0,
+            "unavailable_seconds_on_timeout": 0,
+        },
+        "inspection_fields": [
+            "capability_id", "source_id", "skill_id", "script_path", "runtime_id", "status", "exit_code",
+            "status_text", "error"
+        ],
+    },
     "mcp.call_tool": {
         "id": "mcp.call_tool",
         "version": "1",

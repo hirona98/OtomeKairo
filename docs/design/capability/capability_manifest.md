@@ -82,9 +82,10 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
 ## Manifest 例
 
 `vision.capture` の manifest は次の形を基準にする。
-concrete capability は `vision.capture`、`camera.ptz`、`external.status`、`schedule.status`、`device.status`、`body.status`、`environment.status`、`location.status`、`social.status`、`mcp.call_tool` である。
+concrete capability は `vision.capture`、`camera.ptz`、`external.status`、`schedule.status`、`device.status`、`body.status`、`environment.status`、`location.status`、`social.status`、`agent_skill.run_script`、`mcp.call_tool` である。
 `external.status` は短い外部状態要約、`schedule.status` は短い予定要約と deterministic な schedule slot、`device.status` は短い端末状態要約、`body.status` は短い身体状態要約、`environment.status` は短い周囲環境要約、`location.status` は短い場所状態要約、`social.status` は短い対人文脈要約を result として返す。
 `mcp.call_tool` は接続中 MCP server の許可済み tool catalog から、指定 tool を呼び出す汎用 external-service capability である。
+`agent_skill.run_script` は選択中の trusted Agent Skill package に含まれる script を専用 runner process で実行する local capability である。信頼境界は [Agent Skills 統合](../integration/AgentSkills統合.md#script-実行と信頼境界) を正本とする。
 各 capability の `client_context.body_state_summary / device_state_summary / schedule_summary / environment_summary / location_summary / social_context_summary`、`schedule.status.schedule_slots`、`device.status.device_state_summary`、`body.status.body_state_summary`、`environment.status.environment_summary`、`location.status.location_summary`、`social.status.social_context_summary` は inspection_fields 経由で短い観測要約へ投影する。
 `mcp.call_tool` result は `client_context.mcp_result_summary` を follow-up 判断と inspection に使う。
 `world_state` source pack への投影境界は [world_state_source_pack.md](world_state_source_pack.md) を正本とする。

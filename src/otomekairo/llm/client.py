@@ -40,6 +40,10 @@ from otomekairo.llm.parsing import parse_json_object, parse_recall_hint_payload
 from otomekairo.llm.prompts import (
     build_answer_contract_messages,
     build_answer_contract_repair_prompt,
+    build_agent_skill_material_selection_messages,
+    build_agent_skill_material_selection_repair_prompt,
+    build_agent_skill_selection_messages,
+    build_agent_skill_selection_repair_prompt,
     build_activity_state_messages,
     build_activity_state_repair_prompt,
     build_autonomous_step_messages,
@@ -85,6 +89,85 @@ ROUTINE_SUPPRESSED_LLM_OPERATIONS = {
 @dataclass(slots=True)
 class LLMClient:
     mock_client: MockLLMClient = field(default_factory=MockLLMClient)
+
+    def generate_agent_skill_selection(
+        self,
+        *,
+        model_config: dict[str, Any],
+        selection_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._is_mock_model_config(model_config):
+            return {"selected_skill_ids": [], "reason_summary": "mock model does not select Agent Skills."}
+        return self._generate_structured_payload(
+            model_config=model_config,
+            messages=build_agent_skill_selection_messages(selection_context=selection_context),
+            validator=self._validate_agent_skill_selection,
+            repair_prompt_builder=build_agent_skill_selection_repair_prompt,
+            failure_message="Agent Skill の選択に失敗しました。",
+            operation="agent_skill_selection",
+        )
+
+    def generate_agent_skill_material_selection(
+        self,
+        *,
+        model_config: dict[str, Any],
+        selection_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._is_mock_model_config(model_config):
+            return {
+                "additional_skill_ids": [],
+                "resource_reads": [],
+                "done": True,
+                "reason_summary": "mock model does not read Agent Skill materials.",
+            }
+        return self._generate_structured_payload(
+            model_config=model_config,
+            messages=build_agent_skill_material_selection_messages(selection_context=selection_context),
+            validator=self._validate_agent_skill_material_selection,
+            repair_prompt_builder=build_agent_skill_material_selection_repair_prompt,
+            failure_message="Agent Skill resource の選択に失敗しました。",
+            operation="agent_skill_material_selection",
+        )
+
+    def _validate_agent_skill_selection(self, payload: dict[str, Any]) -> None:
+        _validate_exact_keys(payload, {"selected_skill_ids", "reason_summary"}, "AgentSkillSelection")
+        skill_ids = payload.get("selected_skill_ids")
+        reason_summary = payload.get("reason_summary")
+        if (
+            not isinstance(skill_ids, list)
+            or not all(isinstance(value, str) and value.strip() for value in skill_ids)
+            or len(skill_ids) != len(set(skill_ids))
+            or not isinstance(reason_summary, str)
+            or not reason_summary.strip()
+        ):
+            raise LLMError("AgentSkillSelection の値が不正です。")
+
+    def _validate_agent_skill_material_selection(self, payload: dict[str, Any]) -> None:
+        _validate_exact_keys(
+            payload,
+            {"additional_skill_ids", "resource_reads", "done", "reason_summary"},
+            "AgentSkillMaterialSelection",
+        )
+        skill_ids = payload.get("additional_skill_ids")
+        reads = payload.get("resource_reads")
+        if (
+            not isinstance(skill_ids, list)
+            or not all(isinstance(value, str) and value.strip() for value in skill_ids)
+            or len(skill_ids) != len(set(skill_ids))
+            or not isinstance(reads, list)
+            or not isinstance(payload.get("done"), bool)
+            or not isinstance(payload.get("reason_summary"), str)
+            or not payload["reason_summary"].strip()
+        ):
+            raise LLMError("AgentSkillMaterialSelection の値が不正です。")
+        seen_reads: set[tuple[str, str]] = set()
+        for read in reads:
+            if not isinstance(read, dict) or set(read) != {"skill_id", "path"}:
+                raise LLMError("AgentSkillMaterialSelection.resource_reads が不正です。")
+            pair = (read.get("skill_id"), read.get("path"))
+            if not all(isinstance(value, str) and value.strip() for value in pair) or pair in seen_reads:
+                raise LLMError("AgentSkillMaterialSelection.resource_reads が不正です。")
+            seen_reads.add(pair)
 
     def generate_input_interpretation(
         self,

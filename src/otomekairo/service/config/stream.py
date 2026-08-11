@@ -718,6 +718,12 @@ class ServiceConfigStreamMixin:
         active_ongoing_action: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         capability_id = manifest["id"]
+        if capability_id == "agent_skill.run_script":
+            bound_client_ids = (
+                [self._AGENT_SKILL_RUNNER_CLIENT_ID]
+                if self._agent_skill_script_execution_available()
+                else []
+            )
         related_rejections = [
             binding
             for binding in rejected_bindings

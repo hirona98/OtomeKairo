@@ -220,6 +220,15 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             if method == "GET" and parsed.path == "/api/config/mcp-servers/editor-state":
                 self._write_success(HTTPStatus.OK, self.server.service.get_mcp_servers_editor_state(token))
                 return
+            if method == "GET" and parsed.path == "/api/config/agent-skill-sources/editor-state":
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.get_agent_skill_sources_editor_state(token),
+                )
+                return
+            if method == "GET" and parsed.path == "/api/agent-skills":
+                self._write_success(HTTPStatus.OK, self.server.service.inspect_agent_skills(token))
+                return
             if (
                 method == "GET"
                 and parsed.path
@@ -570,6 +579,20 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 self._write_success(
                     HTTPStatus.OK,
                     self.server.service.replace_mcp_servers_editor_state(token, payload),
+                )
+                return
+            if method == "PUT" and parsed.path == "/api/config/agent-skill-sources/editor-state":
+                payload = self._read_json_body()
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.replace_agent_skill_sources_editor_state(token, payload),
+                )
+                return
+            if method == "POST" and parsed.path == "/api/agent-skills/reload":
+                self._read_json_body()
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.reload_agent_skill_sources(token),
                 )
                 return
             if method == "PUT" and parsed.path == "/api/config/desktop-capture-defaults":
@@ -1292,6 +1315,29 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         if method == "PUT" and path == "/ui/api/config/mcp-servers/editor-state":
             payload = self._read_json_body()
             self._write_success(HTTPStatus.OK, self.server.service.replace_mcp_servers_editor_state(token, payload))
+            return
+        if method == "GET" and path == "/ui/api/config/agent-skill-sources/editor-state":
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.get_agent_skill_sources_editor_state(token),
+            )
+            return
+        if method == "PUT" and path == "/ui/api/config/agent-skill-sources/editor-state":
+            payload = self._read_json_body()
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.replace_agent_skill_sources_editor_state(token, payload),
+            )
+            return
+        if method == "GET" and path == "/ui/api/agent-skills":
+            self._write_success(HTTPStatus.OK, self.server.service.inspect_agent_skills(token))
+            return
+        if method == "POST" and path == "/ui/api/agent-skills/reload":
+            self._read_json_body()
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.reload_agent_skill_sources(token),
+            )
             return
         if (
             method == "GET"

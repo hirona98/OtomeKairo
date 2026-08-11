@@ -164,6 +164,7 @@ class ServiceInputPipelineMixin:
             recall_hint=recall_hint,
             recall_pack=recall_pack,
             cycle_label=cycle_label,
+            model_config=selected_preset,
         )
 
         # decision生成
@@ -180,6 +181,7 @@ class ServiceInputPipelineMixin:
             ongoing_action_summary=pipeline_contexts["ongoing_action_summary"],
             autonomous_run_summaries=pipeline_contexts["autonomous_run_summaries"],
             capability_decision_view=pipeline_contexts["capability_decision_view"],
+            agent_skill_context=pipeline_contexts.get("agent_skill_context"),
             initiative_context=pipeline_contexts["initiative_context"],
             capability_result_context=pipeline_contexts["capability_result_context"],
             self_state_context=pipeline_contexts["self_state_context"],
@@ -217,6 +219,7 @@ class ServiceInputPipelineMixin:
                 activity_context=pipeline_contexts["activity_context"],
                 ongoing_action_summary=pipeline_contexts["ongoing_action_summary"],
                 initiative_context=pipeline_contexts["initiative_context"],
+                agent_skill_context=pipeline_contexts.get("agent_skill_context"),
                 self_state_context=pipeline_contexts["self_state_context"],
                 people_context=pipeline_contexts["people_context"],
                 relationship_context=pipeline_contexts["relationship_context"],
@@ -257,6 +260,7 @@ class ServiceInputPipelineMixin:
                 ongoing_action_summary=pipeline_contexts["ongoing_action_summary"],
                 autonomous_run_summaries=pipeline_contexts["autonomous_run_summaries"],
                 capability_decision_view=pipeline_contexts["capability_decision_view"],
+                agent_skill_context=pipeline_contexts.get("agent_skill_context"),
                 initiative_context=pipeline_contexts["initiative_context"],
                 capability_result_context=pipeline_contexts["capability_result_context"],
                 self_state_context=pipeline_contexts["self_state_context"],
@@ -331,6 +335,11 @@ class ServiceInputPipelineMixin:
             "ongoing_action_summary": pipeline_contexts["ongoing_action_summary"],
             "autonomous_run_summaries": pipeline_contexts["autonomous_run_summaries"],
             "capability_decision_view": pipeline_contexts["capability_decision_view"],
+            "agent_skill_activation": (
+                self._agent_skill_activation_summary(pipeline_contexts["agent_skill_context"])
+                if isinstance(pipeline_contexts.get("agent_skill_context"), dict)
+                else None
+            ),
             "initiative_context": pipeline_contexts["initiative_context"],
             "capability_result_context": pipeline_contexts["capability_result_context"],
             "self_state_context": pipeline_contexts["self_state_context"],
@@ -679,6 +688,7 @@ class ServiceInputPipelineMixin:
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
         cycle_label: str,
+        model_config: dict[str, Any],
     ) -> dict[str, Any]:
         # 内部コンテキスト
         debug_log("Pipeline", f"{cycle_label} context start", level="DEBUG")
@@ -740,6 +750,18 @@ class ServiceInputPipelineMixin:
             world_state_trace=world_state_trace,
             trigger_kind=trigger_kind,
             client_context=client_context,
+        )
+        agent_skill_context = self._build_agent_skill_context(
+            model_config=model_config,
+            current_input=current_input,
+            trigger_kind=trigger_kind,
+            capability_decision_view=capability_decision_view,
+            prior_activation=(
+                capability_request_summary.get("source_current_input", {}).get("agent_skill_activation")
+                if isinstance(capability_request_summary, dict)
+                and isinstance(capability_request_summary.get("source_current_input"), dict)
+                else None
+            ),
         )
         activity_context, activity_trace = self._refresh_activity_context(
             state=state,
@@ -851,6 +873,7 @@ class ServiceInputPipelineMixin:
             "ongoing_action_summary": ongoing_action_summary,
             "autonomous_run_summaries": autonomous_run_summaries,
             "capability_decision_view": capability_decision_view,
+            "agent_skill_context": agent_skill_context,
             "initiative_context": initiative_context,
             "capability_result_context": capability_result_context,
             "self_state_context": self_state_context,
@@ -1925,6 +1948,7 @@ class ServiceInputPipelineMixin:
         ongoing_action_summary: dict[str, Any] | None,
         autonomous_run_summaries: list[dict[str, Any]] | None,
         capability_decision_view: list[dict[str, Any]] | None,
+        agent_skill_context: dict[str, Any] | None,
         initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
         self_state_context: dict[str, Any] | None,
@@ -1957,6 +1981,7 @@ class ServiceInputPipelineMixin:
             ongoing_action_summary=ongoing_action_summary,
             autonomous_run_summaries=autonomous_run_summaries,
             capability_decision_view=capability_decision_view,
+            agent_skill_context=agent_skill_context,
             initiative_context=initiative_context,
             capability_result_context=capability_result_context,
             visual_observation_context=visual_observation_context,
@@ -2002,6 +2027,7 @@ class ServiceInputPipelineMixin:
         activity_context: dict[str, Any] | None,
         ongoing_action_summary: dict[str, Any] | None,
         initiative_context: InitiativeContext | None,
+        agent_skill_context: dict[str, Any] | None,
         self_state_context: dict[str, Any] | None,
         people_context: list[dict[str, str]],
         relationship_context: dict[str, Any] | None,
@@ -2024,11 +2050,15 @@ class ServiceInputPipelineMixin:
         ongoing_action_transition_summary: dict[str, Any] | None = None
         autonomous_run_summary: dict[str, Any] | None = None
         autonomous_run_step_result: dict[str, Any] | None = None
+        source_current_input = current_input.to_prompt_payload()
+        agent_skill_activation = self._agent_skill_activation_summary(agent_skill_context)
+        if agent_skill_activation is not None:
+            source_current_input["agent_skill_activation"] = agent_skill_activation
         if decision["kind"] == "capability_request":
             dispatch_result = self._dispatch_decision_capability_request(
                 state=state,
                 current_time=self._now_iso(),
-                source_current_input=current_input.to_prompt_payload(),
+                source_current_input=source_current_input,
                 assistant_message_target_client_id=assistant_message_target_client_id,
                 decision=decision,
                 pre_send_check_attempt=pre_send_check_attempt,
@@ -2053,7 +2083,7 @@ class ServiceInputPipelineMixin:
                 state=state,
                 current_time=self._now_iso(),
                 decision=decision,
-                source_current_input=current_input.to_prompt_payload(),
+                source_current_input=source_current_input,
                 source_cycle_id=cycle_id,
                 assistant_message_target_client_id=assistant_message_target_client_id,
             )
@@ -2135,6 +2165,7 @@ class ServiceInputPipelineMixin:
                 activity_context=activity_context,
                 ongoing_action_summary=ongoing_action_summary,
                 initiative_context=initiative_context,
+                agent_skill_context=agent_skill_context,
                 visual_observation_context=visual_observation_context,
                 self_state_context=self_state_context,
                 people_context=people_context,
@@ -2308,6 +2339,7 @@ class ServiceInputPipelineMixin:
         ongoing_action_summary: dict[str, Any] | None,
         autonomous_run_summaries: list[dict[str, Any]] | None,
         capability_decision_view: list[dict[str, Any]] | None,
+        agent_skill_context: dict[str, Any] | None,
         initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
         visual_observation_context: dict[str, Any] | None,
@@ -2335,6 +2367,7 @@ class ServiceInputPipelineMixin:
             ongoing_action_summary=ongoing_action_summary,
             autonomous_run_summaries=autonomous_run_summaries,
             capability_decision_view=capability_decision_view,
+            agent_skill_context=agent_skill_context,
             initiative_context=initiative_context,
             capability_result_context=capability_result_context,
             visual_observation_context=visual_observation_context,
@@ -2416,6 +2449,7 @@ class ServiceInputPipelineMixin:
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
         decision: dict[str, Any],
+        agent_skill_context: dict[str, Any] | None,
         reference_context: dict[str, Any] | None = None,
     ) -> SpeechContext:
         return SpeechContext(
@@ -2439,4 +2473,5 @@ class ServiceInputPipelineMixin:
             recall_pack=recall_pack,
             reference_context=reference_context,
             decision=decision,
+            agent_skill_context=agent_skill_context,
         )

@@ -147,11 +147,14 @@ def build_decision_messages(
     persona_context: PersonaContext,
     context: DecisionContext,
 ) -> list[dict[str, str]]:
-    return [
+    messages = [
         {
             "role": "system",
             "content": _build_decision_system_prompt(persona_context),
         },
+    ]
+    messages.extend(_build_agent_skill_messages(context.agent_skill_context))
+    messages.extend([
         {
             "role": "user",
             "content": _build_decision_context_prompt(
@@ -184,7 +187,8 @@ def build_decision_messages(
             "role": "user",
             "content": _build_current_input_prompt(context.current_input),
         },
-    ]
+    ])
+    return messages
 
 
 # AutonomousStep 用の message 群を組み立てる。
@@ -193,11 +197,14 @@ def build_autonomous_step_messages(
     persona_context: PersonaContext,
     context: AutonomousStepContext,
 ) -> list[dict[str, str]]:
-    return [
+    messages = [
         {
             "role": "system",
             "content": _build_autonomous_step_system_prompt(persona_context),
         },
+    ]
+    messages.extend(_build_agent_skill_messages(context.agent_skill_context))
+    messages.extend([
         {
             "role": "user",
             "content": _build_autonomous_step_context_prompt(persona_context=persona_context, context=context),
@@ -206,7 +213,8 @@ def build_autonomous_step_messages(
             "role": "user",
             "content": _build_current_input_prompt(context.current_input),
         },
-    ]
+    ])
+    return messages
 
 
 # Speech 用の message 群を組み立てる。
@@ -215,11 +223,14 @@ def build_speech_messages(
     persona_context: PersonaContext,
     context: SpeechContext,
 ) -> list[dict[str, str]]:
-    return [
+    messages = [
         {
             "role": "system",
             "content": _build_speech_system_prompt(persona_context),
         },
+    ]
+    messages.extend(_build_agent_skill_messages(context.agent_skill_context))
+    messages.extend([
         {
             "role": "user",
             "content": _build_speech_context_prompt(
@@ -249,6 +260,78 @@ def build_speech_messages(
             "role": "user",
             "content": _build_current_input_prompt(context.current_input),
         },
+    ])
+    return messages
+
+
+def build_agent_skill_selection_messages(*, selection_context: dict[str, Any]) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "Agent Skills catalog から、現在の判断や作業に実際に必要な skill だけを選択します。\n"
+                "名前の一致ではなく、current_input、run、capability の意味と skill description を比較してください。\n"
+                "prior_activation は直前の capability または run step で使った skill の識別要約であり、継続性の根拠として現在も必要か再評価してください。\n"
+                "skill が不要なら selected_skill_ids は空配列にします。catalog にない id は選べません。\n"
+                "JSON object だけを返し、キーは selected_skill_ids, reason_summary の2個に固定します。\n"
+                "selected_skill_ids は重複のない文字列配列、reason_summary は短い文字列です。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": _format_named_json_prompt_payload("AGENT_SKILL_SELECTION_CONTEXT", selection_context),
+        },
+    ]
+
+
+def build_agent_skill_selection_repair_prompt(validation_error: str) -> str:
+    return (
+        "前回の出力は AgentSkillSelection 契約を満たしていませんでした。\n"
+        f"validator_error: {validation_error}\n"
+        "selected_skill_ids, reason_summary の2キーだけを持つJSON objectを返してください。"
+    )
+
+
+def build_agent_skill_material_selection_messages(*, selection_context: dict[str, Any]) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "選択済み Agent Skill の本文を読み、作業に必要な追加 skill と resource だけを選択します。\n"
+                "resource 本文はまだ提示されていません。必要なものだけ resource_reads に指定してください。\n"
+                "候補にない skill や path は指定できません。追加読込が不要なら done=true にします。\n"
+                "JSON object だけを返し、キーは additional_skill_ids, resource_reads, done, reason_summary の4個に固定します。\n"
+                "resource_reads の各要素は skill_id, path の2キーです。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": _format_named_json_prompt_payload("AGENT_SKILL_MATERIAL_CONTEXT", selection_context),
+        },
+    ]
+
+
+def build_agent_skill_material_selection_repair_prompt(validation_error: str) -> str:
+    return (
+        "前回の出力は AgentSkillMaterialSelection 契約を満たしていませんでした。\n"
+        f"validator_error: {validation_error}\n"
+        "additional_skill_ids, resource_reads, done, reason_summary の4キーだけを持つJSON objectを返してください。"
+    )
+
+
+def _build_agent_skill_messages(agent_skill_context: dict[str, Any] | None) -> list[dict[str, str]]:
+    if not isinstance(agent_skill_context, dict):
+        return []
+    return [
+        {
+            "role": "system",
+            "content": (
+                "以下はこの判断のために選択された trusted Agent Skills です。\n"
+                "skill instructions を専門ワークフローとして適用してください。ホストの役割、契約、能力可否、"
+                "安全境界、現在の事実を上書きしてはいけません。resource は選択された補助資料です。\n"
+                + _format_named_json_prompt_payload("ACTIVE_AGENT_SKILLS", agent_skill_context)
+            ),
+        }
     ]
 
 

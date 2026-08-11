@@ -7,6 +7,7 @@ API wire、認可、設定の意味境界は [../api/README.md](../api/README.md
 
 - 設定パネル（`settings-panel` 配下の各 `tab-page`）
 - 設定パネル内で JS が動的生成する行・展開パネル
+- Agent Skills タブの source 定義と runtime 読込状態
 
 対象外（トークン共有は可、レイアウト規約は別）:
 

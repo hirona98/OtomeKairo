@@ -34,6 +34,7 @@ OtomeKairo は、人格設定と記憶を基盤に、その時点で成立する
 - 感情モデルは [design/runtime/感情モデル.md](design/runtime/感情モデル.md) を正本とし、memory 文書はそこへリンクする
 - 検証層と合否基準は [design/verification/検証基盤.md](design/verification/検証基盤.md) に置く
 - ブラウザ UI 見た目規約は [design/integration/WebUI設定フォーム規約.md](design/integration/WebUI設定フォーム規約.md) と [design/integration/WebUI通常画面規約.md](design/integration/WebUI通常画面規約.md) を正本とする
+- Agent Skills の発見、選択、resource 読込、script 信頼境界は [design/integration/AgentSkills統合.md](design/integration/AgentSkills統合.md) を正本とする
 - 例示 JSON は shape を示す例とし、意味規則は対応する設計文書に置く
 
 同じ仕様を複数の docs に正本として書かない。

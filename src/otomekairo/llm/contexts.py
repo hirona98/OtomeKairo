@@ -264,6 +264,7 @@ class DecisionContext:
     reference_context: dict[str, Any] | None = None
     people_context: list[dict[str, str]] | None = None
     pre_send_check_feedback: str | None = None
+    agent_skill_context: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,6 +280,7 @@ class AutonomousStepContext:
     last_result_context: dict[str, Any] | None
     people_context: list[dict[str, str]] | None = None
     pre_send_check_feedback: str | None = None
+    agent_skill_context: dict[str, Any] | None = None
 
     def to_prompt_payload(self) -> dict[str, Any]:
         payload = {
@@ -320,3 +322,4 @@ class SpeechContext:
     decision: dict[str, Any]
     reference_context: dict[str, Any] | None = None
     people_context: list[dict[str, str]] | None = None
+    agent_skill_context: dict[str, Any] | None = None

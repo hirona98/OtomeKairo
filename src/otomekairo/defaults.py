@@ -12,7 +12,7 @@ DEFAULT_MODEL_PRESET_ID = "model_preset:default"
 # 送信前チェック専用。生成用の selected_model_preset とは別定義として持つ。
 PRE_SEND_CHECK_MODEL_PRESET_ID = "model_preset:pre_send_check"
 DEFAULT_AVATAR_ID = "avatar:default"
-API_VERSION = "0.9.0"
+API_VERSION = "0.10.0"
 DEFAULT_THINKING_SPEECH_LEVEL = 5
 DEFAULT_WAKE_INTERVAL_SECONDS = 300
 DEFAULT_PROMPT_WINDOW_RECENT_TURN_LIMIT = 30
@@ -224,6 +224,7 @@ def build_default_state() -> dict:
             DEFAULT_ELYTH_MCP_SERVER_ID: build_default_elyth_mcp_server(),
             DEFAULT_ESTAT_MCP_SERVER_ID: build_default_estat_mcp_server(),
         },
+        "agent_skill_sources": {},
         # 一度も connect していない間の desktop 取得方針。初回 connect で端末設定へ渡す。
         "desktop_capture_defaults": build_default_desktop_capture(),
 

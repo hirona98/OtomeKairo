@@ -6,6 +6,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from otomekairo.agent_skills import (
+    AgentSkillError,
+    AgentSkillRegistry,
+    validate_agent_skill_source_definition,
+)
 from otomekairo.defaults import (
     API_VERSION,
     DEFAULT_MODEL_PRESET_ID,
@@ -1032,6 +1037,57 @@ class ServiceConfigResourcesMixin:
         self._append_mcp_servers_editor_state_audit_event(state=state, operation="write")
         return self._build_mcp_servers_editor_state(state)
 
+    def get_agent_skill_sources_editor_state(self, token: str | None) -> dict[str, Any]:
+        state = self._require_token(token)
+        self._append_agent_skill_sources_audit_event(state=state, operation="read")
+        return self._build_agent_skill_sources_editor_state(state)
+
+    def replace_agent_skill_sources_editor_state(
+        self,
+        token: str | None,
+        definition: dict[str, Any],
+    ) -> dict[str, Any]:
+        state = self._require_token(token)
+        source_entries = self._agent_skill_source_entries_by_id(
+            definition.get("agent_skill_sources")
+        )
+        normalized_sources: dict[str, dict[str, Any]] = {}
+        try:
+            for source_id, source in source_entries.items():
+                normalized_sources[source_id] = validate_agent_skill_source_definition(
+                    source_id,
+                    source,
+                )
+            prospective_registry = AgentSkillRegistry.load(normalized_sources)
+        except AgentSkillError as exc:
+            raise ServiceError(400, exc.code, str(exc)) from exc
+
+        state["agent_skill_sources"] = normalized_sources
+        with self._runtime_state_lock:
+            self.store.write_state(state)
+            self._agent_skill_registry = prospective_registry
+        self._append_agent_skill_sources_audit_event(state=state, operation="write")
+        return self._build_agent_skill_sources_editor_state(state)
+
+    def reload_agent_skill_sources(self, token: str | None) -> dict[str, Any]:
+        state = self._require_token(token)
+        try:
+            prospective_registry = AgentSkillRegistry.load(
+                state.get("agent_skill_sources", {})
+            )
+        except AgentSkillError as exc:
+            raise ServiceError(409, exc.code, str(exc)) from exc
+        with self._runtime_state_lock:
+            self._agent_skill_registry = prospective_registry
+        self._append_agent_skill_sources_audit_event(state=state, operation="reload")
+        return self.inspect_agent_skills(token)
+
+    def inspect_agent_skills(self, token: str | None) -> dict[str, Any]:
+        self._require_token(token)
+        with self._runtime_state_lock:
+            registry = self._agent_skill_registry
+        return registry.inspection_payload()
+
     def get_connector_runtime_config(self, token: str | None, client_id: str) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
@@ -1379,6 +1435,20 @@ class ServiceConfigResourcesMixin:
             ],
         }
 
+    def _build_agent_skill_sources_editor_state(self, state: dict[str, Any]) -> dict[str, Any]:
+        sources = state.get("agent_skill_sources")
+        if not isinstance(sources, dict):
+            sources = {}
+        return {
+            "agent_skill_sources": [
+                deepcopy(value)
+                for value in sorted(
+                    sources.values(),
+                    key=lambda item: str(item.get("source_id") or ""),
+                )
+            ],
+        }
+
     def _clear_runtime_state_layers(
         self,
         *,
@@ -1552,6 +1622,38 @@ class ServiceConfigResourcesMixin:
             result[normalized] = entry
         return result
 
+    def _agent_skill_source_entries_by_id(self, entries: Any) -> dict[str, dict[str, Any]]:
+        if not isinstance(entries, list):
+            raise ServiceError(
+                400,
+                "invalid_agent_skill_sources",
+                "agent_skill_sources must be an array.",
+            )
+        result: dict[str, dict[str, Any]] = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise ServiceError(
+                    400,
+                    "invalid_agent_skill_source",
+                    "Each agent_skill_source must be an object.",
+                )
+            source_id = entry.get("source_id")
+            if not isinstance(source_id, str) or not source_id.strip():
+                raise ServiceError(
+                    400,
+                    "invalid_agent_skill_source_id",
+                    "source_id must be a non-empty string.",
+                )
+            normalized_id = source_id.strip()
+            if normalized_id in result:
+                raise ServiceError(
+                    400,
+                    "duplicate_agent_skill_source_id",
+                    f"{normalized_id} is duplicated in agent_skill_sources.",
+                )
+            result[normalized_id] = entry
+        return result
+
     def _append_editor_state_audit_event(self, *, state: dict[str, Any], operation: str) -> None:
         # 秘密値を含む editor-state 本文は audit に残さない。
         self.store.append_events(
@@ -1685,6 +1787,30 @@ class ServiceConfigResourcesMixin:
                     "selected_memory_set_id": state["selected_memory_set_id"],
                     "selected_model_preset_id": state["selected_model_preset_id"],
                     "mcp_server_count": len(self._mcp_servers_from_state(state)),
+                }
+            ]
+        )
+
+    def _append_agent_skill_sources_audit_event(self, *, state: dict[str, Any], operation: str) -> None:
+        # Skill 本文、resource 内容、実行設定は audit に残さない。
+        sources = state.get("agent_skill_sources")
+        source_count = len(sources) if isinstance(sources, dict) else 0
+        with self._runtime_state_lock:
+            skill_count = len(self._agent_skill_registry.skills)
+        self.store.append_events(
+            events=[
+                {
+                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
+                    "cycle_id": "config:agent-skill-sources",
+                    "memory_set_id": state["selected_memory_set_id"],
+                    "kind": f"agent_skill_sources_{operation}",
+                    "role": "system",
+                    "created_at": self._now_iso(),
+                    "selected_persona_id": state["selected_persona_id"],
+                    "selected_memory_set_id": state["selected_memory_set_id"],
+                    "selected_model_preset_id": state["selected_model_preset_id"],
+                    "agent_skill_source_count": source_count,
+                    "agent_skill_count": skill_count,
                 }
             ]
         )

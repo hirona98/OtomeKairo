@@ -7,12 +7,14 @@ from typing import Any
 
 from otomekairo.event_stream import EventStreamRegistry
 from otomekairo.audio.runtime import AudioRuntime
+from otomekairo.agent_skills import AgentSkillRegistry
 from otomekairo.evidence import EvidenceResolver
 from otomekairo.llm.client import LLMClient
 from otomekairo.log_stream import LogStreamRegistry
 from otomekairo.memory.consolidator import MemoryConsolidator
 from otomekairo.recall.builder import RecallBuilder
 from otomekairo.service.autonomous_run import ServiceAutonomousRunMixin
+from otomekairo.service.agent_skills import ServiceAgentSkillsMixin
 from otomekairo.service.audio import ServiceAudioMixin
 from otomekairo.service.capability import ServiceCapabilityMixin
 from otomekairo.service.common import ServiceError, configure_debug_log_stream_sink, debug_log
@@ -30,6 +32,7 @@ from otomekairo.tts import TtsRuntime
 
 # サービス
 class OtomeKairoService(
+    ServiceAgentSkillsMixin,
     ServiceSpeechOutputMixin,
     ServiceAudioMixin,
     ServiceCapabilityMixin,
@@ -47,6 +50,9 @@ class OtomeKairoService(
         configure_debug_log_stream_sink(self._append_debug_log_stream_record)
         debug_log("Service", f"initializing root_dir={root_dir}", level="DEBUG")
         self.store = FileStore(root_dir)
+        self._agent_skill_registry = AgentSkillRegistry.load(
+            self.store.read_state().get("agent_skill_sources", {})
+        )
         self.llm = LLMClient()
         self.recall = RecallBuilder(store=self.store, llm=self.llm)
         self.evidence = EvidenceResolver(store=self.store)
