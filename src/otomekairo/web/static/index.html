@@ -752,6 +752,13 @@
                   <label for="model-display-name">プリセット名:</label>
                   <input id="model-display-name" class="field-width-medium">
                 </div>
+                <div class="setting-row setting-row-top">
+                  <label for="outbound-content-review-model-select">外向き内容レビュー:</label>
+                  <div class="console-control-with-hint">
+                    <select id="outbound-content-review-model-select" class="field-width-medium"></select>
+                    <span class="field-hint">MCPから外部へ送る内容の安全確認に使うモデルプリセット</span>
+                  </div>
+                </div>
               </div>
             </fieldset>
             <fieldset class="settings-group model-settings-group">
@@ -951,6 +958,9 @@
               <div class="settings-list">
                 <label class="checkbox-field">有効
                   <input id="mcp-enabled" type="checkbox">
+                </label>
+                <label class="checkbox-field">外向き内容レビューを必須にする
+                  <input id="mcp-outbound-content-review-required" type="checkbox">
                 </label>
                 <div class="setting-row setting-row-top">
                   <label for="mcp-server-id">名前:</label>

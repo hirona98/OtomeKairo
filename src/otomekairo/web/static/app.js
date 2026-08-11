@@ -3216,12 +3216,20 @@ function renderCurrent() {
   element("current-wake-interval").value = wakePolicy.interval_seconds;
   element("current-wake-desktop-observation").checked =
     observations.some((observation) => isDesktopWakeObservation(observation));
+  setSelectOptions(
+    element("outbound-content-review-model-select"),
+    state.editor.model_presets,
+    "model_preset_id",
+    state.editor.current.outbound_content_review_model_preset_id,
+  );
 }
 
 function syncCurrent() {
   state.editor.current.selected_persona_id = state.selectedPersonaId;
   state.editor.current.selected_memory_set_id = state.selectedMemorySetId;
   state.editor.current.selected_model_preset_id = state.selectedModelPresetId;
+  state.editor.current.outbound_content_review_model_preset_id =
+    element("outbound-content-review-model-select").value;
   const selectedConversationDisplayNameIdValue =
     element("settings-conversation-display-name-select").value;
   if (selectedConversationDisplayNameIdValue) {
@@ -3644,6 +3652,8 @@ function renderMcp() {
   setCollectionEditorEnabled("mcp-select", "fieldset.settings-group", "delete-mcp", hasMcp);
   const mcp = arrayById(servers, "mcp_server_id", state.selectedMcpId);
   element("mcp-enabled").checked = mcp?.enabled === true;
+  element("mcp-outbound-content-review-required").checked =
+    mcp?.outbound_content_review_required === true;
   element("mcp-server-id").value = mcp?.mcp_server_id || "";
   element("mcp-client-id").value = mcp?.client_id || "mcp-client-connector-main";
   element("mcp-transport").value = mcp?.transport || "stdio";
@@ -3662,6 +3672,9 @@ function syncMcp() {
   // connector_kind は UI に出さず既存値を保持する。
   mcp.client_id = textValue("mcp-client-id");
   mcp.enabled = boolValue("mcp-enabled");
+  mcp.outbound_content_review_required = boolValue(
+    "mcp-outbound-content-review-required",
+  );
   mcp.transport = textValue("mcp-transport");
   mcp.command = textValue("mcp-command");
   mcp.args = parseLines(textValue("mcp-args"));
@@ -3934,6 +3947,8 @@ function duplicateModel() {
 }
 
 function deleteModel() {
+  const deletingReviewModel =
+    state.editor.current.outbound_content_review_model_preset_id === state.selectedModelPresetId;
   deleteCollectionItem({
     items: state.editor.model_presets,
     idKey: "model_preset_id",
@@ -3941,6 +3956,9 @@ function deleteModel() {
     setSelectedId: (id) => {
       state.selectedModelPresetId = id;
       state.editor.current.selected_model_preset_id = id;
+      if (deletingReviewModel) {
+        state.editor.current.outbound_content_review_model_preset_id = id;
+      }
     },
     lastItemMessage: "最後のモデルプリセットは削除できません。",
     render: renderSettings,
@@ -4053,6 +4071,7 @@ function addCamera() {
     kind: "camera",
     source_owner: "self",
     enabled: false,
+    outbound_content_review_required: true,
     connection: {
       host: "",
       camera_username: "",

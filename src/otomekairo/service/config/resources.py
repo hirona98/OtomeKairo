@@ -594,6 +594,7 @@ class ServiceConfigResourcesMixin:
             "selected_persona_id",
             "selected_memory_set_id",
             "selected_model_preset_id",
+            "outbound_content_review_model_preset_id",
             "thinking_speech_level",
             "wake_policy",
             "selected_conversation_display_name_id",
@@ -632,6 +633,17 @@ class ServiceConfigResourcesMixin:
             self._validate_model_preset_definition(model_preset_id, state["model_presets"][model_preset_id])
             should_clear_runtime_layers = should_clear_runtime_layers or model_preset_id != state["selected_model_preset_id"]
             state["selected_model_preset_id"] = model_preset_id
+
+        # 外向き内容レビューは通常生成とは独立したモデル選択を使う。
+        if "outbound_content_review_model_preset_id" in payload:
+            review_model_preset_id = payload["outbound_content_review_model_preset_id"]
+            if review_model_preset_id not in state["model_presets"]:
+                raise ServiceError(404, "model_preset_not_found", "The requested model_preset_id does not exist.")
+            self._validate_model_preset_definition(
+                review_model_preset_id,
+                state["model_presets"][review_model_preset_id],
+            )
+            state["outbound_content_review_model_preset_id"] = review_model_preset_id
 
         # 動作設定
         if "thinking_speech_level" in payload:
@@ -837,6 +849,13 @@ class ServiceConfigResourcesMixin:
         )
 
     def delete_model_preset(self, token: str | None, model_preset_id: str) -> dict[str, Any]:
+        state = self._require_token(token)
+        if model_preset_id == state["outbound_content_review_model_preset_id"]:
+            raise ServiceError(
+                409,
+                "outbound_content_review_model_preset_delete_forbidden",
+                "The outbound content review model preset cannot be deleted while selected.",
+            )
         return self._delete_resource_entry(
             token=token,
             entries_key="model_presets",
@@ -1005,7 +1024,7 @@ class ServiceConfigResourcesMixin:
             if camera_source.get("client_id") == normalized_client_id and camera_source.get("enabled") is True
         ]
         mcp_servers = [
-            self._mcp_server_definition_for_read(mcp_server)
+            self._mcp_server_definition_for_connector(mcp_server)
             for mcp_server in self._mcp_servers_from_state(state).values()
             if mcp_server.get("client_id") == normalized_client_id and mcp_server.get("enabled") is True
         ]
@@ -1115,6 +1134,7 @@ class ServiceConfigResourcesMixin:
             "selected_persona_id",
             "selected_memory_set_id",
             "selected_model_preset_id",
+            "outbound_content_review_model_preset_id",
             "thinking_speech_level",
             "wake_policy",
             "selected_conversation_display_name_id",
@@ -1129,6 +1149,7 @@ class ServiceConfigResourcesMixin:
         selected_persona_id = current.get("selected_persona_id")
         selected_memory_set_id = current.get("selected_memory_set_id")
         selected_model_preset_id = current.get("selected_model_preset_id")
+        outbound_content_review_model_preset_id = current.get("outbound_content_review_model_preset_id")
         thinking_speech_level = current.get("thinking_speech_level")
         if selected_persona_id not in personas:
             raise ServiceError(404, "persona_not_found", "The selected_persona_id does not exist in personas.")
@@ -1136,6 +1157,12 @@ class ServiceConfigResourcesMixin:
             raise ServiceError(404, "memory_set_not_found", "The selected_memory_set_id does not exist in memory_sets.")
         if selected_model_preset_id not in model_presets:
             raise ServiceError(404, "model_preset_not_found", "The selected_model_preset_id does not exist in model_presets.")
+        if outbound_content_review_model_preset_id not in model_presets:
+            raise ServiceError(
+                404,
+                "model_preset_not_found",
+                "The outbound_content_review_model_preset_id does not exist in model_presets.",
+            )
 
         # 動作設定検証
         self._validate_thinking_speech_level(thinking_speech_level)
@@ -1161,6 +1188,7 @@ class ServiceConfigResourcesMixin:
         state["selected_persona_id"] = selected_persona_id
         state["selected_memory_set_id"] = selected_memory_set_id
         state["selected_model_preset_id"] = selected_model_preset_id
+        state["outbound_content_review_model_preset_id"] = outbound_content_review_model_preset_id
         state["thinking_speech_level"] = thinking_speech_level
         state["wake_policy"] = current["wake_policy"]
         state["selected_conversation_display_name_id"] = selected_display_name_id
@@ -1197,6 +1225,9 @@ class ServiceConfigResourcesMixin:
             "selected_memory_set_id": state["selected_memory_set_id"],
             "wake_policy": deepcopy(state["wake_policy"]),
             "selected_model_preset_id": state["selected_model_preset_id"],
+            "outbound_content_review_model_preset_id": state[
+                "outbound_content_review_model_preset_id"
+            ],
             "thinking_speech_level": state["thinking_speech_level"],
             "selected_conversation_display_name_id": state[
                 "selected_conversation_display_name_id"
@@ -1454,6 +1485,9 @@ class ServiceConfigResourcesMixin:
                     "selected_persona_id": state["selected_persona_id"],
                     "selected_memory_set_id": state["selected_memory_set_id"],
                     "selected_model_preset_id": state["selected_model_preset_id"],
+                    "outbound_content_review_model_preset_id": state[
+                        "outbound_content_review_model_preset_id"
+                    ],
                     "persona_count": len(state["personas"]),
                     "memory_set_count": len(state["memory_sets"]),
                     "model_preset_count": len(state["model_presets"]),
@@ -1739,12 +1773,19 @@ class ServiceConfigResourcesMixin:
     def _mcp_server_definition_for_read(self, definition: dict[str, Any]) -> dict[str, Any]:
         return deepcopy(definition)
 
+    def _mcp_server_definition_for_connector(self, definition: dict[str, Any]) -> dict[str, Any]:
+        # レビュー要否は server の dispatch 方針であり、実行 connector へ渡さない。
+        connector_definition = self._mcp_server_definition_for_read(definition)
+        connector_definition.pop("outbound_content_review_required", None)
+        return connector_definition
+
     def _normalize_mcp_server_definition(self, mcp_server_id: str, definition: dict[str, Any]) -> dict[str, Any]:
         normalized = {
             "mcp_server_id": definition.get("mcp_server_id", mcp_server_id),
             "connector_kind": definition.get("connector_kind", MCP_DEFAULT_CONNECTOR_KIND),
             "client_id": definition.get("client_id", MCP_DEFAULT_CLIENT_ID),
             "enabled": definition.get("enabled"),
+            "outbound_content_review_required": definition.get("outbound_content_review_required"),
             "transport": definition.get("transport", "stdio"),
             "command": definition.get("command"),
             "args": definition.get("args", []),
@@ -1778,6 +1819,7 @@ class ServiceConfigResourcesMixin:
             "connector_kind",
             "client_id",
             "enabled",
+            "outbound_content_review_required",
             "transport",
             "command",
             "args",
@@ -1798,6 +1840,12 @@ class ServiceConfigResourcesMixin:
         enabled = definition.get("enabled")
         if not isinstance(enabled, bool):
             raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.enabled must be a boolean.")
+        if not isinstance(definition.get("outbound_content_review_required"), bool):
+            raise ServiceError(
+                400,
+                "invalid_mcp_server_field",
+                "mcp_server.outbound_content_review_required must be a boolean.",
+            )
         transport = definition.get("transport")
         if transport not in MCP_TRANSPORTS:
             raise ServiceError(400, "unsupported_mcp_transport", "mcp_server.transport is not supported.")

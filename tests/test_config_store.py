@@ -45,6 +45,7 @@ class ConfigStoreTests(unittest.TestCase):
                     "connector_kind": "mcp_client",
                     "client_id": "mcp-client-connector-main",
                     "enabled": True,
+                    "outbound_content_review_required": True,
                     "transport": "stdio",
                     "command": "uvx",
                     "args": ["estat-mcp-server"],
@@ -92,6 +93,9 @@ class ConfigStoreTests(unittest.TestCase):
                 "password",
             )
             self.assertEqual(reloaded_state["mcp_servers"]["e-stat"]["env"]["E_STAT_APP_ID"], "secret")
+            self.assertTrue(
+                reloaded_state["mcp_servers"]["e-stat"]["outbound_content_review_required"]
+            )
             self.assertEqual(
                 reloaded_state["microphone_settings"],
                 {

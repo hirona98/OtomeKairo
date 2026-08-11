@@ -40,6 +40,7 @@ class McpConfigApiTests(unittest.TestCase):
         mcp_server = response["mcp_servers"][0]
         self.assertEqual(mcp_server["mcp_server_id"], "e-stat")
         self.assertFalse(mcp_server["enabled"])
+        self.assertTrue(mcp_server["outbound_content_review_required"])
         self.assertEqual(mcp_server["command"], "uvx")
         self.assertEqual(mcp_server["args"], ["estat-mcp-server"])
         self.assertEqual(mcp_server["env"]["E_STAT_APP_ID"], "")
@@ -52,6 +53,7 @@ class McpConfigApiTests(unittest.TestCase):
             "e-stat",
             {
                 "enabled": True,
+                "outbound_content_review_required": True,
                 "command": "uvx",
                 "args": ["estat-mcp-server"],
                 "env": {
@@ -80,6 +82,7 @@ class McpConfigApiTests(unittest.TestCase):
                         "connector_kind": "mcp_client",
                         "client_id": "mcp-client-connector-main",
                         "enabled": True,
+                        "outbound_content_review_required": True,
                         "transport": "stdio",
                         "command": "uvx",
                         "args": ["estat-mcp-server"],
@@ -103,6 +106,7 @@ class McpConfigApiTests(unittest.TestCase):
                         "mcp_server_id": "e-stat",
                         "client_id": "mcp-client-connector-main",
                         "enabled": True,
+                        "outbound_content_review_required": True,
                         "command": "uvx",
                         "args": ["estat-mcp-server"],
                         "env": {"E_STAT_APP_ID": "secret"},
@@ -111,6 +115,7 @@ class McpConfigApiTests(unittest.TestCase):
                         "mcp_server_id": "disabled",
                         "client_id": "mcp-client-connector-main",
                         "enabled": False,
+                        "outbound_content_review_required": True,
                         "command": "uvx",
                         "args": ["disabled"],
                         "env": {},
@@ -119,6 +124,7 @@ class McpConfigApiTests(unittest.TestCase):
                         "mcp_server_id": "other",
                         "client_id": "mcp-client-connector-other",
                         "enabled": True,
+                        "outbound_content_review_required": False,
                         "command": "uvx",
                         "args": ["other"],
                         "env": {},
@@ -132,6 +138,7 @@ class McpConfigApiTests(unittest.TestCase):
         self.assertEqual(response["camera_sources"], [])
         self.assertEqual([item["mcp_server_id"] for item in response["mcp_servers"]], ["e-stat"])
         self.assertEqual(response["mcp_servers"][0]["env"]["E_STAT_APP_ID"], "secret")
+        self.assertNotIn("outbound_content_review_required", response["mcp_servers"][0])
         self.assertEqual(service.store.events[-1]["mcp_server_count"], 1)
 
     def test_mcp_server_rejects_invalid_definition(self) -> None:
@@ -143,6 +150,7 @@ class McpConfigApiTests(unittest.TestCase):
                 "e-stat",
                 {
                     "enabled": True,
+                    "outbound_content_review_required": True,
                     "transport": "sse",
                     "command": "uvx",
                 },
