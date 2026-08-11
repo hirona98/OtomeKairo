@@ -2464,6 +2464,7 @@ function renderSettings() {
   renderModel();
   renderMemory();
   renderCapabilities();
+  renderOutboundReview();
   renderApiDocumentation();
 }
 
@@ -3224,10 +3225,9 @@ function renderCurrent() {
   element("current-wake-interval").value = wakePolicy.interval_seconds;
   element("current-wake-desktop-observation").checked =
     observations.some((observation) => isDesktopWakeObservation(observation));
-  renderOutboundContentReviewSettings();
 }
 
-function renderOutboundContentReviewSettings() {
+function renderOutboundReview() {
   if (!state.editor?.current || !state.mcp) {
     return;
   }
@@ -3266,48 +3266,44 @@ function renderOutboundContentReviewMcpList() {
     input.type = "checkbox";
     input.dataset.mcpServerId = server.mcp_server_id || "";
     input.checked = server.outbound_content_review_required === true;
-    input.addEventListener("change", () => {
-      setOutboundContentReviewRequired(server.mcp_server_id, input.checked);
-    });
     label.appendChild(input);
     container.appendChild(label);
   }
 }
 
-function setOutboundContentReviewRequired(mcpServerId, required) {
-  const server = arrayById(state.mcp?.mcp_servers || [], "mcp_server_id", mcpServerId);
-  if (!server) {
+function syncOutboundReview() {
+  if (!state.editor?.current) {
     return;
   }
-  server.outbound_content_review_required = required === true;
-  // MCP タブの同一項目を同期する。
-  if (state.selectedMcpId === mcpServerId) {
-    const formInput = element("mcp-outbound-content-review-required");
-    if (formInput) {
-      formInput.checked = required === true;
-    }
+  const reviewModelId = element("outbound-content-review-model-select").value;
+  if (reviewModelId) {
+    state.editor.current.outbound_content_review_model_preset_id = reviewModelId;
   }
-  const listInput = document.querySelector(
-    `#outbound-content-review-mcp-list input[data-mcp-server-id="${cssEscapeAttribute(mcpServerId)}"]`,
-  );
-  if (listInput) {
-    listInput.checked = required === true;
-  }
+  syncOutboundContentReviewMcpList();
 }
 
-function cssEscapeAttribute(value) {
-  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
-    return CSS.escape(String(value || ""));
+function syncOutboundContentReviewMcpList() {
+  const container = element("outbound-content-review-mcp-list");
+  if (!container || !state.mcp) {
+    return;
   }
-  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const inputs = container.querySelectorAll("input[type='checkbox'][data-mcp-server-id]");
+  for (const input of inputs) {
+    const serverId = input.dataset.mcpServerId || "";
+    if (!serverId) {
+      continue;
+    }
+    const server = arrayById(state.mcp.mcp_servers || [], "mcp_server_id", serverId);
+    if (server) {
+      server.outbound_content_review_required = input.checked;
+    }
+  }
 }
 
 function syncCurrent() {
   state.editor.current.selected_persona_id = state.selectedPersonaId;
   state.editor.current.selected_memory_set_id = state.selectedMemorySetId;
   state.editor.current.selected_model_preset_id = state.selectedModelPresetId;
-  state.editor.current.outbound_content_review_model_preset_id =
-    element("outbound-content-review-model-select").value;
   const selectedConversationDisplayNameIdValue =
     element("settings-conversation-display-name-select").value;
   if (selectedConversationDisplayNameIdValue) {
@@ -3730,8 +3726,6 @@ function renderMcp() {
   setCollectionEditorEnabled("mcp-select", "fieldset.settings-group", "delete-mcp", hasMcp);
   const mcp = arrayById(servers, "mcp_server_id", state.selectedMcpId);
   element("mcp-enabled").checked = mcp?.enabled === true;
-  element("mcp-outbound-content-review-required").checked =
-    mcp?.outbound_content_review_required === true;
   element("mcp-server-id").value = mcp?.mcp_server_id || "";
   element("mcp-client-id").value = mcp?.client_id || "mcp-client-connector-main";
   element("mcp-transport").value = mcp?.transport || "stdio";
@@ -3739,24 +3733,21 @@ function renderMcp() {
   element("mcp-args").value = (mcp?.args || []).join("\n");
   element("mcp-cwd").value = mcp?.cwd || "";
   element("mcp-env").value = formatEnv(mcp?.env || {});
-  // モデルタブの一覧も同じ下書きを見る。
-  renderOutboundContentReviewMcpList();
 }
 
 function syncMcp() {
   const mcp = arrayById(state.mcp.mcp_servers, "mcp_server_id", state.selectedMcpId);
   if (!mcp) {
-    // 選択中が無いときも、モデルタブ一覧の必須化フラグは取り込む。
-    syncOutboundContentReviewMcpList();
     return;
   }
   mcp.mcp_server_id = textValue("mcp-server-id");
   // connector_kind は UI に出さず既存値を保持する。
   mcp.client_id = textValue("mcp-client-id");
   mcp.enabled = boolValue("mcp-enabled");
-  mcp.outbound_content_review_required = boolValue(
-    "mcp-outbound-content-review-required",
-  );
+  // outbound_content_review_required は外向きレビュー専用タブが正とする。
+  if (typeof mcp.outbound_content_review_required !== "boolean") {
+    mcp.outbound_content_review_required = true;
+  }
   mcp.transport = textValue("mcp-transport");
   mcp.command = textValue("mcp-command");
   mcp.args = parseLines(textValue("mcp-args"));
@@ -3766,26 +3757,6 @@ function syncMcp() {
   // 旧下書きに enabled_tools が残っていれば捨てる（設定正本から廃止済み）。
   delete mcp.enabled_tools;
   state.selectedMcpId = mcp.mcp_server_id;
-  // モデルタブ一覧から、選択中以外の server の必須化フラグも取り込む。
-  syncOutboundContentReviewMcpList({ excludeServerId: state.selectedMcpId });
-}
-
-function syncOutboundContentReviewMcpList({ excludeServerId = null } = {}) {
-  const container = element("outbound-content-review-mcp-list");
-  if (!container) {
-    return;
-  }
-  const inputs = container.querySelectorAll("input[type='checkbox'][data-mcp-server-id]");
-  for (const input of inputs) {
-    const serverId = input.dataset.mcpServerId || "";
-    if (!serverId || (excludeServerId != null && serverId === excludeServerId)) {
-      continue;
-    }
-    const server = arrayById(state.mcp?.mcp_servers || [], "mcp_server_id", serverId);
-    if (server) {
-      server.outbound_content_review_required = input.checked;
-    }
-  }
 }
 
 function syncAllForms() {
@@ -3799,6 +3770,7 @@ function syncAllForms() {
   syncCamera();
   syncWatcher();
   syncMcp();
+  syncOutboundReview();
 }
 
 // 選択切替や追加前に、現在フォームの値を下書きへ戻す。
@@ -4226,12 +4198,14 @@ function addMcp() {
   });
   state.selectedMcpId = id;
   renderCapabilities();
+  renderOutboundReview();
 }
 
 function deleteMcp() {
   removeById(state.mcp.mcp_servers, "mcp_server_id", state.selectedMcpId);
   state.selectedMcpId = state.mcp.mcp_servers[0]?.mcp_server_id || "";
   renderCapabilities();
+  renderOutboundReview();
 }
 
 function switchTab(tab) {
@@ -4396,15 +4370,6 @@ function bindEvents() {
       state.selectedModelPresetId = id;
     },
     render: renderModel,
-  });
-  element("mcp-outbound-content-review-required").addEventListener("change", () => {
-    if (!state.selectedMcpId) {
-      return;
-    }
-    setOutboundContentReviewRequired(
-      state.selectedMcpId,
-      element("mcp-outbound-content-review-required").checked,
-    );
   });
   bindCollectionSelect("memory-select", {
     sync: syncMemory,

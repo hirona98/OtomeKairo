@@ -195,6 +195,7 @@
           <option value="desktop">デスクトップ</option>
           <option value="camera">カメラ</option>
           <option value="mcp">MCP</option>
+          <option value="outbound-review">外向きレビュー</option>
         </optgroup>
         <optgroup label="情報">
           <option value="api">API説明</option>
@@ -219,6 +220,7 @@
         <button type="button" class="settings-nav-button" data-tab="desktop">デスクトップ</button>
         <button type="button" class="settings-nav-button" data-tab="camera">カメラ</button>
         <button type="button" class="settings-nav-button" data-tab="mcp">MCP</button>
+        <button type="button" class="settings-nav-button" data-tab="outbound-review">外向きレビュー</button>
         <div class="settings-navigation-category">情報</div>
         <button type="button" class="settings-nav-button" data-tab="api">API説明</button>
       </nav>
@@ -805,25 +807,6 @@
                 </div>
               </div>
             </fieldset>
-            <fieldset class="settings-group model-settings-group">
-              <legend>外向き内容レビュー</legend>
-              <div class="settings-list">
-                <div class="setting-row setting-row-top">
-                  <label for="outbound-content-review-model-select">レビュー用モデル:</label>
-                  <div class="console-control-with-hint">
-                    <select id="outbound-content-review-model-select" class="field-width-medium"></select>
-                    <span class="field-hint">MCP から外部へ送る内容の安全確認に使うモデルプリセット。通常の生成モデルとは別に選べます。</span>
-                  </div>
-                </div>
-                <div class="setting-row setting-row-top">
-                  <label>MCP server ごとの必須化:</label>
-                  <div class="console-control-with-hint">
-                    <div id="outbound-content-review-mcp-list" class="outbound-content-review-mcp-list"></div>
-                    <span class="field-hint">オンにすると、その MCP server の tool 呼び出し前に内容レビューを必須にします。投稿など外向き書き込み向けです。読み取り専用の MCP はオフで構いません。MCP タブの同じ項目と連動します。</span>
-                  </div>
-                </div>
-              </div>
-            </fieldset>
           </section>
 
           <section class="tab-page" data-page="memory">
@@ -971,9 +954,6 @@
                 <label class="checkbox-field">有効
                   <input id="mcp-enabled" type="checkbox">
                 </label>
-                <label class="checkbox-field">外向き内容レビューを必須にする
-                  <input id="mcp-outbound-content-review-required" type="checkbox">
-                </label>
                 <div class="setting-row setting-row-top">
                   <label for="mcp-server-id">名前:</label>
                   <div class="console-control-with-hint">
@@ -1021,6 +1001,28 @@
                   <div class="console-control-with-hint">
                     <textarea id="mcp-env" rows="5" spellcheck="false"></textarea>
                     <span class="field-hint">KEY=VALUE を1行ずつ入力します。</span>
+                  </div>
+                </div>
+              </div>
+            </fieldset>
+          </section>
+
+          <section class="tab-page" data-page="outbound-review">
+            <fieldset class="settings-group">
+              <legend>外向き内容レビュー</legend>
+              <div class="settings-list">
+                <div class="setting-row setting-row-top">
+                  <label for="outbound-content-review-model-select">レビュー用モデル:</label>
+                  <div class="console-control-with-hint">
+                    <select id="outbound-content-review-model-select" class="field-width-medium"></select>
+                    <span class="field-hint">MCP から外部へ送る内容の安全確認に使うモデルプリセット。プリセット本体の編集はモデルタブで行います。</span>
+                  </div>
+                </div>
+                <div class="setting-row setting-row-top">
+                  <label>MCP server ごとの必須化:</label>
+                  <div class="console-control-with-hint">
+                    <div id="outbound-content-review-mcp-list" class="outbound-content-review-mcp-list"></div>
+                    <span class="field-hint">オンにすると、その MCP server の tool 呼び出し前に内容レビューを必須にします。投稿など外向き書き込み向けです。読み取り専用の MCP はオフで構いません。MCP server の追加・接続定義は MCP タブで行います。</span>
                   </div>
                 </div>
               </div>
