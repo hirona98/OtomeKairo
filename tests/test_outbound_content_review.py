@@ -1,5 +1,7 @@
 import unittest
 from copy import deepcopy
+from pathlib import Path
+import tempfile
 from unittest.mock import Mock
 
 from otomekairo.defaults import build_default_state
@@ -15,6 +17,7 @@ from otomekairo.service.input.pipeline import (
     ServiceInputPipelineMixin,
 )
 from otomekairo.service.input.trace_build import ServiceInputTraceBuildMixin
+from otomekairo.service.app import OtomeKairoService
 
 
 class _Store:
@@ -93,6 +96,17 @@ class _PipelineService(ServiceInputPipelineMixin):
 
 class _TraceService(ServiceInputTraceBuildMixin):
     pass
+
+
+class _RecordingWebSocket:
+    def __init__(self) -> None:
+        self.payloads: list[dict] = []
+
+    def send_json(self, payload: dict) -> None:
+        self.payloads.append(deepcopy(payload))
+
+    def close(self) -> None:
+        return None
 
 
 def _tool() -> dict:
@@ -297,6 +311,55 @@ class OutboundContentReviewTests(unittest.TestCase):
         self.assertEqual(notice_event["role"], "system")
         self.assertEqual(notice_event["text"], "外部送信を見送りました。")
         self.assertNotIn("arguments", str(notice_event))
+
+    def test_withheld_request_never_reaches_connected_mcp_connector(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            try:
+                state = service.store.read_state()
+                state["mcp_servers"]["e-stat"]["enabled"] = True
+                service.store.write_state(state)
+                service.llm = _Reviewer("withhold")
+                websocket = _RecordingWebSocket()
+                session_id = service.register_event_stream_connection(websocket)
+                service.handle_event_stream_message(
+                    session_id,
+                    {
+                        "type": "hello",
+                        "client_id": "mcp-client-connector-main",
+                        "client_kind": "capability_connector",
+                        "caps": [{"id": "mcp.call_tool", "version": "1"}],
+                        "mcp_servers": [
+                            {
+                                "mcp_server_id": "e-stat",
+                                "transport": "stdio",
+                                "tools": [_tool()],
+                            }
+                        ],
+                    },
+                )
+
+                with self.assertRaises(OutboundContentReviewWithheldError):
+                    service._dispatch_capability_request(
+                        memory_set_id=state["selected_memory_set_id"],
+                        capability_id="mcp.call_tool",
+                        input_payload=_input("審査で保留する投稿"),
+                        current_time="2026-08-11T12:00:00+09:00",
+                        goal_summary="投稿する",
+                        wait_for_response=False,
+                        component="Test",
+                    )
+
+                self.assertEqual(websocket.payloads, [])
+                self.assertEqual(service._pending_capability_requests, {})
+                self.assertIsNone(
+                    service.store.get_ongoing_action(
+                        memory_set_id=state["selected_memory_set_id"],
+                        current_time="2026-08-11T12:00:00+09:00",
+                    )
+                )
+            finally:
+                service.close_tts_runtime()
 
 
 if __name__ == "__main__":
