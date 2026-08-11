@@ -527,10 +527,14 @@ class ServiceSpontaneousWakeMixin:
         previous_enabled = self._wake_policy_has_enabled_visual_capture(previous_wake_policy)
         next_enabled = self._wake_policy_has_enabled_visual_capture(next_wake_policy)
         with self._runtime_state_lock:
+            # visual capture 有効化直後は 5 秒待ち、その後必ず初回処理へ進む。
+            # 直前の last_wake_at が残ると interval 残りで初回が遅れるため、起点もリセットする。
             if next_enabled and not previous_enabled:
                 self._wake_runtime_state["initial_delay_until"] = (
                     self._parse_iso(current_time) + timedelta(seconds=INITIAL_VISUAL_CAPTURE_DELAY_SECONDS)
                 ).isoformat()
+                self._wake_runtime_state["last_wake_at"] = None
+                self._wake_runtime_state["retry_after"] = None
                 return
             if not next_enabled:
                 self._wake_runtime_state["initial_delay_until"] = None

@@ -218,6 +218,7 @@ LLM の自由文をそのまま状態遷移へ使わない。
 `wake_policy.observations` は 定期思考 の判断前に enabled 項目だけを順番に取得する。
 visual capture の source、result、保存、inspection の詳細は [../capability/視覚機能.md](../capability/視覚機能.md) を正とする。
 思考前観測 の運用時刻は `wake_policy` と process-local runtime で扱い、成功結果は内部観測と自律判断の材料として扱う。
+visual capture を含む enabled observation の無効→有効直後の初回 5 秒待機と、その後の初回 due は [../api/状態と設定.md](../api/状態と設定.md) を正とする。
 思考前観測 として同期取得する capability result は、`ongoing_action` 外の内部観測として扱う。
 会話入力、手動 wake、capability result handling は FIFO で直列化する。
 これらのサイクルが実行中または待機中なら、server はその周期の due autonomous run と `background_thinking` を開始しない。
