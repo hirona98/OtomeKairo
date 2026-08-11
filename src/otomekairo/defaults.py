@@ -9,6 +9,8 @@ from importlib import resources
 DEFAULT_PERSONA_ID = "persona:default"
 DEFAULT_MEMORY_SET_ID = "memory_set:default"
 DEFAULT_MODEL_PRESET_ID = "model_preset:default"
+# 外向き内容レビュー専用。生成用の selected_model_preset とは別定義として持つ。
+OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID = "model_preset:outbound_content_review"
 DEFAULT_AVATAR_ID = "avatar:default"
 API_VERSION = "0.9.0"
 DEFAULT_THINKING_SPEECH_LEVEL = 5
@@ -174,7 +176,7 @@ def build_default_state() -> dict:
         "selected_persona_id": DEFAULT_PERSONA_ID,
         "selected_memory_set_id": DEFAULT_MEMORY_SET_ID,
         "selected_model_preset_id": DEFAULT_MODEL_PRESET_ID,
-        "outbound_content_review_model_preset_id": DEFAULT_MODEL_PRESET_ID,
+        "outbound_content_review_model_preset_id": OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID,
         "selected_avatar_id": DEFAULT_AVATAR_ID,
         "thinking_speech_level": DEFAULT_THINKING_SPEECH_LEVEL,
         "selected_conversation_display_name_id": DEFAULT_CONVERSATION_DISPLAY_NAME_ID,
@@ -211,6 +213,7 @@ def build_default_state() -> dict:
         },
         "model_presets": {
             DEFAULT_MODEL_PRESET_ID: build_default_model_preset(),
+            OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID: build_default_outbound_content_review_model_preset(),
         },
         "avatars": {
             DEFAULT_AVATAR_ID: build_default_avatar(),
@@ -321,6 +324,23 @@ def build_default_model_preset() -> dict:
     return {
         "model_preset_id": DEFAULT_MODEL_PRESET_ID,
         "display_name": "Default OpenRouter Gemini Preset",
+        "prompt_window": {
+            "recent_turn_limit": DEFAULT_PROMPT_WINDOW_RECENT_TURN_LIMIT,
+            "recent_turn_minutes": DEFAULT_PROMPT_WINDOW_RECENT_TURN_MINUTES,
+        },
+        "model": DEFAULT_GEMINI_GENERATION_MODEL,
+        "api_key": "",
+        "max_output_tokens": DEFAULT_GENERATION_MAX_OUTPUT_TOKENS,
+        "timeout_seconds": DEFAULT_GENERATION_TIMEOUT_SECONDS,
+        "web_search_enabled": False,
+    }
+
+
+def build_default_outbound_content_review_model_preset() -> dict:
+    # 外向き内容レビュー専用。会話窓や Web 検索は使わない。
+    return {
+        "model_preset_id": OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID,
+        "display_name": "外向き内容レビュー",
         "prompt_window": {
             "recent_turn_limit": DEFAULT_PROMPT_WINDOW_RECENT_TURN_LIMIT,
             "recent_turn_minutes": DEFAULT_PROMPT_WINDOW_RECENT_TURN_MINUTES,

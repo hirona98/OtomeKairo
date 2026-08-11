@@ -1009,17 +1009,45 @@
 
           <section class="tab-page" data-page="outbound-review">
             <fieldset class="settings-group">
-              <legend>外向き内容レビュー</legend>
+              <legend>レビュー用モデル</legend>
               <div class="settings-list">
-                <div class="setting-row setting-row-top">
-                  <label for="outbound-content-review-model-select">レビュー用モデル:</label>
-                  <div class="console-control-with-hint">
-                    <select id="outbound-content-review-model-select" class="field-width-medium"></select>
-                    <span class="field-hint">MCP から外部へ送る内容の安全確認に使うモデルプリセット。プリセット本体の編集はモデルタブで行います。</span>
+                <div class="setting-row">
+                  <label for="outbound-review-model">モデル:</label>
+                  <input id="outbound-review-model" class="field-width-long">
+                </div>
+                <div class="setting-row">
+                  <label for="outbound-review-api-base">エンドポイントURL:</label>
+                  <input id="outbound-review-api-base">
+                </div>
+                <div class="setting-row">
+                  <label for="outbound-review-api-key">APIキー:</label>
+                  <div class="inline-control-row secret-field-controls">
+                    <input id="outbound-review-api-key" type="password" autocomplete="new-password">
+                    <button type="button" class="plain-button" data-secret-action="copy"
+                      data-secret-input="outbound-review-api-key" data-secret-label="外向きレビューのAPIキー">コピー</button>
+                    <button type="button" class="plain-button" data-secret-action="paste"
+                      data-secret-input="outbound-review-api-key" data-secret-label="外向きレビューのAPIキー">上書き貼り付け</button>
                   </div>
                 </div>
+                <div class="setting-row">
+                  <label for="outbound-review-reasoning-effort">推論の深さ:</label>
+                  <input id="outbound-review-reasoning-effort" class="field-width-medium">
+                </div>
+                <div class="setting-row">
+                  <label for="outbound-review-max-output-tokens">最大出力トークン:</label>
+                  <input id="outbound-review-max-output-tokens" class="field-width-short" type="number" min="1">
+                </div>
+                <div class="setting-row">
+                  <label for="outbound-review-timeout-seconds">タイムアウト（秒）:</label>
+                  <input id="outbound-review-timeout-seconds" class="field-width-short" type="number" min="1" step="1">
+                </div>
+              </div>
+            </fieldset>
+            <fieldset class="settings-group">
+              <legend>MCP server ごとの必須化</legend>
+              <div class="settings-list">
                 <div class="setting-row setting-row-top">
-                  <label>MCP server ごとの必須化:</label>
+                  <label>対象 MCP:</label>
                   <div class="console-control-with-hint">
                     <div id="outbound-content-review-mcp-list" class="outbound-content-review-mcp-list"></div>
                     <span class="field-hint">オンにすると、その MCP server の tool 呼び出し前に内容レビューを必須にします。投稿など外向き書き込み向けです。読み取り専用の MCP はオフで構いません。MCP server の追加・接続定義は MCP タブで行います。</span>

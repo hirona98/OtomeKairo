@@ -36,6 +36,14 @@ class CurrentConfigApiTests(unittest.TestCase):
         self.assertNotIn("reasoning_effort", preset)
         self.assertEqual(
             state["outbound_content_review_model_preset_id"],
+            "model_preset:outbound_content_review",
+        )
+        self.assertIn(
+            "model_preset:outbound_content_review",
+            state["model_presets"],
+        )
+        self.assertNotEqual(
+            state["outbound_content_review_model_preset_id"],
             state["selected_model_preset_id"],
         )
 
@@ -110,17 +118,11 @@ class CurrentConfigApiTests(unittest.TestCase):
         response = service.patch_current("token", {"thinking_speech_level": 10})
         self.assertEqual(response["settings_snapshot"]["thinking_speech_level"], 10)
 
-    def test_outbound_content_review_model_selection_is_independent(self) -> None:
+    def test_outbound_content_review_uses_dedicated_model_preset(self) -> None:
         service = DummyService()
         state = service.store.read_state()
         source_id = state["selected_model_preset_id"]
-        review_id = "model_preset:review"
-        state["model_presets"][review_id] = {
-            **deepcopy(state["model_presets"][source_id]),
-            "model_preset_id": review_id,
-            "display_name": "Review",
-        }
-        service.store.write_state(state)
+        review_id = "model_preset:outbound_content_review"
 
         response = service.patch_current(
             "token",
@@ -132,6 +134,16 @@ class CurrentConfigApiTests(unittest.TestCase):
             review_id,
         )
         self.assertEqual(response["settings_snapshot"]["selected_model_preset_id"], source_id)
+
+        with self.assertRaises(ServiceError) as raised:
+            service.patch_current(
+                "token",
+                {"outbound_content_review_model_preset_id": source_id},
+            )
+        self.assertEqual(
+            raised.exception.error_code,
+            "invalid_outbound_content_review_model_preset_id",
+        )
 
         with self.assertRaises(ServiceError) as raised:
             service.delete_model_preset("token", review_id)

@@ -3227,16 +3227,59 @@ function renderCurrent() {
     observations.some((observation) => isDesktopWakeObservation(observation));
 }
 
+const OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID = "model_preset:outbound_content_review";
+
+function generationModelPresets() {
+  return (state.editor?.model_presets || []).filter(
+    (preset) => preset.model_preset_id !== OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID,
+  );
+}
+
+function outboundContentReviewModelPreset() {
+  let preset = arrayById(
+    state.editor?.model_presets || [],
+    "model_preset_id",
+    OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID,
+  );
+  if (preset) {
+    return preset;
+  }
+  // editor-state に専用定義が無い旧下書き向けに、その場で確保する。
+  preset = {
+    model_preset_id: OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID,
+    display_name: "外向き内容レビュー",
+    prompt_window: {
+      recent_turn_limit: 30,
+      recent_turn_minutes: 30,
+    },
+    model: "",
+    api_key: "",
+    max_output_tokens: 4000,
+    timeout_seconds: 90,
+    web_search_enabled: false,
+  };
+  if (state.editor) {
+    state.editor.model_presets = state.editor.model_presets || [];
+    state.editor.model_presets.push(preset);
+    if (state.editor.current) {
+      state.editor.current.outbound_content_review_model_preset_id =
+        OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID;
+    }
+  }
+  return preset;
+}
+
 function renderOutboundReview() {
   if (!state.editor?.current || !state.mcp) {
     return;
   }
-  setSelectOptions(
-    element("outbound-content-review-model-select"),
-    state.editor.model_presets,
-    "model_preset_id",
-    state.editor.current.outbound_content_review_model_preset_id,
-  );
+  const preset = outboundContentReviewModelPreset();
+  element("outbound-review-model").value = preset.model || "";
+  element("outbound-review-api-base").value = preset.api_base || "";
+  element("outbound-review-api-key").value = preset.api_key || "";
+  element("outbound-review-reasoning-effort").value = preset.reasoning_effort || "";
+  element("outbound-review-max-output-tokens").value = preset.max_output_tokens || 4000;
+  element("outbound-review-timeout-seconds").value = preset.timeout_seconds || 90;
   renderOutboundContentReviewMcpList();
 }
 
@@ -3275,10 +3318,30 @@ function syncOutboundReview() {
   if (!state.editor?.current) {
     return;
   }
-  const reviewModelId = element("outbound-content-review-model-select").value;
-  if (reviewModelId) {
-    state.editor.current.outbound_content_review_model_preset_id = reviewModelId;
+  const preset = outboundContentReviewModelPreset();
+  preset.model = textValue("outbound-review-model");
+  preset.api_key = textValue("outbound-review-api-key");
+  preset.max_output_tokens = intValue("outbound-review-max-output-tokens", 4000);
+  preset.timeout_seconds = boundedIntValue(
+    "outbound-review-timeout-seconds",
+    "タイムアウト（秒）",
+    1,
+  );
+  preset.web_search_enabled = false;
+  const apiBase = textValue("outbound-review-api-base").trim();
+  if (apiBase) {
+    preset.api_base = apiBase;
+  } else {
+    delete preset.api_base;
   }
+  const reasoningEffort = textValue("outbound-review-reasoning-effort").trim();
+  if (reasoningEffort) {
+    preset.reasoning_effort = reasoningEffort;
+  } else {
+    delete preset.reasoning_effort;
+  }
+  state.editor.current.outbound_content_review_model_preset_id =
+    OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID;
   syncOutboundContentReviewMcpList();
 }
 
@@ -3395,9 +3458,28 @@ function syncPersona() {
 }
 
 function renderModel() {
-  state.selectedModelPresetId = selectedOrFirst(state.editor.model_presets, "model_preset_id", state.selectedModelPresetId);
-  setSelectOptions(element("model-select"), state.editor.model_presets, "model_preset_id", state.selectedModelPresetId);
-  const preset = arrayById(state.editor.model_presets, "model_preset_id", state.selectedModelPresetId);
+  const generationPresets = generationModelPresets();
+  if (
+    state.selectedModelPresetId === OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID
+    || !arrayById(generationPresets, "model_preset_id", state.selectedModelPresetId)
+  ) {
+    state.selectedModelPresetId = generationPresets[0]?.model_preset_id || "";
+    if (state.editor?.current && state.selectedModelPresetId) {
+      state.editor.current.selected_model_preset_id = state.selectedModelPresetId;
+    }
+  }
+  state.selectedModelPresetId = selectedOrFirst(
+    generationPresets,
+    "model_preset_id",
+    state.selectedModelPresetId,
+  );
+  setSelectOptions(
+    element("model-select"),
+    generationPresets,
+    "model_preset_id",
+    state.selectedModelPresetId,
+  );
+  const preset = arrayById(generationPresets, "model_preset_id", state.selectedModelPresetId);
   if (!preset) {
     return;
   }
@@ -3985,10 +4067,10 @@ function addModel() {
     setSelectedId: (id) => {
       state.selectedModelPresetId = id;
     },
-    buildItem: (items) => ({
+    buildItem: () => ({
       model_preset_id: `model_preset:${idSuffix()}`,
       display_name: uniqueDisplayName(
-        items.map((item) => item.display_name),
+        generationModelPresets().map((item) => item.display_name),
         "新規モデルプリセット",
       ),
       // モデル名・キー等は空。数値はシステム定数（選択中プリセットはコピーしない）。
@@ -4007,6 +4089,10 @@ function addModel() {
 }
 
 function duplicateModel() {
+  if (state.selectedModelPresetId === OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID) {
+    showNotice("外向きレビュー用モデルはモデルタブから複製できません。", true);
+    return;
+  }
   duplicateClonedCollectionItem({
     items: state.editor.model_presets,
     idKey: "model_preset_id",
@@ -4021,18 +4107,29 @@ function duplicateModel() {
 }
 
 function deleteModel() {
-  const deletingReviewModel =
-    state.editor.current.outbound_content_review_model_preset_id === state.selectedModelPresetId;
+  if (state.selectedModelPresetId === OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID) {
+    showNotice("外向きレビュー用モデルは削除できません。", true);
+    return;
+  }
+  if (generationModelPresets().length <= 1) {
+    showNotice("最後のモデルプリセットは削除できません。", true);
+    return;
+  }
   deleteCollectionItem({
     items: state.editor.model_presets,
     idKey: "model_preset_id",
     selectedId: state.selectedModelPresetId,
+    // 専用レビュー定義を含む配列なので、生成用が 1 件残るまで許す。
+    minCount: 2,
     setSelectedId: (id) => {
-      state.selectedModelPresetId = id;
-      state.editor.current.selected_model_preset_id = id;
-      if (deletingReviewModel) {
-        state.editor.current.outbound_content_review_model_preset_id = id;
-      }
+      const nextId =
+        id === OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID
+          ? generationModelPresets()[0]?.model_preset_id || ""
+          : id;
+      state.selectedModelPresetId = nextId;
+      state.editor.current.selected_model_preset_id = nextId;
+      state.editor.current.outbound_content_review_model_preset_id =
+        OUTBOUND_CONTENT_REVIEW_MODEL_PRESET_ID;
     },
     lastItemMessage: "最後のモデルプリセットは削除できません。",
     render: renderSettings,
