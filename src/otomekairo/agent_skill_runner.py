@@ -18,6 +18,18 @@ class RunnerError(RuntimeError):
     pass
 
 
+# 信頼済み script でも暴走から本体を守る固定上限。source 設定には出さない。
+DEFAULT_SCRIPT_LIMITS: dict[str, int] = {
+    "wall_time_seconds": 30,
+    "cpu_time_seconds": 20,
+    "memory_bytes": 536870912,
+    "max_processes": 16,
+    "max_open_files": 128,
+    "max_file_bytes": 10485760,
+    "max_output_bytes": 1048576,
+}
+
+
 def execute_runner_request(request: dict[str, Any]) -> dict[str, Any]:
     required = {
         "source_definition",
@@ -25,7 +37,6 @@ def execute_runner_request(request: dict[str, Any]) -> dict[str, Any]:
         "skill_id",
         "skill_sha256",
         "script_path",
-        "runtime_id",
         "args",
         "stdin_text",
         "run_dir",
@@ -36,7 +47,6 @@ def execute_runner_request(request: dict[str, Any]) -> dict[str, Any]:
     skill_id = _required_text(request, "skill_id")
     expected_digest = _required_text(request, "skill_sha256")
     script_path = _required_relative_path(request, "script_path")
-    runtime_id = _required_text(request, "runtime_id")
     args = request.get("args")
     stdin_text = request.get("stdin_text")
     if not isinstance(args, list) or not all(isinstance(value, str) for value in args):
@@ -50,12 +60,6 @@ def execute_runner_request(request: dict[str, Any]) -> dict[str, Any]:
     execution = normalized_source["script_execution"]
     if execution["enabled"] is not True:
         raise RunnerError("script execution is disabled for the source")
-    runtime = next(
-        (entry for entry in execution["runtimes"] if entry["runtime_id"] == runtime_id),
-        None,
-    )
-    if not isinstance(runtime, dict):
-        raise RunnerError("runtime is not allowed for the source")
 
     registry = AgentSkillRegistry.load({source_id: normalized_source})
     skill = registry.require_skill(skill_id)
@@ -76,10 +80,10 @@ def execute_runner_request(request: dict[str, Any]) -> dict[str, Any]:
     if workspace.resolve(strict=True) not in resolved_script.parents or not resolved_script.is_file():
         raise RunnerError("copied script path is invalid")
 
-    limits = execution["limits"]
+    limits = DEFAULT_SCRIPT_LIMITS
+    # 信頼済み source の script は OtomeKairo ホスト Python で実行する。runtime 選択は設けない。
     command = [
-        runtime["executable"],
-        *runtime["prefix_args"],
+        sys.executable,
         str(resolved_script),
         *args,
     ]

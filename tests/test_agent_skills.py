@@ -18,35 +18,10 @@ from otomekairo.service.app import OtomeKairoService
 def _source_definition(root: Path, *, execution_enabled: bool) -> dict:
     return {
         "source_id": "test-source",
-        "display_name": "Test Skills",
         "enabled": True,
         "root_path": str(root),
         "script_execution": {
             "enabled": execution_enabled,
-            "runtimes": (
-                [
-                    {
-                        "runtime_id": "python",
-                        "executable": sys.executable,
-                        "prefix_args": [],
-                    }
-                ]
-                if execution_enabled
-                else []
-            ),
-            "limits": (
-                {
-                    "wall_time_seconds": 5,
-                    "cpu_time_seconds": 3,
-                    "memory_bytes": 268435456,
-                    "max_processes": 8,
-                    "max_open_files": 64,
-                    "max_file_bytes": 1048576,
-                    "max_output_bytes": 1048576,
-                }
-                if execution_enabled
-                else None
-            ),
         },
     }
 
@@ -99,7 +74,7 @@ class AgentSkillRegistryTests(unittest.TestCase):
 
             self.assertEqual(raised.exception.code, "agent_skill_symlink_forbidden")
 
-    def test_dedicated_runner_executes_snapshot_with_limits(self) -> None:
+    def test_dedicated_runner_executes_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             base = Path(temporary_directory)
             root = base / "skills"
@@ -114,7 +89,6 @@ class AgentSkillRegistryTests(unittest.TestCase):
                 "skill_id": "echo-skill",
                 "skill_sha256": skill.sha256,
                 "script_path": "scripts/echo.py",
-                "runtime_id": "python",
                 "args": ["one", "two"],
                 "stdin_text": "hello",
                 "run_dir": str(base / "run"),
@@ -262,7 +236,6 @@ class AgentSkillRegistryTests(unittest.TestCase):
                     "skill_id": "echo-skill",
                     "skill_sha256": skill.sha256,
                     "script_path": "scripts/echo.py",
-                    "runtime_id": "python",
                     "args": ["capability"],
                     "stdin_text": "input",
                 },

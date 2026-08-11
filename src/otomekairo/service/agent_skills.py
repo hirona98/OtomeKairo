@@ -7,6 +7,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from otomekairo.agent_skill_runner import DEFAULT_SCRIPT_LIMITS
 from otomekairo.llm.contexts import CurrentInput
 from otomekairo.llm.contracts import LLMError
 from otomekairo.service.common import debug_log
@@ -221,13 +222,10 @@ class ServiceAgentSkillsMixin:
         execution = source.definition["script_execution"]
         if execution["enabled"] is not True:
             raise ValueError("Agent Skill script execution is disabled.")
-        runtime_id = input_payload.get("runtime_id")
-        if not any(runtime["runtime_id"] == runtime_id for runtime in execution["runtimes"]):
-            raise ValueError("Agent Skill runtime_id is not allowed.")
 
         timeout_ms = min(
             int(manifest["timeout_ms"]),
-            int(execution["limits"]["wall_time_seconds"]) * 1000 + 5000,
+            int(DEFAULT_SCRIPT_LIMITS["wall_time_seconds"]) * 1000 + 5000,
         )
         action_seed = None
         if track_ongoing_action:
@@ -269,7 +267,6 @@ class ServiceAgentSkillsMixin:
             "skill_id": skill_id,
             "skill_sha256": skill.sha256,
             "script_path": script.relative_path,
-            "runtime_id": runtime_id,
             "args": input_payload["args"],
             "stdin_text": input_payload["stdin_text"],
             "run_dir": str(

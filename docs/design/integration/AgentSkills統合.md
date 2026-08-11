@@ -47,16 +47,17 @@ source ごとの `script_execution.enabled=true` は、その root 全体を cod
 
 script は `agent_skill.run_script` capability からだけ実行する。server process 内で import や eval をせず、専用 runner process が次を再検証して実行する。
 
-- source、skill、package digest、script resource、runtime id が現在の registry snapshot と一致する
-- source 設定で script execution と runtime が許可されている
+- source、skill、package digest、script resource が現在の registry snapshot と一致する
+- source 設定で `script_execution.enabled=true` である
 - package を request 固有の `agent-skill-runs/<request-id>/workspace/` へコピーし、copy 内の script を実行する
-- runtime executable は絶対 path とし、child environment は `PATH / LANG / LC_ALL` だけにする
-- wall time、CPU time、address space、process 数、open file 数、file size、合計 output bytes の全 limit を適用する
+- 実行 interpreter は OtomeKairo ホストの Python（`sys.executable`）に固定する。source ごとの runtime 選択は設けない
+- child environment は `PATH / LANG / LC_ALL` だけにする
+- wall time、CPU time、address space、process 数、open file 数、file size、合計 output bytes の **固定上限** を runner が適用する（source 設定には持たない）
 - stdout/stderr は UTF-8 とし、上限超過、timeout、非ゼロ終了を明示的な failed result にする。出力を途中で切って成功扱いしない
 
 stdout/stderr は後続判断に必要な capability result として cycle trace に残り得る。skill とその入力には、結果へ秘密情報を出さないものだけを使用する。server log は内容を記録せず文字数だけを記録する。
 
-専用 process は障害と resource 使用を server process から分けるが、OS user や filesystem 権限を分離する sandbox ではない。enabled root 内の code は OtomeKairo process と同等の権限で任意の外部作用を行えるものとして信頼する。
+専用 process は障害と resource 使用を server process から分けるが、OS user や filesystem 権限を分離する sandbox ではない。enabled root 内の code は OtomeKairo process と同等の権限で任意の外部作用を行えるものとして信頼する。固定上限は信頼の代替ではなく、暴走 script の fail-fast 用である。source ごとの上限・runtime 調整は設けない。
 
 ## ELYTH の登録例
 
@@ -68,9 +69,9 @@ git clone https://github.com/Divedesign/elyth-remote-mcp-skills.git /opt/elyth-r
 
 ブラウザ UI の「Agent Skills」で、例として次を設定する。
 
-- source ID: `elyth-skills`
+- 名前（`source_id`）: `elyth-skills`
 - root path: `/opt/elyth-remote-mcp-skills/skills`
-- enabled: `true`
-- script 実行: repository 内の script が必要な場合だけ、信頼確認後に `true`
+- 有効: `true`
+- script 実行を許可: repository 内の script が必要な場合だけ、信頼確認後に `true`
 
 ELYTH MCP server の URL、認証、有限 MCP セッションは従来どおり MCP 設定の責務である。Agent Skill source と MCP server を `elyth` という名前で暗黙結合しない。

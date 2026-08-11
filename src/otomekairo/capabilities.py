@@ -747,11 +747,11 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
         "decision_description": "選択中の trusted Agent Skill に同梱された script を専用 runner process で実行する",
         "when_to_use": [
             "選択中の Agent Skill が目的達成に必要な script 実行を明示している",
-            "対象 source の script_execution と runtime が available である",
+            "対象 source の script_execution が available である",
         ],
         "do_not_use_when": [
             "Agent Skill の instructions と resource catalog に対象 script がない",
-            "skill digest、runtime、引数を確定できない",
+            "skill digest や引数を確定できない",
             "script を実行せずに判断や発話だけで目的を達成できる",
         ],
         "required_permissions": [],
@@ -762,12 +762,11 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
                 "skill_id": {"type": "string"},
                 "skill_sha256": {"type": "string"},
                 "script_path": {"type": "string"},
-                "runtime_id": {"type": "string"},
                 "args": {"type": "array", "items": {"type": "string"}},
                 "stdin_text": {"type": ["string", "null"]},
             },
             "required": [
-                "source_id", "skill_id", "skill_sha256", "script_path", "runtime_id", "args", "stdin_text"
+                "source_id", "skill_id", "skill_sha256", "script_path", "args", "stdin_text"
             ],
             "additionalProperties": False,
         },
@@ -805,7 +804,7 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "unavailable_seconds_on_timeout": 0,
         },
         "inspection_fields": [
-            "capability_id", "source_id", "skill_id", "script_path", "runtime_id", "status", "exit_code",
+            "capability_id", "source_id", "skill_id", "script_path", "status", "exit_code",
             "status_text", "error"
         ],
     },

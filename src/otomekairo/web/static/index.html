@@ -906,7 +906,7 @@
               <button type="button" data-action="add-camera">追加</button>
               <button type="button" class="danger-button" data-action="delete-camera">削除</button>
             </div>
-            <fieldset class="settings-group capability-group">
+            <fieldset class="settings-group capability-group" data-collection-editor>
               <legend>カメラ接続</legend>
               <div class="settings-list">
                 <div class="setting-row setting-row-top">
@@ -954,7 +954,7 @@
               <button type="button" data-action="add-mcp">追加</button>
               <button type="button" class="danger-button" data-action="delete-mcp">削除</button>
             </div>
-            <fieldset class="settings-group capability-group">
+            <fieldset class="settings-group capability-group" data-collection-editor>
               <legend>MCP server</legend>
               <div class="settings-list">
                 <label class="checkbox-field">有効
@@ -1019,31 +1019,39 @@
                     <span class="field-hint">Authorization=Bearer ... のように1行ずつ入力します。秘密値として扱います。</span>
                   </div>
                 </div>
-                <div class="setting-row setting-row-top">
+                <div class="setting-row">
                   <label for="mcp-client-id">接続クライアント:</label>
-                  <div class="console-control-with-hint">
-                    <input id="mcp-client-id" class="field-width-medium">
-                    <span class="field-hint">この MCP server を起動する MCP client connector の client_id。通常は既定値を使う。</span>
-                  </div>
+                  <input id="mcp-client-id" class="field-width-medium" disabled>
                 </div>
-                <label class="checkbox-field">有限 MCP セッションを有効化
+              </div>
+            </fieldset>
+            <fieldset class="settings-group capability-group" data-collection-editor>
+              <legend>連続した tool 利用</legend>
+              <div class="settings-list">
+                <p class="field-hint">1回の依頼で、この MCP の tool を何度か続けて使えるようにします。会話中の単発の tool
+                  呼び出しには影響しません。上限に達するとその一連の作業は終わります。</p>
+                <label class="checkbox-field">この MCP を連続利用できる
                   <input id="mcp-autonomous-enabled" type="checkbox">
                 </label>
-                <label class="checkbox-field">バックグラウンドから開始
+                <label class="checkbox-field" data-mcp-session-dependent>
+                  定期思考からも自動で始められる
                   <input id="mcp-autonomous-background-enabled" type="checkbox">
                 </label>
-                <div class="setting-row setting-row-top">
-                  <label for="mcp-session-interval">最短間隔:</label>
+                <div class="setting-row setting-row-top" data-mcp-session-dependent data-mcp-session-interval>
+                  <label for="mcp-session-interval">自動開始の間隔:</label>
                   <div class="console-control-with-hint">
-                    <input id="mcp-session-interval" type="number" min="1">
-                    <span class="field-hint">バックグラウンド開始どうしの最短間隔（秒）。</span>
+                    <div class="inline-suffix-control">
+                      <input id="mcp-session-interval" class="field-width-short" type="number" min="1">
+                      <span>秒</span>
+                    </div>
+                    <span class="field-hint">定期思考から自動で始めるときの、前回開始からの最短待ち時間。人が頼んだ場合は待ちません。</span>
                   </div>
                 </div>
-                <div class="setting-row setting-row-top">
-                  <label for="mcp-session-calls">tool call上限:</label>
+                <div class="setting-row setting-row-top" data-mcp-session-dependent>
+                  <label for="mcp-session-calls">1回の作業の上限:</label>
                   <div class="console-control-with-hint">
-                    <input id="mcp-session-calls" type="number" min="1">
-                    <span class="field-hint">1セッションで試行できる対象 MCP の tool call 数。</span>
+                    <input id="mcp-session-calls" class="field-width-short" type="number" min="1">
+                    <span class="field-hint">一連の作業のあいだに、この MCP の tool を呼べる回数の上限です。</span>
                   </div>
                 </div>
               </div>
@@ -1057,36 +1065,28 @@
               <button type="button" class="danger-button" data-action="delete-agent-skill-source">削除</button>
               <button type="button" data-action="reload-agent-skills">再読込</button>
             </div>
-            <fieldset class="settings-group capability-group">
-              <legend>Trusted Agent Skill source</legend>
+            <fieldset class="settings-group capability-group" data-collection-editor>
+              <legend>Agent Skill source</legend>
               <div class="settings-list">
-                <p class="console-info-box">有効な source はコード実行を含めて信頼されます。root_path 直下の各ディレクトリから SKILL.md を読み込みます。</p>
+                <p class="field-hint">有効な source の root_path 直下から SKILL.md を読み込みます。script 実行を許可すると、その root 内の script
+                  をホスト Python で実行できます（root 全体を信頼する明示設定）。</p>
                 <label class="checkbox-field">有効
                   <input id="agent-skill-source-enabled" type="checkbox">
                 </label>
-                <div class="setting-row setting-row-top">
-                  <label for="agent-skill-source-id">source ID:</label>
+                <div class="setting-row">
+                  <label for="agent-skill-source-id">名前:</label>
                   <input id="agent-skill-source-id" class="field-width-medium">
                 </div>
                 <div class="setting-row setting-row-top">
-                  <label for="agent-skill-source-name">表示名:</label>
-                  <input id="agent-skill-source-name" class="field-width-medium">
-                </div>
-                <div class="setting-row setting-row-top">
                   <label for="agent-skill-root-path">root path:</label>
-                  <input id="agent-skill-root-path" class="field-width-long">
+                  <div class="console-control-with-hint">
+                    <input id="agent-skill-root-path" class="field-width-long">
+                    <span class="field-hint">skillsの置いてある絶対path。直下の各ディレクトリの SKILL.md を入口として読み込みます。</span>
+                  </div>
                 </div>
                 <label class="checkbox-field">script 実行を許可
                   <input id="agent-skill-script-enabled" type="checkbox">
                 </label>
-                <div class="setting-row setting-row-top">
-                  <label for="agent-skill-runtimes">runtimes JSON:</label>
-                  <textarea id="agent-skill-runtimes" rows="6" spellcheck="false"></textarea>
-                </div>
-                <div class="setting-row setting-row-top">
-                  <label for="agent-skill-limits">limits JSON:</label>
-                  <textarea id="agent-skill-limits" rows="10" spellcheck="false"></textarea>
-                </div>
               </div>
             </fieldset>
             <fieldset class="settings-group">

@@ -109,7 +109,6 @@ class AgentSkill:
 @dataclass(frozen=True, slots=True)
 class AgentSkillSourceSnapshot:
     source_id: str
-    display_name: str
     root_path: Path
     definition: dict[str, Any]
     skills: dict[str, AgentSkill]
@@ -118,7 +117,6 @@ class AgentSkillSourceSnapshot:
     def inspection_payload(self) -> dict[str, Any]:
         return {
             "source_id": self.source_id,
-            "display_name": self.display_name,
             "root_path": str(self.root_path),
             "enabled": True,
             "status": "available",
@@ -189,22 +187,19 @@ def validate_agent_skill_source_definition(source_id: str, definition: dict[str,
         raise AgentSkillError("invalid_agent_skill_source_id", "source_id must be a non-empty string.")
     if not isinstance(definition, dict):
         raise AgentSkillError("invalid_agent_skill_source", "agent_skill_source must be an object.")
-    required = {"source_id", "display_name", "enabled", "root_path", "script_execution"}
+    required = {"source_id", "enabled", "root_path", "script_execution"}
     if set(definition) != required:
         raise AgentSkillError(
             "invalid_agent_skill_source_fields",
-            "agent_skill_source requires exactly source_id, display_name, enabled, root_path, script_execution.",
+            "agent_skill_source requires exactly source_id, enabled, root_path, script_execution.",
         )
     normalized = {
         **definition,
         "source_id": str(definition.get("source_id") or "").strip(),
-        "display_name": str(definition.get("display_name") or "").strip(),
         "root_path": str(definition.get("root_path") or "").strip(),
     }
     if normalized["source_id"] != source_id:
         raise AgentSkillError("agent_skill_source_id_mismatch", "source_id must match its collection key.")
-    if not normalized["display_name"]:
-        raise AgentSkillError("invalid_agent_skill_source_field", "display_name must be non-empty.")
     if not isinstance(definition.get("enabled"), bool):
         raise AgentSkillError("invalid_agent_skill_source_field", "enabled must be a boolean.")
     if not normalized["root_path"]:
@@ -217,69 +212,16 @@ def validate_agent_skill_source_definition(source_id: str, definition: dict[str,
 
 
 def _validate_script_execution(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict) or set(value) != {"enabled", "runtimes", "limits"}:
+    # runtimes / limits は設定に持たない。実行はホスト Python、暴走防護は runner 固定上限。
+    if not isinstance(value, dict) or set(value) != {"enabled"}:
         raise AgentSkillError(
             "invalid_agent_skill_script_execution",
-            "script_execution requires exactly enabled, runtimes, limits.",
+            "script_execution requires exactly enabled.",
         )
     enabled = value.get("enabled")
-    runtimes = value.get("runtimes")
-    limits = value.get("limits")
-    if not isinstance(enabled, bool) or not isinstance(runtimes, list):
-        raise AgentSkillError("invalid_agent_skill_script_execution", "enabled and runtimes are invalid.")
-    normalized_runtimes: list[dict[str, Any]] = []
-    seen_runtime_ids: set[str] = set()
-    for runtime in runtimes:
-        if not isinstance(runtime, dict) or set(runtime) != {"runtime_id", "executable", "prefix_args"}:
-            raise AgentSkillError("invalid_agent_skill_runtime", "runtime has invalid fields.")
-        runtime_id = str(runtime.get("runtime_id") or "").strip()
-        executable = str(runtime.get("executable") or "").strip()
-        prefix_args = runtime.get("prefix_args")
-        if not runtime_id or runtime_id in seen_runtime_ids:
-            raise AgentSkillError("invalid_agent_skill_runtime", "runtime_id must be non-empty and unique.")
-        if not Path(executable).is_absolute():
-            raise AgentSkillError("invalid_agent_skill_runtime", "runtime executable must be an absolute path.")
-        if not isinstance(prefix_args, list) or not all(isinstance(item, str) for item in prefix_args):
-            raise AgentSkillError("invalid_agent_skill_runtime", "runtime prefix_args must be strings.")
-        if enabled:
-            resolved_executable = Path(executable).resolve(strict=True)
-            if not resolved_executable.is_file() or not os.access(resolved_executable, os.X_OK):
-                raise AgentSkillError("invalid_agent_skill_runtime", "runtime executable is not executable.")
-            executable = str(resolved_executable)
-        seen_runtime_ids.add(runtime_id)
-        normalized_runtimes.append(
-            {"runtime_id": runtime_id, "executable": executable, "prefix_args": list(prefix_args)}
-        )
-    limit_fields = {
-        "wall_time_seconds",
-        "cpu_time_seconds",
-        "memory_bytes",
-        "max_processes",
-        "max_open_files",
-        "max_file_bytes",
-        "max_output_bytes",
-    }
-    if enabled:
-        if not normalized_runtimes:
-            raise AgentSkillError("invalid_agent_skill_script_execution", "enabled execution requires runtimes.")
-        if not isinstance(limits, dict) or set(limits) != limit_fields:
-            raise AgentSkillError("invalid_agent_skill_script_limits", "script limits have invalid fields.")
-        for field_name in limit_fields:
-            field_value = limits.get(field_name)
-            if not isinstance(field_value, int) or isinstance(field_value, bool) or field_value <= 0:
-                raise AgentSkillError(
-                    "invalid_agent_skill_script_limits",
-                    f"script_execution.limits.{field_name} must be a positive integer.",
-                )
-        normalized_limits: dict[str, int] | None = dict(limits)
-    else:
-        if normalized_runtimes or limits is not None:
-            raise AgentSkillError(
-                "invalid_agent_skill_script_execution",
-                "disabled script execution requires runtimes=[] and limits=null.",
-            )
-        normalized_limits = None
-    return {"enabled": enabled, "runtimes": normalized_runtimes, "limits": normalized_limits}
+    if not isinstance(enabled, bool):
+        raise AgentSkillError("invalid_agent_skill_script_execution", "enabled must be a boolean.")
+    return {"enabled": enabled}
 
 
 def _load_source(source_id: str, definition: dict[str, Any]) -> AgentSkillSourceSnapshot:
@@ -319,7 +261,6 @@ def _load_source(source_id: str, definition: dict[str, Any]) -> AgentSkillSource
     ).hexdigest()
     return AgentSkillSourceSnapshot(
         source_id=source_id,
-        display_name=str(definition.get("display_name") or source_id),
         root_path=root,
         definition=dict(definition),
         skills=skills,

@@ -114,15 +114,6 @@ const RESULT_KIND_LABELS = {
 
 const DESKTOP_WAKE_OBSERVATION_ID = "observation:main_desktop";
 const DEFAULT_WAKE_INTERVAL_SECONDS = 300;
-const DEFAULT_AGENT_SKILL_LIMITS = {
-  wall_time_seconds: 30,
-  cpu_time_seconds: 20,
-  memory_bytes: 536870912,
-  max_processes: 16,
-  max_open_files: 128,
-  max_file_bytes: 10485760,
-  max_output_bytes: 1048576,
-};
 const WEB_MICROPHONE_DEVICE_KEY = "otomekairo.web_microphone_device_id";
 const MICROPHONE_SOURCE_LABELS = {
   local_microphone: "OtomeKairo",
@@ -2425,7 +2416,7 @@ async function saveSettings({ closeAfterSave = false } = {}) {
     });
     const agentSkills = await apiRequest("/ui/api/config/agent-skill-sources/editor-state", {
       method: "PUT",
-      body: JSON.stringify(state.agentSkills),
+      body: JSON.stringify(normalizeAgentSkillSourcesForSave(clone(state.agentSkills))),
     });
     let consoleClient = state.consoleClient;
     if (consoleClient) {
@@ -3612,12 +3603,19 @@ function renderCapabilities() {
 
 function setCollectionEditorEnabled(selectId, fieldsetSelector, deleteAction, hasItems) {
   // 0 件のときは選択・入力・削除を無効化し、追加だけ残す。
+  // fieldsetSelector は .tab-page 内の CSS selector。data-collection-editor を優先して
+  // 読込状態など編集対象外 fieldset を残せる。
   const select = element(selectId);
   select.disabled = !hasItems;
   const page = select.closest(".tab-page");
-  const fieldset = page?.querySelector(fieldsetSelector);
-  if (fieldset) {
-    fieldset.disabled = !hasItems;
+  if (page) {
+    const marked = page.querySelectorAll("fieldset[data-collection-editor]");
+    const fieldsets = marked.length > 0
+      ? marked
+      : page.querySelectorAll(fieldsetSelector);
+    fieldsets.forEach((fieldset) => {
+      fieldset.disabled = !hasItems;
+    });
   }
   const deleteButton = page?.querySelector(`[data-action="${deleteAction}"]`);
   if (deleteButton) {
@@ -3839,8 +3837,12 @@ function renderMcp() {
   setSelectOptions(element("mcp-select"), servers, "mcp_server_id", state.selectedMcpId);
   setCollectionEditorEnabled("mcp-select", "fieldset.settings-group", "delete-mcp", hasMcp);
   const mcp = arrayById(servers, "mcp_server_id", state.selectedMcpId);
+  const session = mcp?.autonomous_session || {};
+  const sessionEnabled = session.enabled === true;
+  const backgroundEnabled = session.background_enabled === true;
   element("mcp-enabled").checked = mcp?.enabled === true;
   element("mcp-server-id").value = mcp?.mcp_server_id || "";
+  // 接続クライアントは既定固定。編集は API 直接利用の範囲とする。
   element("mcp-client-id").value = mcp?.client_id || "mcp-client-connector-main";
   element("mcp-transport").value = mcp?.transport || "stdio";
   element("mcp-command").value = mcp?.command || "";
@@ -3849,13 +3851,37 @@ function renderMcp() {
   element("mcp-env").value = formatEnv(mcp?.env || {});
   element("mcp-url").value = mcp?.url || "";
   element("mcp-headers").value = formatEnv(mcp?.headers || {});
-  element("mcp-autonomous-enabled").checked = mcp?.autonomous_session?.enabled === true;
-  element("mcp-autonomous-background-enabled").checked = mcp?.autonomous_session?.background_enabled === true;
-  element("mcp-session-interval").value = mcp?.autonomous_session?.min_interval_seconds || 3600;
-  element("mcp-session-calls").value = mcp?.autonomous_session?.max_tool_calls || 10;
+  element("mcp-autonomous-enabled").checked = sessionEnabled;
+  element("mcp-autonomous-background-enabled").checked = backgroundEnabled;
+  element("mcp-session-interval").value = session.min_interval_seconds || 3600;
+  element("mcp-session-calls").value = session.max_tool_calls || 10;
   const remote = mcp?.transport === "streamable_http";
-  document.querySelectorAll("[data-mcp-stdio-field]").forEach((row) => { row.hidden = remote; });
-  document.querySelectorAll("[data-mcp-http-field]").forEach((row) => { row.hidden = !remote; });
+  // transport の非選択側は hidden せず disabled にする（stdio 専用 / http 専用）。
+  setMcpRowInputsDisabled("[data-mcp-stdio-field]", remote);
+  setMcpRowInputsDisabled("[data-mcp-http-field]", !remote);
+  // 有限セッション親が off なら子を disabled。最短間隔は background 開始時だけ触る。
+  document.querySelectorAll("[data-mcp-session-dependent]").forEach((row) => {
+    const needsBackground = row.hasAttribute("data-mcp-session-interval");
+    const enabled = sessionEnabled && (!needsBackground || backgroundEnabled);
+    setMcpRowInputsDisabled(row, !enabled);
+  });
+}
+
+function setMcpRowInputsDisabled(rowOrSelector, disabled) {
+  const rows = typeof rowOrSelector === "string"
+    ? [...document.querySelectorAll(rowOrSelector)]
+    : [rowOrSelector];
+  rows.forEach((row) => {
+    if (!row) {
+      return;
+    }
+    const inputs = row.matches?.("input, select, textarea")
+      ? [row]
+      : [...row.querySelectorAll("input, select, textarea")];
+    inputs.forEach((input) => {
+      input.disabled = disabled;
+    });
+  });
 }
 
 function syncMcp() {
@@ -3863,9 +3889,13 @@ function syncMcp() {
   if (!mcp) {
     return;
   }
+  const previousSession = mcp.autonomous_session || {};
   mcp.mcp_server_id = textValue("mcp-server-id");
   // connector_kind は UI に出さず既存値を保持する。
-  mcp.client_id = textValue("mcp-client-id");
+  // client_id は表示専用。既存値または既定を維持する。
+  if (typeof mcp.client_id !== "string" || !mcp.client_id.trim()) {
+    mcp.client_id = "mcp-client-connector-main";
+  }
   mcp.enabled = boolValue("mcp-enabled");
   // pre_send_check_enabled は送信前チェック専用タブが正とする。
   if (typeof mcp.pre_send_check_enabled !== "boolean") {
@@ -3888,11 +3918,26 @@ function syncMcp() {
     delete mcp.url;
     delete mcp.headers;
   }
+  const sessionEnabled = boolValue("mcp-autonomous-enabled");
+  // disabled 中の子入力は DOM を読まず state を保持する。enabled=false では
+  // background_enabled を false に正規化する（サーバ契約: background は enabled 必須）。
+  let backgroundEnabled = previousSession.background_enabled === true;
+  let minInterval = previousSession.min_interval_seconds || 3600;
+  let maxToolCalls = previousSession.max_tool_calls || 10;
+  if (sessionEnabled) {
+    backgroundEnabled = boolValue("mcp-autonomous-background-enabled");
+    maxToolCalls = boundedIntValue("mcp-session-calls", "1回の作業の上限", 1, 1000);
+    if (backgroundEnabled) {
+      minInterval = boundedIntValue("mcp-session-interval", "自動開始の間隔", 1, 31536000);
+    }
+  } else {
+    backgroundEnabled = false;
+  }
   mcp.autonomous_session = {
-    enabled: boolValue("mcp-autonomous-enabled"),
-    background_enabled: boolValue("mcp-autonomous-background-enabled"),
-    min_interval_seconds: boundedIntValue("mcp-session-interval", "最短間隔", 1, 31536000),
-    max_tool_calls: boundedIntValue("mcp-session-calls", "tool call上限", 1, 1000),
+    enabled: sessionEnabled,
+    background_enabled: backgroundEnabled,
+    min_interval_seconds: minInterval,
+    max_tool_calls: maxToolCalls,
   };
   // 旧下書きに enabled_tools が残っていれば捨てる（設定正本から廃止済み）。
   delete mcp.enabled_tools;
@@ -3922,33 +3967,13 @@ function renderAgentSkills() {
   const source = arrayById(sources, "source_id", state.selectedAgentSkillSourceId);
   element("agent-skill-source-enabled").checked = source?.enabled === true;
   element("agent-skill-source-id").value = source?.source_id || "";
-  element("agent-skill-source-name").value = source?.display_name || "";
   element("agent-skill-root-path").value = source?.root_path || "";
   element("agent-skill-script-enabled").checked = source?.script_execution?.enabled === true;
-  element("agent-skill-runtimes").value = JSON.stringify(
-    source?.script_execution?.runtimes || [],
-    null,
-    2,
-  );
-  element("agent-skill-limits").value = JSON.stringify(
-    source?.script_execution?.limits || DEFAULT_AGENT_SKILL_LIMITS,
-    null,
-    2,
-  );
   element("agent-skill-inspection").textContent = JSON.stringify(
     state.agentSkillInspection || { skill_count: 0, sources: [] },
     null,
     2,
   );
-}
-
-function parseAgentSkillJson(id, label) {
-  const text = textValue(id).trim();
-  try {
-    return JSON.parse(text);
-  } catch (_error) {
-    throw new Error(`${label} は有効な JSON で入力してください。`);
-  }
 }
 
 function syncAgentSkills() {
@@ -3961,20 +3986,25 @@ function syncAgentSkills() {
     return;
   }
   source.source_id = textValue("agent-skill-source-id").trim();
-  source.display_name = textValue("agent-skill-source-name").trim();
   source.enabled = boolValue("agent-skill-source-enabled");
   source.root_path = textValue("agent-skill-root-path").trim();
-  const executionEnabled = boolValue("agent-skill-script-enabled");
   source.script_execution = {
-    enabled: executionEnabled,
-    runtimes: executionEnabled
-      ? parseAgentSkillJson("agent-skill-runtimes", "runtimes")
-      : [],
-    limits: executionEnabled
-      ? parseAgentSkillJson("agent-skill-limits", "limits")
-      : null,
+    enabled: boolValue("agent-skill-script-enabled"),
   };
+  // 旧下書きの display_name / runtimes / limits を捨てる。
+  delete source.display_name;
   state.selectedAgentSkillSourceId = source.source_id;
+}
+
+function normalizeAgentSkillSourcesForSave(bundle) {
+  const sources = bundle?.agent_skill_sources || [];
+  for (const source of sources) {
+    source.script_execution = {
+      enabled: source.script_execution?.enabled === true,
+    };
+    delete source.display_name;
+  }
+  return bundle;
 }
 
 function syncAllForms() {
@@ -4412,7 +4442,7 @@ function deleteCamera() {
 
 function addMcp() {
   syncAllForms();
-  // 名前以外の編集項目は空。接続クライアントと disabled の transport は残す。
+  // 名前以外の編集項目は空。接続クライアントは表示専用の既定値を入れる。
   const id = uniqueDisplayName(
     state.mcp.mcp_servers.map((item) => item.mcp_server_id),
     "MCP",
@@ -4455,13 +4485,10 @@ function addAgentSkillSource() {
   );
   state.agentSkills.agent_skill_sources.push({
     source_id: sourceId,
-    display_name: "Agent Skills",
     enabled: false,
     root_path: "",
     script_execution: {
       enabled: false,
-      runtimes: [],
-      limits: null,
     },
   });
   state.selectedAgentSkillSourceId = sourceId;
@@ -4695,6 +4722,14 @@ function bindEvents() {
     render: renderAgentSkills,
   });
   element("mcp-transport").addEventListener("change", () => {
+    syncMcp();
+    renderMcp();
+  });
+  element("mcp-autonomous-enabled").addEventListener("change", () => {
+    syncMcp();
+    renderMcp();
+  });
+  element("mcp-autonomous-background-enabled").addEventListener("change", () => {
     syncMcp();
     renderMcp();
   });
