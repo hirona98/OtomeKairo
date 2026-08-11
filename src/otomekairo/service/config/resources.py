@@ -1862,7 +1862,7 @@ class ServiceConfigResourcesMixin:
     def _mcp_server_definition_for_connector(self, definition: dict[str, Any]) -> dict[str, Any]:
         # 送信前チェック要否は server の dispatch 方針であり、実行 connector へ渡さない。
         connector_definition = self._mcp_server_definition_for_read(definition)
-        connector_definition.pop("pre_send_check_required", None)
+        connector_definition.pop("pre_send_check_enabled", None)
         return connector_definition
 
     def _normalize_mcp_server_definition(self, mcp_server_id: str, definition: dict[str, Any]) -> dict[str, Any]:
@@ -1871,7 +1871,7 @@ class ServiceConfigResourcesMixin:
             "connector_kind": definition.get("connector_kind", MCP_DEFAULT_CONNECTOR_KIND),
             "client_id": definition.get("client_id", MCP_DEFAULT_CLIENT_ID),
             "enabled": definition.get("enabled"),
-            "pre_send_check_required": definition.get("pre_send_check_required"),
+            "pre_send_check_enabled": definition.get("pre_send_check_enabled"),
             "transport": definition.get("transport", "stdio"),
             "command": definition.get("command"),
             "args": definition.get("args", []),
@@ -1905,7 +1905,7 @@ class ServiceConfigResourcesMixin:
             "connector_kind",
             "client_id",
             "enabled",
-            "pre_send_check_required",
+            "pre_send_check_enabled",
             "transport",
             "command",
             "args",
@@ -1926,11 +1926,11 @@ class ServiceConfigResourcesMixin:
         enabled = definition.get("enabled")
         if not isinstance(enabled, bool):
             raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.enabled must be a boolean.")
-        if not isinstance(definition.get("pre_send_check_required"), bool):
+        if not isinstance(definition.get("pre_send_check_enabled"), bool):
             raise ServiceError(
                 400,
                 "invalid_mcp_server_field",
-                "mcp_server.pre_send_check_required must be a boolean.",
+                "mcp_server.pre_send_check_enabled must be a boolean.",
             )
         transport = definition.get("transport")
         if transport not in MCP_TRANSPORTS:

@@ -3301,14 +3301,13 @@ function renderPreSendCheckMcpList() {
     const label = document.createElement("label");
     label.className = "checkbox-field";
     const name = server.mcp_server_id || "(unnamed)";
-    const enabledNote = server.enabled === true ? "" : "（無効）";
     label.appendChild(
-      document.createTextNode(`${name}${enabledNote}: 送信前チェックを必須にする`),
+      document.createTextNode(`${name}`),
     );
     const input = document.createElement("input");
     input.type = "checkbox";
     input.dataset.mcpServerId = server.mcp_server_id || "";
-    input.checked = server.pre_send_check_required === true;
+    input.checked = server.pre_send_check_enabled === true;
     label.appendChild(input);
     container.appendChild(label);
   }
@@ -3358,7 +3357,7 @@ function syncPreSendCheckMcpList() {
     }
     const server = arrayById(state.mcp.mcp_servers || [], "mcp_server_id", serverId);
     if (server) {
-      server.pre_send_check_required = input.checked;
+      server.pre_send_check_enabled = input.checked;
     }
   }
 }
@@ -3826,9 +3825,9 @@ function syncMcp() {
   // connector_kind は UI に出さず既存値を保持する。
   mcp.client_id = textValue("mcp-client-id");
   mcp.enabled = boolValue("mcp-enabled");
-  // pre_send_check_required は送信前チェック専用タブが正とする。
-  if (typeof mcp.pre_send_check_required !== "boolean") {
-    mcp.pre_send_check_required = true;
+  // pre_send_check_enabled は送信前チェック専用タブが正とする。
+  if (typeof mcp.pre_send_check_enabled !== "boolean") {
+    mcp.pre_send_check_enabled = true;
   }
   mcp.transport = textValue("mcp-transport");
   mcp.command = textValue("mcp-command");
@@ -4285,8 +4284,7 @@ function addMcp() {
     connector_kind: "mcp_client",
     client_id: "mcp-client-connector-main",
     enabled: false,
-    // 用途不明の新規 MCP は安全側で送信前チェック必須にする。
-    pre_send_check_required: true,
+    pre_send_check_enabled: false,
     transport: "stdio",
     command: "",
     args: [],

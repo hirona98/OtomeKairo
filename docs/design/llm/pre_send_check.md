@@ -12,8 +12,8 @@
 ## 適用境界
 
 - 初期適用先は `mcp.call_tool` とする
-- MCP server 定義の `pre_send_check_required=true` の場合、読み取りを含む全 tool call を対象にする
-- 読み取り中心の MCP（既定の e-stat など）は `pre_send_check_required=false` を既定とする
+- MCP server 定義の `pre_send_check_enabled=true` の場合、読み取りを含む全 tool call を対象にする
+- 読み取り中心の MCP（既定の e-stat など）は `pre_send_check_enabled=false` を既定とする
 - 投稿や外部書き込みを含む MCP（ELYTH など）は運用で `true` にする
 - tool 名、description、argument key の固定一覧からチェック要否を推定しない
 - ELYTH 固有の capability、connector、MCP fork を作らない

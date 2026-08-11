@@ -605,7 +605,7 @@ class ServiceCapabilityMixin:
                     failure_reason="mcp_server_definition_missing",
                 )
             )
-        if server_definition.get("pre_send_check_required") is False:
+        if server_definition.get("pre_send_check_enabled") is False:
             return None
         if not isinstance(arguments, dict) or not isinstance(mcp_tool, dict):
             raise PreSendCheckFailureError(

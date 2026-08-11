@@ -26,7 +26,7 @@ class _Store:
         self.state = build_default_state()
         self.state["mcp_servers"]["e-stat"]["enabled"] = True
         # 既定 e-stat は読み取り向けに審査オフ。審査経路の試験では明示的に有効化する。
-        self.state["mcp_servers"]["e-stat"]["pre_send_check_required"] = True
+        self.state["mcp_servers"]["e-stat"]["pre_send_check_enabled"] = True
 
     def read_state(self) -> dict:
         return deepcopy(self.state)
@@ -220,7 +220,7 @@ class PreSendCheckTests(unittest.TestCase):
     def test_disabled_policy_bypasses_review(self) -> None:
         reviewer = _Reviewer("withhold")
         service = _Service(reviewer)
-        service.store.state["mcp_servers"]["e-stat"]["pre_send_check_required"] = False
+        service.store.state["mcp_servers"]["e-stat"]["pre_send_check_enabled"] = False
 
         audit = service._review_mcp_pre_send_check(
             input_payload=_input("任意の本文"),
@@ -338,7 +338,7 @@ class PreSendCheckTests(unittest.TestCase):
             try:
                 state = service.store.read_state()
                 state["mcp_servers"]["e-stat"]["enabled"] = True
-                state["mcp_servers"]["e-stat"]["pre_send_check_required"] = True
+                state["mcp_servers"]["e-stat"]["pre_send_check_enabled"] = True
                 service.store.write_state(state)
                 service.llm = _Reviewer("withhold")
                 websocket = _RecordingWebSocket()

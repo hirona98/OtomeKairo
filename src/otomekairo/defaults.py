@@ -361,7 +361,7 @@ def build_default_estat_mcp_server() -> dict:
         "client_id": "mcp-client-connector-main",
         "enabled": False,
         # 読み取り中心の政府統計 API なので既定は審査オフ。外向き write 系 MCP は true にする。
-        "pre_send_check_required": False,
+        "pre_send_check_enabled": False,
         "transport": "stdio",
         "command": "uvx",
         "args": ["estat-mcp-server"],
