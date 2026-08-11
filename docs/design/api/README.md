@@ -77,7 +77,7 @@ OtomeKairo設定の `selected_conversation_display_name_id` から解決した�
 設定編集の役割は次のように分ける。
 
 - Web UI: 人格（本文・表現補助・音声起動ワード）、モデル、記憶、会話入力（呼ばれ方・STT 詳細）、定期思考（思考前観測を含む）、Watcher、デスクトップ取得方針、カメラ接続、MCP、API説明、アバター音声を含む本体設定。アバターの VRM は最終接続端末の現在値を読み取り専用で表示する
-- CocoroConsole: 表示、アバター（プリセットと VRM）、モーション、マイク（入力元と Console デバイス）、ライセンス。メイン画面のマイクボタンは `stt.enabled`、Speaker ボタンは `tts.enabled` の運用トグルであり、デスクトップウォッチと並べる。音声合成 engine 詳細と音声起動ワードは Web UI で編集する
+- CocoroConsole: 表示、アバター（プリセットと VRM）、モーション、マイク（入力元と Console デバイス）、ライセンス。メイン画面のマイクボタンは `stt.enabled`、Speaker ボタンは `tts.enabled` の運用トグルであり、デスクトップ観測と並べる。音声合成 engine 詳細と音声起動ワードは Web UI で編集する
 
 アバターの VRM は、OtomeKairo が保持する `console_client_settings` の現在値を Web UI に disabled で表示する。表示・モーション・VRM の編集は CocoroConsole から端末設定 API へ保存する。
 `定期思考` は判断機会の有効化・間隔・発話頻度に加え、思考前のデスクトップ観測とカメラ観測の on/off を持つ。カメラの host や account など接続定義は `接続 → カメラ` に置く。
