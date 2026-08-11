@@ -10,7 +10,8 @@ def test_http_response_log_levels(monkeypatch) -> None:
     monkeypatch.setattr("otomekairo.http_server.debug_log", log)
     handler = object.__new__(OtomeKairoHandler)
     handler.command = "GET"
-    handler.path = "/api/config/watchers/watcher%3Aleika-eye-1/runtime-config"
+    # 高頻度抑制対象ではない通常 API でレベル判定を確認する。
+    handler.path = "/api/config"
 
     handler._debug_log_response(200, {"ok": True, "data": {}})
     handler._debug_log_response(404, {"ok": False, "error": {"code": "not_found"}})
@@ -19,6 +20,19 @@ def test_http_response_log_levels(monkeypatch) -> None:
     assert log.call_args_list[0].kwargs == {"level": "DEBUG"}
     assert log.call_args_list[1].kwargs == {"level": "WARNING"}
     assert log.call_args_list[2].kwargs == {"level": "ERROR"}
+
+
+def test_watcher_runtime_config_http_log_suppressed(monkeypatch) -> None:
+    log = Mock()
+    monkeypatch.setattr("otomekairo.http_server.debug_log", log)
+    handler = object.__new__(OtomeKairoHandler)
+    handler.command = "GET"
+    handler.path = "/api/config/watchers/watcher%3A%E5%AF%BE%E9%9D%A2%E3%82%AB%E3%83%A1%E3%83%A9/runtime-config"
+
+    handler._debug_log_response(200, {"ok": True, "data": {}})
+    handler._debug_log_response(404, {"ok": False, "error": {"code": "not_found"}})
+
+    assert log.call_args_list == []
 
 
 def test_static_response_log_levels(monkeypatch) -> None:

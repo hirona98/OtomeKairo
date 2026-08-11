@@ -46,6 +46,10 @@ SUPPRESSED_HTTP_LOG_PATH_PREFIXES = (
     "/api/inspection",
     "/ui/api/inspection",
 )
+# watcher は poll ごとに runtime-config を再取得するため、アクセスログは出さない。
+SUPPRESSED_HTTP_LOG_PATH_PREFIX_AND_SUFFIX = (
+    ("/api/config/watchers/", "/runtime-config"),
+)
 WEB_STATIC_PACKAGE = "otomekairo.web.static"
 WEB_STATIC_FILES = {
     "/ui/": ("index.html", "text/html; charset=utf-8", "no-store"),
@@ -1464,7 +1468,12 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         # 高頻度参照と観測返却は運用ログへ重複記録しない。
         if path in SUPPRESSED_HTTP_LOG_EXACT_PATHS:
             return False
-        return not any(path.startswith(prefix) for prefix in SUPPRESSED_HTTP_LOG_PATH_PREFIXES)
+        if any(path.startswith(prefix) for prefix in SUPPRESSED_HTTP_LOG_PATH_PREFIXES):
+            return False
+        return not any(
+            path.startswith(prefix) and path.endswith(suffix)
+            for prefix, suffix in SUPPRESSED_HTTP_LOG_PATH_PREFIX_AND_SUFFIX
+        )
 
     def _is_client_disconnect(self, exc: BaseException) -> bool:
         # レスポンス送信中の切断だけを通常の終了として扱う。
