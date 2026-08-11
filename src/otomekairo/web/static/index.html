@@ -779,7 +779,10 @@
                 </div>
                 <div class="setting-row">
                   <label for="model-reasoning-effort">推論の深さ:</label>
-                  <input id="model-reasoning-effort" class="field-width-medium">
+                  <div class="console-control-with-hint">
+                    <input id="model-reasoning-effort" class="field-width-medium">
+                    <span class="field-hint">空欄のときは provider と model の既定動作を使う</span>
+                  </div>
                 </div>
                 <div class="setting-row">
                   <label for="model-max-output-tokens">最大出力トークン:</label>
@@ -1028,11 +1031,17 @@
                       data-secret-input="pre-send-check-api-key" data-secret-label="送信前チェックのAPIキー">コピー</button>
                     <button type="button" class="plain-button" data-secret-action="paste"
                       data-secret-input="pre-send-check-api-key" data-secret-label="送信前チェックのAPIキー">上書き貼り付け</button>
+                    <button type="button" class="plain-button" data-secret-action="paste-from-llm"
+                      data-secret-input="pre-send-check-api-key"
+                      data-secret-label="送信前チェックのAPIキー">LLMモデルのAPIキーを貼り付け</button>
                   </div>
                 </div>
                 <div class="setting-row">
                   <label for="pre-send-check-reasoning-effort">推論の深さ:</label>
-                  <input id="pre-send-check-reasoning-effort" class="field-width-medium">
+                  <div class="console-control-with-hint">
+                    <input id="pre-send-check-reasoning-effort" class="field-width-medium">
+                    <span class="field-hint">空欄のときは provider と model の既定動作を使う</span>
+                  </div>
                 </div>
                 <div class="setting-row">
                   <label for="pre-send-check-max-output-tokens">最大出力トークン:</label>
@@ -1047,11 +1056,11 @@
             <fieldset class="settings-group">
               <legend>MCP server ごとのチェック対象</legend>
               <div class="settings-list">
+                <p class="field-hint">呼び出し前に個人情報やセンシティブな内容が含まれていないかLLMでチェックします。</p>
                 <div class="setting-row setting-row-top">
                   <label>対象 MCP:</label>
                   <div class="console-control-with-hint">
                     <div id="pre-send-check-mcp-list" class="pre-send-check-mcp-list"></div>
-                    <span class="field-hint">呼び出し前に個人情報やセンシティブな内容が含まれていないかLLMでチェックします。</span>
                   </div>
                 </div>
               </div>

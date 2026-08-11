@@ -3555,13 +3555,13 @@ function syncMemory() {
   memory.embedding.api_key = textValue("memory-api-key");
 }
 
-function pasteLlmApiKeyToMemory() {
+function pasteLlmApiKey(inputId) {
   const apiKey = preferredLlmApiKey();
   if (!apiKey) {
     showNotice("貼り付け元の LLM モデル API キーが空です。", true);
     return;
   }
-  element("memory-api-key").value = apiKey;
+  element(inputId).value = apiKey;
   showNotice("LLMモデルのAPIキーを貼り付けました。");
 }
 
@@ -4546,7 +4546,7 @@ function bindEvents() {
     } else if (secretAction === "paste") {
       pasteApiKey(inputId, label);
     } else if (secretAction === "paste-from-llm") {
-      pasteLlmApiKeyToMemory();
+      pasteLlmApiKey(inputId);
     }
   });
 
