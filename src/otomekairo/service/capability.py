@@ -74,6 +74,10 @@ class OutboundContentReviewFailureError(ValueError):
         self.audit_summary = audit_summary
 
 
+# 日常語や短い設定値との衝突を避ける。資格情報として十分な長さだけを局所照合する。
+OUTBOUND_KNOWN_SECRET_MIN_LENGTH = 12
+
+
 class ServiceCapabilityMixin:
     def recover_capability_runtime_state_after_startup(self) -> None:
         # capability request の照合表は process-local なので、再起動後に結果待ちは成立しない。
@@ -747,10 +751,11 @@ class ServiceCapabilityMixin:
 
     def _collect_configured_secret_values(self, state: dict[str, Any]) -> set[str]:
         # 秘密として定義された設定 path だけを列挙し、自然文の key 推測は行わない。
+        # 短い値は日常語と衝突しやすいので、照合対象を最小長以上に限定する。
         secrets: set[str] = set()
 
         def add(value: Any) -> None:
-            if isinstance(value, str) and value:
+            if isinstance(value, str) and len(value) >= OUTBOUND_KNOWN_SECRET_MIN_LENGTH:
                 secrets.add(value)
 
         add(state.get("console_access_token"))

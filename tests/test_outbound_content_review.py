@@ -8,6 +8,7 @@ from otomekairo.defaults import build_default_state
 from otomekairo.interaction import InteractionContext, ParticipantContext
 from otomekairo.llm.contracts import LLMError, validate_outbound_content_review_contract
 from otomekairo.service.capability import (
+    OUTBOUND_KNOWN_SECRET_MIN_LENGTH,
     OutboundContentReviewFailureError,
     OutboundContentReviewWithheldError,
     ServiceCapabilityMixin,
@@ -24,6 +25,8 @@ class _Store:
     def __init__(self) -> None:
         self.state = build_default_state()
         self.state["mcp_servers"]["e-stat"]["enabled"] = True
+        # 既定 e-stat は読み取り向けに審査オフ。審査経路の試験では明示的に有効化する。
+        self.state["mcp_servers"]["e-stat"]["outbound_content_review_required"] = True
 
     def read_state(self) -> dict:
         return deepcopy(self.state)
@@ -185,17 +188,34 @@ class OutboundContentReviewTests(unittest.TestCase):
     def test_known_configured_secret_is_withheld_before_llm(self) -> None:
         reviewer = _Reviewer("allow")
         service = _Service(reviewer)
-        service.store.state["mcp_servers"]["e-stat"]["env"]["E_STAT_APP_ID"] = "secret-value"
+        secret = "s" * OUTBOUND_KNOWN_SECRET_MIN_LENGTH
+        service.store.state["mcp_servers"]["e-stat"]["env"]["E_STAT_APP_ID"] = secret
 
         with self.assertRaises(OutboundContentReviewWithheldError) as raised:
             service._review_mcp_outbound_content(
-                input_payload=_input("prefix secret-value suffix"),
+                input_payload=_input(f"prefix {secret} suffix"),
                 mcp_tool=_tool(),
                 review_attempt=1,
             )
 
         self.assertEqual(raised.exception.audit_summary["reason_code"], "known_secret_detected")
         self.assertEqual(reviewer.calls, [])
+
+    def test_short_configured_secret_does_not_trigger_local_scan(self) -> None:
+        # 短い値は日常語と衝突しやすいので局所照合せず、LLM 審査へ進む。
+        reviewer = _Reviewer("allow")
+        service = _Service(reviewer)
+        short_secret = "x" * (OUTBOUND_KNOWN_SECRET_MIN_LENGTH - 1)
+        service.store.state["mcp_servers"]["e-stat"]["env"]["E_STAT_APP_ID"] = short_secret
+
+        audit = service._review_mcp_outbound_content(
+            input_payload=_input(f"prefix {short_secret} suffix"),
+            mcp_tool=_tool(),
+            review_attempt=1,
+        )
+
+        self.assertEqual(audit["outcome"], "allow")
+        self.assertEqual(len(reviewer.calls), 1)
 
     def test_disabled_policy_bypasses_review(self) -> None:
         reviewer = _Reviewer("withhold")
@@ -318,6 +338,7 @@ class OutboundContentReviewTests(unittest.TestCase):
             try:
                 state = service.store.read_state()
                 state["mcp_servers"]["e-stat"]["enabled"] = True
+                state["mcp_servers"]["e-stat"]["outbound_content_review_required"] = True
                 service.store.write_state(state)
                 service.llm = _Reviewer("withhold")
                 websocket = _RecordingWebSocket()

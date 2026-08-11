@@ -13,6 +13,8 @@
 
 - 初期適用先は `mcp.call_tool` とする
 - MCP server 定義の `outbound_content_review_required=true` の場合、読み取りを含む全 tool call を対象にする
+- 読み取り中心の MCP（既定の e-stat など）は `outbound_content_review_required=false` を既定とする
+- 投稿や外部書き込みを含む MCP（ELYTH など）は運用で `true` にする
 - tool 名、description、argument key の固定一覧からレビュー要否を推定しない
 - ELYTH 固有の capability、connector、MCP fork を作らない
 - connector と外部 MCP server はレビュー済み request を実行するだけとする
@@ -25,7 +27,11 @@
 レビュー LLM へ渡す前に、コードは設定正本にある既知の秘密値と、outgoing `arguments` 内の string 値を実値照合する。
 対象は token、API key、password、および秘密値として保持する MCP env 値とする。
 
-既知の秘密値が string の一部に現れた場合は LLM を呼ばず `withhold` とする。
+照合に使う秘密値は、長さ 12 文字以上のものに限定する。
+短い設定値は日常語や一般文と衝突しやすいため、局所照合の対象にしない。
+長さ 12 文字未満の既知秘密が含まれていても、この段階では止めず、後段の LLM 審査に委ねる。
+
+既知の秘密値（最小長以上）が string の一部に現れた場合は LLM を呼ばず `withhold` とする。
 これは資格情報という構造化済み値の機械的照合であり、自然文の意味判定を文字列規則へ置き換えるものではない。
 
 ## LLM 入力
@@ -105,8 +111,17 @@ mock 実行は暗黙の `allow` にせず、test double から結果を明示注
 レビュー生成自体の失敗では candidate を再生成せず、cycle を `internal_failure` とする。
 
 `autonomous_run` の step では同じ一回制限を使い、固定 feedback は安全な `capability_request` または `action.kind=none` を求める。
-再生成が `action.kind=none`、または 2 回目も `withhold` の場合は当該 step の外部送信を行わず、audit event と `system_notice` を残す。
-安全な別 action が成立した場合も、最初の `withhold` を本文なしの audit event として残す。
+
+通常の判断 cycle と `autonomous_run` では、terminal 後の終了単位が異なる。
+
+| 経路 | 最初の withhold 後 | 2 回目 withhold | レビュー失敗 |
+|------|-------------------|-----------------|--------------|
+| 通常 cycle | 固定 feedback で 1 回再判断 | 外部送信なしで cycle を `noop` 相当に確定 | cycle を `internal_failure` |
+| `autonomous_run` | 固定 feedback で step を 1 回再生成 | 外部送信なしで **当該 run を `cancelled`** | 外部送信なしで **当該 run を `cancelled`** |
+
+再生成が `action.kind=none` の場合は外部送信だけ見送り、run 自体の遷移は step 契約（`transition`）に従う。
+安全な別 action（別の `capability_request` や `speech`）が成立した場合も、最初の `withhold` を本文なしの audit event として残す。
+2 回目 withhold とレビュー失敗で run を cancel するのは、未審査・不安全な外部作用を自律継続へ残さないための fail-closed である。
 
 terminal な `withhold` またはレビュー失敗は候補本文を含まない `system_notice` で通知する。
 起点人物がいる場合は同じ定型通知を会話欄の system message として表示し、assistant 発話や音声にはしない。

@@ -40,7 +40,7 @@ class McpConfigApiTests(unittest.TestCase):
         mcp_server = response["mcp_servers"][0]
         self.assertEqual(mcp_server["mcp_server_id"], "e-stat")
         self.assertFalse(mcp_server["enabled"])
-        self.assertTrue(mcp_server["outbound_content_review_required"])
+        self.assertFalse(mcp_server["outbound_content_review_required"])
         self.assertEqual(mcp_server["command"], "uvx")
         self.assertEqual(mcp_server["args"], ["estat-mcp-server"])
         self.assertEqual(mcp_server["env"]["E_STAT_APP_ID"], "")
