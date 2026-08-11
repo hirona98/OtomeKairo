@@ -3743,22 +3743,11 @@ function syncCamera() {
   }
 }
 
-function watcherItems() {
-  return (state.camera?.camera_sources || []).map((camera) => {
-    const watcher = cameraWatcher(camera);
-    const displayName = camera.display_name || camera.vision_source_id;
-    return {
-      vision_source_id: camera.vision_source_id,
-      display_name: `${displayName} / カメラモーション / ${camera.vision_source_id} / 即時wake`,
-    };
-  });
-}
-
 function renderWatcher() {
-  const items = watcherItems();
-  const hasWatcher = items.length > 0;
-  state.selectedWatcherSourceId = selectedOrFirst(items, "vision_source_id", state.selectedWatcherSourceId);
-  setSelectOptions(element("watcher-select"), items, "vision_source_id", state.selectedWatcherSourceId);
+  const cameras = state.camera?.camera_sources || [];
+  const hasWatcher = cameras.length > 0;
+  state.selectedWatcherSourceId = selectedOrFirst(cameras, "vision_source_id", state.selectedWatcherSourceId);
+  setSelectOptions(element("watcher-select"), cameras, "vision_source_id", state.selectedWatcherSourceId);
   // Watcher はカメラ定義に従属するため、0 件時は入力を無効化する。
   const watcherSelect = element("watcher-select");
   watcherSelect.disabled = !hasWatcher;
