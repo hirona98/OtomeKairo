@@ -110,8 +110,9 @@ microphone connector は加えて VAD、STT、音声起動ワード判定、話�
 - watcher はローカル設定ファイルを持たず、`config.db` から `console_access_token` と有効な `watcher_id` を読む。server URL 等は環境変数で扱う
 - camera connector の host / camera account は本体の `camera_source` で扱う
 - watcher の host / camera account / 監視閾値 / snapshot 保存先は本体の `camera_source.watcher` と runtime config で扱う
-- MCP client connector の command / args / cwd / env は本体の `mcp_server` で扱う
+- MCP client connector の stdio 用 command / args / cwd / env と Streamable HTTP 用 url / headers は本体の `mcp_server` で扱う
 - MCP server 子 process へは launcher 用 `PATH` と当該 `mcp_server.env` だけを渡し、connector process の環境を継承しない
+- MCP 固有の意味手順は connector に埋め込まず、本体が検証済み skill bundle として判断文脈へ供給する
 - `config.example.json` と repository に秘密値を入れない
 - 通常ログ、debug log、inspection 用 result summary、`client_context` に秘密値を出さない
 

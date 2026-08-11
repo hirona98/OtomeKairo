@@ -105,11 +105,11 @@ client -> server:
 - 未知の capability id または非対応 version は実行不可として扱う
 - `mcp.call_tool` が accepted された client は、`mcp_servers` を必須かつ 1 件以上にする
 - `mcp_servers[].mcp_server_id` は接頭辞なしの名前とし、接続中 server 全体で一意にする
-- `mcp_servers[].transport` の初期対応値は `stdio` とする
+- `mcp_servers[].transport` は `stdio / streamable_http` のいずれかとする
 - `mcp_servers[].tools[]` は MCP `tools/list` の `name / description / inputSchema` を渡す
 - `mcp_servers[].tools` は tool が無い場合に空配列とする
 - server は MCP server の有効状態、割当先 `client_id`、transport が hello と一致する場合だけ catalog を登録する
-- `mcp_servers` には API key、token、内部 URL、command、env を入れない
+- `mcp_servers` には API key、token、URL、command、env、headers を入れない
 - `vision.capture` が accepted された client は、`vision_sources` を必須かつ 1 件以上にする
 - `vision.capture` が accepted されない client では、`vision_sources` は省略または空配列にする
 - `vision_sources[].vision_source_id` は server 内で一意に扱う

@@ -133,6 +133,24 @@ pause 中ではない run は `active` に戻し、`next_run_at` を現在時刻
 pause 中の run は `paused` を維持し、再開時に `active` へ戻る状態にする。
 timeout 後に再試行、待機、完了、cancel のどれを選ぶかは `autonomous_step_generation` が判断する。
 
+## operational skill session
+
+skill bundle の session skill を選んで開始した `autonomous_run` は、その MCP server だけを扱う有限セッションとする。通常の期限なし監視とは異なり、host policy が tool call 総数、更新系 call 数、background からの最小開始間隔を固定する。
+
+ELYTH の `elyth-run-session` は次を正本値とする。
+
+| 項目 | 値 |
+|------|----|
+| `min_interval_seconds` | `3600` |
+| `max_tool_calls` | `10` |
+| `max_mutating_calls` | `3` |
+
+同じ bundle の active、waiting、paused session がある間は新しい session を開始しない。直近 session の開始から最小間隔が経過していない場合も開始しない。ユーザーの明示依頼は skill 選択の入力になるが、host policy の間隔と call 上限は変えない。
+
+各 step は action skill を意味選択し、選択 skill と tool の対応を検証する。call 数は外部 dispatch より前に永続化して消費し、失敗または送信前チェック後の再生成も無制限な再試行へ使えない。更新系上限へ達した後は更新系 tool を decision view から除く。総数上限へ達した session は `completed` にする。
+
+session 内で許可する capability は、同じ bundle で覆われた同じ MCP server の `mcp.call_tool` だけとする。capability result 待ちは継続するが、tool call を伴わない自己スケジュールは作らず完了する。
+
 process startup 時点では capability request の内部照合表が空になる。
 このため、`waiting_result` の run と `waiting_request_id` を持つ `paused` run は、再起動前の result を照合できない orphan として扱う。
 server は orphan を timeout と同じ再評価可能状態へ戻し、未完了 request で新しい能力実行を塞がない。
