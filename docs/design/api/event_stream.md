@@ -276,6 +276,7 @@ server は両 endpoint の HTTP 応答を 10 秒間隔で監視し、健全な1�
 1 delivery 内で合成失敗した endpoint を即 unhealthy にし、**同一 delivery ではもう一方へ掛け直さない**。次の delivery または次のプローブ結果で接続先が切り替わる。
 サブが空のときは優先だけを使い、ヘルス監視による切替を行わない。
 TTS入力では発話本文先頭の`[face:Joy] / [face:Angry] / [face:Sorrow] / [face:Fun]`を1個だけ除去し、それ以外の文字、空白、改行を保持する。
+`assistant_message.data.message` の wire からは顔タグを除去しない。チャット UI での表示除去は各 client の責務であり、Web UI は [../integration/WebUI通常画面規約.md](../integration/WebUI通常画面規約.md) を正とする。
 server はTTS入力を文字列長で切り詰めない。
 音声合成失敗は先行する発話本文の成功を取り消さない。
 `conversation_input.data.message_id / cycle_id / created_at / message / interaction_ref / speaker_ref / participant_refs / display_name / source_kind` は必須とする。`utterance_seq` は音声入力時だけ持つ。

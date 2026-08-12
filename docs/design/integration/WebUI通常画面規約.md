@@ -100,6 +100,7 @@ chip、badge、`.status.processing` / `.status.error` は上記を共有する�
 - 時刻は client が表示した時刻を `HH:mm` で表示し、person はバルーン左側、assistant は右側の下端に揃える
 - system / error / noop には表示名や時刻を付けない
 - 入力元や assistant 発話の起点はバルーン周辺に表示しない
+- assistant 本文は表示直前に `[face:...]`（`...` は任意文字列）をすべて除去し、前後の空白を trim する。規則は CocoroConsole の `RemoveFaceTags` と同じ。`assistant_message.data.message` の wire 自体は除去しない
 
 person と assistant の吹き出しは event stream を表示の正本とし、event 発生時に起動・購読中の全 client で同じ順序に追加する。HTTP response から assistant 吹き出しを追加しない。送信画像は `message_id` に対応づけて送信元ブラウザだけが表示し、他 client へ同期しない。system / error / noop の表示は各 UI のローカル通知とする。
 

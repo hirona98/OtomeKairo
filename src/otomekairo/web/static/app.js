@@ -2083,13 +2083,20 @@ function renderAudioMeters() {
   }
 }
 
+// CocoroConsole の RemoveFaceTags と同規則。assistant 表示専用の出力 protocol を隠す。
+function removeFaceTags(message) {
+  return String(message || "").replace(/\[face:[^\]]+\]/g, "").trim();
+}
+
 function addMessage(kind, text, images = [], options = {}) {
   const wrapper = document.createElement("article");
   wrapper.className = `message ${kind}`;
 
   const bubble = document.createElement("div");
   bubble.className = "bubble";
-  bubble.textContent = text || "";
+  // wire 上の message はタグ付きのまま。表示直前だけ除去する。
+  const displayText = kind === "assistant" ? removeFaceTags(text) : (text || "");
+  bubble.textContent = displayText;
   for (const image of images) {
     const img = document.createElement("img");
     img.className = "message-image";
