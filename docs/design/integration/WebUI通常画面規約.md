@@ -104,6 +104,8 @@ chip、badge、`.status.processing` / `.status.error` は上記を共有する�
 
 person と assistant の吹き出しは event stream を表示の正本とし、event 発生時に起動・購読中の全 client で同じ順序に追加する。HTTP response から assistant 吹き出しを追加しない。送信画像は `message_id` に対応づけて送信元ブラウザだけが表示し、他 client へ同期しない。system / error / noop の表示は各 UI のローカル通知とする。
 
+HTTP response の `result_kind=capability_request` は会話吹き出しにしない。能力実行の進行は「いま」パネルの結果待ち表示に寄せ、`capability_id` / `request_id` などの内部識別子を会話本文へ出さない。失敗（`internal_failure`）と `system_notice`（`conversation_visible=true`）は従来どおり会話欄に表示してよい。
+
 ## 実装対応
 
 - 静的マークアップ: `src/otomekairo/web/static/index.html`

@@ -2142,15 +2142,12 @@ function addMessage(kind, text, images = [], options = {}) {
 }
 
 function resultText(result) {
+  // capability_request は会話吹き出しにしない。進行は「いま」パネルの結果待ちへ寄せる。
+  if (result?.result_kind === "capability_request" || result?.capability_request) {
+    return null;
+  }
   if (result?.speech?.text) {
     return { kind: "assistant", text: result.speech.text };
-  }
-  if (result?.capability_request) {
-    const request = result.capability_request;
-    return {
-      kind: "system",
-      text: `能力実行を要求しました。\n${request.capability_id || ""} ${request.request_id || ""}`.trim(),
-    };
   }
   if (result?.result_kind === "noop") {
     return { kind: "system", text: "応答はありません。" };
@@ -2222,7 +2219,9 @@ async function sendMessage(event) {
     });
     if (result?.result_kind !== "speech") {
       const rendered = resultText(result);
-      addMessage(rendered.kind, rendered.text, [], { cycleId: rendered.cycleId || "" });
+      if (rendered) {
+        addMessage(rendered.kind, rendered.text, [], { cycleId: rendered.cycleId || "" });
+      }
     }
     await loadStatus({ silent: true });
     await refreshDashboard({ silent: true });
