@@ -58,6 +58,9 @@ SUPPRESSED_HTTP_LOG_EXACT_PATHS = {
     "/api/bootstrap/probe",
     "/api/autonomous-runs",
     "/api/capability/result",
+    # 外部 client が高頻度で再取得する設定 snapshot。
+    "/api/config",
+    "/api/config/camera-sources",
     "/api/audio/stream",
     "/api/audio/console-stream",
     "/api/audio/input-state",

@@ -44,7 +44,7 @@ def test_http_response_log_levels(monkeypatch) -> None:
     handler = object.__new__(OtomeKairoHandler)
     handler.command = "GET"
     # 高頻度抑制対象ではない通常 API でレベル判定を確認する。
-    handler.path = "/api/config"
+    handler.path = "/api/wake"
 
     handler._debug_log_response(200, {"ok": True, "data": {}})
     handler._debug_log_response(404, {"ok": False, "error": {"code": "not_found"}})
@@ -66,6 +66,20 @@ def test_watcher_runtime_config_http_log_suppressed(monkeypatch) -> None:
     handler._debug_log_response(404, {"ok": False, "error": {"code": "not_found"}})
 
     assert log.call_args_list == []
+
+
+def test_polled_config_http_log_suppressed(monkeypatch) -> None:
+    log = Mock()
+    monkeypatch.setattr("otomekairo.http_server.debug_log", log)
+    handler = object.__new__(OtomeKairoHandler)
+    handler.command = "GET"
+
+    for path in ("/api/config", "/api/config/camera-sources"):
+        log.reset_mock()
+        handler.path = path
+        handler._debug_log_response(200, {"ok": True, "data": {}})
+        assert log.call_args_list == [], path
+        assert handler._should_log_http_path(path) is False
 
 
 def test_static_response_log_levels(monkeypatch) -> None:
