@@ -86,10 +86,21 @@ class ServiceAgentSkillsMixin:
                     registry.require_skill(skill_id).resources.values(),
                     key=lambda item: item.relative_path,
                 )
-                if resource.relative_path not in selected_resources.get(skill_id, {})
+                if (
+                    resource.kind == "resource"
+                    and resource.text_content is not None
+                    and resource.relative_path not in selected_resources.get(skill_id, {})
+                )
             ]
             if not linked_candidates and not resource_candidates:
                 break
+            active_skills: list[dict[str, Any]] = []
+            for skill_id in active_ids:
+                payload = registry.require_skill(skill_id).instruction_payload()
+                payload["selected_resources"] = list(
+                    selected_resources.get(skill_id, {}).values()
+                )
+                active_skills.append(payload)
             material = self.llm.generate_agent_skill_material_selection(
                 model_config=model_config,
                 selection_context={
@@ -97,10 +108,7 @@ class ServiceAgentSkillsMixin:
                     "trigger_kind": trigger_kind,
                     "run": run,
                     "prior_activation": prior_activation,
-                    "active_skills": [
-                        registry.require_skill(skill_id).instruction_payload()
-                        for skill_id in active_ids
-                    ],
+                    "active_skills": active_skills,
                     "allowed_additional_skill_ids": linked_candidates,
                     "allowed_resource_reads": [
                         {
@@ -143,10 +151,6 @@ class ServiceAgentSkillsMixin:
                     progressed = True
             for skill_id, relative_path in sorted(requested_pairs):
                 resource = registry.require_skill(skill_id).resources[relative_path]
-                if resource.text_content is None:
-                    raise LLMError(
-                        f"選択された Agent Skill resource は UTF-8 text ではありません: {skill_id}/{relative_path}"
-                    )
                 selected_resources.setdefault(skill_id, {})[relative_path] = {
                     "path": relative_path,
                     "sha256": resource.sha256,
@@ -154,12 +158,8 @@ class ServiceAgentSkillsMixin:
                 }
                 progressed = True
             material_reasons.append(material["reason_summary"].strip())
-            if material["done"] is True:
-                break
             if not progressed:
-                raise LLMError(
-                    "AgentSkillMaterialSelection は done=false のとき追加の skill または resource を選択する必要があります。"
-                )
+                break
 
         skills_payload: list[dict[str, Any]] = []
         for skill_id in active_ids:

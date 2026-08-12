@@ -184,24 +184,41 @@ class AgentSkillRegistryTests(unittest.TestCase):
             references = root_skill / "references"
             references.mkdir()
             (references / "guide.md").write_text("selected guide", encoding="utf-8")
+            (references / "other.md").write_text("unselected guide", encoding="utf-8")
+            (references / "binary.dat").write_bytes(b"\xff\xfe")
+            scripts = root_skill / "scripts"
+            scripts.mkdir()
+            (scripts / "helper.py").write_text("print('helper')\n", encoding="utf-8")
             child = root / "child-skill"
             child.mkdir()
             (child / "SKILL.md").write_text(
                 "---\nname: child-skill\ndescription: Child workflow.\n---\nChild instructions.\n",
                 encoding="utf-8",
             )
+            child_references = child / "references"
+            child_references.mkdir()
+            (child_references / "child.md").write_text("child guide", encoding="utf-8")
             definition = _source_definition(root, execution_enabled=False)
+            material_contexts: list[dict] = []
 
             class FakeLlm:
                 def generate_agent_skill_selection(self, **_kwargs):
                     return {"selected_skill_ids": ["root-skill"], "reason_summary": "needed"}
 
-                def generate_agent_skill_material_selection(self, **_kwargs):
+                def generate_agent_skill_material_selection(self, **kwargs):
+                    material_contexts.append(kwargs["selection_context"])
+                    if len(material_contexts) == 1:
+                        return {
+                            "additional_skill_ids": ["child-skill"],
+                            "resource_reads": [
+                                {"skill_id": "root-skill", "path": "references/guide.md"}
+                            ],
+                            "reason_summary": "read guide and child",
+                        }
                     return {
-                        "additional_skill_ids": ["child-skill"],
-                        "resource_reads": [{"skill_id": "root-skill", "path": "references/guide.md"}],
-                        "done": True,
-                        "reason_summary": "read guide and child",
+                        "additional_skill_ids": [],
+                        "resource_reads": [],
+                        "reason_summary": "enough material",
                     }
 
             class Subject(ServiceAgentSkillsMixin):
@@ -229,6 +246,65 @@ class AgentSkillRegistryTests(unittest.TestCase):
                 context["skills"][0]["selected_resources"][0]["content"],
                 "selected guide",
             )
+            self.assertEqual(len(material_contexts), 2)
+            second_context = material_contexts[1]
+            self.assertEqual(
+                second_context["active_skills"][0]["selected_resources"][0]["content"],
+                "selected guide",
+            )
+            self.assertEqual(second_context["active_skills"][1]["skill_id"], "child-skill")
+            self.assertEqual(
+                second_context["allowed_resource_reads"],
+                [
+                    {"skill_id": "root-skill", "path": "references/other.md"},
+                    {"skill_id": "child-skill", "path": "references/child.md"},
+                ],
+            )
+
+    def test_empty_material_selection_finishes_normally(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory) / "skills"
+            root.mkdir()
+            skill_dir = _write_skill(root)
+            references = skill_dir / "references"
+            references.mkdir()
+            (references / "guide.md").write_text("optional guide", encoding="utf-8")
+            definition = _source_definition(root, execution_enabled=False)
+
+            class FakeLlm:
+                def generate_agent_skill_selection(self, **_kwargs):
+                    return {"selected_skill_ids": ["echo-skill"], "reason_summary": "needed"}
+
+                def generate_agent_skill_material_selection(self, **_kwargs):
+                    return {
+                        "additional_skill_ids": [],
+                        "resource_reads": [],
+                        "reason_summary": "no additional material needed",
+                    }
+
+            class Subject(ServiceAgentSkillsMixin):
+                def __init__(self):
+                    self._runtime_state_lock = threading.RLock()
+                    self._agent_skill_registry = AgentSkillRegistry.load({"test-source": definition})
+                    self.llm = FakeLlm()
+
+            context = Subject()._build_agent_skill_context(
+                model_config={"model": "real-model"},
+                current_input=CurrentInput(
+                    sender_kind="person",
+                    sender_ref="person:test",
+                    source_kind="user_message",
+                    response_target_refs=("person:test",),
+                    interaction_context=None,
+                    text="perform the workflow",
+                ),
+                trigger_kind="user_message",
+                capability_decision_view=[],
+            )
+
+            self.assertEqual(context["selected_skill_ids"], ["echo-skill"])
+            self.assertEqual(context["material_reason_summaries"], ["no additional material needed"])
+            self.assertEqual(context["skills"][0]["selected_resources"], [])
 
     def test_skill_selection_repairs_catalog_violation_once(self) -> None:
         responses = iter(
@@ -286,7 +362,6 @@ class AgentSkillRegistryTests(unittest.TestCase):
                                 "path": invalid_path,
                             }
                         ],
-                        "done": False,
                         "reason_summary": "linked skill を読む",
                     },
                     ensure_ascii=False,
@@ -295,7 +370,6 @@ class AgentSkillRegistryTests(unittest.TestCase):
                     {
                         "additional_skill_ids": ["elyth-discover"],
                         "resource_reads": [],
-                        "done": True,
                         "reason_summary": "linked skill として追加する",
                     },
                     ensure_ascii=False,
@@ -321,6 +395,70 @@ class AgentSkillRegistryTests(unittest.TestCase):
         repair_prompt = complete.call_args_list[1].kwargs["messages"][-1]["content"]
         self.assertIn("候補にない resource", repair_prompt)
         self.assertIn("allowed_resource_reads にある値だけ", repair_prompt)
+
+    def test_material_selection_repairs_legacy_done_field(self) -> None:
+        responses = iter(
+            [
+                json.dumps(
+                    {
+                        "additional_skill_ids": [],
+                        "resource_reads": [],
+                        "done": True,
+                        "reason_summary": "旧契約で完了する",
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "additional_skill_ids": [],
+                        "resource_reads": [],
+                        "reason_summary": "追加読込は不要",
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        selection_context = {
+            "allowed_additional_skill_ids": [],
+            "allowed_resource_reads": [],
+        }
+
+        with patch("otomekairo.llm.client.complete_text", side_effect=lambda **_kwargs: next(responses)) as complete:
+            result = LLMClient().generate_agent_skill_material_selection(
+                model_config={"model": "real-model"},
+                selection_context=selection_context,
+            )
+
+        self.assertEqual(result["additional_skill_ids"], [])
+        self.assertEqual(result["resource_reads"], [])
+        self.assertNotIn("done", result)
+        self.assertEqual(complete.call_count, 2)
+        repair_prompt = complete.call_args_list[1].kwargs["messages"][-1]["content"]
+        self.assertIn("キーが不正", repair_prompt)
+        self.assertIn("3キーだけ", repair_prompt)
+
+    def test_material_selection_fails_after_second_candidate_violation(self) -> None:
+        response = json.dumps(
+            {
+                "additional_skill_ids": ["unknown-skill"],
+                "resource_reads": [],
+                "reason_summary": "候補外の skill を追加する",
+            },
+            ensure_ascii=False,
+        )
+        selection_context = {
+            "allowed_additional_skill_ids": ["elyth-discover"],
+            "allowed_resource_reads": [],
+        }
+
+        with patch("otomekairo.llm.client.complete_text", return_value=response) as complete:
+            with self.assertRaisesRegex(LLMError, "候補にない skill_id"):
+                LLMClient().generate_agent_skill_material_selection(
+                    model_config={"model": "real-model"},
+                    selection_context=selection_context,
+                )
+
+        self.assertEqual(complete.call_count, 2)
 
     def test_skill_selection_fails_after_second_catalog_violation(self) -> None:
         response = json.dumps(

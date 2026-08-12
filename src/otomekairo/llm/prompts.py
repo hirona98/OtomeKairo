@@ -304,8 +304,8 @@ def build_agent_skill_material_selection_messages(*, selection_context: dict[str
                 "additional_skill_ids は allowed_additional_skill_ids に並ぶ文字列だけをそのままコピーして作ります。\n"
                 "resource_reads は allowed_resource_reads に並ぶ skill_id/path の組だけをそのままコピーして作ります。\n"
                 "SKILL.md へのリンクは sibling skill の関係を表し、resource_reads には入れません。\n"
-                "許可リストが空なら対応する出力配列も空にし、追加読込が不要なら done=true にします。\n"
-                "JSON object だけを返し、キーは additional_skill_ids, resource_reads, done, reason_summary の4個に固定します。\n"
+                "許可リストが空なら対応する出力配列も空にし、追加読込が不要なら両方の配列を空にします。\n"
+                "JSON object だけを返し、キーは additional_skill_ids, resource_reads, reason_summary の3個に固定します。\n"
                 "resource_reads の各要素は skill_id, path の2キーです。"
             ),
         },
@@ -321,7 +321,7 @@ def build_agent_skill_material_selection_repair_prompt(validation_error: str) ->
         "前回の出力は AgentSkillMaterialSelection 契約を満たしていませんでした。\n"
         f"validator_error: {validation_error}\n"
         "additional_skill_ids は allowed_additional_skill_ids、resource_reads は allowed_resource_reads にある値だけをそのまま使い、"
-        "additional_skill_ids, resource_reads, done, reason_summary の4キーだけを持つJSON objectを返してください。"
+        "追加読込が不要なら両方の配列を空にして、additional_skill_ids, resource_reads, reason_summary の3キーだけを持つJSON objectを返してください。"
     )
 
 

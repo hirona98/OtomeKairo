@@ -120,7 +120,6 @@ class LLMClient:
             return {
                 "additional_skill_ids": [],
                 "resource_reads": [],
-                "done": True,
                 "reason_summary": "mock model does not read Agent Skill materials.",
             }
         return self._generate_structured_payload(
@@ -183,7 +182,7 @@ class LLMClient:
     ) -> None:
         _validate_exact_keys(
             payload,
-            {"additional_skill_ids", "resource_reads", "done", "reason_summary"},
+            {"additional_skill_ids", "resource_reads", "reason_summary"},
             "AgentSkillMaterialSelection",
         )
         skill_ids = payload.get("additional_skill_ids")
@@ -193,7 +192,6 @@ class LLMClient:
             or not all(isinstance(value, str) and value.strip() for value in skill_ids)
             or len(skill_ids) != len(set(skill_ids))
             or not isinstance(reads, list)
-            or not isinstance(payload.get("done"), bool)
             or not isinstance(payload.get("reason_summary"), str)
             or not payload["reason_summary"].strip()
         ):
