@@ -117,7 +117,7 @@ microphone connector は加えて VAD、STT、音声起動ワード判定、話�
 - MCP tool の意味と入力境界は connector に固定せず、接続中の `tools/list` catalog を本体の判断文脈へ供給する
 - `config.example.json` と repository に秘密値を入れない
 - 通常ログ、debug log、inspection 用 result summary、`client_context` に秘密値を出さない
-- connector / watcher の運用ログ最小レベルは本体と同じ `OTOMEKAIRO_DEBUG_LOG_MIN_LEVEL` に従う（既定 `WARNING`）。取りうる値と失敗方針は [../runtime/デバッグ可能性.md](../runtime/デバッグ可能性.md) を正とする
+- connector / watcher の journal 向け運用ログ最小レベルは本体と同じ `OTOMEKAIRO_DEBUG_LOG_MIN_LEVEL` に従う（既定 `WARNING`）。取りうる値と失敗方針は [../runtime/デバッグ可能性.md](../runtime/デバッグ可能性.md) を正とする
 
 ## 別 repository への切り出し基準
 

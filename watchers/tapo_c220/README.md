@@ -31,7 +31,7 @@ python3 -m venv .venv
 `console_access_token` が未発行の場合は bootstrap API で初回発行する。
 
 FFmpeg 警告ログは watcher 内で `error` まで抑制する。
-運用ログの最小レベルは `OTOMEKAIRO_DEBUG_LOG_MIN_LEVEL`（既定 `WARNING`）に従う。
+journal 向け運用ログの最小レベルは `OTOMEKAIRO_DEBUG_LOG_MIN_LEVEL`（既定 `WARNING`）に従う。
 毎ポーリングの `diff result` は `DEBUG` なので、既定では journalctl に出ない。
 
 ## 実行

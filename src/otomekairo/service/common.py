@@ -128,11 +128,11 @@ def debug_log(component: str, message: str, *, level: str = "INFO") -> None:
     normalized_level = level.strip().upper() if isinstance(level, str) else "INFO"
     if normalized_level not in DEBUG_LOG_LEVELS:
         normalized_level = "INFO"
-    min_level = _read_debug_log_min_level()
-    if DEBUG_LOG_LEVEL_ORDER[normalized_level] < DEBUG_LOG_LEVEL_ORDER[min_level]:
-        return
     line = f"{timestamp} [{normalized_level}] [{component}] {message}"
-    print(_terminal_debug_log_line(line, normalized_level), flush=True)
+    # journalctl 向けの標準出力だけ最小レベルで間引く。ファイルと logs/stream は全レベル。
+    min_level = _read_debug_log_min_level()
+    if DEBUG_LOG_LEVEL_ORDER[normalized_level] >= DEBUG_LOG_LEVEL_ORDER[min_level]:
+        print(_terminal_debug_log_line(line, normalized_level), flush=True)
     _append_debug_log_file(line)
     _append_debug_log_stream(
         {
