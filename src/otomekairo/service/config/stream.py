@@ -1207,7 +1207,7 @@ class ServiceConfigStreamMixin:
         if not isinstance(properties, dict) or not isinstance(required_names, list):
             return None
         parts: list[str] = []
-        for field_name in required_names[:4]:
+        for field_name in required_names:
             if not isinstance(field_name, str) or not field_name.strip():
                 continue
             property_schema = properties.get(field_name, {})

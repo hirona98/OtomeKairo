@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-import re
 import threading
 import uuid
 from copy import deepcopy
 from datetime import timedelta
 from typing import Any
 
-from otomekairo.capabilities import capability_manifests, capability_readiness_input_digest
+from otomekairo.capabilities import (
+    capability_manifests,
+    capability_readiness_input_digest,
+    validate_capability_payload,
+)
 from otomekairo.service.common import debug_log
 from otomekairo.service.config.constants import CAPABILITY_UNAVAILABLE_REASONS
 
@@ -572,10 +575,10 @@ class ServiceCapabilityMixin:
             )
         input_schema = tool.get("inputSchema")
         if isinstance(input_schema, dict):
-            self._validate_capability_schema_value(
-                value=arguments,
+            validate_capability_payload(
+                payload=arguments,
                 schema=input_schema,
-                path=f"mcp.call_tool.arguments.{normalized_tool_name}",
+                label=f"mcp.call_tool.arguments.{normalized_tool_name}",
             )
         client_id = target.get("client_id")
         if not isinstance(client_id, str) or not client_id.strip():
@@ -1778,73 +1781,4 @@ class ServiceCapabilityMixin:
                 )
 
     def _validate_capability_payload(self, *, payload: Any, schema: Any, label: str) -> None:
-        # 現行 manifest で使う JSON Schema の最小 subset だけを検証する。
-        if not isinstance(schema, dict):
-            raise ValueError(f"{label} schema is invalid.")
-        self._validate_capability_schema_value(value=payload, schema=schema, path=label)
-
-    def _validate_capability_schema_value(self, *, value: Any, schema: dict[str, Any], path: str) -> None:
-        expected_type = schema.get("type")
-        if expected_type is not None and not self._capability_schema_type_matches(value, expected_type):
-            raise ValueError(f"{path} type is invalid.")
-        enum_values = schema.get("enum")
-        if isinstance(enum_values, list) and value not in enum_values:
-            raise ValueError(f"{path} value is not allowed.")
-        pattern = schema.get("pattern")
-        if isinstance(value, str) and isinstance(pattern, str) and re.search(pattern, value) is None:
-            raise ValueError(f"{path} value does not match pattern.")
-        if isinstance(value, dict):
-            properties = schema.get("properties", {})
-            required_names = schema.get("required", [])
-            if isinstance(required_names, list):
-                for required_name in required_names:
-                    if isinstance(required_name, str) and required_name not in value:
-                        raise ValueError(f"{path}.{required_name} is required.")
-            if schema.get("additionalProperties") is False and isinstance(properties, dict):
-                extra_keys = sorted(set(value) - set(properties))
-                if extra_keys:
-                    raise ValueError(f"{path} has unsupported properties: {', '.join(extra_keys)}")
-            if isinstance(properties, dict):
-                for key, child_schema in properties.items():
-                    if key not in value:
-                        continue
-                    if isinstance(child_schema, dict):
-                        self._validate_capability_schema_value(
-                            value=value[key],
-                            schema=child_schema,
-                            path=f"{path}.{key}",
-                        )
-        if isinstance(value, list):
-            max_items = schema.get("maxItems")
-            if max_items is not None:
-                if not isinstance(max_items, int) or isinstance(max_items, bool) or max_items < 0:
-                    raise ValueError(f"{path} schema maxItems is invalid.")
-                if len(value) > max_items:
-                    raise ValueError(f"{path} has too many items.")
-            item_schema = schema.get("items")
-            if isinstance(item_schema, dict):
-                for index, item in enumerate(value):
-                    self._validate_capability_schema_value(
-                        value=item,
-                        schema=item_schema,
-                        path=f"{path}[{index}]",
-                    )
-
-    def _capability_schema_type_matches(self, value: Any, expected_type: Any) -> bool:
-        if isinstance(expected_type, list):
-            return any(self._capability_schema_type_matches(value, item) for item in expected_type)
-        if expected_type == "object":
-            return isinstance(value, dict)
-        if expected_type == "array":
-            return isinstance(value, list)
-        if expected_type == "string":
-            return isinstance(value, str)
-        if expected_type == "null":
-            return value is None
-        if expected_type == "boolean":
-            return isinstance(value, bool)
-        if expected_type == "integer":
-            return isinstance(value, int) and not isinstance(value, bool)
-        if expected_type == "number":
-            return isinstance(value, (int, float)) and not isinstance(value, bool)
-        return True
+        validate_capability_payload(payload=payload, schema=schema, label=label)

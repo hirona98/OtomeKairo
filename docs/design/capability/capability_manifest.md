@@ -351,6 +351,10 @@ busy、権限不足、動的一時 unavailable は decision view の `available:
 `readiness.world_state_type` は status family の不足判定と result 投影先を揃えるための正本である。
 `readiness.input_keys` は LLM が capability 固有入力を組み立てる最小 key を表す。
 `readiness.result_summary_keys` と `readiness.result_item_keys` は result が判断・記憶・inspection へ投影される要約 key を表す。
+`required_input` は `input_schema.required` の全 key を順序どおり要約し、件数で省略しない。
+`decision_generation` と `autonomous_step_generation` が `capability_request` を返した場合、server は LLM 出力契約の検証として、`capability_id` が decision view に存在して `available=true` であることと、`input` が manifest の `input_schema` に一致することを確認する。
+`mcp.call_tool` はさらに、`mcp_server_id / tool_name` が同じ decision view の接続中 catalog に存在することと、`arguments` がその tool の `input_schema` に一致することを確認する。
+この検証に失敗した初回出力は既存の structured output repair へ渡し、同じ入力と validator error で 1 回だけ再生成する。repair 後も不正なら LLM contract failure とし、capability request record や外部副作用を作らない。
 非視覚 capability を実行する必要性は、foreground `world_state` と capability の対象を合わせて LLM が意味判断する。server は state type の一致だけで capability request を遮断しない。
 `vision.capture` は `visual_context` の state type だけでは判断せず、`vision_source_id` が一致する新鮮な foreground `world_state` を `fresh_world_state_by_vision_source` に入れる。
 `wake / background_thinking` では、同じ cycle の `wake_observations` で成功した `vision.capture` も `fresh_world_state_by_vision_source` に入れる。
@@ -384,15 +388,15 @@ capability 実行は次の順序で行う。
 1. client が `GET /api/events/stream` に接続し、`hello.caps` を送る。
 2. server が `hello.caps` と既知の manifest を照合し、`CapabilityBinding` を更新する。
 3. server が manifest、binding、state から判断用 decision view を作る。
-4. LLM が `capability_id` と入力 payload を含む実行要求案を返す。
-5. server が `input_schema`、権限、利用可否、`ongoing_action`、並列制限を検証し、`risk_level` を実行記録と inspection へ残す。
+4. LLM が `capability_id` と入力 payload を含む実行要求案を返し、server が decision view と schema に対する出力契約を検証する。
+5. server が最新の manifest、binding、権限、利用可否、`ongoing_action`、並列制限を実行境界で再検証し、`risk_level` を実行記録と inspection へ残す。
 6. server が binding から実行先 client を選び、stream で request を送る。
 7. client が capability family 共通の result endpoint へ結果を返す。
 8. server が `request_id`、`target_client_id`、`result_schema` を検証する。
 9. server が `capability_id` ごとの follow-up pipeline で `memory_policy`、`state_policy`、`inspection_fields` に従って記憶、状態、inspection を更新する。
 
 LLM が実行要求案を出しても、server の検証を通らない要求は実行しない。
-検証失敗は判断サイクルの `internal_failure` または capability failure として記録する。
+LLM 出力契約の repair 後も不正な要求は判断サイクルの `internal_failure` とする。出力契約通過後に binding や runtime state が変化した場合は、実行境界の明示的な capability failure として記録する。
 
 ## 権限との関係
 

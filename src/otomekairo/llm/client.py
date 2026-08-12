@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from otomekairo.capabilities import capability_manifests, validate_capability_payload
 from otomekairo.llm.contexts import (
     AutonomousStepContext,
     CurrentInput,
@@ -443,6 +444,7 @@ class LLMClient:
                     persona_context=persona_context,
                     context=context,
                 )
+                self._validate_decision_contract_for_context(payload=payload, context=context)
                 debug_log("LLM", f"{operation} done mode=mock kind={payload.get('kind')}", level="DEBUG")
                 return payload
 
@@ -482,6 +484,12 @@ class LLMClient:
             payload=payload,
             context=context,
         )
+        if payload.get("kind") == "capability_request":
+            self._validate_capability_request_for_context(
+                request_payload=payload.get("capability_request"),
+                capability_decision_view=context.capability_decision_view,
+                label="Decision capability_request",
+            )
         if isinstance(context.capability_result_context, dict):
             self._validate_decision_capability_result_context(
                 payload=payload,
@@ -600,7 +608,7 @@ class LLMClient:
                     persona_context=persona_context,
                     context=context,
                 )
-                validate_autonomous_step_contract(payload)
+                self._validate_autonomous_step_contract_for_context(payload=payload, context=context)
                 debug_log(
                     "LLM",
                     (
@@ -618,7 +626,10 @@ class LLMClient:
             payload = self._generate_structured_payload(
                 model_config=model_config,
                 messages=messages,
-                validator=validate_autonomous_step_contract,
+                validator=lambda value: self._validate_autonomous_step_contract_for_context(
+                    payload=value,
+                    context=context,
+                ),
                 repair_prompt_builder=build_autonomous_step_repair_prompt,
                 failure_message="AutonomousStep の生成に失敗しました。解析可能な応答が得られませんでした。",
                 operation=operation,
@@ -741,9 +752,164 @@ class LLMClient:
         for item in capability_decision_view or []:
             if not isinstance(item, dict):
                 continue
-            if item.get("id") == capability_id:
+            item_id = item.get("id")
+            if isinstance(item_id, str) and item_id.strip() == capability_id.strip():
                 return item
         return None
+
+    def _validate_autonomous_step_contract_for_context(
+        self,
+        *,
+        payload: dict[str, Any],
+        context: AutonomousStepContext,
+    ) -> None:
+        validate_autonomous_step_contract(payload)
+        action = payload.get("action")
+        if not isinstance(action, dict) or action.get("kind") != "capability_request":
+            return
+        self._validate_capability_request_for_context(
+            request_payload=action.get("capability_request"),
+            capability_decision_view=context.capability_decision_view,
+            label="AutonomousStep action.capability_request",
+        )
+
+    def _validate_capability_request_for_context(
+        self,
+        *,
+        request_payload: Any,
+        capability_decision_view: list[dict[str, Any]] | None,
+        label: str,
+    ) -> None:
+        if not isinstance(request_payload, dict):
+            return
+        capability_id = request_payload.get("capability_id")
+        input_payload = request_payload.get("input")
+        if not isinstance(capability_id, str) or not capability_id.strip() or not isinstance(input_payload, dict):
+            return
+        normalized_capability_id = capability_id.strip()
+        capability_entry = self._capability_decision_view_entry(
+            capability_decision_view=capability_decision_view,
+            capability_id=normalized_capability_id,
+        )
+        if capability_entry is None:
+            raise LLMError(
+                f"{label}.capability_id={normalized_capability_id} は "
+                "CapabilityDecisionView に存在しません。"
+                "CapabilityDecisionView の available=true の id だけを指定してください。"
+            )
+        if capability_entry.get("available") is not True:
+            unavailable_reason = capability_entry.get("unavailable_reason")
+            reason_suffix = (
+                f" unavailable_reason={unavailable_reason}"
+                if isinstance(unavailable_reason, str) and unavailable_reason.strip()
+                else ""
+            )
+            raise LLMError(
+                f"{label}.capability_id={normalized_capability_id} は現在実行できません。"
+                f"{reason_suffix} CapabilityDecisionView の available=true の能力を選んでください。"
+            )
+
+        manifest = capability_manifests().get(normalized_capability_id)
+        if not isinstance(manifest, dict):
+            raise LLMError(f"{label}.capability_id={normalized_capability_id} の manifest がありません。")
+        try:
+            validate_capability_payload(
+                payload=input_payload,
+                schema=manifest.get("input_schema"),
+                label=f"{label}.input",
+            )
+        except ValueError as exc:
+            raise LLMError(str(exc)) from exc
+
+        if normalized_capability_id == "mcp.call_tool":
+            self._validate_mcp_call_tool_request_for_context(
+                input_payload=input_payload,
+                capability_entry=capability_entry,
+                label=label,
+            )
+        if normalized_capability_id in {"vision.capture", "camera.ptz"}:
+            self._validate_vision_target_for_context(
+                capability_id=normalized_capability_id,
+                input_payload=input_payload,
+                capability_entry=capability_entry,
+                label=label,
+            )
+
+    def _validate_mcp_call_tool_request_for_context(
+        self,
+        *,
+        input_payload: dict[str, Any],
+        capability_entry: dict[str, Any],
+        label: str,
+    ) -> None:
+        mcp_server_id = str(input_payload.get("mcp_server_id") or "").strip()
+        tool_name = str(input_payload.get("tool_name") or "").strip()
+        selected_server = next(
+            (
+                server
+                for server in capability_entry.get("mcp_servers", [])
+                if isinstance(server, dict)
+                and server.get("mcp_server_id") == mcp_server_id
+                and server.get("available") is True
+            ),
+            None,
+        )
+        if selected_server is None:
+            raise LLMError(
+                f"{label}.input.mcp_server_id={mcp_server_id} は現在利用可能な MCP server ではありません。"
+            )
+        selected_tool = next(
+            (
+                tool
+                for tool in selected_server.get("tools", [])
+                if isinstance(tool, dict) and tool.get("name") == tool_name
+            ),
+            None,
+        )
+        if selected_tool is None:
+            raise LLMError(
+                f"{label}.input.tool_name={tool_name} は MCP server={mcp_server_id} の catalog にありません。"
+            )
+        try:
+            validate_capability_payload(
+                payload=input_payload.get("arguments"),
+                schema=selected_tool.get("input_schema"),
+                label=f"{label}.input.arguments.{tool_name}",
+            )
+        except ValueError as exc:
+            raise LLMError(str(exc)) from exc
+
+    def _validate_vision_target_for_context(
+        self,
+        *,
+        capability_id: str,
+        input_payload: dict[str, Any],
+        capability_entry: dict[str, Any],
+        label: str,
+    ) -> None:
+        vision_source_id = str(input_payload.get("vision_source_id") or "").strip()
+        selected_source = next(
+            (
+                source
+                for source in capability_entry.get("vision_sources", [])
+                if isinstance(source, dict)
+                and source.get("vision_source_id") == vision_source_id
+                and source.get("available") is True
+            ),
+            None,
+        )
+        if selected_source is None:
+            raise LLMError(
+                f"{label}.input.vision_source_id={vision_source_id} は現在利用可能な対象ではありません。"
+            )
+        if capability_id != "camera.ptz":
+            return
+        operation = input_payload.get("operation")
+        amount = input_payload.get("amount")
+        if operation not in selected_source.get("supported_operations", []):
+            raise LLMError(f"{label}.input.operation={operation} は対象cameraで利用できません。")
+        if amount not in selected_source.get("supported_amounts", []):
+            raise LLMError(f"{label}.input.amount={amount} は対象cameraで利用できません。")
 
     def _validate_decision_capability_result_context(
         self,

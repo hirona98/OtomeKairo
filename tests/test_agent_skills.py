@@ -532,6 +532,10 @@ class AgentSkillRegistryTests(unittest.TestCase):
 
             capability = next(item for item in decision_view if item["id"] == "agent_skill.run_script")
             self.assertTrue(capability["available"])
+            self.assertEqual(
+                capability["required_input"],
+                "source_id, skill_id, skill_sha256, script_path, args, stdin_text",
+            )
             self.assertEqual(result["status"], "completed")
             self.assertIn('"args": ["capability"]', result["stdout"])
 
