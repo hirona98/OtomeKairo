@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import time
 import uuid
@@ -8,7 +9,7 @@ from typing import Any
 from urllib.parse import quote
 
 from .capture import CaptureError, RtspCameraConfig, RtspFrameCapture
-from .config import AppConfig
+from .config import AppConfig, ConfigError, resolve_watcher_id
 from .diff import FrameDiffer
 from .http import HttpError, JsonApiClient
 
@@ -19,6 +20,7 @@ SNAPSHOT_JPEG_QUALITY = 88
 class TapoC220Watcher:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
+        self.watcher_id = config.watcher.watcher_id
         self.http = JsonApiClient(
             base_url=config.server.base_url,
             access_token=config.server.access_token,
@@ -29,14 +31,24 @@ class TapoC220Watcher:
         self.redaction_values: list[str] = [config.server.access_token]
 
     def run_forever(self) -> None:
-        self._log(f"starting watcher_id={self.config.watcher.watcher_id}")
+        self._log(f"starting watcher_id={self.watcher_id}")
         while True:
             try:
+                self._refresh_watcher_identity()
                 runtime = self._fetch_runtime_config()
                 self._run_runtime(runtime)
-            except (HttpError, CaptureError, OSError, RuntimeError, ValueError) as exc:
+            except (HttpError, CaptureError, OSError, RuntimeError, ValueError, ConfigError) as exc:
                 self._log(f"watch loop failed error={self._short_error(exc)}")
                 time.sleep(self.config.server.reconnect_delay_seconds)
+
+    def _refresh_watcher_identity(self) -> None:
+        # display_name 変更や登録の付け替えを外側ループで拾う。
+        resolved = resolve_watcher_id(environ=os.environ)
+        if resolved is None:
+            raise ConfigError("no registered watcher.watcher_id found in config.db.")
+        if resolved != self.watcher_id:
+            self._log(f"watcher_id resolved {self.watcher_id} -> {resolved}")
+            self.watcher_id = resolved
 
     def _run_runtime(self, runtime: dict[str, Any]) -> None:
         watcher = self._object(runtime.get("watcher"), "runtime.watcher")
@@ -97,7 +109,7 @@ class TapoC220Watcher:
             time.sleep(poll_interval)
 
     def _fetch_runtime_config(self) -> dict[str, Any]:
-        encoded_watcher_id = quote(self.config.watcher.watcher_id, safe="")
+        encoded_watcher_id = quote(self.watcher_id, safe="")
         return self.http.get(f"/api/config/watchers/{encoded_watcher_id}/runtime-config")
 
     def _camera_config(self, camera_source: dict[str, Any]) -> RtspCameraConfig:
@@ -159,7 +171,7 @@ class TapoC220Watcher:
         payload = {
             "client_context": {
                 "source": "tapo_c220_watcher",
-                "client_id": self.config.watcher.watcher_id,
+                "client_id": self.watcher_id,
                 "locale": "ja-JP",
             },
             "reference": {

@@ -35,10 +35,15 @@ def main() -> int:
         settings = load_settings(default_watcher_id=args.default_watcher_id)
         runtime_config = fetch_runtime_config(settings)
         watcher = runtime_config.get("watcher")
-        if not isinstance(watcher, dict) or watcher.get("enabled") is not True:
-            print("skipping watcher: watcher is disabled.", file=sys.stderr)
+        if not isinstance(watcher, dict):
+            print("skipping watcher: runtime config has no watcher object.", file=sys.stderr)
             return SKIP
-        print("watcher runtime config found.", file=sys.stderr)
+        enabled = watcher.get("enabled") is True
+        print(
+            f"watcher runtime config found. enabled={str(enabled).lower()} "
+            f"watcher_id={settings['watcher_id']}",
+            file=sys.stderr,
+        )
         return START
     except RuntimeConfigNotFound as exc:
         print(f"skipping watcher: {exc}", file=sys.stderr)
@@ -117,22 +122,24 @@ def _configured_watcher_id(
     *,
     default_watcher_id: str,
 ) -> str:
+    # default_watcher_id は launcher 互換の引数として残すが、登録ゼロ時の誤フォールバックには使わない。
+    _ = default_watcher_id
     configured = _env_value(os.environ, "OTOMEKAIRO_WATCHER_ID", "")
     if configured:
         return _watcher_id(configured)
 
     discovered_ids: list[str] = []
     for db_path in _candidate_config_db_paths(server={}, environ=os.environ, config_path=None):
-        discovered_ids.extend(_enabled_watcher_ids_from_config_db(db_path))
+        discovered_ids.extend(_registered_watcher_ids_from_config_db(db_path))
     unique_ids = sorted(set(discovered_ids))
     if len(unique_ids) == 1:
         return _watcher_id(unique_ids[0])
     if len(unique_ids) > 1:
-        raise PreflightError("watcher.watcher_id must be set when multiple enabled watchers exist.")
-    return _watcher_id(default_watcher_id)
+        raise PreflightError("watcher.watcher_id must be set when multiple registered watchers exist.")
+    raise RuntimeConfigNotFound("no registered watcher in config.db.")
 
 
-def _enabled_watcher_ids_from_config_db(db_path: Path) -> list[str]:
+def _registered_watcher_ids_from_config_db(db_path: Path) -> list[str]:
     if not db_path.is_file():
         return []
     try:
@@ -150,7 +157,7 @@ def _enabled_watcher_ids_from_config_db(db_path: Path) -> list[str]:
         if not isinstance(camera_source, dict):
             continue
         watcher = camera_source.get("watcher")
-        if not isinstance(watcher, dict) or watcher.get("enabled") is not True:
+        if not isinstance(watcher, dict):
             continue
         watcher_id = watcher.get("watcher_id")
         if isinstance(watcher_id, str) and watcher_id.strip():

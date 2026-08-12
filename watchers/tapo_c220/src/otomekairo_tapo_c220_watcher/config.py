@@ -5,7 +5,7 @@ import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Mapping
 from urllib.parse import urlparse
 
 from .http import HttpError, JsonApiClient
@@ -45,6 +45,9 @@ def load_config(
     )
     tls_verify = _env_bool_value(env, "OTOMEKAIRO_TLS_VERIFY", default=False)
     request_timeout_seconds = _env_positive_float(env, "OTOMEKAIRO_WATCHER_REQUEST_TIMEOUT_SECONDS", default=180.0)
+    watcher_id = resolve_watcher_id(environ=env)
+    if watcher_id is None:
+        raise ConfigError("no registered watcher.watcher_id found in config.db.")
     return AppConfig(
         server=ServerConfig(
             base_url=base_url,
@@ -62,15 +65,26 @@ def load_config(
                 default=5.0,
             ),
         ),
-        watcher=WatcherIdentity(
-            watcher_id=_watcher_id(
-                _configured_watcher_id(
-                    environ=env,
-                    default="watcher:camera",
-                )
-            )
-        ),
+        watcher=WatcherIdentity(watcher_id=watcher_id),
     )
+
+
+def resolve_watcher_id(*, environ: Mapping[str, str] | None = None) -> str | None:
+    """登録済み watcher_id を解決する。enabled は問わない。未登録なら None。"""
+    env = environ if environ is not None else os.environ
+    explicit = _env_value(env, "OTOMEKAIRO_WATCHER_ID", "")
+    if explicit:
+        return _watcher_id(explicit)
+
+    discovered_ids: list[str] = []
+    for db_path in _candidate_config_db_paths(environ=env):
+        discovered_ids.extend(_registered_watcher_ids_from_config_db(db_path))
+    unique_ids = sorted(set(discovered_ids))
+    if len(unique_ids) == 1:
+        return _watcher_id(unique_ids[0])
+    if len(unique_ids) > 1:
+        raise ConfigError("watcher.watcher_id must be set when multiple registered watchers exist.")
+    return None
 
 
 def _resolve_access_token(
@@ -124,10 +138,12 @@ def _candidate_config_db_paths(
     *,
     environ: Mapping[str, str],
 ) -> list[Path]:
-    candidates: list[Path] = []
+    # 明示 DB は探索範囲そのものとして扱い、別環境の DB を混在させない。
     config_db_path = _env_value(environ, "OTOMEKAIRO_CONFIG_DB_PATH", "")
     if config_db_path:
-        candidates.append(Path(config_db_path).expanduser())
+        return [Path(config_db_path).expanduser().resolve()]
+
+    candidates: list[Path] = []
     data_dir = _env_value(environ, "OTOMEKAIRO_DATA_DIR", "")
     if data_dir:
         candidates.append(Path(data_dir).expanduser() / "config.db")
@@ -144,27 +160,7 @@ def _candidate_config_db_paths(
     return result
 
 
-def _configured_watcher_id(
-    *,
-    environ: Mapping[str, str],
-    default: str,
-) -> str:
-    explicit = _env_value(environ, "OTOMEKAIRO_WATCHER_ID", "")
-    if explicit:
-        return explicit
-
-    discovered_ids: list[str] = []
-    for db_path in _candidate_config_db_paths(environ=environ):
-        discovered_ids.extend(_enabled_watcher_ids_from_config_db(db_path))
-    unique_ids = sorted(set(discovered_ids))
-    if len(unique_ids) == 1:
-        return unique_ids[0]
-    if len(unique_ids) > 1:
-        raise ConfigError("watcher.watcher_id must be set when multiple enabled watchers exist.")
-    return default
-
-
-def _enabled_watcher_ids_from_config_db(db_path: Path) -> list[str]:
+def _registered_watcher_ids_from_config_db(db_path: Path) -> list[str]:
     if not db_path.is_file():
         return []
     try:
@@ -182,7 +178,7 @@ def _enabled_watcher_ids_from_config_db(db_path: Path) -> list[str]:
         if not isinstance(camera_source, dict):
             continue
         watcher = camera_source.get("watcher")
-        if not isinstance(watcher, dict) or watcher.get("enabled") is not True:
+        if not isinstance(watcher, dict):
             continue
         watcher_id = watcher.get("watcher_id")
         if isinstance(watcher_id, str) and watcher_id.strip():

@@ -134,7 +134,7 @@ watcher_runtime_config_ready() {
       return 0
       ;;
     10)
-      echo "skipping ${label} watcher: no enabled runtime config" >&2
+      echo "skipping ${label} watcher: no registered runtime config" >&2
       return 1
       ;;
     *)
@@ -202,8 +202,9 @@ if connector_runtime_config_ready "Tapo C220" "tapo_c220" "tapo-c220-connector-m
   CHILD_PIDS+=("${TAPO_PID}")
 fi
 
+# 登録済み watcher があれば enabled=false でも idle 常駐する。未登録のときだけ skip する。
 if watcher_runtime_config_ready "Tapo C220" "watcher:camera"; then
-  echo "starting Tapo C220 watcher" >&2
+  echo "starting Tapo C220 watcher (idle when disabled)" >&2
   "${TAPO_WATCHER_VENV_DIR}/bin/python" -m otomekairo_tapo_c220_watcher &
   TAPO_WATCHER_PID="$!"
   CHILD_PIDS+=("${TAPO_WATCHER_PID}")
