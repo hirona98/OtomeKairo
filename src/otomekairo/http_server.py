@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import json
 import ssl
+import sys
 from importlib import resources
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -25,6 +26,32 @@ CLIENT_DISCONNECT_SSL_REASONS = {
     "BAD_LENGTH",
     "EOF_OCCURRED",
 }
+
+
+def is_client_disconnect(exc: BaseException) -> bool:
+    """クライアント側の切断・タイムアウトを通常終了として扱うか判定する。"""
+    if isinstance(
+        exc,
+        (
+            BrokenPipeError,
+            ConnectionAbortedError,
+            ConnectionResetError,
+            TimeoutError,
+            ssl.SSLEOFError,
+            ssl.SSLZeroReturnError,
+        ),
+    ):
+        return True
+    if isinstance(exc, OSError) and exc.errno in CLIENT_DISCONNECT_ERRNOS:
+        return True
+    if isinstance(exc, ssl.SSLError):
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, str) and reason in CLIENT_DISCONNECT_SSL_REASONS:
+            return True
+        message = str(exc)
+        return any(marker in message for marker in CLIENT_DISCONNECT_SSL_REASONS)
+    return False
+
 
 SUPPRESSED_HTTP_LOG_EXACT_PATHS = {
     "/api/status",
@@ -108,6 +135,15 @@ class OtomeKairoHttpServer(ThreadingHTTPServer):
             return
 
         super().process_request_thread(tls_request, client_address)
+
+    def handle_error(self, request, client_address) -> None:
+        # マイク再接続や keep-alive 切断などで、リクエスト行読み取り中に RST されると
+        # 標準 socketserver がフル traceback を stderr に出す。クライアント切断は通常終了。
+        exc = sys.exc_info()[1]
+        if exc is not None and is_client_disconnect(exc):
+            return
+        super().handle_error(request, client_address)
+
 
 
 # ハンドラー
@@ -1522,25 +1558,4 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         )
 
     def _is_client_disconnect(self, exc: BaseException) -> bool:
-        # レスポンス送信中の切断だけを通常の終了として扱う。
-        if isinstance(
-            exc,
-            (
-                BrokenPipeError,
-                ConnectionAbortedError,
-                ConnectionResetError,
-                TimeoutError,
-                ssl.SSLEOFError,
-                ssl.SSLZeroReturnError,
-            ),
-        ):
-            return True
-        if isinstance(exc, OSError) and exc.errno in CLIENT_DISCONNECT_ERRNOS:
-            return True
-        if isinstance(exc, ssl.SSLError):
-            reason = getattr(exc, "reason", None)
-            if isinstance(reason, str) and reason in CLIENT_DISCONNECT_SSL_REASONS:
-                return True
-            message = str(exc)
-            return any(marker in message for marker in CLIENT_DISCONNECT_SSL_REASONS)
-        return False
+        return is_client_disconnect(exc)

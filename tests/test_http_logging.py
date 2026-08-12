@@ -2,7 +2,40 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 
-from otomekairo.http_server import OtomeKairoHandler
+from otomekairo.http_server import (
+    OtomeKairoHandler,
+    OtomeKairoHttpServer,
+    is_client_disconnect,
+)
+
+
+def test_is_client_disconnect_recognizes_connection_reset() -> None:
+    assert is_client_disconnect(ConnectionResetError(104, "Connection reset by peer"))
+    assert is_client_disconnect(BrokenPipeError())
+    assert not is_client_disconnect(ValueError("not a disconnect"))
+
+
+def test_handle_error_suppresses_client_disconnect_traceback(monkeypatch) -> None:
+    server = object.__new__(OtomeKairoHttpServer)
+    super_handle_error = Mock()
+    monkeypatch.setattr(
+        "http.server.ThreadingHTTPServer.handle_error",
+        super_handle_error,
+    )
+
+    try:
+        raise ConnectionResetError(104, "Connection reset by peer")
+    except ConnectionResetError:
+        server.handle_error(None, ("127.0.0.1", 12345))
+
+    super_handle_error.assert_not_called()
+
+    try:
+        raise RuntimeError("unexpected failure")
+    except RuntimeError:
+        server.handle_error(None, ("127.0.0.1", 12345))
+
+    super_handle_error.assert_called_once()
 
 
 def test_http_response_log_levels(monkeypatch) -> None:
