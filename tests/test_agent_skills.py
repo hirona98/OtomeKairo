@@ -10,6 +10,11 @@ import unittest
 from pathlib import Path
 
 from otomekairo.agent_skills import AgentSkillError, AgentSkillRegistry
+from otomekairo.defaults import (
+    DEFAULT_ELYTH_AGENT_SKILL_ROOT_PATH,
+    DEFAULT_ELYTH_AGENT_SKILL_SOURCE_ID,
+    build_default_state,
+)
 from otomekairo.llm.contexts import CurrentInput
 from otomekairo.service.agent_skills import ServiceAgentSkillsMixin
 from otomekairo.service.app import OtomeKairoService
@@ -45,6 +50,23 @@ def _write_skill(root: Path) -> Path:
 
 
 class AgentSkillRegistryTests(unittest.TestCase):
+    def test_default_state_contains_disabled_elyth_skills_template(self) -> None:
+        state = build_default_state()
+        sources = state["agent_skill_sources"]
+
+        self.assertEqual(list(sources.keys()), [DEFAULT_ELYTH_AGENT_SKILL_SOURCE_ID])
+        elyth = sources[DEFAULT_ELYTH_AGENT_SKILL_SOURCE_ID]
+        self.assertEqual(elyth["source_id"], "elyth-skills")
+        self.assertFalse(elyth["enabled"])
+        self.assertEqual(elyth["root_path"], DEFAULT_ELYTH_AGENT_SKILL_ROOT_PATH)
+        self.assertEqual(elyth["root_path"], "/opt/elyth-remote-mcp-skills/skills")
+        self.assertFalse(elyth["script_execution"]["enabled"])
+
+        # disabled source は path 未配置でも registry を空のまま起動できる
+        registry = AgentSkillRegistry.load(sources)
+        self.assertEqual(registry.catalog(), [])
+        self.assertEqual(registry.inspection_payload()["skill_count"], 0)
+
     def test_loads_metadata_body_and_resources(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory) / "skills"

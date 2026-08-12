@@ -61,17 +61,21 @@ stdout/stderr は後続判断に必要な capability result として cycle trac
 
 ## ELYTH の登録例
 
-ELYTH の skill repository を OtomeKairo 外へ checkout し、その checkout root を通常の source として登録する。
+新規既定状態は、disabled の `elyth-skills` source を設定例として持つ。
+skill package 本体は OtomeKairo repository 内へ vendoring せず、有効化前に次を checkout する。
 
 ```bash
 git clone https://github.com/Divedesign/elyth-remote-mcp-skills.git /opt/elyth-remote-mcp-skills
 ```
 
-ブラウザ UI の「Agent Skills」で、例として次を設定する。
+既定の雛形は次である。
 
 - 名前（`source_id`）: `elyth-skills`
 - root path: `/opt/elyth-remote-mcp-skills/skills`
-- 有効: `true`
-- script 実行を許可: repository 内の script が必要な場合だけ、信頼確認後に `true`
+- 有効: `false`（既定）
+- script 実行を許可: `false`（既定）。repository 内の script が必要な場合だけ、信頼確認後に `true`
+
+checkout 後にブラウザ UI の「Agent Skills」で source を有効にする。
+path を変えた場合は `root_path` を合わせて更新する。
 
 ELYTH MCP server の URL、認証、有限 MCP セッションは従来どおり MCP 設定の責務である。Agent Skill source と MCP server を `elyth` という名前で暗黙結合しない。

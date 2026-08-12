@@ -28,6 +28,9 @@ DEFAULT_CONVERSATION_DISPLAY_NAME_ID = "conversation_display_name:default"
 DEFAULT_CONVERSATION_DISPLAY_NAME = "マスター"
 DEFAULT_ELYTH_MCP_SERVER_ID = "elyth"
 DEFAULT_ESTAT_MCP_SERVER_ID = "e-stat"
+DEFAULT_ELYTH_AGENT_SKILL_SOURCE_ID = "elyth-skills"
+# ELYTH skill repository を OtomeKairo 外へ checkout したときの root 例。
+DEFAULT_ELYTH_AGENT_SKILL_ROOT_PATH = "/opt/elyth-remote-mcp-skills/skills"
 # 既定の音声起動ワード。prefix 一致で会話入力を開始する。
 DEFAULT_PERSONA_WAKE_WORDS = ["ミク", "ミクさん", "ミクちゃん"]
 DEFAULT_PERSONA_PROMPT = """## 役割や存在感
@@ -224,7 +227,9 @@ def build_default_state() -> dict:
             DEFAULT_ELYTH_MCP_SERVER_ID: build_default_elyth_mcp_server(),
             DEFAULT_ESTAT_MCP_SERVER_ID: build_default_estat_mcp_server(),
         },
-        "agent_skill_sources": {},
+        "agent_skill_sources": {
+            DEFAULT_ELYTH_AGENT_SKILL_SOURCE_ID: build_default_elyth_agent_skill_source(),
+        },
         # 一度も connect していない間の desktop 取得方針。初回 connect で端末設定へ渡す。
         "desktop_capture_defaults": build_default_desktop_capture(),
 
@@ -399,5 +404,18 @@ def build_default_estat_mcp_server() -> dict:
             "background_enabled": False,
             "min_interval_seconds": 3600,
             "max_tool_calls": 10,
+        },
+    }
+
+
+def build_default_elyth_agent_skill_source() -> dict:
+    # ELYTH Remote MCP Skills の配置例。disabled のため path 未配置でも起動できる。
+    # 有効化前に repository を root_path へ checkout し、script 実行は別途信頼確認する。
+    return {
+        "source_id": DEFAULT_ELYTH_AGENT_SKILL_SOURCE_ID,
+        "enabled": False,
+        "root_path": DEFAULT_ELYTH_AGENT_SKILL_ROOT_PATH,
+        "script_execution": {
+            "enabled": False,
         },
     }
