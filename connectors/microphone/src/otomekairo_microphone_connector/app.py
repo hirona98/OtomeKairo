@@ -18,6 +18,7 @@ from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import ClientConnection, connect
 
 from .config import AppConfig, find_runtime_access_token
+from .log import emit_log
 
 
 FRAME_BYTES = 640
@@ -151,7 +152,7 @@ class MicrophoneConnector:
                 if refreshed_token:
                     self._access_token = refreshed_token
             if not self._access_token:
-                self._log("access tokenの発行を待機します。")
+                self._log("access tokenの発行を待機します。", level="INFO")
                 time.sleep(self.config.server.reconnect_delay_seconds)
                 continue
             try:
@@ -159,7 +160,7 @@ class MicrophoneConnector:
             except KeyboardInterrupt:
                 raise
             except Exception as exc:  # noqa: BLE001
-                self._log(f"接続を再試行します: {type(exc).__name__}")
+                self._log(f"接続を再試行します: {type(exc).__name__}", level="WARNING")
                 time.sleep(self.config.server.reconnect_delay_seconds)
 
     def _run_connection(self) -> None:
@@ -177,7 +178,7 @@ class MicrophoneConnector:
             open_timeout=self.config.server.request_timeout_seconds,
             close_timeout=5.0,
         ) as websocket:
-            self._log("音声streamへ接続しました。")
+            self._log("音声streamへ接続しました。", level="INFO")
             self._run_session(websocket)
 
     def _run_session(self, websocket: ClientConnection) -> None:
@@ -285,7 +286,7 @@ class MicrophoneConnector:
                                 )
                             )
                             paused = True
-                            self._log("選択マイクを開始しました。")
+                            self._log("選択マイクを開始しました。", level="INFO")
                         except Exception as exc:  # noqa: BLE001
                             if capture is not None:
                                 capture.close()
@@ -294,7 +295,8 @@ class MicrophoneConnector:
                             next_device_open = now + DEVICE_SCAN_SECONDS
                             self._log(
                                 "選択マイクを開けませんでした: "
-                                f"{type(exc).__name__}"
+                                f"{type(exc).__name__}",
+                                level="WARNING",
                             )
 
                 control = self._receive_control(websocket)
@@ -371,7 +373,8 @@ class MicrophoneConnector:
                     capture_error = capture.error()
                     if capture_error is not None:
                         self._log(
-                            f"選択マイクを再取得します: {capture_error}"
+                            f"選択マイクを再取得します: {capture_error}",
+                            level="WARNING",
                         )
                         self._send_stop(websocket, lease_generation)
                         lease_generation = None
@@ -497,7 +500,7 @@ class MicrophoneConnector:
             except KeyboardInterrupt:
                 raise
             except Exception as exc:  # noqa: BLE001
-                self._log(f"音声出力を再接続します: {type(exc).__name__}")
+                self._log(f"音声出力を再接続します: {type(exc).__name__}", level="WARNING")
                 time.sleep(self.config.server.reconnect_delay_seconds)
 
     def _run_playback_connection(
@@ -754,5 +757,5 @@ class MicrophoneConnector:
             raise ConnectorError("lease_generation is invalid.")
         return value
 
-    def _log(self, message: str) -> None:
-        print(f"[microphone-connector] {message}", flush=True)
+    def _log(self, message: str, *, level: str = "INFO") -> None:
+        emit_log("microphone-connector", message, level=level)

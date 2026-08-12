@@ -7,6 +7,7 @@ from typing import Any
 
 from .config import AppConfig, McpServerConfig
 from .http import HttpError, JsonApiClient
+from .log import emit_log
 from .mcp_bridge import call_tool, list_tools
 from .stream import EventStreamClient, StreamError
 from .trace import trace_writer_from_env
@@ -66,7 +67,7 @@ class McpClientConnector:
                 )
                 stream.run(hello_payload=self.hello_payload(), on_event=self._handle_event)
             except (StreamError, OSError, HttpError, RuntimeError) as exc:
-                print(f"mcp connector stream error: {exc}", flush=True)
+                emit_log("mcp-client-connector", f"stream error: {exc}", level="WARNING")
                 time.sleep(self.config.server.reconnect_delay_seconds)
 
     def _handle_event(self, event: dict[str, Any]) -> None:

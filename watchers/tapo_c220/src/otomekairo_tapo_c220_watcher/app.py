@@ -12,6 +12,7 @@ from .capture import CaptureError, RtspCameraConfig, RtspFrameCapture
 from .config import AppConfig, ConfigError, resolve_watcher_id
 from .diff import FrameDiffer
 from .http import HttpError, JsonApiClient
+from .log import emit_log
 
 
 SNAPSHOT_JPEG_QUALITY = 88
@@ -31,14 +32,14 @@ class TapoC220Watcher:
         self.redaction_values: list[str] = [config.server.access_token]
 
     def run_forever(self) -> None:
-        self._log(f"starting watcher_id={self.watcher_id}")
+        self._log(f"starting watcher_id={self.watcher_id}", level="INFO")
         while True:
             try:
                 self._refresh_watcher_identity()
                 runtime = self._fetch_runtime_config()
                 self._run_runtime(runtime)
             except (HttpError, CaptureError, OSError, RuntimeError, ValueError, ConfigError) as exc:
-                self._log(f"watch loop failed error={self._short_error(exc)}")
+                self._log(f"watch loop failed error={self._short_error(exc)}", level="ERROR")
                 time.sleep(self.config.server.reconnect_delay_seconds)
 
     def _refresh_watcher_identity(self) -> None:
@@ -47,14 +48,14 @@ class TapoC220Watcher:
         if resolved is None:
             raise ConfigError("no registered watcher.watcher_id found in config.db.")
         if resolved != self.watcher_id:
-            self._log(f"watcher_id resolved {self.watcher_id} -> {resolved}")
+            self._log(f"watcher_id resolved {self.watcher_id} -> {resolved}", level="INFO")
             self.watcher_id = resolved
 
     def _run_runtime(self, runtime: dict[str, Any]) -> None:
         watcher = self._object(runtime.get("watcher"), "runtime.watcher")
         camera_source = self._object(runtime.get("camera_source"), "runtime.camera_source")
         if watcher.get("enabled") is not True:
-            self._log("watcher disabled")
+            self._log("watcher disabled", level="INFO")
             time.sleep(self.config.server.reconnect_delay_seconds)
             return
 
@@ -76,13 +77,16 @@ class TapoC220Watcher:
         snapshot_dir = Path(self._text_value(runtime, "snapshot_dir"))
         display_name = self._text_value(camera_source, "display_name")
 
-        self._log(f"watching vision_source_id={camera_source.get('vision_source_id')} interval={poll_interval}")
+        self._log(
+            f"watching vision_source_id={camera_source.get('vision_source_id')} interval={poll_interval}",
+            level="INFO",
+        )
         while True:
             refreshed = self._fetch_runtime_config()
             refreshed_watcher = self._object(refreshed.get("watcher"), "runtime.watcher")
             refreshed_camera_source = self._object(refreshed.get("camera_source"), "runtime.camera_source")
             if refreshed_watcher != watcher or refreshed_camera_source != camera_source:
-                self._log("runtime config changed")
+                self._log("runtime config changed", level="INFO")
                 return
 
             frame = capture.capture_frame(timeout_seconds=camera_config.rtsp_open_timeout_seconds)
@@ -153,7 +157,8 @@ class TapoC220Watcher:
             f"threshold={threshold:.4f} "
             f"wake_due={str(wake_due).lower()} "
             f"cooldown_remaining_seconds={cooldown_remaining_seconds:.1f} "
-            f"action={action}"
+            f"action={action}",
+            level="DEBUG",
         )
 
     def _snapshot_path(self, snapshot_dir: Path) -> Path:
@@ -185,7 +190,10 @@ class TapoC220Watcher:
             },
         }
         self.http.post("/api/wake", payload)
-        self._log(f"wake posted snapshot={snapshot_path.name} changed_ratio={changed_ratio:.3f}")
+        self._log(
+            f"wake posted snapshot={snapshot_path.name} changed_ratio={changed_ratio:.3f}",
+            level="INFO",
+        )
 
     def _prune_snapshots(self, snapshot_dir: Path, *, max_count: int = 200, max_age_hours: float = 24.0) -> None:
         if not snapshot_dir.is_dir():
@@ -230,5 +238,5 @@ class TapoC220Watcher:
                 text = text.replace(secret, "***")
         return text.replace("\n", " ")[:160]
 
-    def _log(self, message: str) -> None:
-        print(f"[tapo-c220-watcher] {message}", file=sys.stderr, flush=True)
+    def _log(self, message: str, *, level: str = "INFO") -> None:
+        emit_log("tapo-c220-watcher", message, level=level, stream=sys.stderr)
