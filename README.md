@@ -45,6 +45,7 @@ VSCode の F5 も起動前に同じ系統の準備を行うが、既に入って
 
 データはデフォルトで `var/otomekairo/` に保存する。
 デバッグログは `var/otomekairo/server.log` に保存する。
+ログの最小レベルは既定で `WARNING`（`OTOMEKAIRO_DEBUG_LOG_MIN_LEVEL` で変更）。
 ログは既定で 5MiB を超えるとローテーションし、`server.log` 本体と 3 世代を合わせて最大約 20MiB 保持する。
 
 ブラウザ UI は同じ HTTPS サーバから配信する。
