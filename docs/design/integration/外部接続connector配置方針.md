@@ -61,7 +61,9 @@ Webカメラは新しい capability id にせず、`vision.capture` の `VisionS
 - どれか 1 つの process が終了した場合は service 全体を終了し、systemd の restart に任せる
 - microphone connector は音声入力が無効でも idle process として起動する
 - camera source または MCP server の runtime config が未登録の場合、対象 connector は起動しない
-- watcher runtime config が未登録または無効の場合、watcher は起動しない
+- watcher は `camera_source.watcher` が登録済みなら、`watcher.enabled=false` でも idle process として起動する
+- watcher runtime config 自体が未登録の場合だけ watcher は起動しない
+- idle 中の watcher は runtime config を再取得し、有効化や閾値変更を service 再起動なしで反映する
 
 ## connector の責務
 
