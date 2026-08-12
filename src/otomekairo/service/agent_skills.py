@@ -49,6 +49,7 @@ class ServiceAgentSkillsMixin:
                 "run": run,
                 "prior_activation": prior_activation,
                 "capability_decision_view": capability_decision_view or [],
+                "allowed_skill_ids": [entry["skill_id"] for entry in catalog],
                 "skill_catalog": catalog,
             },
         )
@@ -99,6 +100,14 @@ class ServiceAgentSkillsMixin:
                     "active_skills": [
                         registry.require_skill(skill_id).instruction_payload()
                         for skill_id in active_ids
+                    ],
+                    "allowed_additional_skill_ids": linked_candidates,
+                    "allowed_resource_reads": [
+                        {
+                            "skill_id": candidate["skill_id"],
+                            "path": candidate["path"],
+                        }
+                        for candidate in resource_candidates
                     ],
                     "additional_skill_candidates": linked_candidates,
                     "resource_candidates": resource_candidates,

@@ -272,7 +272,9 @@ def build_agent_skill_selection_messages(*, selection_context: dict[str, Any]) -
                 "Agent Skills catalog から、現在の判断や作業に実際に必要な skill だけを選択します。\n"
                 "名前の一致ではなく、current_input、run、capability の意味と skill description を比較してください。\n"
                 "prior_activation は直前の capability または run step で使った skill の識別要約であり、継続性の根拠として現在も必要か再評価してください。\n"
-                "skill が不要なら selected_skill_ids は空配列にします。catalog にない id は選べません。\n"
+                "selected_skill_ids は allowed_skill_ids に並ぶ文字列だけをそのままコピーして作ります。\n"
+                "capability_decision_view は skill の必要性を考えるための実行能力情報であり、その capability id は selected_skill_ids の値ではありません。\n"
+                "該当する Agent Skill が不要なら selected_skill_ids は空配列にします。\n"
                 "JSON object だけを返し、キーは selected_skill_ids, reason_summary の2個に固定します。\n"
                 "selected_skill_ids は重複のない文字列配列、reason_summary は短い文字列です。"
             ),
@@ -288,6 +290,7 @@ def build_agent_skill_selection_repair_prompt(validation_error: str) -> str:
     return (
         "前回の出力は AgentSkillSelection 契約を満たしていませんでした。\n"
         f"validator_error: {validation_error}\n"
+        "selected_skill_ids には AGENT_SKILL_SELECTION_CONTEXT.allowed_skill_ids の文字列だけをそのまま使い、"
         "selected_skill_ids, reason_summary の2キーだけを持つJSON objectを返してください。"
     )
 
@@ -298,8 +301,10 @@ def build_agent_skill_material_selection_messages(*, selection_context: dict[str
             "role": "system",
             "content": (
                 "選択済み Agent Skill の本文を読み、作業に必要な追加 skill と resource だけを選択します。\n"
-                "resource 本文はまだ提示されていません。必要なものだけ resource_reads に指定してください。\n"
-                "候補にない skill や path は指定できません。追加読込が不要なら done=true にします。\n"
+                "additional_skill_ids は allowed_additional_skill_ids に並ぶ文字列だけをそのままコピーして作ります。\n"
+                "resource_reads は allowed_resource_reads に並ぶ skill_id/path の組だけをそのままコピーして作ります。\n"
+                "SKILL.md へのリンクは sibling skill の関係を表し、resource_reads には入れません。\n"
+                "許可リストが空なら対応する出力配列も空にし、追加読込が不要なら done=true にします。\n"
                 "JSON object だけを返し、キーは additional_skill_ids, resource_reads, done, reason_summary の4個に固定します。\n"
                 "resource_reads の各要素は skill_id, path の2キーです。"
             ),
@@ -315,6 +320,7 @@ def build_agent_skill_material_selection_repair_prompt(validation_error: str) ->
     return (
         "前回の出力は AgentSkillMaterialSelection 契約を満たしていませんでした。\n"
         f"validator_error: {validation_error}\n"
+        "additional_skill_ids は allowed_additional_skill_ids、resource_reads は allowed_resource_reads にある値だけをそのまま使い、"
         "additional_skill_ids, resource_reads, done, reason_summary の4キーだけを持つJSON objectを返してください。"
     )
 

@@ -101,7 +101,10 @@ class LLMClient:
         return self._generate_structured_payload(
             model_config=model_config,
             messages=build_agent_skill_selection_messages(selection_context=selection_context),
-            validator=self._validate_agent_skill_selection,
+            validator=lambda payload: self._validate_agent_skill_selection(
+                payload,
+                selection_context=selection_context,
+            ),
             repair_prompt_builder=build_agent_skill_selection_repair_prompt,
             failure_message="Agent Skill の選択に失敗しました。",
             operation="agent_skill_selection",
@@ -123,13 +126,21 @@ class LLMClient:
         return self._generate_structured_payload(
             model_config=model_config,
             messages=build_agent_skill_material_selection_messages(selection_context=selection_context),
-            validator=self._validate_agent_skill_material_selection,
+            validator=lambda payload: self._validate_agent_skill_material_selection(
+                payload,
+                selection_context=selection_context,
+            ),
             repair_prompt_builder=build_agent_skill_material_selection_repair_prompt,
             failure_message="Agent Skill resource の選択に失敗しました。",
             operation="agent_skill_material_selection",
         )
 
-    def _validate_agent_skill_selection(self, payload: dict[str, Any]) -> None:
+    def _validate_agent_skill_selection(
+        self,
+        payload: dict[str, Any],
+        *,
+        selection_context: dict[str, Any] | None = None,
+    ) -> None:
         _validate_exact_keys(payload, {"selected_skill_ids", "reason_summary"}, "AgentSkillSelection")
         skill_ids = payload.get("selected_skill_ids")
         reason_summary = payload.get("reason_summary")
@@ -142,7 +153,34 @@ class LLMClient:
         ):
             raise LLMError("AgentSkillSelection の値が不正です。")
 
-    def _validate_agent_skill_material_selection(self, payload: dict[str, Any]) -> None:
+        if selection_context is None:
+            return
+        allowed_values = selection_context.get("allowed_skill_ids")
+        if isinstance(allowed_values, list):
+            allowed_skill_ids = {
+                value
+                for value in allowed_values
+                if isinstance(value, str)
+            }
+        else:
+            catalog = selection_context.get("skill_catalog")
+            allowed_skill_ids = {
+                entry.get("skill_id")
+                for entry in catalog if isinstance(entry, dict)
+            } if isinstance(catalog, list) else set()
+        unknown_ids = sorted(set(skill_ids) - allowed_skill_ids)
+        if unknown_ids:
+            raise LLMError(
+                "AgentSkillSelection が catalog にない skill_id を返しました: "
+                + ", ".join(unknown_ids)
+            )
+
+    def _validate_agent_skill_material_selection(
+        self,
+        payload: dict[str, Any],
+        *,
+        selection_context: dict[str, Any] | None = None,
+    ) -> None:
         _validate_exact_keys(
             payload,
             {"additional_skill_ids", "resource_reads", "done", "reason_summary"},
@@ -168,6 +206,38 @@ class LLMClient:
             if not all(isinstance(value, str) and value.strip() for value in pair) or pair in seen_reads:
                 raise LLMError("AgentSkillMaterialSelection.resource_reads が不正です。")
             seen_reads.add(pair)
+
+        if selection_context is None:
+            return
+        additional_candidates = selection_context.get("allowed_additional_skill_ids")
+        if not isinstance(additional_candidates, list):
+            additional_candidates = selection_context.get("additional_skill_candidates")
+        allowed_additional_ids = {
+            value
+            for value in additional_candidates
+            if isinstance(value, str)
+        } if isinstance(additional_candidates, list) else set()
+        invalid_additional = sorted(set(skill_ids) - allowed_additional_ids)
+        if invalid_additional:
+            raise LLMError(
+                "AgentSkillMaterialSelection が候補にない skill_id を返しました: "
+                + ", ".join(invalid_additional)
+            )
+
+        resource_candidates = selection_context.get("allowed_resource_reads")
+        if not isinstance(resource_candidates, list):
+            resource_candidates = selection_context.get("resource_candidates")
+        candidate_pairs = {
+            (entry.get("skill_id"), entry.get("path"))
+            for entry in resource_candidates
+            if isinstance(entry, dict)
+        } if isinstance(resource_candidates, list) else set()
+        invalid_pairs = sorted(seen_reads - candidate_pairs)
+        if invalid_pairs:
+            raise LLMError(
+                "AgentSkillMaterialSelection が候補にない resource を返しました: "
+                + ", ".join(f"{skill_id}/{path}" for skill_id, path in invalid_pairs)
+            )
 
     def generate_input_interpretation(
         self,

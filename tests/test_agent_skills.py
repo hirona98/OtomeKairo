@@ -8,6 +8,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from otomekairo.agent_skills import AgentSkillError, AgentSkillRegistry
 from otomekairo.defaults import (
@@ -16,6 +17,8 @@ from otomekairo.defaults import (
     build_default_state,
 )
 from otomekairo.llm.contexts import CurrentInput
+from otomekairo.llm.contracts import LLMError
+from otomekairo.llm.client import LLMClient
 from otomekairo.service.agent_skills import ServiceAgentSkillsMixin
 from otomekairo.service.app import OtomeKairoService
 
@@ -226,6 +229,127 @@ class AgentSkillRegistryTests(unittest.TestCase):
                 context["skills"][0]["selected_resources"][0]["content"],
                 "selected guide",
             )
+
+    def test_skill_selection_repairs_catalog_violation_once(self) -> None:
+        responses = iter(
+            [
+                json.dumps(
+                    {
+                        "selected_skill_ids": ["vision.capture"],
+                        "reason_summary": "視覚観測に必要",
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "selected_skill_ids": [],
+                        "reason_summary": "該当する Agent Skill は不要",
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        selection_context = {
+            "allowed_skill_ids": ["elyth-observe"],
+            "skill_catalog": [
+                {
+                    "source_id": "elyth-skills",
+                    "skill_id": "elyth-observe",
+                    "description": "Observe ELYTH.",
+                    "sha256": "digest",
+                }
+            ]
+        }
+
+        with patch("otomekairo.llm.client.complete_text", side_effect=lambda **_kwargs: next(responses)) as complete:
+            result = LLMClient().generate_agent_skill_selection(
+                model_config={"model": "real-model"},
+                selection_context=selection_context,
+            )
+
+        self.assertEqual(result["selected_skill_ids"], [])
+        self.assertEqual(complete.call_count, 2)
+        repair_prompt = complete.call_args_list[1].kwargs["messages"][-1]["content"]
+        self.assertIn("catalog にない skill_id", repair_prompt)
+        self.assertIn("allowed_skill_ids の文字列だけ", repair_prompt)
+
+    def test_material_selection_repairs_linked_skill_returned_as_resource(self) -> None:
+        invalid_path = "../elyth-discover/SKILL.md"
+        responses = iter(
+            [
+                json.dumps(
+                    {
+                        "additional_skill_ids": [],
+                        "resource_reads": [
+                            {
+                                "skill_id": "elyth-discover",
+                                "path": invalid_path,
+                            }
+                        ],
+                        "done": False,
+                        "reason_summary": "linked skill を読む",
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "additional_skill_ids": ["elyth-discover"],
+                        "resource_reads": [],
+                        "done": True,
+                        "reason_summary": "linked skill として追加する",
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        selection_context = {
+            "allowed_additional_skill_ids": ["elyth-discover"],
+            "allowed_resource_reads": [],
+            "additional_skill_candidates": ["elyth-discover"],
+            "resource_candidates": [],
+        }
+
+        with patch("otomekairo.llm.client.complete_text", side_effect=lambda **_kwargs: next(responses)) as complete:
+            result = LLMClient().generate_agent_skill_material_selection(
+                model_config={"model": "real-model"},
+                selection_context=selection_context,
+            )
+
+        self.assertEqual(result["additional_skill_ids"], ["elyth-discover"])
+        self.assertEqual(result["resource_reads"], [])
+        self.assertEqual(complete.call_count, 2)
+        repair_prompt = complete.call_args_list[1].kwargs["messages"][-1]["content"]
+        self.assertIn("候補にない resource", repair_prompt)
+        self.assertIn("allowed_resource_reads にある値だけ", repair_prompt)
+
+    def test_skill_selection_fails_after_second_catalog_violation(self) -> None:
+        response = json.dumps(
+            {
+                "selected_skill_ids": ["vision.capture"],
+                "reason_summary": "視覚観測に必要",
+            },
+            ensure_ascii=False,
+        )
+        selection_context = {
+            "allowed_skill_ids": ["elyth-observe"],
+            "skill_catalog": [
+                {
+                    "source_id": "elyth-skills",
+                    "skill_id": "elyth-observe",
+                    "description": "Observe ELYTH.",
+                    "sha256": "digest",
+                }
+            ]
+        }
+
+        with patch("otomekairo.llm.client.complete_text", return_value=response) as complete:
+            with self.assertRaisesRegex(LLMError, "catalog にない skill_id"):
+                LLMClient().generate_agent_skill_selection(
+                    model_config={"model": "real-model"},
+                    selection_context=selection_context,
+                )
+
+        self.assertEqual(complete.call_count, 2)
 
     def test_run_script_capability_uses_local_runner_binding(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
