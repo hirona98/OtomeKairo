@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import timedelta
 from typing import Any
+from urllib.parse import quote
 
 from otomekairo.service.input.constants import (
     WORLD_STATE_HINT_SCORES,
@@ -324,6 +325,8 @@ class ServiceInputWorldStateNormalizeMixin:
             service_key = self._world_state_service_key(context)
             if service_key is not None:
                 return {"mode": "external_service_service", "key": f"external_service:{service_key}"}
+            if isinstance(context, WorldStateExternalServiceContext) and context.capability_id == "mcp.call_tool":
+                raise ValueError("mcp.call_tool external_service requires mcp_server_id and tool_name.")
             return {"mode": "scope", "key": f"{state_type}:{scope_type}:{scope_key}"}
         if state_type == "body":
             return {"mode": "body_foreground", "key": "body:self"}
@@ -348,6 +351,18 @@ class ServiceInputWorldStateNormalizeMixin:
             return None
         if not isinstance(context.service, str) or not context.service.strip():
             return None
+        if context.capability_id == "mcp.call_tool":
+            if (
+                not isinstance(context.mcp_server_id, str)
+                or not context.mcp_server_id.strip()
+                or not isinstance(context.tool_name, str)
+                or not context.tool_name.strip()
+            ):
+                return None
+            # 各識別子を別々に encode し、区切り文字を含む名前同士も衝突させない。
+            server_key = quote(context.mcp_server_id.strip(), safe="")
+            tool_key = quote(context.tool_name.strip(), safe="")
+            return f"{server_key}/{tool_key}"
         normalized = "".join(char if char.isalnum() else "_" for char in context.service.lower()).strip("_")
         return normalized or None
 

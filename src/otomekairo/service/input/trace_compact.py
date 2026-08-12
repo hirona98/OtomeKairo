@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.capabilities import capability_manifests
+from otomekairo.interaction import InteractionContext
 from otomekairo.llm.contexts import InitiativeContext
 
 
@@ -12,6 +13,7 @@ class ServiceInputTraceCompactMixin:
         *,
         trigger_kind: str,
         input_text: str,
+        interaction_context: InteractionContext | None,
         observation_summary: dict[str, Any] | None,
         capability_request_summary: dict[str, Any] | None,
         followup_capability_request_summary: dict[str, Any] | None,
@@ -35,6 +37,7 @@ class ServiceInputTraceCompactMixin:
             "current_input_summary": self._build_current_input(
                 input_text=input_text,
                 trigger_kind=trigger_kind,
+                interaction_context=interaction_context,
                 capability_request_summary=capability_request_summary,
             ).to_prompt_payload(),
             "entry_summary": self._build_trigger_compact_entry_summary(
@@ -563,10 +566,22 @@ class ServiceInputTraceCompactMixin:
         readiness_digest = summary.get("readiness_digest")
         if isinstance(readiness_digest, dict):
             payload["readiness_digest"] = readiness_digest
-        for key in ("vision_source_id", "source_kind", "source_owner", "source_label", "operation", "amount"):
+        for key in (
+            "vision_source_id",
+            "source_kind",
+            "source_owner",
+            "source_label",
+            "operation",
+            "amount",
+            "mcp_server_id",
+            "tool_name",
+        ):
             value = summary.get(key)
             if isinstance(value, str) and value.strip():
                 payload[key] = value.strip()
+        pre_send_check = summary.get("pre_send_check")
+        if isinstance(pre_send_check, dict):
+            payload["pre_send_check"] = pre_send_check
         if not payload:
             return None
         return payload

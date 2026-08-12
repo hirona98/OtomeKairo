@@ -21,6 +21,14 @@ class DummyService(ServiceDocsMixin, ServiceConfigMixin):
 
 
 class DocsApiTests(unittest.TestCase):
+    def test_server_identity_uses_running_code_api_version(self) -> None:
+        service = DummyService()
+        service.store.state["api_version"] = "0.3.0"
+
+        identity = service.read_server_identity()
+
+        self.assertEqual(identity["api_version"], "0.10.0")
+
     def test_docs_requires_token(self) -> None:
         service = DummyService()
 
@@ -36,9 +44,8 @@ class DocsApiTests(unittest.TestCase):
 
         self.assertEqual(response["document_set_id"], "console_docs")
         self.assertEqual(response["format"], "plain_text")
-        self.assertEqual([section["section_id"] for section in response["sections"]], ["conversation", "wake"])
-        self.assertIn("POST {BASE_URL}/api/conversation", response["sections"][0]["body_text"])
-        self.assertIn("POST {BASE_URL}/api/wake", response["sections"][1]["body_text"])
+        self.assertEqual([section["section_id"] for section in response["sections"]], ["wake"])
+        self.assertIn("POST {BASE_URL}/api/wake", response["sections"][0]["body_text"])
         self.assertNotIn("body_markdown", response["sections"][0])
         joined = "\n".join(section["body_text"] for section in response["sections"])
         self.assertNotIn("tok_", joined)

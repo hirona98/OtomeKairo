@@ -51,6 +51,74 @@ class ServiceConfigInspectionMixin:
         }
         return localize_timestamp_fields(snapshot)
 
+    def get_memory_snapshot_inspection(
+        self,
+        token: str | None,
+        *,
+        unit_limit: int = 12,
+        episode_limit: int = 8,
+    ) -> dict[str, Any]:
+        # 選択中 memory_set の継続理解と経験を、読み取り専用の要約として返す。
+        state = self._require_token(token)
+        generated_at = self._now_iso()
+        memory_set_id = state["selected_memory_set_id"]
+        safe_unit_limit = max(1, min(int(unit_limit), 30))
+        safe_episode_limit = max(1, min(int(episode_limit), 20))
+
+        memory_units = self.store.list_memory_units_for_recall(
+            memory_set_id=memory_set_id,
+            current_time=generated_at,
+            statuses=["active", "dormant"],
+            limit=safe_unit_limit,
+        )
+        episodes = self.store.list_episodes_for_recall(
+            memory_set_id=memory_set_id,
+            limit=safe_episode_limit,
+        )
+        snapshot = {
+            "generated_at": generated_at,
+            "memory_set_id": memory_set_id,
+            "memory_units": [
+                self._compact_memory_unit_for_inspection(unit)
+                for unit in memory_units
+                if isinstance(unit, dict)
+            ],
+            "episodes": [
+                self._compact_episode_for_inspection(episode)
+                for episode in episodes
+                if isinstance(episode, dict)
+            ],
+        }
+        return localize_timestamp_fields(snapshot)
+
+    def _compact_memory_unit_for_inspection(self, unit: dict[str, Any]) -> dict[str, Any]:
+        # embedding や根拠 ID 列は出さず、人間が読める要約だけを残す。
+        return {
+            "memory_unit_id": unit.get("memory_unit_id"),
+            "memory_type": unit.get("memory_type"),
+            "summary_text": unit.get("summary_text"),
+            "status": unit.get("status"),
+            "salience": unit.get("salience"),
+            "confidence": unit.get("confidence"),
+            "scope_type": unit.get("scope_type"),
+            "scope_key": unit.get("scope_key"),
+            "formed_at": unit.get("formed_at"),
+            "last_confirmed_at": unit.get("last_confirmed_at"),
+            "updated_at": unit.get("updated_at") or unit.get("last_confirmed_at") or unit.get("formed_at"),
+        }
+
+    def _compact_episode_for_inspection(self, episode: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "episode_id": episode.get("episode_id"),
+            "episode_type": episode.get("episode_type"),
+            "summary_text": episode.get("summary_text"),
+            "outcome_text": episode.get("outcome_text"),
+            "salience": episode.get("salience"),
+            "formed_at": episode.get("formed_at"),
+            "primary_scope_type": episode.get("primary_scope_type"),
+            "primary_scope_key": episode.get("primary_scope_key"),
+        }
+
     def _build_capability_inspection_snapshot(
         self,
         *,
@@ -121,6 +189,7 @@ class ServiceConfigInspectionMixin:
         current_time: str,
     ) -> dict[str, Any]:
         return {
+            "audio_runtime_state": self._audio_runtime.snapshot(),
             "wake_runtime_state": self._snapshot_wake_runtime_state(current_time=current_time),
             "wake_policy_observations": self._snapshot_wake_policy_observations(state=state),
             "memory_postprocess_runtime_state": self._snapshot_memory_postprocess_runtime_state(),
@@ -147,13 +216,20 @@ class ServiceConfigInspectionMixin:
                 current_time=current_time,
                 limit=8,
             ),
-            "activity_context": self._summarize_activity_context(
-                self.store.get_current_activity_state(
+            "activity_contexts": [
+                summary
+                for activity_state in self.store.list_current_activity_states(
                     memory_set_id=state["selected_memory_set_id"],
                     current_time=current_time,
-                ),
-                current_time=current_time,
-            ),
+                    limit=12,
+                )
+                if (
+                    summary := self._summarize_activity_context(
+                        activity_state,
+                        current_time=current_time,
+                    )
+                ) is not None
+            ],
             "drive_states": self._list_current_drive_states(
                 state=state,
                 current_time=current_time,
@@ -588,7 +664,7 @@ class ServiceConfigInspectionMixin:
         }
 
     def _world_state_scope_ref(self, *, scope_type: str, scope_key: str) -> str:
-        if scope_type in {"self", "user", "world"}:
+        if scope_type in {"self", "world"}:
             return scope_key
         if scope_type == "topic":
             return scope_key

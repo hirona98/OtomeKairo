@@ -42,6 +42,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         state: dict[str, Any],
         augmented_query_text: str,
         recall_hint: dict[str, Any],
+        current_person_ref: str | None,
         current_time: str | None = None,
     ) -> dict[str, Any]:
         # コンテキスト
@@ -52,7 +53,10 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         )
         recall_hint = entity_resolution["recall_hint"]
         primary_recall_focus = recall_hint["primary_recall_focus"]
-        scope_context = self._build_scope_context(recall_hint)
+        scope_context = self._build_scope_context(
+            recall_hint,
+            current_person_ref=current_person_ref,
+        )
         raw_candidate_ids: set[str] = set()
 
         # 有効なcommitment群
@@ -75,18 +79,18 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         )
         self._collect_raw_candidate_ids(raw_candidate_ids, relationship_model)
 
-        # ユーザーモデル
-        user_model = self._limit_memory_section(
+        # 入力文脈に対応する人物モデル
+        person_model = self._limit_memory_section(
             raw_items=self._build_scope_memory_section(
                 memory_set_id=memory_set_id,
-                scope_filters=scope_context["user_filters"],
-                limit=SECTION_LIMITS["user_model"] * 3,
+                scope_filters=scope_context["person_filters"],
+                limit=SECTION_LIMITS["person_model"] * 3,
                 current_time=current_time,
                 exclude_memory_types=["commitment"],
             ),
-            limit=SECTION_LIMITS["user_model"],
+            limit=SECTION_LIMITS["person_model"],
         )
-        self._collect_raw_candidate_ids(raw_candidate_ids, user_model)
+        self._collect_raw_candidate_ids(raw_candidate_ids, person_model)
 
         # 自己モデル
         self_model = self._limit_memory_section(
@@ -141,23 +145,29 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             scope_context=scope_context,
         )
         self._collect_raw_candidate_ids(raw_candidate_ids, association_sections["self_model"])
-        self._collect_raw_candidate_ids(raw_candidate_ids, association_sections["user_model"])
+        self._collect_raw_candidate_ids(raw_candidate_ids, association_sections["person_model"])
         self._collect_raw_candidate_ids(raw_candidate_ids, association_sections["relationship_model"])
         self._collect_raw_candidate_ids(raw_candidate_ids, association_sections["active_topics"])
         self._collect_raw_candidate_ids(raw_candidate_ids, association_sections["episodic_evidence"])
 
         # canonical entity から 1-hop の関係根拠を補強する。
+        relation_entity_refs = [
+            entity_ref
+            for entity_ref in recall_hint.get("mentioned_entities", [])
+            if isinstance(entity_ref, str)
+        ]
+        if isinstance(current_person_ref, str) and current_person_ref:
+            relation_entity_refs.insert(0, current_person_ref)
         relation_index_result = self.store.list_relation_index_for_recall(
             memory_set_id=memory_set_id,
-            entity_refs=[
-                entity_ref
-                for entity_ref in recall_hint.get("mentioned_entities", [])
-                if isinstance(entity_ref, str)
-            ],
+            entity_refs=list(dict.fromkeys(relation_entity_refs)),
             current_time=current_time or now_iso(),
             limit=RELATION_INDEX_RECALL_LIMIT,
         )
-        relation_sections = self._relation_index_candidate_sections(relation_index_result)
+        relation_sections = self._relation_index_candidate_sections(
+            relation_index_result,
+            current_person_ref=current_person_ref,
+        )
         for section_name in relation_sections:
             self._collect_raw_candidate_ids(raw_candidate_ids, relation_sections[section_name])
 
@@ -166,9 +176,9 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             raw_items=self_model + association_sections["self_model"] + relation_sections["self_model"],
             limit=SECTION_LIMITS["self_model"] * 3,
         )
-        user_model = self._limit_memory_section(
-            raw_items=user_model + association_sections["user_model"] + relation_sections["user_model"],
-            limit=SECTION_LIMITS["user_model"] * 3,
+        person_model = self._limit_memory_section(
+            raw_items=person_model + association_sections["person_model"] + relation_sections["person_model"],
+            limit=SECTION_LIMITS["person_model"] * 3,
         )
         relationship_model = self._limit_memory_section(
             raw_items=(
@@ -192,7 +202,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         )
 
         # 競合元
-        selected_memory_items = active_commitments + relationship_model + user_model + self_model
+        selected_memory_items = active_commitments + relationship_model + person_model + self_model
 
         # 競合群
         conflicts = self._build_conflicts(
@@ -203,7 +213,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         # 選別候補
         candidate_sections = {
             "self_model": self_model,
-            "user_model": user_model,
+            "person_model": person_model,
             "relationship_model": relationship_model,
             "active_topics": active_topics,
             "active_commitments": active_commitments,
@@ -316,11 +326,16 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "candidate_count": len(raw_candidate_ids),
         }
 
-    def _relation_index_candidate_sections(self, result: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    def _relation_index_candidate_sections(
+        self,
+        result: dict[str, Any],
+        *,
+        current_person_ref: str | None,
+    ) -> dict[str, list[dict[str, Any]]]:
         # relation_index は独立sectionを作らず、記憶本来のsectionへ戻す。
         sections = {
             "self_model": [],
-            "user_model": [],
+            "person_model": [],
             "relationship_model": [],
             "active_topics": [],
             "active_commitments": [],
@@ -342,12 +357,20 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
                     "relation_target_ref": candidate.get("relation_target_ref"),
                 }
             )
-            section_name = self._relation_index_section_name(item)
+            section_name = self._relation_index_section_name(
+                item,
+                current_person_ref=current_person_ref,
+            )
             if section_name is not None:
                 sections[section_name].append(item)
         return sections
 
-    def _relation_index_section_name(self, item: dict[str, Any]) -> str | None:
+    def _relation_index_section_name(
+        self,
+        item: dict[str, Any],
+        *,
+        current_person_ref: str | None,
+    ) -> str | None:
         if item.get("memory_type") == "commitment":
             return (
                 "active_commitments"
@@ -357,8 +380,8 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         scope_type = item.get("scope_type")
         if scope_type == "self":
             return "self_model"
-        if scope_type == "user":
-            return "user_model"
+        if scope_type == "entity" and item.get("scope_key") == current_person_ref:
+            return "person_model"
         if scope_type == "relationship":
             return "relationship_model"
         if scope_type in {"entity", "topic", "world"}:
@@ -389,7 +412,12 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "stale_memory_unit_ids": result.get("stale_memory_unit_ids", []),
         }
 
-    def _build_scope_context(self, recall_hint: dict[str, Any]) -> dict[str, list[tuple[str, str]]]:
+    def _build_scope_context(
+        self,
+        recall_hint: dict[str, Any],
+        *,
+        current_person_ref: str | None,
+    ) -> dict[str, list[tuple[str, str]]]:
         # focus scope群
         focus_specs = self._parse_focus_scopes(recall_hint.get("focus_scopes", []))
         mentioned_entity_filters = self._parse_mentioned_entities(
@@ -401,11 +429,19 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         primary_recall_focus = recall_hint["primary_recall_focus"]
 
         # 基底scope群
-        user_filters = self._merged_scope_filters([("user", "user")], focus_specs, allowed_scope_type="user")
+        person_filters = (
+            [("entity", current_person_ref)]
+            if isinstance(current_person_ref, str) and current_person_ref
+            else []
+        )
         self_filters = self._merged_scope_filters([("self", "self")], focus_specs, allowed_scope_type="self")
-        relationship_defaults = [("relationship", "self|user")]
+        relationship_defaults = (
+            [("relationship", f"self|{current_person_ref}")]
+            if isinstance(current_person_ref, str) and current_person_ref
+            else []
+        )
         relationship_filters = self._merged_scope_filters(
-            relationship_defaults if primary_recall_focus in {"commitment", "user", "relationship"} else [],
+            relationship_defaults if primary_recall_focus in {"commitment", "person", "relationship"} else [],
             focus_specs,
             allowed_scope_type="relationship",
         )
@@ -420,7 +456,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             else []
         )
         episode_scope_filters = self._merged_scope_filters(
-            user_filters
+            person_filters
             + relationship_filters
             + self_filters
             + topic_filters
@@ -432,11 +468,15 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
 
         # 結果
         return {
-            "user_filters": user_filters,
+            "person_filters": person_filters,
             "self_filters": self_filters,
             "relationship_filters": relationship_filters,
             "topic_filters": topic_filters,
-            "entity_filters": mentioned_entity_filters,
+            "entity_filters": [
+                scope_filter
+                for scope_filter in mentioned_entity_filters
+                if scope_filter not in person_filters
+            ],
             "world_filters": world_filters,
             "episode_scope_filters": episode_scope_filters,
         }
@@ -531,9 +571,13 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             if not isinstance(scope, str):
                 continue
             normalized = scope.strip()
-            if not normalized.startswith("relationship:"):
+            if normalized.startswith("entity:"):
+                candidate_refs = [normalized.removeprefix("entity:")]
+            elif normalized.startswith("relationship:"):
+                candidate_refs = normalized.removeprefix("relationship:").split("|")
+            else:
                 continue
-            for ref in normalized.removeprefix("relationship:").split("|"):
+            for ref in candidate_refs:
                 ref = ref.strip()
                 if self._is_named_entity_ref(ref):
                     refs.append(ref)
@@ -572,7 +616,10 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             if not isinstance(scope, str):
                 continue
             normalized = scope.strip()
-            if normalized.startswith("relationship:"):
+            if normalized.startswith("entity:"):
+                entity_ref = normalized.removeprefix("entity:").strip()
+                normalized = "entity:" + mapping.get(entity_ref, entity_ref)
+            elif normalized.startswith("relationship:"):
                 relationship_key = normalized.removeprefix("relationship:")
                 refs = [
                     mapping.get(ref.strip(), ref.strip())
@@ -723,22 +770,22 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
                 "active_commitments",
                 "relationship_model",
                 "episodic_evidence",
-                "user_model",
+                "person_model",
                 "active_topics",
                 "self_model",
             ]
         if primary_recall_focus == "relationship":
             return [
                 "relationship_model",
-                "user_model",
+                "person_model",
                 "episodic_evidence",
                 "active_commitments",
                 "active_topics",
                 "self_model",
             ]
-        if primary_recall_focus == "user":
+        if primary_recall_focus == "person":
             return [
-                "user_model",
+                "person_model",
                 "relationship_model",
                 "active_topics",
                 "episodic_evidence",
@@ -749,14 +796,14 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             return [
                 "episodic_evidence",
                 "active_topics",
-                "user_model",
+                "person_model",
                 "relationship_model",
                 "active_commitments",
                 "self_model",
             ]
         if primary_recall_focus == "state":
             return [
-                "user_model",
+                "person_model",
                 "active_topics",
                 "relationship_model",
                 "episodic_evidence",
@@ -764,7 +811,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
                 "self_model",
             ]
         return [
-            "user_model",
+            "person_model",
             "relationship_model",
             "active_topics",
             "active_commitments",
@@ -879,13 +926,13 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             normalized = scope.strip()
             if not normalized:
                 continue
-            if normalized in {"self", "user"}:
-                parsed.append((normalized, normalized))
+            if normalized == "self":
+                parsed.append(("self", "self"))
                 continue
             scope_type, separator, scope_key = normalized.partition(":")
             if not separator or not scope_key:
                 continue
-            if scope_type not in {"relationship", "topic"}:
+            if scope_type not in {"entity", "relationship", "topic"}:
                 continue
             if scope_type == "topic":
                 parsed.append((scope_type, normalized))
@@ -974,7 +1021,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         # 結果
         return {
             "self_model": [],
-            "user_model": [],
+            "person_model": [],
             "relationship_model": [],
             "active_topics": [],
             "episodic_evidence": [],
@@ -984,7 +1031,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         # 結果
         return {
             "self_model": [],
-            "user_model": [],
+            "person_model": [],
             "relationship_model": [],
             "active_topics": [],
             "active_commitments": [],

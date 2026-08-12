@@ -1,45 +1,26 @@
 # Generic MCP client connector
 
-この connector は、stdio MCP server を OtomeKairo の `mcp.call_tool` capability として登録する。
-OtomeKairo server 本体へ MCP server 固有依存を入れない。
+この connector は、stdio または Streamable HTTP MCP server を OtomeKairo の `mcp.call_tool` capability として登録する。MCP server 固有の手順や依存は connector に持たない。
 
 ## 責務
 
-- 起動時に設定済み MCP server を `initialize` し、`tools/list` の結果を hello の `mcp_servers` へ載せる
-- `mcp.call_tool_request` を受けたとき、対象 MCP server の `tools/call` を実行する
-- `POST /api/capability/result` へ result を返す
-- MCP API key、token、内部 URL の秘密部分を通常ログや result に出さない
+- 起動時に有効な MCP server を `initialize` し、`tools/list` の catalog を hello へ載せる
+- `mcp.call_tool_request` を MCP `tools/call` で実行し、result を OtomeKairo へ返す
+- stdio 子 process には launcher 用 `PATH` と server 固有 `env` だけを渡す
+- Streamable HTTP は TLS 検証を有効にし、設定 header を request に付与して redirect へ追従しない
+- token、header、env、tool arguments を通常ログや result summary に出さない
 
-## ELYTH 設定例
+tool の意味判断、送信前チェック、有限セッションの実行上限は OtomeKairo server が担当する。
 
-`config.example.json` は OtomeKairo への接続情報だけを含む。
-ELYTH の MCP server 定義は OtomeKairo 本体の設定 API に登録する。
+## セットアップ
+
+`config.example.json` は OtomeKairo への接続情報だけを含む。MCP server 定義は OtomeKairo の設定 API または Web UI で登録する。
 
 ```bash
 cd connectors/mcp_client
 python3 -m venv .venv
 .venv/bin/pip install -e .
 cp config.example.json config.local.json
-```
-
-ELYTH を登録する。
-
-```bash
-curl -k \
-  -H "Authorization: Bearer $OTOMEKAIRO_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -X PUT \
-  https://127.0.0.1:55601/api/config/mcp-servers/mcp%3Aelyth \
-  -d '{
-    "enabled": true,
-    "command": "npx",
-    "args": ["-y", "elyth-mcp-server@latest"],
-    "cwd": null,
-    "env": {
-      "ELYTH_API_BASE": "https://elythworld.com",
-      "ELYTH_API_KEY": "..."
-    }
-  }'
 ```
 
 hello payload を確認する。
@@ -54,68 +35,36 @@ connector を起動する。
 .venv/bin/python -m otomekairo_mcp_client_connector --config config.local.json
 ```
 
-OtomeKairo access token は、`OTOMEKAIRO_ACCESS_TOKEN`、ローカル `config.db`、bootstrap の順に解決する。
-MCP server 設定は `GET /api/config/connectors/{client_id}/runtime-config` から取得する。
-実 token と ELYTH API key を repository、sample、通常ログ、result に保存しない。
+OtomeKairo access token は、`OTOMEKAIRO_ACCESS_TOKEN`、ローカル `config.db`、bootstrap の順に解決する。MCP server 設定は `GET /api/config/connectors/{client_id}/runtime-config` から取得する。
 
-## ELYTH 接続テスト用 trace
+## ELYTH Remote MCP
 
-`OTOMEKAIRO_MCP_TRACE_PATH` を指定すると、connector は送受信内容を JSON Lines 形式で追記する。
-trace には `Authorization`、`x-api-key`、`ELYTH_API_KEY`、token、password、secret をマスクして保存する。
+ELYTH は他の MCP server と同じ connector と `tools/list` catalog で扱う。Streamable HTTP の設定例と有限 MCP セッションの設定 wire は [状態と設定](../../docs/design/api/状態と設定.md#put-apiconfigmcp-serversmcp_server_id) を参照する。
 
-```bash
-export OTOMEKAIRO_MCP_TRACE_PATH=/tmp/otomekairo-elyth-trace.jsonl
+ELYTH API token は `headers.Authorization` に `Bearer ...` として保存する。repository、sample、通常ログ、trace に実 token を残さない。
+
+## stdio MCP の例
+
+e-Stat などの stdio MCP は `transport=stdio` と `command / args / cwd / env` を登録する。`transport=streamable_http` の field と混在させない。
+
+```json
+{
+  "enabled": true,
+  "pre_send_check_enabled": false,
+  "transport": "stdio",
+  "command": "uvx",
+  "args": ["estat-mcp-server"],
+  "cwd": null,
+  "env": {
+    "E_STAT_APP_ID": "..."
+  }
+}
 ```
 
-完全ローカルで OtomeKairo と MCP connector の経路だけを確認する場合は、偽 ELYTH MCP server を登録する。
+## 接続テスト用 trace
+
+`OTOMEKAIRO_MCP_TRACE_PATH` を指定すると、connector は OtomeKairo HTTP と event stream の送受信を JSON Lines 形式で追記する。秘密 header、env 値、MCP tool arguments は保存しない。stdio MCP の JSON-RPC を調査するときは `otomekairo-mcp-stdio-trace-proxy` を明示的に挟む。
 
 ```bash
-curl -k \
-  -H "Authorization: Bearer $OTOMEKAIRO_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -X PUT \
-  https://127.0.0.1:55601/api/config/mcp-servers/mcp%3Aelyth-test \
-  -d '{
-    "enabled": true,
-    "command": "python3",
-    "args": ["-m", "otomekairo_mcp_client_connector.elyth_fake_mcp_server"],
-    "cwd": null,
-    "env": {
-      "PYTHONPATH": "connectors/mcp_client/src"
-    }
-  }'
+export OTOMEKAIRO_MCP_TRACE_PATH=/tmp/otomekairo-mcp-trace.jsonl
 ```
-
-本物の `elyth-mcp-server@latest` が ELYTH API へ送る HTTP request を受信だけで確認する場合は、ローカル recorder を起動する。
-
-```bash
-.venv/bin/otomekairo-elyth-http-recorder --host 127.0.0.1 --port 18080
-```
-
-別 terminal で、ELYTH MCP server を stdio trace proxy 経由にして登録する。
-
-```bash
-curl -k \
-  -H "Authorization: Bearer $OTOMEKAIRO_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -X PUT \
-  https://127.0.0.1:55601/api/config/mcp-servers/mcp%3Aelyth-test \
-  -d '{
-    "enabled": true,
-    "command": "otomekairo-mcp-stdio-trace-proxy",
-    "args": ["--", "npx", "-y", "elyth-mcp-server@latest"],
-    "cwd": null,
-    "env": {
-      "ELYTH_API_BASE": "http://127.0.0.1:18080",
-      "ELYTH_API_KEY": "local-recorder-key"
-    }
-  }'
-```
-
-この設定では ELYTH API base が `127.0.0.1` を指すため、ELYTH 本体へ HTTP request を送らない。
-trace file には次の境界が記録される。
-
-- `otomekairo_http`: connector と OtomeKairo HTTP API の request / response
-- `otomekairo_event`: event stream の hello、request、result
-- `mcp_stdio`: connector と MCP server 間の JSON-RPC
-- `elyth_http`: ELYTH API 相当の HTTP request / response

@@ -335,20 +335,52 @@ class SQLiteMemoryStore(
             )
 
     def list_cycle_summaries(self, limit: int) -> list[dict[str, Any]]:
-        # クエリ
+        # 一覧俯瞰用に、入力・結果・判断理由を trace から投影して載せる。
+        # 保存済み cycle_summary に無い過去行でも、trace があれば同じ shape で返す。
         with self._memory_db() as conn:
             rows = conn.execute(
                 """
-                SELECT payload_json
-                FROM cycle_summaries
-                ORDER BY started_at DESC, rowid DESC
+                SELECT
+                    s.payload_json AS summary_json,
+                    json_extract(t.payload_json, '$.input_trace.input_summary') AS input_summary,
+                    COALESCE(
+                        json_extract(t.payload_json, '$.result_trace.speech_summary'),
+                        json_extract(t.payload_json, '$.result_trace.internal_failure_summary'),
+                        json_extract(t.payload_json, '$.result_trace.pending_intent_summary.intent_summary'),
+                        json_extract(t.payload_json, '$.result_trace.pending_intent_summary.summary_text'),
+                        json_extract(t.payload_json, '$.result_trace.capability_request_summary.goal_summary'),
+                        json_extract(t.payload_json, '$.result_trace.capability_request_summary.summary_text'),
+                        json_extract(t.payload_json, '$.result_trace.capability_request_summary.capability_id'),
+                        json_extract(t.payload_json, '$.result_trace.noop_reason_summary')
+                    ) AS outcome_summary,
+                    COALESCE(
+                        json_extract(t.payload_json, '$.decision_trace.reason_summary'),
+                        json_extract(t.payload_json, '$.result_trace.trigger_compact_summary.decision_summary.reason_summary'),
+                        json_extract(t.payload_json, '$.result_trace.noop_reason_summary'),
+                        json_extract(t.payload_json, '$.result_trace.internal_failure_summary')
+                    ) AS reason_summary
+                FROM cycle_summaries AS s
+                LEFT JOIN cycle_traces AS t ON t.cycle_id = s.cycle_id
+                ORDER BY s.started_at DESC, s.rowid DESC
                 LIMIT ?
                 """,
                 (limit,),
             ).fetchall()
 
-        # 結果
-        return [json.loads(row["payload_json"]) for row in rows]
+        summaries: list[dict[str, Any]] = []
+        for row in rows:
+            summary = json.loads(row["summary_json"])
+            if not isinstance(summary, dict):
+                continue
+            # 一覧 shape は保存済み要約を正とし、俯瞰用本文は trace 投影で揃える。
+            if isinstance(row["input_summary"], str) and row["input_summary"].strip():
+                summary["input_summary"] = row["input_summary"].strip()
+            if isinstance(row["outcome_summary"], str) and row["outcome_summary"].strip():
+                summary["outcome_summary"] = row["outcome_summary"].strip()
+            if isinstance(row["reason_summary"], str) and row["reason_summary"].strip():
+                summary["reason_summary"] = row["reason_summary"].strip()
+            summaries.append(summary)
+        return summaries
 
     def get_cycle_trace(self, cycle_id: str) -> dict[str, Any] | None:
         # クエリ
@@ -669,11 +701,6 @@ class SQLiteMemoryStore(
         with self._memory_db() as conn:
             conn.execute("DELETE FROM ongoing_actions WHERE memory_set_id = ?", (memory_set_id,))
 
-    def clear_autonomous_runs(self, *, memory_set_id: str) -> None:
-        # トランザクション
-        with self._memory_db() as conn:
-            conn.execute("DELETE FROM autonomous_runs WHERE memory_set_id = ?", (memory_set_id,))
-
     def get_latest_reflection_run(
         self,
         memory_set_id: str,
@@ -711,6 +738,7 @@ class SQLiteMemoryStore(
         self,
         *,
         memory_set_id: str,
+        interaction_ref: str,
         since_iso: str,
         limit: int,
     ) -> list[dict[str, Any]]:
@@ -718,16 +746,17 @@ class SQLiteMemoryStore(
         with self._memory_db() as conn:
             rows = conn.execute(
                 """
-                SELECT role, text, created_at
+                SELECT role, text, interaction_ref, speaker_ref, participant_refs_json, created_at
                 FROM events
                 WHERE memory_set_id = ?
+                  AND interaction_ref = ?
                   AND kind IN ('conversation_input', 'speech')
                   AND text IS NOT NULL
                   AND created_at >= ?
                 ORDER BY created_at DESC, rowid DESC
                 LIMIT ?
                 """,
-                (memory_set_id, since_iso, limit),
+                (memory_set_id, interaction_ref, since_iso, limit),
             ).fetchall()
 
         # 結果
@@ -735,6 +764,9 @@ class SQLiteMemoryStore(
             {
                 "role": row["role"],
                 "text": row["text"],
+                "interaction_ref": row["interaction_ref"],
+                "speaker_ref": row["speaker_ref"],
+                "participant_refs": json.loads(row["participant_refs_json"]),
                 "created_at": row["created_at"],
             }
             for row in reversed(rows)
@@ -921,15 +953,15 @@ class SQLiteMemoryStore(
     def _event_kinds_for_actor(self, target_actor: str) -> tuple[str, ...]:
         if target_actor == "assistant":
             return ("speech",)
-        if target_actor == "user":
+        if target_actor == "person":
             return ("conversation_input", "observation")
         return ("conversation_input", "observation", "speech")
 
     def _event_roles_for_actor(self, target_actor: str) -> tuple[str, ...]:
         if target_actor == "assistant":
             return ("assistant",)
-        if target_actor == "user":
-            return ("user",)
+        if target_actor == "person":
+            return ("person",)
         return ()
 
     def count_cycle_summaries_since(
@@ -1474,6 +1506,99 @@ class FileStore:
     def write_state(self, state: dict) -> None:
         # 委譲
         self.config_store.write_state(state)
+
+    def list_voice_speakers(
+        self,
+        *,
+        registered_only: bool = False,
+        include_embedding: bool = False,
+    ) -> list[dict[str, Any]]:
+        # 話者登録は config.db の専用tableへ委譲する。
+        return self.config_store.list_voice_speakers(
+            registered_only=registered_only,
+            include_embedding=include_embedding,
+        )
+
+    def get_voice_speaker(
+        self,
+        person_ref: str,
+        *,
+        include_embedding: bool = False,
+    ) -> dict[str, Any] | None:
+        return self.config_store.get_voice_speaker(
+            person_ref,
+            include_embedding=include_embedding,
+        )
+
+    def replace_voice_speaker_registration(
+        self,
+        *,
+        person_ref: str,
+        conversation_display_name_id: str,
+        embedding: list[float],
+        model_id: str,
+    ) -> dict[str, Any]:
+        return self.config_store.replace_voice_speaker_registration(
+            person_ref=person_ref,
+            conversation_display_name_id=conversation_display_name_id,
+            embedding=embedding,
+            model_id=model_id,
+        )
+
+    def assign_voice_speaker_conversation_display_name(
+        self,
+        *,
+        person_ref: str,
+        conversation_display_name_id: str,
+    ) -> dict[str, Any] | None:
+        return self.config_store.assign_voice_speaker_conversation_display_name(
+            person_ref=person_ref,
+            conversation_display_name_id=conversation_display_name_id,
+        )
+
+    def list_conversation_display_names(self) -> list[dict[str, Any]]:
+        return self.config_store.list_conversation_display_names()
+
+    def get_conversation_display_name(
+        self,
+        conversation_display_name_id: str,
+    ) -> dict[str, Any] | None:
+        return self.config_store.get_conversation_display_name(
+            conversation_display_name_id
+        )
+
+    def create_conversation_display_name(
+        self,
+        *,
+        conversation_display_name_id: str,
+        display_name: str,
+    ) -> dict[str, Any]:
+        return self.config_store.create_conversation_display_name(
+            conversation_display_name_id=conversation_display_name_id,
+            display_name=display_name,
+        )
+
+    def update_conversation_display_name(
+        self,
+        *,
+        conversation_display_name_id: str,
+        display_name: str,
+    ) -> dict[str, Any] | None:
+        return self.config_store.update_conversation_display_name(
+            conversation_display_name_id=conversation_display_name_id,
+            display_name=display_name,
+        )
+
+    def delete_conversation_display_name(
+        self,
+        conversation_display_name_id: str,
+    ) -> dict[str, Any] | None:
+        return self.config_store.delete_conversation_display_name(
+            conversation_display_name_id
+        )
+
+    def unregister_voice_speaker(self, person_ref: str) -> dict[str, Any] | None:
+        return self.config_store.unregister_voice_speaker(person_ref)
 
     def __getattr__(self, name: str) -> Any:
         # 委譲

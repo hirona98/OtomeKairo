@@ -4,7 +4,21 @@ import uuid
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
+from otomekairo.agent_skills import (
+    AgentSkillError,
+    AgentSkillRegistry,
+    validate_agent_skill_source_definition,
+)
+from otomekairo.defaults import (
+    API_VERSION,
+    DEFAULT_MODEL_PRESET_ID,
+    PRE_SEND_CHECK_MODEL_PRESET_ID,
+    build_default_console_client_settings,
+    build_default_desktop_capture,
+    build_default_pre_send_check_model_preset,
+)
 from otomekairo.service.common import ServiceError
 from otomekairo.service.config.constants import (
     MCP_CONNECTOR_KINDS,
@@ -30,26 +44,23 @@ class ServiceConfigResourcesMixin:
         return {
             "server_id": state["server_id"],
             "server_display_name": state["server_display_name"],
-            "api_version": state["api_version"],
+            # API互換版は永続設定ではなく、実行中コードの契約版を返す。
+            "api_version": API_VERSION,
             "bootstrap_state": self._bootstrap_state(state),
             "console_access_token_issued": state["console_access_token"] is not None,
         }
 
-    def register_first_console(self) -> dict[str, Any]:
-        # 読み込み状態
-        state = self.store.read_state()
+    def acquire_console_access_token(self) -> dict[str, Any]:
+        # 同時要求でも全クライアントへ同じ token を返すため、取得と初回発行を直列化する。
+        with self._runtime_state_lock:
+            state = self.store.read_state()
+            if state["console_access_token"] is None:
+                state["console_access_token"] = self._new_console_token()
+                self.store.write_state(state)
 
-        # 初回登録済みの token は再表示しない。
-        if state["console_access_token"] is not None:
-            raise ServiceError(409, "first_console_already_registered", "The first console token has already been issued.")
-
-        state["console_access_token"] = self._new_console_token()
-        self.store.write_state(state)
-
-        # 結果
-        return {
-            "console_access_token": state["console_access_token"],
-        }
+            return {
+                "console_access_token": state["console_access_token"],
+            }
 
     def reissue_console_access_token(self, token: str | None) -> dict[str, Any]:
         # 認可
@@ -80,16 +91,319 @@ class ServiceConfigResourcesMixin:
         # 応答
         return {
             "settings_snapshot": self._build_settings_snapshot(state),
+            "conversation_display_names": [
+                deepcopy(value)
+                for value in state["conversation_display_names"].values()
+            ],
             "selected_persona": deepcopy(state["personas"][state["selected_persona_id"]]),
             "selected_memory_set": self._public_memory_set(state["memory_sets"][state["selected_memory_set_id"]]),
             "selected_model_preset": self._public_model_preset(selected_preset),
         }
 
+    def list_conversation_display_names(self, token: str | None) -> dict[str, Any]:
+        self._require_token(token)
+        return {
+            "conversation_display_names": self.store.list_conversation_display_names()
+        }
+
+    def create_conversation_display_name(
+        self,
+        token: str | None,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        self._require_token(token)
+        display_name = self._conversation_display_name_from_payload(payload)
+        try:
+            return self.store.create_conversation_display_name(
+                conversation_display_name_id=f"conversation_display_name:{uuid.uuid4()}",
+                display_name=display_name,
+            )
+        except ValueError as exc:
+            if str(exc) == "duplicate_conversation_display_name":
+                raise ServiceError(
+                    409,
+                    "duplicate_conversation_display_name",
+                    "The conversation display name already exists.",
+                ) from exc
+            raise
+
+    def update_conversation_display_name(
+        self,
+        token: str | None,
+        conversation_display_name_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        self._require_token(token)
+        display_name = self._conversation_display_name_from_payload(payload)
+        try:
+            definition = self.store.update_conversation_display_name(
+                conversation_display_name_id=conversation_display_name_id,
+                display_name=display_name,
+            )
+        except ValueError as exc:
+            if str(exc) == "duplicate_conversation_display_name":
+                raise ServiceError(
+                    409,
+                    "duplicate_conversation_display_name",
+                    "The conversation display name already exists.",
+                ) from exc
+            raise
+        if definition is None:
+            raise ServiceError(
+                404,
+                "conversation_display_name_not_found",
+                "The conversation display name does not exist.",
+            )
+        return definition
+
+    def delete_conversation_display_name(
+        self,
+        token: str | None,
+        conversation_display_name_id: str,
+    ) -> dict[str, Any]:
+        # 呼ばれ方は常に1件以上を保つ。会話入力の選択中なら残りの1件へ付け替える。
+        state = self._require_token(token)
+        definitions = state["conversation_display_names"]
+        if conversation_display_name_id not in definitions:
+            raise ServiceError(
+                404,
+                "conversation_display_name_not_found",
+                "The conversation display name does not exist.",
+            )
+        if len(definitions) <= 1:
+            raise ServiceError(
+                409,
+                "conversation_display_name_in_use",
+                "The last conversation display name cannot be deleted.",
+            )
+        if state["selected_conversation_display_name_id"] == conversation_display_name_id:
+            replacement_id = next(
+                entry_id
+                for entry_id in definitions
+                if entry_id != conversation_display_name_id
+            )
+            state["selected_conversation_display_name_id"] = replacement_id
+            self.store.write_state(state)
+        try:
+            definition = self.store.delete_conversation_display_name(
+                conversation_display_name_id
+            )
+        except ValueError as exc:
+            if str(exc) == "conversation_display_name_in_use":
+                raise ServiceError(
+                    409,
+                    "conversation_display_name_in_use",
+                    "The conversation display name is in use.",
+                ) from exc
+            raise
+        if definition is None:
+            raise ServiceError(
+                404,
+                "conversation_display_name_not_found",
+                "The conversation display name does not exist.",
+            )
+        return definition
+
+    def _conversation_display_name_from_payload(self, payload: dict[str, Any]) -> str:
+        if not isinstance(payload, dict) or set(payload) != {"display_name"}:
+            raise ServiceError(
+                400,
+                "invalid_conversation_display_name",
+                "display_name is required.",
+            )
+        display_name = payload.get("display_name")
+        if not isinstance(display_name, str) or not display_name.strip():
+            raise ServiceError(
+                400,
+                "invalid_conversation_display_name",
+                "display_name must be a non-empty string.",
+            )
+        return display_name.strip()
+
     def get_editor_state(self, token: str | None) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
+        if self._ensure_pre_send_check_model_preset(state):
+            self.store.write_state(state)
         self._append_editor_state_audit_event(state=state, operation="read")
         return self._build_editor_state(state)
+
+    def get_avatar_speech(self, token: str | None) -> dict[str, Any]:
+        # 通常の読み取りでは音声サービスの秘密値を返さない。
+        state = self._require_token(token)
+        selected_avatar = state["avatars"][state["selected_avatar_id"]]
+        return {
+            "selected_avatar_id": state["selected_avatar_id"],
+            "audio_output_settings": deepcopy(state["audio_output_settings"]),
+            "microphone_settings": deepcopy(state["microphone_settings"]),
+            "selected_avatar": self._public_avatar_definition(selected_avatar),
+        }
+
+    def get_avatar_speech_editor_state(self, token: str | None) -> dict[str, Any]:
+        # 設定編集面だけがSTT/TTSの秘密値を含む。
+        state = self._require_token(token)
+        self._append_avatar_speech_editor_state_audit_event(state=state, operation="read")
+        return self._build_avatar_speech_editor_state(state)
+
+    def get_stt_enabled(self, token: str | None) -> dict[str, Any]:
+        # 運用トグル用。選択中アバターの stt.enabled だけを返す。
+        state = self._require_token(token)
+        selected_avatar_id = state["selected_avatar_id"]
+        return {
+            "enabled": bool(state["avatars"][selected_avatar_id]["stt"]["enabled"]),
+            "selected_avatar_id": selected_avatar_id,
+        }
+
+    def replace_stt_enabled(
+        self,
+        token: str | None,
+        definition: dict[str, Any],
+    ) -> dict[str, Any]:
+        # マイク運用トグルは stt.enabled 1 bit だけを更新する。
+        state = self._require_token(token)
+        if not isinstance(definition, dict) or set(definition) != {"enabled"}:
+            raise ServiceError(
+                400,
+                "invalid_stt_enabled",
+                "stt-enabled request must contain only enabled.",
+            )
+        enabled = definition.get("enabled")
+        if not isinstance(enabled, bool):
+            raise ServiceError(
+                400,
+                "invalid_stt_enabled",
+                "enabled must be a boolean.",
+            )
+        selected_avatar_id = state["selected_avatar_id"]
+        selected_avatar = state["avatars"][selected_avatar_id]
+        previous_enabled = bool(selected_avatar["stt"]["enabled"])
+        if previous_enabled != enabled:
+            selected_avatar["stt"]["enabled"] = enabled
+            self.store.write_state(state)
+            self._reload_audio_runtime_settings()
+            self._append_stt_enabled_audit_event(
+                state=state,
+                enabled=enabled,
+            )
+        return {
+            "enabled": enabled,
+            "selected_avatar_id": selected_avatar_id,
+        }
+
+    def get_tts_enabled(self, token: str | None) -> dict[str, Any]:
+        # 運用トグル用。選択中アバターの tts.enabled だけを返す。
+        state = self._require_token(token)
+        selected_avatar_id = state["selected_avatar_id"]
+        return {
+            "enabled": bool(state["avatars"][selected_avatar_id]["tts"]["enabled"]),
+            "selected_avatar_id": selected_avatar_id,
+        }
+
+    def replace_tts_enabled(
+        self,
+        token: str | None,
+        definition: dict[str, Any],
+    ) -> dict[str, Any]:
+        # TTS 運用トグルは tts.enabled 1 bit だけを更新する。
+        # 音声入力 lease は破棄しない（TtsRuntime は reserve 時に store を読む）。
+        state = self._require_token(token)
+        if not isinstance(definition, dict) or set(definition) != {"enabled"}:
+            raise ServiceError(
+                400,
+                "invalid_tts_enabled",
+                "tts-enabled request must contain only enabled.",
+            )
+        enabled = definition.get("enabled")
+        if not isinstance(enabled, bool):
+            raise ServiceError(
+                400,
+                "invalid_tts_enabled",
+                "enabled must be a boolean.",
+            )
+        selected_avatar_id = state["selected_avatar_id"]
+        selected_avatar = state["avatars"][selected_avatar_id]
+        previous_enabled = bool(selected_avatar["tts"]["enabled"])
+        if previous_enabled != enabled:
+            selected_avatar["tts"]["enabled"] = enabled
+            self.store.write_state(state)
+            self._publish_audio_runtime_state()
+            self._append_tts_enabled_audit_event(
+                state=state,
+                enabled=enabled,
+            )
+        return {
+            "enabled": enabled,
+            "selected_avatar_id": selected_avatar_id,
+        }
+
+    def replace_avatar_speech_editor_state(
+        self,
+        token: str | None,
+        definition: dict[str, Any],
+    ) -> dict[str, Any]:
+        # 音声設定は独立したbundleとして一括検証してから保存する。
+        state = self._require_token(token)
+        supported_fields = {
+            "selected_avatar_id",
+            "audio_output_settings",
+            "microphone_settings",
+            "avatars",
+        }
+        unsupported_fields = sorted(set(definition) - supported_fields)
+        if unsupported_fields:
+            raise ServiceError(
+                400,
+                "unsupported_avatar_speech_editor_state_fields",
+                f"avatar speech editor-state has unsupported fields: {', '.join(unsupported_fields)}.",
+            )
+        avatars = self._entries_by_id(definition.get("avatars"), "avatar_id", "avatars")
+        if not avatars:
+            raise ServiceError(400, "missing_avatars", "avatar speech editor-state requires at least one avatar.")
+        normalized_avatars = {
+            avatar_id: self._normalize_avatar_definition(avatar)
+            for avatar_id, avatar in avatars.items()
+        }
+        for avatar_id, avatar in normalized_avatars.items():
+            self._validate_avatar_definition(avatar_id, avatar)
+
+        selected_avatar_id = definition.get("selected_avatar_id")
+        if selected_avatar_id not in normalized_avatars:
+            raise ServiceError(
+                404,
+                "avatar_not_found",
+                "The selected_avatar_id does not exist in avatars.",
+            )
+        microphone_settings = self._normalize_microphone_settings(
+            definition.get("microphone_settings")
+        )
+        self._validate_microphone_settings(microphone_settings)
+        audio_output_settings = self._normalize_audio_output_settings(
+            definition.get("audio_output_settings")
+        )
+        self._validate_audio_output_settings(audio_output_settings)
+
+        state["selected_avatar_id"] = selected_avatar_id
+        state["audio_output_settings"] = deepcopy(audio_output_settings)
+        state["microphone_settings"] = deepcopy(microphone_settings)
+        state["avatars"] = normalized_avatars
+        for client_entry in state.get("console_client_settings", {}).values():
+            settings = client_entry.get("settings")
+            if not isinstance(settings, dict):
+                continue
+            presentations = settings.get("avatar_presentations")
+            if not isinstance(presentations, list):
+                continue
+            settings["avatar_presentations"] = [
+                presentation
+                for presentation in presentations
+                if isinstance(presentation, dict)
+                and presentation.get("avatar_id") in normalized_avatars
+            ]
+        self.store.write_state(state)
+        self._reload_audio_runtime_settings()
+        self._publish_audio_runtime_state()
+        self._append_avatar_speech_editor_state_audit_event(state=state, operation="write")
+        return self._build_avatar_speech_editor_state(state)
 
     def get_catalog(self, token: str | None) -> dict[str, Any]:
         # 認可
@@ -102,6 +416,185 @@ class ServiceConfigResourcesMixin:
             "model_presets": self._catalog_entries(state["model_presets"], "model_preset_id"),
         }
 
+    def connect_console_client(self, token: str | None, client_id: str) -> dict[str, Any]:
+        # 端末設定の取得と最終接続端末の更新を一つの接続操作にする。
+        state = self._require_token(token)
+        normalized_client_id = self._validate_console_client_id(client_id)
+        entries = state.setdefault("console_client_settings", {})
+        entry = entries.get(normalized_client_id)
+        if not isinstance(entry, dict):
+            # 未接続時に Web UI が編集した desktop_capture 既定を初回端末設定へ渡す。
+            desktop_defaults = state.get("desktop_capture_defaults")
+            if not isinstance(desktop_defaults, dict):
+                desktop_defaults = build_default_desktop_capture()
+            settings = build_default_console_client_settings(
+                normalized_client_id,
+                desktop_capture=desktop_defaults,
+            )
+            self._validate_console_client_settings(normalized_client_id, settings)
+            entry = {
+                "last_connected_at": None,
+                "settings": settings,
+            }
+            entries[normalized_client_id] = entry
+        entry["last_connected_at"] = self._now_iso()
+        self.store.write_state(state)
+        return self._build_console_client_editor_state(normalized_client_id, entry)
+
+    def get_console_client_editor_state(self, token: str | None, client_id: str) -> dict[str, Any]:
+        state = self._require_token(token)
+        normalized_client_id = self._validate_console_client_id(client_id)
+        entry = state.get("console_client_settings", {}).get(normalized_client_id)
+        if not isinstance(entry, dict):
+            raise ServiceError(
+                404,
+                "console_client_settings_not_found",
+                "The requested CocoroConsole client settings do not exist.",
+            )
+        return self._build_console_client_editor_state(normalized_client_id, entry)
+
+    def get_last_connected_console_client_editor_state(self, token: str | None) -> dict[str, Any]:
+        state = self._require_token(token)
+        entries = state.get("console_client_settings", {})
+        connected_entries = [
+            (client_id, entry)
+            for client_id, entry in entries.items()
+            if isinstance(entry, dict)
+            and isinstance(entry.get("last_connected_at"), str)
+            and entry["last_connected_at"]
+        ]
+        if not connected_entries:
+            raise ServiceError(
+                404,
+                "console_client_settings_not_found",
+                "No CocoroConsole client has connected.",
+            )
+        client_id, entry = max(
+            connected_entries,
+            key=lambda item: (item[1]["last_connected_at"], item[0]),
+        )
+        return self._build_console_client_editor_state(client_id, entry)
+
+    def replace_console_client_editor_state(
+        self,
+        token: str | None,
+        client_id: str,
+        definition: dict[str, Any],
+    ) -> dict[str, Any]:
+        state = self._require_token(token)
+        normalized_client_id = self._validate_console_client_id(client_id)
+        entries = state.get("console_client_settings", {})
+        entry = entries.get(normalized_client_id)
+        if not isinstance(entry, dict):
+            raise ServiceError(
+                404,
+                "console_client_settings_not_found",
+                "The requested CocoroConsole client settings do not exist.",
+            )
+        settings = deepcopy(definition)
+        self._validate_console_client_settings(normalized_client_id, settings)
+        self._validate_console_avatar_references(state, settings)
+        entry["settings"] = settings
+        # 端末設定全体置換でも取得方針既定を揃える（CocoroConsole 保存経路）。
+        state["desktop_capture_defaults"] = deepcopy(settings["desktop_capture"])
+        self.store.write_state(state)
+        return self._build_console_client_editor_state(normalized_client_id, entry)
+
+    def patch_console_client_settings(
+        self,
+        token: str | None,
+        client_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        state = self._require_token(token)
+        normalized_client_id = self._validate_console_client_id(client_id)
+        entries = state.get("console_client_settings", {})
+        entry = entries.get(normalized_client_id)
+        if not isinstance(entry, dict):
+            raise ServiceError(
+                404,
+                "console_client_settings_not_found",
+                "The requested CocoroConsole client settings do not exist.",
+            )
+        supported_fields = {
+            "process",
+            "display",
+            "desktop_capture",
+            "avatar_presentations",
+            "motion",
+        }
+        unsupported_fields = sorted(set(payload) - supported_fields)
+        if unsupported_fields or not payload:
+            raise ServiceError(
+                400,
+                "unsupported_console_client_settings_fields",
+                "CocoroConsole client settings patch must contain supported top-level sections.",
+            )
+        settings = deepcopy(entry["settings"])
+        for field_name, value in payload.items():
+            settings[field_name] = deepcopy(value)
+        self._validate_console_client_settings(normalized_client_id, settings)
+        self._validate_console_avatar_references(state, settings)
+        entry["settings"] = settings
+        # 最終接続端末の取得方針は、次回以降の新規端末向け既定にも揃える。
+        if "desktop_capture" in payload:
+            state["desktop_capture_defaults"] = deepcopy(settings["desktop_capture"])
+        self.store.write_state(state)
+        return self._build_console_client_editor_state(normalized_client_id, entry)
+
+    def get_desktop_capture_defaults(self, token: str | None) -> dict[str, Any]:
+        # 一度も connect していない間の desktop 取得方針を返す。
+        state = self._require_token(token)
+        defaults = state.get("desktop_capture_defaults")
+        if not isinstance(defaults, dict):
+            defaults = build_default_desktop_capture()
+        self._validate_console_desktop_capture_settings(defaults)
+        return {"desktop_capture": deepcopy(defaults)}
+
+    def replace_desktop_capture_defaults(
+        self,
+        token: str | None,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        # 未接続時でも取得除外などを永続化し、初回 connect で端末設定へ渡す。
+        state = self._require_token(token)
+        if not isinstance(payload, dict):
+            raise ServiceError(
+                400,
+                "invalid_desktop_capture_defaults",
+                "desktop capture defaults must be an object.",
+            )
+        desktop_capture = payload.get("desktop_capture", payload)
+        self._validate_console_desktop_capture_settings(desktop_capture)
+        state["desktop_capture_defaults"] = deepcopy(desktop_capture)
+        self.store.write_state(state)
+        return {"desktop_capture": deepcopy(desktop_capture)}
+
+    def _validate_console_avatar_references(
+        self,
+        state: dict[str, Any],
+        settings: dict[str, Any],
+    ) -> None:
+        avatar_ids = set(state["avatars"])
+        for presentation in settings["avatar_presentations"]:
+            if presentation["avatar_id"] not in avatar_ids:
+                raise ServiceError(
+                    404,
+                    "avatar_not_found",
+                    "avatar_presentations contains an unknown avatar_id.",
+                )
+
+    def _build_console_client_editor_state(
+        self,
+        client_id: str,
+        entry: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "client_id": client_id,
+            "last_connected_at": entry.get("last_connected_at"),
+            "settings": deepcopy(entry["settings"]),
+        }
+
     def patch_current(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:
         # 状態
         state = self._require_token(token)
@@ -112,8 +605,10 @@ class ServiceConfigResourcesMixin:
             "selected_persona_id",
             "selected_memory_set_id",
             "selected_model_preset_id",
+            "pre_send_check_model_preset_id",
             "thinking_speech_level",
             "wake_policy",
+            "selected_conversation_display_name_id",
         }
         unsupported_fields = sorted(set(payload.keys()) - supported_fields)
         if unsupported_fields:
@@ -146,9 +641,31 @@ class ServiceConfigResourcesMixin:
             model_preset_id = payload["selected_model_preset_id"]
             if model_preset_id not in state["model_presets"]:
                 raise ServiceError(404, "model_preset_not_found", "The requested model_preset_id does not exist.")
+            if model_preset_id == PRE_SEND_CHECK_MODEL_PRESET_ID:
+                raise ServiceError(
+                    400,
+                    "invalid_selected_model_preset_id",
+                    "The dedicated pre-send check model preset cannot be selected for generation.",
+                )
             self._validate_model_preset_definition(model_preset_id, state["model_presets"][model_preset_id])
             should_clear_runtime_layers = should_clear_runtime_layers or model_preset_id != state["selected_model_preset_id"]
             state["selected_model_preset_id"] = model_preset_id
+
+        # 送信前チェックは専用固定プリセットのみを使う。
+        if "pre_send_check_model_preset_id" in payload:
+            review_model_preset_id = payload["pre_send_check_model_preset_id"]
+            if review_model_preset_id != PRE_SEND_CHECK_MODEL_PRESET_ID:
+                raise ServiceError(
+                    400,
+                    "invalid_pre_send_check_model_preset_id",
+                    "pre_send_check_model_preset_id must be the dedicated review model preset.",
+                )
+            self._ensure_pre_send_check_model_preset(state)
+            self._validate_model_preset_definition(
+                PRE_SEND_CHECK_MODEL_PRESET_ID,
+                state["model_presets"][PRE_SEND_CHECK_MODEL_PRESET_ID],
+            )
+            state["pre_send_check_model_preset_id"] = PRE_SEND_CHECK_MODEL_PRESET_ID
 
         # 動作設定
         if "thinking_speech_level" in payload:
@@ -163,6 +680,25 @@ class ServiceConfigResourcesMixin:
             self._validate_wake_policy(payload["wake_policy"])
             state["wake_policy"] = payload["wake_policy"]
 
+        if "selected_conversation_display_name_id" in payload:
+            selected_display_name_id = payload["selected_conversation_display_name_id"]
+            if (
+                not isinstance(selected_display_name_id, str)
+                or not selected_display_name_id
+            ):
+                raise ServiceError(
+                    400,
+                    "invalid_selected_conversation_display_name_id",
+                    "selected_conversation_display_name_id must be a non-empty string.",
+                )
+            if selected_display_name_id not in state["conversation_display_names"]:
+                raise ServiceError(
+                    404,
+                    "conversation_display_name_not_found",
+                    "The selected conversation display name does not exist.",
+                )
+            state["selected_conversation_display_name_id"] = selected_display_name_id
+
         # 永続化
         self.store.write_state(state)
         if should_clear_runtime_layers:
@@ -176,6 +712,9 @@ class ServiceConfigResourcesMixin:
                 next_wake_policy=state["wake_policy"],
                 current_time=self._now_iso(),
             )
+        # 選択中人格が変わると音声起動ワードも変わる。
+        if "selected_persona_id" in payload:
+            self._reload_audio_runtime_settings()
         return self.get_config(token=state["console_access_token"])
 
     def select_persona(self, token: str | None, persona_id: str) -> dict[str, Any]:
@@ -332,6 +871,19 @@ class ServiceConfigResourcesMixin:
         )
 
     def delete_model_preset(self, token: str | None, model_preset_id: str) -> dict[str, Any]:
+        state = self._require_token(token)
+        if model_preset_id == PRE_SEND_CHECK_MODEL_PRESET_ID:
+            raise ServiceError(
+                409,
+                "pre_send_check_model_preset_delete_forbidden",
+                "The dedicated pre-send check model preset cannot be deleted.",
+            )
+        if model_preset_id == state["pre_send_check_model_preset_id"]:
+            raise ServiceError(
+                409,
+                "pre_send_check_model_preset_delete_forbidden",
+                "The pre-send check model preset cannot be deleted while selected.",
+            )
         return self._delete_resource_entry(
             token=token,
             entries_key="model_presets",
@@ -412,10 +964,7 @@ class ServiceConfigResourcesMixin:
         return {
             "mcp_servers": [
                 self._public_mcp_server(mcp_server)
-                for mcp_server in sorted(
-                    mcp_servers.values(),
-                    key=lambda item: str(item.get("mcp_server_id") or ""),
-                )
+                for mcp_server in self._ordered_mcp_servers(mcp_servers.values())
             ],
         }
 
@@ -488,6 +1037,57 @@ class ServiceConfigResourcesMixin:
         self._append_mcp_servers_editor_state_audit_event(state=state, operation="write")
         return self._build_mcp_servers_editor_state(state)
 
+    def get_agent_skill_sources_editor_state(self, token: str | None) -> dict[str, Any]:
+        state = self._require_token(token)
+        self._append_agent_skill_sources_audit_event(state=state, operation="read")
+        return self._build_agent_skill_sources_editor_state(state)
+
+    def replace_agent_skill_sources_editor_state(
+        self,
+        token: str | None,
+        definition: dict[str, Any],
+    ) -> dict[str, Any]:
+        state = self._require_token(token)
+        source_entries = self._agent_skill_source_entries_by_id(
+            definition.get("agent_skill_sources")
+        )
+        normalized_sources: dict[str, dict[str, Any]] = {}
+        try:
+            for source_id, source in source_entries.items():
+                normalized_sources[source_id] = validate_agent_skill_source_definition(
+                    source_id,
+                    source,
+                )
+            prospective_registry = AgentSkillRegistry.load(normalized_sources)
+        except AgentSkillError as exc:
+            raise ServiceError(400, exc.code, str(exc)) from exc
+
+        state["agent_skill_sources"] = normalized_sources
+        with self._runtime_state_lock:
+            self.store.write_state(state)
+            self._agent_skill_registry = prospective_registry
+        self._append_agent_skill_sources_audit_event(state=state, operation="write")
+        return self._build_agent_skill_sources_editor_state(state)
+
+    def reload_agent_skill_sources(self, token: str | None) -> dict[str, Any]:
+        state = self._require_token(token)
+        try:
+            prospective_registry = AgentSkillRegistry.load(
+                state.get("agent_skill_sources", {})
+            )
+        except AgentSkillError as exc:
+            raise ServiceError(409, exc.code, str(exc)) from exc
+        with self._runtime_state_lock:
+            self._agent_skill_registry = prospective_registry
+        self._append_agent_skill_sources_audit_event(state=state, operation="reload")
+        return self.inspect_agent_skills(token)
+
+    def inspect_agent_skills(self, token: str | None) -> dict[str, Any]:
+        self._require_token(token)
+        with self._runtime_state_lock:
+            registry = self._agent_skill_registry
+        return registry.inspection_payload()
+
     def get_connector_runtime_config(self, token: str | None, client_id: str) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
@@ -500,7 +1100,7 @@ class ServiceConfigResourcesMixin:
             if camera_source.get("client_id") == normalized_client_id and camera_source.get("enabled") is True
         ]
         mcp_servers = [
-            deepcopy(mcp_server)
+            self._mcp_server_definition_for_connector(mcp_server)
             for mcp_server in self._mcp_servers_from_state(state).values()
             if mcp_server.get("client_id") == normalized_client_id and mcp_server.get("enabled") is True
         ]
@@ -610,8 +1210,10 @@ class ServiceConfigResourcesMixin:
             "selected_persona_id",
             "selected_memory_set_id",
             "selected_model_preset_id",
+            "pre_send_check_model_preset_id",
             "thinking_speech_level",
             "wake_policy",
+            "selected_conversation_display_name_id",
         }
         unsupported_current_fields = sorted(set(current.keys()) - supported_current_fields)
         if unsupported_current_fields:
@@ -623,6 +1225,8 @@ class ServiceConfigResourcesMixin:
         selected_persona_id = current.get("selected_persona_id")
         selected_memory_set_id = current.get("selected_memory_set_id")
         selected_model_preset_id = current.get("selected_model_preset_id")
+        # 送信前チェック用は専用固定プリセットのみ。UI からの付け替えは受け付けない。
+        pre_send_check_model_preset_id = PRE_SEND_CHECK_MODEL_PRESET_ID
         thinking_speech_level = current.get("thinking_speech_level")
         if selected_persona_id not in personas:
             raise ServiceError(404, "persona_not_found", "The selected_persona_id does not exist in personas.")
@@ -630,17 +1234,66 @@ class ServiceConfigResourcesMixin:
             raise ServiceError(404, "memory_set_not_found", "The selected_memory_set_id does not exist in memory_sets.")
         if selected_model_preset_id not in model_presets:
             raise ServiceError(404, "model_preset_not_found", "The selected_model_preset_id does not exist in model_presets.")
+        if selected_model_preset_id == PRE_SEND_CHECK_MODEL_PRESET_ID:
+            raise ServiceError(
+                400,
+                "invalid_selected_model_preset_id",
+                "The dedicated pre-send check model preset cannot be selected for generation.",
+            )
+        # 専用プリセットが bundle に無い場合は、旧 review 指し先から値を引き継いで確保する。
+        previous_review_id = current.get("pre_send_check_model_preset_id")
+        if PRE_SEND_CHECK_MODEL_PRESET_ID not in model_presets:
+            source = model_presets.get(previous_review_id) if isinstance(previous_review_id, str) else None
+            if isinstance(source, dict):
+                dedicated = deepcopy(source)
+                dedicated["model_preset_id"] = PRE_SEND_CHECK_MODEL_PRESET_ID
+                dedicated["display_name"] = "送信前チェック"
+                dedicated["web_search_enabled"] = False
+                model_presets[PRE_SEND_CHECK_MODEL_PRESET_ID] = (
+                    self._normalize_model_preset_definition(dedicated)
+                )
+            else:
+                model_presets[PRE_SEND_CHECK_MODEL_PRESET_ID] = (
+                    self._normalize_model_preset_definition(
+                        build_default_pre_send_check_model_preset()
+                    )
+                )
+            self._validate_model_preset_definition(
+                PRE_SEND_CHECK_MODEL_PRESET_ID,
+                model_presets[PRE_SEND_CHECK_MODEL_PRESET_ID],
+            )
+        else:
+            # 専用プリセットは Web 検索を使わない。
+            model_presets[PRE_SEND_CHECK_MODEL_PRESET_ID]["web_search_enabled"] = False
 
         # 動作設定検証
         self._validate_thinking_speech_level(thinking_speech_level)
         self._validate_wake_policy(current.get("wake_policy"))
+        selected_display_name_id = current.get("selected_conversation_display_name_id")
+        if (
+            not isinstance(selected_display_name_id, str)
+            or not selected_display_name_id
+        ):
+            raise ServiceError(
+                400,
+                "invalid_selected_conversation_display_name_id",
+                "selected_conversation_display_name_id must be a non-empty string.",
+            )
+        if selected_display_name_id not in state["conversation_display_names"]:
+            raise ServiceError(
+                404,
+                "conversation_display_name_not_found",
+                "The selected conversation display name does not exist.",
+            )
 
         # 永続化
         state["selected_persona_id"] = selected_persona_id
         state["selected_memory_set_id"] = selected_memory_set_id
         state["selected_model_preset_id"] = selected_model_preset_id
+        state["pre_send_check_model_preset_id"] = pre_send_check_model_preset_id
         state["thinking_speech_level"] = thinking_speech_level
         state["wake_policy"] = current["wake_policy"]
+        state["selected_conversation_display_name_id"] = selected_display_name_id
         state["personas"] = personas
         state["memory_sets"] = memory_sets
         state["model_presets"] = model_presets
@@ -658,8 +1311,15 @@ class ServiceConfigResourcesMixin:
             next_wake_policy=state["wake_policy"],
             current_time=self._now_iso(),
         )
+        # 人格設定の音声起動ワード変更を音声 runtime へ反映する。
+        self._reload_audio_runtime_settings()
         self._append_editor_state_audit_event(state=state, operation="write")
         return self._build_editor_state(state)
+
+    def _reload_audio_runtime_settings(self) -> None:
+        audio_runtime = getattr(self, "_audio_runtime", None)
+        if audio_runtime is not None:
+            audio_runtime.reload_settings()
 
     def _build_settings_snapshot(self, state: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -667,8 +1327,52 @@ class ServiceConfigResourcesMixin:
             "selected_memory_set_id": state["selected_memory_set_id"],
             "wake_policy": deepcopy(state["wake_policy"]),
             "selected_model_preset_id": state["selected_model_preset_id"],
+            "pre_send_check_model_preset_id": state[
+                "pre_send_check_model_preset_id"
+            ],
             "thinking_speech_level": state["thinking_speech_level"],
+            "selected_conversation_display_name_id": state[
+                "selected_conversation_display_name_id"
+            ],
         }
+
+    def _ensure_pre_send_check_model_preset(self, state: dict[str, Any]) -> bool:
+        # 既存 state に専用プリセットが無い場合、接続設定を引き継いで確保する。
+        model_presets = state.get("model_presets")
+        if not isinstance(model_presets, dict):
+            return False
+        changed = False
+        previous_id = state.get("pre_send_check_model_preset_id")
+        if PRE_SEND_CHECK_MODEL_PRESET_ID not in model_presets:
+            source = model_presets.get(previous_id) if isinstance(previous_id, str) else None
+            if isinstance(source, dict):
+                dedicated = deepcopy(source)
+                dedicated["model_preset_id"] = PRE_SEND_CHECK_MODEL_PRESET_ID
+                dedicated["display_name"] = "送信前チェック"
+                dedicated["web_search_enabled"] = False
+            else:
+                dedicated = build_default_pre_send_check_model_preset()
+            model_presets[PRE_SEND_CHECK_MODEL_PRESET_ID] = dedicated
+            changed = True
+        if state.get("pre_send_check_model_preset_id") != PRE_SEND_CHECK_MODEL_PRESET_ID:
+            state["pre_send_check_model_preset_id"] = PRE_SEND_CHECK_MODEL_PRESET_ID
+            changed = True
+        if state.get("selected_model_preset_id") == PRE_SEND_CHECK_MODEL_PRESET_ID:
+            if DEFAULT_MODEL_PRESET_ID in model_presets:
+                state["selected_model_preset_id"] = DEFAULT_MODEL_PRESET_ID
+            else:
+                fallback_id = next(
+                    (
+                        preset_id
+                        for preset_id in model_presets
+                        if preset_id != PRE_SEND_CHECK_MODEL_PRESET_ID
+                    ),
+                    None,
+                )
+                if fallback_id is not None:
+                    state["selected_model_preset_id"] = fallback_id
+            changed = True
+        return changed
 
     def _build_editor_state(self, state: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -676,6 +1380,20 @@ class ServiceConfigResourcesMixin:
             "personas": [deepcopy(value) for value in state["personas"].values()],
             "memory_sets": [deepcopy(value) for value in state["memory_sets"].values()],
             "model_presets": [deepcopy(value) for value in state["model_presets"].values()],
+        }
+
+    def _build_avatar_speech_editor_state(self, state: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "selected_avatar_id": state["selected_avatar_id"],
+            "audio_output_settings": deepcopy(state["audio_output_settings"]),
+            "microphone_settings": deepcopy(state["microphone_settings"]),
+            "avatars": [
+                deepcopy(value)
+                for value in sorted(
+                    state["avatars"].values(),
+                    key=lambda item: str(item.get("avatar_id") or ""),
+                )
+            ],
         }
 
     def _build_camera_sources_editor_state(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -712,10 +1430,21 @@ class ServiceConfigResourcesMixin:
         mcp_servers = self._mcp_servers_from_state(state)
         return {
             "mcp_servers": [
+                self._mcp_server_definition_for_read(value)
+                for value in self._ordered_mcp_servers(mcp_servers.values())
+            ],
+        }
+
+    def _build_agent_skill_sources_editor_state(self, state: dict[str, Any]) -> dict[str, Any]:
+        sources = state.get("agent_skill_sources")
+        if not isinstance(sources, dict):
+            sources = {}
+        return {
+            "agent_skill_sources": [
                 deepcopy(value)
                 for value in sorted(
-                    mcp_servers.values(),
-                    key=lambda item: str(item.get("mcp_server_id") or ""),
+                    sources.values(),
+                    key=lambda item: str(item.get("source_id") or ""),
                 )
             ],
         }
@@ -791,6 +1520,9 @@ class ServiceConfigResourcesMixin:
         self.store.write_state(state)
         if entry_id == state[selected_id_key]:
             self._clear_pending_intent_candidates()
+            # 選択中人格の音声起動ワード更新を音声 runtime へ反映する。
+            if entries_key == "personas":
+                self._reload_audio_runtime_settings()
 
         # 応答
         entry = state[entries_key][entry_id]
@@ -879,9 +1611,8 @@ class ServiceConfigResourcesMixin:
             mcp_server_id = entry.get("mcp_server_id")
             if not isinstance(mcp_server_id, str) or not mcp_server_id.strip():
                 raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.mcp_server_id must be a non-empty string.")
+            # 設定正本の mcp_server_id は接頭辞なしの名前。
             normalized = mcp_server_id.strip()
-            if not normalized.startswith("mcp:"):
-                raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.mcp_server_id must start with mcp:.")
             if normalized in result:
                 raise ServiceError(
                     400,
@@ -889,6 +1620,38 @@ class ServiceConfigResourcesMixin:
                     f"{normalized} is duplicated in mcp_servers.",
                 )
             result[normalized] = entry
+        return result
+
+    def _agent_skill_source_entries_by_id(self, entries: Any) -> dict[str, dict[str, Any]]:
+        if not isinstance(entries, list):
+            raise ServiceError(
+                400,
+                "invalid_agent_skill_sources",
+                "agent_skill_sources must be an array.",
+            )
+        result: dict[str, dict[str, Any]] = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise ServiceError(
+                    400,
+                    "invalid_agent_skill_source",
+                    "Each agent_skill_source must be an object.",
+                )
+            source_id = entry.get("source_id")
+            if not isinstance(source_id, str) or not source_id.strip():
+                raise ServiceError(
+                    400,
+                    "invalid_agent_skill_source_id",
+                    "source_id must be a non-empty string.",
+                )
+            normalized_id = source_id.strip()
+            if normalized_id in result:
+                raise ServiceError(
+                    400,
+                    "duplicate_agent_skill_source_id",
+                    f"{normalized_id} is duplicated in agent_skill_sources.",
+                )
+            result[normalized_id] = entry
         return result
 
     def _append_editor_state_audit_event(self, *, state: dict[str, Any], operation: str) -> None:
@@ -905,12 +1668,90 @@ class ServiceConfigResourcesMixin:
                     "selected_persona_id": state["selected_persona_id"],
                     "selected_memory_set_id": state["selected_memory_set_id"],
                     "selected_model_preset_id": state["selected_model_preset_id"],
+                    "pre_send_check_model_preset_id": state[
+                        "pre_send_check_model_preset_id"
+                    ],
                     "persona_count": len(state["personas"]),
                     "memory_set_count": len(state["memory_sets"]),
                     "model_preset_count": len(state["model_presets"]),
                 }
             ]
         )
+
+    def _append_avatar_speech_editor_state_audit_event(
+        self,
+        *,
+        state: dict[str, Any],
+        operation: str,
+    ) -> None:
+        # API keyや音声設定本文はauditへ記録しない。
+        self.store.append_events(
+            events=[
+                {
+                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
+                    "cycle_id": "config:avatar-speech-editor-state",
+                    "memory_set_id": state["selected_memory_set_id"],
+                    "kind": f"avatar_speech_editor_state_{operation}",
+                    "role": "system",
+                    "created_at": self._now_iso(),
+                    "selected_persona_id": state["selected_persona_id"],
+                    "selected_memory_set_id": state["selected_memory_set_id"],
+                    "selected_model_preset_id": state["selected_model_preset_id"],
+                    "selected_avatar_id": state["selected_avatar_id"],
+                    "avatar_count": len(state["avatars"]),
+                }
+            ]
+        )
+
+    def _append_stt_enabled_audit_event(
+        self,
+        *,
+        state: dict[str, Any],
+        enabled: bool,
+    ) -> None:
+        # 運用トグルの変更だけを audit に残し、秘密値は含めない。
+        self.store.append_events(
+            events=[
+                {
+                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
+                    "cycle_id": "config:stt-enabled",
+                    "memory_set_id": state["selected_memory_set_id"],
+                    "kind": "stt_enabled_write",
+                    "role": "system",
+                    "created_at": self._now_iso(),
+                    "selected_avatar_id": state["selected_avatar_id"],
+                    "enabled": enabled,
+                }
+            ]
+        )
+
+    def _append_tts_enabled_audit_event(
+        self,
+        *,
+        state: dict[str, Any],
+        enabled: bool,
+    ) -> None:
+        # 運用トグルの変更だけを audit に残し、秘密値は含めない。
+        self.store.append_events(
+            events=[
+                {
+                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
+                    "cycle_id": "config:tts-enabled",
+                    "memory_set_id": state["selected_memory_set_id"],
+                    "kind": "tts_enabled_write",
+                    "role": "system",
+                    "created_at": self._now_iso(),
+                    "selected_avatar_id": state["selected_avatar_id"],
+                    "enabled": enabled,
+                }
+            ]
+        )
+
+    def _publish_audio_runtime_state(self) -> None:
+        # TTS など入力 lease を壊さない運用変更のあと、snapshot だけを配る。
+        audio_runtime = getattr(self, "_audio_runtime", None)
+        if audio_runtime is not None:
+            audio_runtime.publish_state(force=True)
 
     def _append_camera_sources_editor_state_audit_event(self, *, state: dict[str, Any], operation: str) -> None:
         # 秘密値を含む camera source editor-state 本文は audit に残さない。
@@ -946,6 +1787,30 @@ class ServiceConfigResourcesMixin:
                     "selected_memory_set_id": state["selected_memory_set_id"],
                     "selected_model_preset_id": state["selected_model_preset_id"],
                     "mcp_server_count": len(self._mcp_servers_from_state(state)),
+                }
+            ]
+        )
+
+    def _append_agent_skill_sources_audit_event(self, *, state: dict[str, Any], operation: str) -> None:
+        # Skill 本文、resource 内容、実行設定は audit に残さない。
+        sources = state.get("agent_skill_sources")
+        source_count = len(sources) if isinstance(sources, dict) else 0
+        with self._runtime_state_lock:
+            skill_count = len(self._agent_skill_registry.skills)
+        self.store.append_events(
+            events=[
+                {
+                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
+                    "cycle_id": "config:agent-skill-sources",
+                    "memory_set_id": state["selected_memory_set_id"],
+                    "kind": f"agent_skill_sources_{operation}",
+                    "role": "system",
+                    "created_at": self._now_iso(),
+                    "selected_persona_id": state["selected_persona_id"],
+                    "selected_memory_set_id": state["selected_memory_set_id"],
+                    "selected_model_preset_id": state["selected_model_preset_id"],
+                    "agent_skill_source_count": source_count,
+                    "agent_skill_count": skill_count,
                 }
             ]
         )
@@ -1029,6 +1894,20 @@ class ServiceConfigResourcesMixin:
             public_definition["embedding"] = self._public_embedding_definition(embedding)
         return public_definition
 
+    def _public_avatar_definition(self, definition: dict[str, Any]) -> dict[str, Any]:
+        public_definition = deepcopy(definition)
+        stt = public_definition.get("stt")
+        if isinstance(stt, dict):
+            stt["api_key_present"] = bool(stt.get("api_key"))
+            stt.pop("api_key", None)
+        tts = public_definition.get("tts")
+        if isinstance(tts, dict):
+            aivis_cloud = tts.get("aivis_cloud_config")
+            if isinstance(aivis_cloud, dict):
+                aivis_cloud["api_key_present"] = bool(aivis_cloud.get("api_key"))
+                aivis_cloud.pop("api_key", None)
+        return public_definition
+
     def _public_embedding_definition(self, definition: dict[str, Any]) -> dict[str, Any]:
         public_definition = {
             **definition,
@@ -1089,28 +1968,61 @@ class ServiceConfigResourcesMixin:
         return public_definition
 
     def _public_mcp_server(self, definition: dict[str, Any]) -> dict[str, Any]:
-        public_definition = deepcopy(definition)
+        public_definition = self._mcp_server_definition_for_read(definition)
         env = public_definition.get("env")
         if isinstance(env, dict):
             public_definition["env"] = {
                 key: {"value_present": bool(value)}
                 for key, value in sorted(env.items())
             }
+        headers = public_definition.get("headers")
+        if isinstance(headers, dict):
+            public_definition["headers"] = {
+                key: {"value_present": bool(value)}
+                for key, value in sorted(headers.items())
+            }
         return public_definition
 
+    def _ordered_mcp_servers(self, definitions: Any) -> list[dict[str, Any]]:
+        # 組み込み雛形では ELYTH を先頭にし、残りは識別子順で安定させる。
+        return sorted(
+            definitions,
+            key=lambda item: (
+                0 if item.get("mcp_server_id") == "elyth" else 1,
+                str(item.get("mcp_server_id") or ""),
+            ),
+        )
+
+    def _mcp_server_definition_for_read(self, definition: dict[str, Any]) -> dict[str, Any]:
+        return deepcopy(definition)
+
+    def _mcp_server_definition_for_connector(self, definition: dict[str, Any]) -> dict[str, Any]:
+        # 送信前チェック要否は server の dispatch 方針であり、実行 connector へ渡さない。
+        connector_definition = self._mcp_server_definition_for_read(definition)
+        connector_definition.pop("pre_send_check_enabled", None)
+        connector_definition.pop("autonomous_session", None)
+        return connector_definition
+
     def _normalize_mcp_server_definition(self, mcp_server_id: str, definition: dict[str, Any]) -> dict[str, Any]:
-        normalized = {
-            "mcp_server_id": definition.get("mcp_server_id", mcp_server_id),
-            "connector_kind": definition.get("connector_kind", MCP_DEFAULT_CONNECTOR_KIND),
-            "client_id": definition.get("client_id", MCP_DEFAULT_CLIENT_ID),
-            "enabled": definition.get("enabled"),
-            "transport": definition.get("transport", "stdio"),
-            "command": definition.get("command"),
-            "args": definition.get("args", []),
-            "cwd": definition.get("cwd"),
-            "env": definition.get("env", {}),
-        }
-        for field_name in ("mcp_server_id", "connector_kind", "client_id", "transport", "command", "cwd"):
+        if not isinstance(definition, dict):
+            raise ServiceError(400, "invalid_mcp_server", "mcp_server must be an object.")
+        transport = definition.get("transport", "stdio")
+        # 未知フィールドと transport 非互換フィールドを検証側で確実に拒否できるよう、
+        # 入力を落とさずに既定値だけを補う。
+        normalized = deepcopy(definition)
+        normalized.setdefault("mcp_server_id", mcp_server_id)
+        normalized.setdefault("connector_kind", MCP_DEFAULT_CONNECTOR_KIND)
+        normalized.setdefault("client_id", MCP_DEFAULT_CLIENT_ID)
+        normalized.setdefault("transport", transport)
+        if transport == "stdio":
+            normalized.setdefault("command", None)
+            normalized.setdefault("args", [])
+            normalized.setdefault("cwd", None)
+            normalized.setdefault("env", {})
+        elif transport == "streamable_http":
+            normalized.setdefault("url", None)
+            normalized.setdefault("headers", {})
+        for field_name in ("mcp_server_id", "connector_kind", "client_id", "transport", "command", "cwd", "url"):
             value = normalized.get(field_name)
             if isinstance(value, str):
                 normalized[field_name] = value.strip()
@@ -1123,6 +2035,12 @@ class ServiceConfigResourcesMixin:
                 key.strip() if isinstance(key, str) else key: value
                 for key, value in env.items()
             }
+        headers = normalized.get("headers")
+        if isinstance(headers, dict):
+            normalized["headers"] = {
+                key.strip() if isinstance(key, str) else key: value
+                for key, value in headers.items()
+            }
         return normalized
 
     def _validate_mcp_server_definition(self, mcp_server_id: str, definition: dict[str, Any]) -> None:
@@ -1130,18 +2048,22 @@ class ServiceConfigResourcesMixin:
             raise ServiceError(400, "invalid_mcp_server", "mcp_server must be an object.")
         if definition.get("mcp_server_id") != mcp_server_id:
             raise ServiceError(400, "mcp_server_id_mismatch", "mcp_server_id must match the path.")
-        if not isinstance(mcp_server_id, str) or not mcp_server_id.startswith("mcp:"):
-            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.mcp_server_id must start with mcp:.")
+        if not isinstance(mcp_server_id, str) or not mcp_server_id.strip():
+            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.mcp_server_id must be a non-empty string.")
         supported_fields = {
             "mcp_server_id",
             "connector_kind",
             "client_id",
             "enabled",
+            "pre_send_check_enabled",
             "transport",
             "command",
             "args",
             "cwd",
             "env",
+            "url",
+            "headers",
+            "autonomous_session",
         }
         unsupported_fields = sorted(set(definition.keys()) - supported_fields)
         if unsupported_fields:
@@ -1157,9 +2079,29 @@ class ServiceConfigResourcesMixin:
         enabled = definition.get("enabled")
         if not isinstance(enabled, bool):
             raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.enabled must be a boolean.")
+        if not isinstance(definition.get("pre_send_check_enabled"), bool):
+            raise ServiceError(
+                400,
+                "invalid_mcp_server_field",
+                "mcp_server.pre_send_check_enabled must be a boolean.",
+            )
         transport = definition.get("transport")
         if transport not in MCP_TRANSPORTS:
             raise ServiceError(400, "unsupported_mcp_transport", "mcp_server.transport is not supported.")
+        if transport == "stdio":
+            self._validate_stdio_mcp_server_definition(definition)
+        else:
+            self._validate_streamable_http_mcp_server_definition(definition)
+        self._validate_mcp_autonomous_session(definition)
+
+    def _validate_stdio_mcp_server_definition(self, definition: dict[str, Any]) -> None:
+        incompatible = sorted(set(definition) & {"url", "headers"})
+        if incompatible:
+            raise ServiceError(
+                400,
+                "invalid_mcp_server_field",
+                f"stdio mcp_server cannot contain: {', '.join(incompatible)}.",
+            )
         self._validate_mcp_required_text_field(definition, "command", "mcp_server.command")
         args = definition.get("args")
         if not isinstance(args, list):
@@ -1178,6 +2120,63 @@ class ServiceConfigResourcesMixin:
                 raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.env keys must be non-empty strings.")
             if not isinstance(value, str):
                 raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.env values must be strings.")
+
+    def _validate_streamable_http_mcp_server_definition(self, definition: dict[str, Any]) -> None:
+        incompatible = sorted(set(definition) & {"command", "args", "cwd", "env"})
+        if incompatible:
+            raise ServiceError(
+                400,
+                "invalid_mcp_server_field",
+                f"streamable_http mcp_server cannot contain: {', '.join(incompatible)}.",
+            )
+        self._validate_mcp_required_text_field(definition, "url", "mcp_server.url")
+        parsed = urlparse(str(definition["url"]))
+        if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password or parsed.fragment:
+            raise ServiceError(
+                400,
+                "invalid_mcp_server_field",
+                "mcp_server.url must be an HTTPS URL without userinfo or fragment.",
+            )
+        headers = definition.get("headers")
+        if not isinstance(headers, dict):
+            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.headers must be an object.")
+        reserved = {"accept", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id"}
+        for key, value in headers.items():
+            if not isinstance(key, str) or not key.strip() or any(character in key for character in "\r\n:"):
+                raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.headers contains an invalid name.")
+            if key.strip().lower() in reserved:
+                raise ServiceError(400, "invalid_mcp_server_field", f"mcp_server.headers.{key} is protocol-managed.")
+            if not isinstance(value, str) or "\r" in value or "\n" in value:
+                raise ServiceError(400, "invalid_mcp_server_field", f"mcp_server.headers.{key} must be a single-line string.")
+            if definition.get("enabled") is True and not value.strip():
+                raise ServiceError(400, "invalid_mcp_server_field", f"mcp_server.headers.{key} must be non-empty when enabled.")
+
+    def _validate_mcp_autonomous_session(self, definition: dict[str, Any]) -> None:
+        session = definition.get("autonomous_session")
+        if not isinstance(session, dict) or set(session) != {
+            "enabled",
+            "background_enabled",
+            "min_interval_seconds",
+            "max_tool_calls",
+        }:
+            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.autonomous_session has invalid fields.")
+        if not isinstance(session.get("enabled"), bool):
+            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.autonomous_session.enabled must be a boolean.")
+        if not isinstance(session.get("background_enabled"), bool):
+            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.autonomous_session.background_enabled must be a boolean.")
+        if session["background_enabled"] and not session["enabled"]:
+            raise ServiceError(400, "invalid_mcp_server_field", "background_enabled requires autonomous_session.enabled=true.")
+        for key in ("min_interval_seconds", "max_tool_calls"):
+            value = session.get(key)
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise ServiceError(400, "invalid_mcp_server_field", f"mcp_server.autonomous_session.{key} must be a positive integer.")
+
+    def _mcp_tool_is_enabled(self, mcp_server_id: str, tool_name: str) -> bool:
+        # 実行可否の正本は MCP server の enabled。tool 実在は接続中 catalog で別途判定する。
+        _ = tool_name
+        state = self.store.read_state()
+        mcp_server = self._mcp_servers_from_state(state).get(mcp_server_id)
+        return isinstance(mcp_server, dict) and mcp_server.get("enabled") is True
 
     def _validate_mcp_required_text_field(self, definition: dict[str, Any], key: str, label: str) -> None:
         value = definition.get(key)

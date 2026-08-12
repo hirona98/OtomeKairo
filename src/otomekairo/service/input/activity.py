@@ -28,8 +28,20 @@ class ServiceInputActivityMixin:
         persona_context: Any,
     ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
         memory_set_id = state["selected_memory_set_id"]
+        actor_ref = self._activity_actor_ref(current_input)
+        if actor_ref is None:
+            return None, {
+                "result_status": "skipped",
+                "source_pack_summary": {},
+                "candidate_count": 0,
+                "updated_count": 0,
+                "expired_count": 0,
+                "activity_context": None,
+                "failure_reason": None,
+            }
         previous_state = self.store.get_current_activity_state(
             memory_set_id=memory_set_id,
+            actor_ref=actor_ref,
             current_time=started_at,
         )
         source_pack = self._build_activity_source_pack(
@@ -67,6 +79,7 @@ class ServiceInputActivityMixin:
             candidate = self._activity_candidate(payload)
             activity_state, expired_activity_id = self._normalize_activity_candidate(
                 memory_set_id=memory_set_id,
+                actor_ref=actor_ref,
                 started_at=started_at,
                 source_pack=source_pack,
                 previous_state=previous_state,
@@ -75,12 +88,14 @@ class ServiceInputActivityMixin:
             )
             refresh_summary = self.store.refresh_activity_state(
                 memory_set_id=memory_set_id,
+                actor_ref=actor_ref,
                 current_time=started_at,
                 activity_state=activity_state,
                 expired_activity_id=expired_activity_id,
             )
             current_state = self.store.get_current_activity_state(
                 memory_set_id=memory_set_id,
+                actor_ref=actor_ref,
                 current_time=started_at,
             )
             activity_context = self._summarize_activity_context(current_state, current_time=started_at)
@@ -113,6 +128,25 @@ class ServiceInputActivityMixin:
             )
             debug_log("Activity", f"{cycle_label} activity failed reason={self._clamp(str(exc))}", level="WARNING")
             return trace["activity_context"], trace
+
+    def _activity_actor_ref(self, current_input: dict[str, Any]) -> str | None:
+        # 人物入力と人物に紐づくwakeだけを人物活動へ反映する。
+        sender_ref = current_input.get("sender_ref")
+        if isinstance(sender_ref, str) and sender_ref.startswith("person:"):
+            return sender_ref
+        interaction_context = current_input.get("interaction_context")
+        if not isinstance(interaction_context, dict):
+            return None
+        participants = interaction_context.get("participants")
+        if not isinstance(participants, list) or len(participants) != 1:
+            return None
+        participant = participants[0]
+        if not isinstance(participant, dict):
+            return None
+        person_ref = participant.get("person_ref")
+        if isinstance(person_ref, str) and person_ref.startswith("person:"):
+            return person_ref
+        return None
 
     def _build_activity_source_pack(
         self,
@@ -178,7 +212,7 @@ class ServiceInputActivityMixin:
         ):
             return True
         current_input = source_pack.get("current_input")
-        return isinstance(current_input, dict) and current_input.get("sender") == "user"
+        return isinstance(current_input, dict) and current_input.get("sender_kind") == "person"
 
     def _activity_client_context(self, client_context: dict[str, Any]) -> dict[str, Any]:
         payload: dict[str, Any] = {}
@@ -273,6 +307,7 @@ class ServiceInputActivityMixin:
         self,
         *,
         memory_set_id: str,
+        actor_ref: str,
         started_at: str,
         source_pack: dict[str, Any],
         previous_state: dict[str, Any] | None,
@@ -301,6 +336,7 @@ class ServiceInputActivityMixin:
         return {
             "activity_id": activity_id,
             "memory_set_id": memory_set_id,
+            "actor_ref": actor_ref,
             "label": str(candidate["label"]).strip(),
             "actor": str(candidate["actor"]).strip(),
             "target": str(candidate.get("target", "")).strip(),

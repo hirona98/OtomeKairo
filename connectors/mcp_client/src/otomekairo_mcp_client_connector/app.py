@@ -7,6 +7,7 @@ from typing import Any
 
 from .config import AppConfig, McpServerConfig
 from .http import HttpError, JsonApiClient
+from .log import emit_log
 from .mcp_bridge import call_tool, list_tools
 from .stream import EventStreamClient, StreamError
 from .trace import trace_writer_from_env
@@ -30,11 +31,12 @@ class McpClientConnector:
         return {
             "type": "hello",
             "client_id": self.config.client_id,
+            "client_kind": "capability_connector",
             "caps": [{"id": "mcp.call_tool", "version": "1"}],
             "mcp_servers": [
                 {
                     "mcp_server_id": server.mcp_server_id,
-                    "transport": "stdio",
+                    "transport": server.transport,
                     "tools": self._tools_by_server.get(server.mcp_server_id, []),
                 }
                 for server in self.config.mcp_servers
@@ -44,7 +46,8 @@ class McpClientConnector:
     def refresh_tools(self) -> None:
         tools_by_server: dict[str, list[dict[str, Any]]] = {}
         for server in self.config.mcp_servers:
-            tools_by_server[server.mcp_server_id] = asyncio.run(list_tools(server))
+            # enabled な server は tools/list の catalog をそのまま hello へ載せる。
+            tools_by_server[server.mcp_server_id] = list(asyncio.run(list_tools(server)))
         self._tools_by_server = tools_by_server
 
     def print_hello(self) -> None:
@@ -64,7 +67,7 @@ class McpClientConnector:
                 )
                 stream.run(hello_payload=self.hello_payload(), on_event=self._handle_event)
             except (StreamError, OSError, HttpError, RuntimeError) as exc:
-                print(f"mcp connector stream error: {exc}", flush=True)
+                emit_log("mcp-client-connector", f"stream error: {exc}", level="WARNING")
                 time.sleep(self.config.server.reconnect_delay_seconds)
 
     def _handle_event(self, event: dict[str, Any]) -> None:
@@ -90,7 +93,6 @@ class McpClientConnector:
                     "request_id": request_id,
                     "mcp_server_id": mcp_server_id,
                     "tool_name": tool_name,
-                    "arguments": arguments,
                 },
             )
         server = self._servers_by_id.get(mcp_server_id)

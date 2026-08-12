@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ja">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CocoroAI 判断</title>
+  <link rel="stylesheet" href="/ui/styles.css">
+</head>
+
+<body class="cycle-page">
+  <div class="cycle-shell">
+    <header class="cycle-topbar">
+      <div class="brand-block">
+        <h1>CocoroAI<span class="brand-suffix"> Powered by OtomeKairo</span></h1>
+      </div>
+      <div class="cycle-toolbar" role="toolbar" aria-label="判断操作">
+        <button type="button" class="plain-button" id="refresh-cycles">一覧を更新</button>
+        <button type="button" class="plain-button" id="reload-trace">選択中を再読込</button>
+        <a class="plain-button" href="/ui/logs" target="_blank" rel="noopener noreferrer">ログへ</a>
+      </div>
+    </header>
+
+    <p class="cycle-role-note" id="cycle-role-note">
+      <strong>この画面:</strong> 1 回の判断について、何を受けて何をし、なぜそうしたかを見る。
+      <strong>見ないもの:</strong> リアルタイムの裏側ログ（それは「ログ」へ）。
+    </p>
+
+    <main class="cycle-main">
+      <aside class="cycle-list-panel" aria-label="判断一覧">
+        <div class="cycle-list" id="cycle-list"></div>
+      </aside>
+
+      <section class="cycle-detail-panel" aria-label="判断詳細">
+        <div class="cycle-detail-header">
+          <h2 id="selected-cycle-title">cycle 未選択</h2>
+          <p id="selected-cycle-meta" class="cycle-detail-meta"></p>
+        </div>
+
+        <div class="cycle-tabs" role="tablist" aria-label="判断の見方">
+          <button type="button" class="cycle-tab is-active" role="tab" id="tab-overview" aria-selected="true"
+            data-tab="overview">要点</button>
+          <button type="button" class="cycle-tab" role="tab" id="tab-stages" aria-selected="false"
+            data-tab="stages">段階</button>
+          <button type="button" class="cycle-tab" role="tab" id="tab-json" aria-selected="false"
+            data-tab="json">詳細 JSON</button>
+        </div>
+
+        <div class="cycle-tab-panels">
+          <div class="cycle-tab-panel" id="panel-overview" role="tabpanel" data-panel="overview">
+            <div id="overview-sections" class="cycle-overview"></div>
+          </div>
+          <div class="cycle-tab-panel" id="panel-stages" role="tabpanel" data-panel="stages" hidden>
+            <div id="stage-sections" class="cycle-stages"></div>
+          </div>
+          <div class="cycle-tab-panel" id="panel-json" role="tabpanel" data-panel="json" hidden>
+            <details class="cycle-json-block" open>
+              <summary>cycle trace</summary>
+              <pre id="json-trace" class="cycle-json"></pre>
+            </details>
+            <details class="cycle-json-block">
+              <summary>認知コンテキスト（派生。正本ではない）</summary>
+              <pre id="json-cognitive" class="cycle-json"></pre>
+            </details>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="cycle-statusbar">
+      <span id="status-text" class="status">読み込み中…</span>
+    </footer>
+  </div>
+
+  <script src="/ui/cycles.js"></script>
+</body>
+
+</html>

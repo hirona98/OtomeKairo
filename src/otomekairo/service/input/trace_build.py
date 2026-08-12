@@ -4,6 +4,7 @@ import uuid
 from typing import Any
 
 from otomekairo.llm.contexts import InitiativeContext
+from otomekairo.interaction import InteractionContext
 from otomekairo.world_state.models import WorldStateTrace
 
 
@@ -113,6 +114,7 @@ class ServiceInputTraceBuildMixin:
         memory_set_id: str,
         input_event_kind: str,
         input_event_role: str,
+        interaction_context: InteractionContext | None,
         input_text: str,
         started_at: str,
         finished_at: str,
@@ -123,8 +125,12 @@ class ServiceInputTraceBuildMixin:
         failure_reason: str | None = None,
         failure_event_kind: str = "recall_hint_failure",
         failure_event_payload: dict[str, Any] | None = None,
+        system_notice: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         # 入力イベント
+        interaction_ref = interaction_context.interaction_ref if interaction_context is not None else None
+        participant_refs = list(interaction_context.participant_refs) if interaction_context is not None else []
+        input_speaker_ref = interaction_context.speaker_ref if interaction_context is not None else None
         events = [
             {
                 "event_id": f"event:{uuid.uuid4().hex}",
@@ -133,6 +139,9 @@ class ServiceInputTraceBuildMixin:
                 "kind": input_event_kind,
                 "role": input_event_role,
                 "text": input_text,
+                "interaction_ref": interaction_ref,
+                "speaker_ref": input_speaker_ref,
+                "participant_refs": participant_refs,
                 "created_at": started_at,
             }
         ]
@@ -151,30 +160,49 @@ class ServiceInputTraceBuildMixin:
                     "memory_set_id": memory_set_id,
                     "kind": failure_event_kind,
                     "role": "system",
+                    "interaction_ref": interaction_ref,
+                    "speaker_ref": None,
+                    "participant_refs": participant_refs,
                     "created_at": finished_at,
                     **payload,
                 }
             )
+            if isinstance(system_notice, dict) and system_notice.get("conversation_visible") is True:
+                events.append(
+                    self._build_system_notice_conversation_event(
+                        cycle_id=cycle_id,
+                        memory_set_id=memory_set_id,
+                        interaction_ref=interaction_ref,
+                        participant_refs=participant_refs,
+                        created_at=finished_at,
+                        system_notice=system_notice,
+                    )
+                )
             return events
 
         # 決定イベント
         if decision is None or result_kind is None:
             raise ValueError("decision and result_kind are required for success events.")
-        events.append(
-            {
-                "event_id": f"event:{uuid.uuid4().hex}",
-                "cycle_id": cycle_id,
-                "memory_set_id": memory_set_id,
-                "kind": "decision",
-                "role": "system",
-                "result_kind": decision["kind"],
-                "external_result_kind": result_kind,
-                "reason_code": decision["reason_code"],
-                "reason_summary": decision["reason_summary"],
-                "pending_intent_summary": pending_intent_summary,
-                "created_at": finished_at,
-            }
-        )
+        decision_event = {
+            "event_id": f"event:{uuid.uuid4().hex}",
+            "cycle_id": cycle_id,
+            "memory_set_id": memory_set_id,
+            "kind": "decision",
+            "role": "system",
+            "interaction_ref": interaction_ref,
+            "speaker_ref": None,
+            "participant_refs": participant_refs,
+            "result_kind": decision["kind"],
+            "external_result_kind": result_kind,
+            "reason_code": decision["reason_code"],
+            "reason_summary": decision["reason_summary"],
+            "pending_intent_summary": pending_intent_summary,
+            "created_at": finished_at,
+        }
+        pre_send_check = decision.get("pre_send_check")
+        if isinstance(pre_send_check, dict):
+            decision_event["pre_send_check"] = pre_send_check
+        events.append(decision_event)
 
         # 応答イベント
         if speech_payload is not None:
@@ -186,10 +214,48 @@ class ServiceInputTraceBuildMixin:
                     "kind": "speech",
                     "role": "assistant",
                     "text": speech_payload["speech_text"],
+                    "interaction_ref": interaction_ref,
+                    "speaker_ref": "self",
+                    "participant_refs": participant_refs,
                     "created_at": finished_at,
                 }
             )
+        if isinstance(system_notice, dict) and system_notice.get("conversation_visible") is True:
+            events.append(
+                self._build_system_notice_conversation_event(
+                    cycle_id=cycle_id,
+                    memory_set_id=memory_set_id,
+                    interaction_ref=interaction_ref,
+                    participant_refs=participant_refs,
+                    created_at=finished_at,
+                    system_notice=system_notice,
+                )
+            )
         return events
+
+    def _build_system_notice_conversation_event(
+        self,
+        *,
+        cycle_id: str,
+        memory_set_id: str,
+        interaction_ref: str | None,
+        participant_refs: list[str],
+        created_at: str,
+        system_notice: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "event_id": f"event:{uuid.uuid4().hex}",
+            "cycle_id": cycle_id,
+            "memory_set_id": memory_set_id,
+            "kind": "system_notice",
+            "role": "system",
+            "text": system_notice["message"],
+            "code": system_notice["code"],
+            "interaction_ref": interaction_ref,
+            "speaker_ref": None,
+            "participant_refs": participant_refs,
+            "created_at": created_at,
+        }
 
     def _build_retrieval_run_success(
         self,
@@ -280,8 +346,27 @@ class ServiceInputTraceBuildMixin:
         trigger_kind: str,
         result_kind: str,
         failed: bool,
+        input_text: str = "",
+        decision: dict[str, Any] | None = None,
+        speech_payload: dict[str, Any] | None = None,
+        pending_intent_summary: dict[str, Any] | None = None,
+        capability_request_summary: dict[str, Any] | None = None,
+        failure_reason: str | None = None,
     ) -> dict[str, Any]:
-        return {
+        # 一覧俯瞰用の短い意味要約。長い機械 ID は載せず、入力・結果・判断理由に寄せる。
+        input_summary = self._clamp(input_text.strip() if isinstance(input_text, str) else "", limit=160)
+        outcome_summary = self._build_cycle_outcome_summary(
+            decision=decision,
+            speech_payload=speech_payload,
+            pending_intent_summary=pending_intent_summary,
+            capability_request_summary=capability_request_summary,
+            failure_reason=failure_reason,
+        )
+        reason_summary = self._build_cycle_reason_summary(
+            decision=decision,
+            failure_reason=failure_reason,
+        )
+        payload: dict[str, Any] = {
             "cycle_id": cycle_id,
             "server_id": state["server_id"],
             "trigger_kind": trigger_kind,
@@ -293,6 +378,61 @@ class ServiceInputTraceBuildMixin:
             "result_kind": result_kind,
             "failed": failed,
         }
+        if input_summary is not None:
+            payload["input_summary"] = input_summary
+        if outcome_summary is not None:
+            payload["outcome_summary"] = outcome_summary
+        if reason_summary is not None:
+            payload["reason_summary"] = reason_summary
+        return payload
+
+    def _build_cycle_outcome_summary(
+        self,
+        *,
+        decision: dict[str, Any] | None,
+        speech_payload: dict[str, Any] | None,
+        pending_intent_summary: dict[str, Any] | None,
+        capability_request_summary: dict[str, Any] | None,
+        failure_reason: str | None,
+    ) -> str | None:
+        # 外に出た結果の短い一覧向け本文。判断理由は reason_summary 側に分ける。
+        if isinstance(speech_payload, dict):
+            speech_text = speech_payload.get("speech_text")
+            if isinstance(speech_text, str) and speech_text.strip():
+                return self._clamp(speech_text.strip(), limit=160)
+        if isinstance(failure_reason, str) and failure_reason.strip():
+            return self._clamp(failure_reason.strip(), limit=160)
+        if isinstance(pending_intent_summary, dict):
+            for key in ("intent_summary", "summary_text"):
+                value = pending_intent_summary.get(key)
+                if isinstance(value, str) and value.strip():
+                    return self._clamp(value.strip(), limit=160)
+        if isinstance(capability_request_summary, dict):
+            for key in ("goal_summary", "summary_text", "capability_id"):
+                value = capability_request_summary.get(key)
+                if isinstance(value, str) and value.strip():
+                    return self._clamp(value.strip(), limit=160)
+        # noop などで外向き本文が無いときだけ、結果欄に理由を載せる。
+        if isinstance(decision, dict) and decision.get("kind") == "noop":
+            reason = decision.get("reason_summary")
+            if isinstance(reason, str) and reason.strip():
+                return self._clamp(reason.strip(), limit=160)
+        return None
+
+    def _build_cycle_reason_summary(
+        self,
+        *,
+        decision: dict[str, Any] | None,
+        failure_reason: str | None,
+    ) -> str | None:
+        # なぜその結果にしたかの短い一覧向け本文。
+        if isinstance(decision, dict):
+            reason = decision.get("reason_summary")
+            if isinstance(reason, str) and reason.strip():
+                return self._clamp(reason.strip(), limit=160)
+        if isinstance(failure_reason, str) and failure_reason.strip():
+            return self._clamp(failure_reason.strip(), limit=160)
+        return None
 
     def _build_cycle_trace(
         self,
@@ -300,6 +440,7 @@ class ServiceInputTraceBuildMixin:
         cycle_id: str,
         cycle_summary: dict[str, Any],
         input_text: str,
+        interaction_context: InteractionContext | None,
         augmented_query_text: str | None,
         client_context: dict[str, Any],
         runtime_summary: dict[str, Any],
@@ -321,6 +462,7 @@ class ServiceInputTraceBuildMixin:
             "current_input": self._build_current_input(
                 input_text=input_text,
                 trigger_kind=cycle_summary["trigger_kind"],
+                interaction_context=interaction_context,
                 capability_request_summary=capability_request_summary,
             ).to_prompt_payload(),
             "input_summary": self._clamp(input_text),
@@ -568,9 +710,17 @@ class ServiceInputTraceBuildMixin:
         input_payload = capability_request.get("input")
         if not isinstance(capability_id, str) or not isinstance(input_payload, dict):
             return None
+        trace_input = input_payload
+        if capability_id == "mcp.call_tool":
+            # MCP arguments は外部 payload なので、trace には実行先の閉じた識別子だけを残す。
+            trace_input = {}
+            for key in ("mcp_server_id", "tool_name"):
+                value = input_payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    trace_input[key] = value.strip()
         return {
             "capability_id": capability_id,
-            "input": input_payload,
+            "input": trace_input,
         }
 
     def _decision_autonomous_run_summary(self, decision: dict[str, Any]) -> dict[str, Any] | None:
@@ -582,6 +732,7 @@ class ServiceInputTraceBuildMixin:
         payload: dict[str, Any] = {
             "objective_summary": autonomous_run.get("objective_summary"),
             "initial_step_summary": autonomous_run.get("initial_step_summary"),
+            "mcp_server_id": autonomous_run.get("mcp_server_id"),
         }
         if isinstance(coordination, dict):
             payload["coordination"] = {
@@ -645,6 +796,7 @@ class ServiceInputTraceBuildMixin:
         *,
         trigger_kind: str,
         input_text: str,
+        interaction_context: InteractionContext | None,
         started_at: str,
         finished_at: str,
         decision: dict[str, Any],
@@ -666,6 +818,10 @@ class ServiceInputTraceBuildMixin:
             "internal_failure_summary": None,
             "duration_ms": self._duration_ms(started_at, finished_at),
         }
+        if isinstance(speech_payload, dict) and isinstance(speech_payload.get("disclosure_review"), dict):
+            trace["disclosure_review"] = speech_payload["disclosure_review"]
+        elif isinstance(decision.get("disclosure_review"), dict):
+            trace["disclosure_review"] = decision["disclosure_review"]
         if isinstance(capability_request_summary, dict):
             trace["capability_request_summary"] = capability_request_summary
         if isinstance(ongoing_action_transition_summary, dict):
@@ -673,6 +829,7 @@ class ServiceInputTraceBuildMixin:
         trace["trigger_compact_summary"] = self._build_trigger_compact_summary(
             trigger_kind=trigger_kind,
             input_text=input_text,
+            interaction_context=interaction_context,
             observation_summary=observation_summary,
             capability_request_summary=capability_request_summary,
             followup_capability_request_summary=followup_capability_request_summary,
@@ -713,6 +870,7 @@ class ServiceInputTraceBuildMixin:
         *,
         trigger_kind: str,
         input_text: str,
+        interaction_context: InteractionContext | None,
         started_at: str,
         finished_at: str,
         failure_reason: str,
@@ -738,6 +896,7 @@ class ServiceInputTraceBuildMixin:
         trace["trigger_compact_summary"] = self._build_trigger_compact_summary(
             trigger_kind=trigger_kind,
             input_text=input_text,
+            interaction_context=interaction_context,
             observation_summary=observation_summary,
             capability_request_summary=capability_request_summary,
             followup_capability_request_summary=followup_capability_request_summary,

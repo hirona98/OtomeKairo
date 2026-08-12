@@ -33,7 +33,7 @@ class LLMMockSpeechMixin:
         conflict_items = recall_pack.get("conflicts", [])
         commitment_items = recall_pack.get("active_commitments", [])
         relationship_items = recall_pack.get("relationship_model", [])
-        user_items = recall_pack.get("user_model", [])
+        user_items = recall_pack.get("person_model", [])
         topic_items = recall_pack.get("active_topics", [])
         episode_items = recall_pack.get("episodic_evidence", [])
         event_items = recall_pack.get("event_evidence", [])
@@ -148,7 +148,7 @@ class LLMMockSpeechMixin:
                 event_basis=event_basis,
                 conflict_item=conflict_item,
             )
-        if primary_recall_focus == "user" and any(token in text for token in ("相談", "どうしたら", "悩", "困って")):
+        if primary_recall_focus == "person" and any(token in text for token in ("相談", "どうしたら", "悩", "困って")):
             return self._mock_user_focus_speech_text(
                 text=text,
                 caution_prefix=caution_prefix,

@@ -740,11 +740,79 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "error",
         ],
     },
+    "agent_skill.run_script": {
+        "id": "agent_skill.run_script",
+        "version": "1",
+        "kind": "action",
+        "decision_description": "選択中の trusted Agent Skill に同梱された script を専用 runner process で実行する",
+        "when_to_use": [
+            "選択中の Agent Skill が目的達成に必要な script 実行を明示している",
+            "対象 source の script_execution が available である",
+        ],
+        "do_not_use_when": [
+            "Agent Skill の instructions と resource catalog に対象 script がない",
+            "skill digest や引数を確定できない",
+            "script を実行せずに判断や発話だけで目的を達成できる",
+        ],
+        "required_permissions": [],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "source_id": {"type": "string"},
+                "skill_id": {"type": "string"},
+                "skill_sha256": {"type": "string"},
+                "script_path": {"type": "string"},
+                "args": {"type": "array", "items": {"type": "string"}},
+                "stdin_text": {"type": ["string", "null"]},
+            },
+            "required": [
+                "source_id", "skill_id", "skill_sha256", "script_path", "args", "stdin_text"
+            ],
+            "additionalProperties": False,
+        },
+        "result_schema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["completed", "failed"]},
+                "exit_code": {"type": ["integer", "null"]},
+                "status_text": {"type": "string"},
+                "stdout": {"type": "string"},
+                "stderr": {"type": "string"},
+                "client_context": {"type": ["object", "null"]},
+                "error": {"type": ["string", "null"]},
+            },
+            "required": ["status", "exit_code", "status_text", "stdout", "stderr", "client_context", "error"],
+            "additionalProperties": False,
+        },
+        "side_effects": {
+            "external_world": True,
+            "user_visible": False,
+            "stores_raw_payload": True,
+        },
+        "timeout_ms": 300000,
+        "risk_level": "high",
+        "memory_policy": {
+            "record_result_event": True,
+            "allow_memory_update": False,
+        },
+        "state_policy": {
+            "creates_ongoing_action": True,
+            "blocks_parallel_capability": True,
+            "result_context_hook": None,
+            "followup_hint_hook": None,
+            "unavailable_seconds_on_dispatch_failure": 0,
+            "unavailable_seconds_on_timeout": 0,
+        },
+        "inspection_fields": [
+            "capability_id", "source_id", "skill_id", "script_path", "status", "exit_code",
+            "status_text", "error"
+        ],
+    },
     "mcp.call_tool": {
         "id": "mcp.call_tool",
         "version": "1",
         "kind": "external_service",
-        "decision_description": "接続中の MCP server が公開する tool を呼び出す",
+        "decision_description": "接続中の MCP server で許可された tool を呼び出す",
         "when_to_use": [
             "判断に MCP tool 経由の外部情報取得や外部サービス操作が必要",
             "MCP tool catalog に目的へ合う tool が available として載っている",
@@ -824,7 +892,7 @@ def capability_manifests() -> dict[str, dict[str, Any]]:
     return deepcopy(CAPABILITY_MANIFESTS)
 
 
-# decision view / inspection と fresh world_state 再利用の対応を manifest に集約する。
+# decision view と inspection が使う readiness 定義を manifest に集約する。
 def capability_decision_readiness_from_manifest(manifest: dict[str, Any]) -> dict[str, Any] | None:
     readiness = manifest.get("decision_readiness")
     if not isinstance(readiness, dict):
@@ -837,19 +905,6 @@ def capability_decision_readiness(capability_id: str) -> dict[str, Any] | None:
     if not isinstance(manifest, dict):
         return None
     return capability_decision_readiness_from_manifest(manifest)
-
-
-def capability_world_state_type(capability_id: str) -> str | None:
-    manifest = CAPABILITY_MANIFESTS.get(capability_id)
-    if not isinstance(manifest, dict):
-        return None
-    readiness = manifest.get("decision_readiness")
-    if not isinstance(readiness, dict):
-        return None
-    world_state_type = readiness.get("world_state_type")
-    if not isinstance(world_state_type, str) or not world_state_type.strip():
-        return None
-    return world_state_type.strip()
 
 
 def capability_readiness_input_digest(
@@ -904,27 +959,6 @@ def capability_readiness_result_digest(
             "present_result_item_keys": present_item_keys,
             "missing_result_item_keys": missing_item_keys,
             "result_item_keys_satisfied": not missing_item_keys,
-        }
-    )
-    return digest
-
-
-def capability_readiness_world_state_digest(
-    capability_id: str,
-    foreground_world_state_type: Any,
-) -> dict[str, Any] | None:
-    digest = _capability_readiness_digest_base(capability_id)
-    if digest is None:
-        return None
-    observed_type = foreground_world_state_type.strip() if isinstance(foreground_world_state_type, str) else None
-    digest.update(
-        {
-            "foreground_world_state_type": observed_type,
-            "world_state_type_matched": (
-                isinstance(observed_type, str)
-                and bool(observed_type)
-                and observed_type == digest.get("world_state_type")
-            ),
         }
     )
     return digest

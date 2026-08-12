@@ -70,6 +70,7 @@ class AppConfig:
         return {
             "type": "hello",
             "client_id": self.connector.client_id,
+            "client_kind": "capability_connector",
             "caps": [
                 {"id": "vision.capture", "version": "1"},
                 {"id": "camera.ptz", "version": "1"},
@@ -238,7 +239,7 @@ def _resolve_access_token(
     if local_token:
         return local_token
 
-    bootstrap_token = _bootstrap_first_console_token(
+    bootstrap_token = _acquire_console_access_token(
         base_url=base_url,
         tls_verify=tls_verify,
         request_timeout_seconds=request_timeout_seconds,
@@ -315,7 +316,7 @@ def _read_config_db_access_token(db_path: Path) -> str:
     return token.strip() if isinstance(token, str) and token.strip() else ""
 
 
-def _bootstrap_first_console_token(
+def _acquire_console_access_token(
     *,
     base_url: str,
     tls_verify: bool,
@@ -328,7 +329,7 @@ def _bootstrap_first_console_token(
         timeout_seconds=request_timeout_seconds,
     )
     try:
-        data = client.post("/api/bootstrap/register-first-console", {})
+        data = client.post("/api/bootstrap/acquire-console-access-token", {})
     except HttpError:
         return ""
     token = data.get("console_access_token")

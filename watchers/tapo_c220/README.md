@@ -14,7 +14,7 @@
 ## 設定
 
 OtomeKairo 側の `camera_source.watcher` を正本にする。
-watcher は `config.db` から `console_access_token` と有効な `watcher_id` を読む。
+watcher は `config.db` から `console_access_token` と登録済みの `watcher_id` を読む。
 watcher 用の `config.local.json` は作成しない。
 
 ```bash
@@ -26,10 +26,13 @@ python3 -m venv .venv
 明示 token が必要な場合は、`OTOMEKAIRO_ACCESS_TOKEN` に現行 API の `console_access_token` を設定する。
 明示 watcher ID が必要な場合は、`OTOMEKAIRO_WATCHER_ID` を設定する。
 通常は同一 PC 内の `config.db` から `console_access_token` を読み取る。
-有効な watcher が 1 件だけの場合、watcher はその `watcher_id` を `config.db` から採用する。
+登録済み watcher が 1 件だけの場合、watcher はその `watcher_id` を `config.db` から採用する（`enabled` は問わない）。
+`watcher.enabled=false` のときも process は idle で残り、runtime config を再取得して有効化や閾値変更を service 再起動なしで反映する。
 `console_access_token` が未発行の場合は bootstrap API で初回発行する。
 
 FFmpeg 警告ログは watcher 内で `error` まで抑制する。
+journal 向け運用ログの最小レベルは `OTOMEKAIRO_DEBUG_LOG_MIN_LEVEL`（既定 `WARNING`）に従う。
+毎ポーリングの `diff result` は `DEBUG` なので、既定では journalctl に出ない。
 
 ## 実行
 

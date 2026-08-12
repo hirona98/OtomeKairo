@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.llm.contexts import InitiativeContext
+from otomekairo.interaction import InteractionContext
 from otomekairo.service.capability import CapabilityDispatchError
 from otomekairo.service.input.source_owner import visual_source_owner
 from otomekairo.world_state.models import WorldStateTrace
@@ -17,10 +18,11 @@ class ServiceInputTracePersistMixin:
         runtime_summary: dict[str, Any],
         input_text: str,
         client_context: dict[str, Any],
+        interaction_context: InteractionContext | None,
         pipeline: dict[str, Any],
         trigger_kind: str = "user_message",
         input_event_kind: str = "conversation_input",
-        input_event_role: str = "user",
+        input_event_role: str = "person",
         consolidate_memory: bool = True,
         pending_intent_selection: dict[str, Any] | None = None,
         observation_summary: dict[str, Any] | None = None,
@@ -30,6 +32,9 @@ class ServiceInputTracePersistMixin:
         # 結果選択
         decision = pipeline["decision"]
         speech_payload = pipeline["speech_payload"]
+        system_notice = pipeline.get("system_notice")
+        if not isinstance(system_notice, dict):
+            system_notice = None
         if capability_request_summary is None:
             candidate_summary = pipeline.get("capability_request_summary")
             if isinstance(candidate_summary, dict):
@@ -65,6 +70,7 @@ class ServiceInputTracePersistMixin:
             input_text=input_text,
             augmented_query_text=pipeline.get("augmented_query_text"),
             client_context=client_context,
+            interaction_context=interaction_context,
             recall_hint=pipeline["recall_hint"],
             recall_pack=pipeline["recall_pack"],
             time_context=pipeline["time_context"],
@@ -96,6 +102,13 @@ class ServiceInputTracePersistMixin:
             capability_request_summary=capability_request_summary,
             followup_capability_request_summary=followup_capability_request_summary,
             ongoing_action_transition_summary=ongoing_action_transition_summary,
+            system_notice=system_notice,
+        )
+        self._register_interaction_participants(
+            memory_set_id=state["selected_memory_set_id"],
+            interaction_context=interaction_context,
+            observed_at=started_at,
+            events=events,
         )
 
         # デバッグログ群
@@ -149,12 +162,23 @@ class ServiceInputTracePersistMixin:
         # 応答
         return {
             "cycle_id": cycle_id,
+            "interaction_ref": interaction_context.interaction_ref if interaction_context is not None else None,
+            "recipient_person_refs": (
+                list(interaction_context.participant_refs)
+                if interaction_context is not None
+                else []
+            ),
             "result_kind": result_kind,
-            "speech": {"text": speech_payload["speech_text"]} if speech_payload else None,
+            "speech": {
+                "text": speech_payload["speech_text"],
+                "persona_id": pipeline["persona_id"],
+                "persona_display_name": pipeline["persona_display_name"],
+            } if speech_payload else None,
             "capability_request": capability_request_summary if isinstance(capability_request_summary, dict) else None,
             "autonomous_run": pipeline.get("autonomous_run_summary")
             if isinstance(pipeline.get("autonomous_run_summary"), dict)
             else None,
+            "system_notice": system_notice,
         }
 
     def _persist_cycle_success(
@@ -168,6 +192,7 @@ class ServiceInputTracePersistMixin:
         input_text: str,
         augmented_query_text: str | None,
         client_context: dict[str, Any],
+        interaction_context: InteractionContext | None,
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
         time_context: dict[str, Any],
@@ -199,6 +224,7 @@ class ServiceInputTracePersistMixin:
         capability_request_summary: dict[str, Any] | None = None,
         followup_capability_request_summary: dict[str, Any] | None = None,
         ongoing_action_transition_summary: dict[str, Any] | None = None,
+        system_notice: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         memory_set_id = state["selected_memory_set_id"]
         events = self._build_cycle_events(
@@ -206,6 +232,7 @@ class ServiceInputTracePersistMixin:
             memory_set_id=memory_set_id,
             input_event_kind=input_event_kind,
             input_event_role=input_event_role,
+            interaction_context=interaction_context,
             input_text=input_text,
             started_at=started_at,
             finished_at=finished_at,
@@ -213,6 +240,7 @@ class ServiceInputTracePersistMixin:
             result_kind=result_kind,
             speech_payload=speech_payload,
             pending_intent_summary=pending_intent_summary,
+            system_notice=system_notice,
         )
         events.extend(
             self._build_event_evidence_audit_events(
@@ -238,11 +266,21 @@ class ServiceInputTracePersistMixin:
             trigger_kind=trigger_kind,
             result_kind=result_kind,
             failed=False,
+            input_text=input_text,
+            decision=decision,
+            speech_payload=speech_payload,
+            pending_intent_summary=pending_intent_summary,
+            capability_request_summary=(
+                followup_capability_request_summary
+                if trigger_kind == "capability_result"
+                else capability_request_summary
+            ),
         )
         cycle_trace = self._build_cycle_trace(
             cycle_id=cycle_id,
             cycle_summary=cycle_summary,
             input_text=input_text,
+            interaction_context=interaction_context,
             augmented_query_text=augmented_query_text,
             client_context=client_context,
             runtime_summary=runtime_summary,
@@ -276,6 +314,7 @@ class ServiceInputTracePersistMixin:
             result_trace=self._build_success_result_trace(
                 trigger_kind=trigger_kind,
                 input_text=input_text,
+                interaction_context=interaction_context,
                 started_at=started_at,
                 finished_at=finished_at,
                 decision=decision,
@@ -310,7 +349,34 @@ class ServiceInputTracePersistMixin:
             cycle_trace=cycle_trace,
             visual_observation_records=visual_observation_records,
         )
+        self._register_interaction_participants(
+            memory_set_id=memory_set_id,
+            interaction_context=interaction_context,
+            observed_at=started_at,
+            events=events,
+        )
         return events
+
+    def _register_interaction_participants(
+        self,
+        *,
+        memory_set_id: str,
+        interaction_context: InteractionContext | None,
+        observed_at: str,
+        events: list[dict[str, Any]],
+    ) -> None:
+        # 成否にかかわらず、外部が確定した人物参照を入力eventの観測として登録する。
+        if interaction_context is None:
+            return
+        self.store.register_interaction_participants(
+            memory_set_id=memory_set_id,
+            participants=[
+                participant.to_prompt_payload()
+                for participant in interaction_context.participants
+            ],
+            observed_at=observed_at,
+            evidence_event_ids=[events[0]["event_id"]] if events else [],
+        )
 
     def _persist_cycle_failure(
         self,
@@ -322,10 +388,11 @@ class ServiceInputTracePersistMixin:
         runtime_summary: dict[str, Any],
         input_text: str,
         client_context: dict[str, Any],
+        interaction_context: InteractionContext | None,
         failure_reason: str,
         trigger_kind: str = "user_message",
         input_event_kind: str = "conversation_input",
-        input_event_role: str = "user",
+        input_event_role: str = "person",
         recall_trace: dict[str, Any] | None = None,
         failure_event_kind: str = "recall_hint_failure",
         failure_event_payload: dict[str, Any] | None = None,
@@ -338,6 +405,7 @@ class ServiceInputTracePersistMixin:
         capability_request_summary: dict[str, Any] | None = None,
         followup_capability_request_summary: dict[str, Any] | None = None,
         ongoing_action_transition_summary: dict[str, Any] | None = None,
+        system_notice: dict[str, Any] | None = None,
     ) -> None:
         memory_set_id = state["selected_memory_set_id"]
         events = self._build_cycle_events(
@@ -345,12 +413,14 @@ class ServiceInputTracePersistMixin:
             memory_set_id=memory_set_id,
             input_event_kind=input_event_kind,
             input_event_role=input_event_role,
+            interaction_context=interaction_context,
             input_text=input_text,
             started_at=started_at,
             finished_at=finished_at,
             failure_reason=failure_reason,
             failure_event_kind=failure_event_kind,
             failure_event_payload=failure_event_payload,
+            system_notice=system_notice,
         )
         retrieval_run = self._build_retrieval_run_failure(
             cycle_id=cycle_id,
@@ -367,11 +437,19 @@ class ServiceInputTracePersistMixin:
             trigger_kind=trigger_kind,
             result_kind="internal_failure",
             failed=True,
+            input_text=input_text,
+            failure_reason=failure_reason,
+            capability_request_summary=(
+                followup_capability_request_summary
+                if trigger_kind == "capability_result"
+                else capability_request_summary
+            ),
         )
         cycle_trace = self._build_cycle_trace(
             cycle_id=cycle_id,
             cycle_summary=cycle_summary,
             input_text=input_text,
+            interaction_context=interaction_context,
             augmented_query_text=None,
             client_context=client_context,
             runtime_summary=runtime_summary,
@@ -391,6 +469,7 @@ class ServiceInputTracePersistMixin:
             result_trace=self._build_failure_result_trace(
                 trigger_kind=trigger_kind,
                 input_text=input_text,
+                interaction_context=interaction_context,
                 started_at=started_at,
                 finished_at=finished_at,
                 failure_reason=failure_reason,
@@ -421,6 +500,12 @@ class ServiceInputTracePersistMixin:
             cycle_summary=cycle_summary,
             cycle_trace=cycle_trace,
             visual_observation_records=visual_observation_records,
+        )
+        self._register_interaction_participants(
+            memory_set_id=memory_set_id,
+            interaction_context=interaction_context,
+            observed_at=started_at,
+            events=events,
         )
 
     def _build_visual_observation_records(

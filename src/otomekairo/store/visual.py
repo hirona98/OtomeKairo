@@ -29,40 +29,6 @@ class StoreVisualMixin:
             for row in rows:
                 self._upsert_visual_observation_search_index(conn, json.loads(row["payload_json"]))
 
-    def rebuild_visual_observation_search_index(self, *, memory_set_id: str | None = None) -> None:
-        # 派生検索 index は正本ではないため、視覚記録から再構築する。
-        clauses: list[str] = []
-        params: list[Any] = []
-        if isinstance(memory_set_id, str) and memory_set_id.strip():
-            clauses.append("memory_set_id = ?")
-            params.append(memory_set_id.strip())
-
-        with self._memory_db() as conn:
-            if clauses:
-                conn.execute(
-                    "DELETE FROM visual_observation_search_index WHERE memory_set_id = ?",
-                    (memory_set_id.strip(),),
-                )
-            else:
-                conn.execute("DELETE FROM visual_observation_search_index")
-
-            query = "SELECT payload_json FROM visual_observation_records"
-            if clauses:
-                query += f" WHERE {' AND '.join(clauses)}"
-            rows = conn.execute(query, params).fetchall()
-            for row in rows:
-                self._upsert_visual_observation_search_index(conn, json.loads(row["payload_json"]))
-
-    def upsert_visual_observation_records(self, *, records: list[dict[str, Any]]) -> None:
-        # 空
-        if not records:
-            return
-
-        # トランザクション
-        with self._memory_db() as conn:
-            for record in records:
-                self._insert_visual_observation_record(conn, record)
-
     def upsert_daily_visual_digest(
         self,
         *,

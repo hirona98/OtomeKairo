@@ -169,7 +169,7 @@ LLM の出力は JSON object 1 個に固定する。
 
 system prompt では、少なくとも次を明示する。
 
-- あなたは `event_evidence` の短い証拠表現だけを作る
+- 自律 AI 本体の内部処理 role `event_evidence` として短い証拠表現だけを作る
 - slot に無い新しい意味カテゴリを増やさない
 - `decision_or_result` は決定や結果があるときだけ書く
 - `tone_or_note` は補助であり、主根拠の代わりにしない

@@ -94,7 +94,14 @@ def configure_debug_log_stream_sink(sink: Callable[[dict[str, Any]], None] | Non
             print(f"[LogStream] append_failed error={type(exc).__name__}", flush=True)
 
 
-DEBUG_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR"}
+DEBUG_LOG_LEVEL_ORDER = {
+    "DEBUG": 10,
+    "INFO": 20,
+    "WARNING": 30,
+    "ERROR": 40,
+}
+DEBUG_LOG_LEVELS = set(DEBUG_LOG_LEVEL_ORDER)
+DEFAULT_DEBUG_LOG_MIN_LEVEL = "WARNING"
 DEBUG_LOG_LEVEL_COLORS = {
     "DEBUG": "\033[36m",
     "INFO": "\033[32m",
@@ -104,13 +111,28 @@ DEBUG_LOG_LEVEL_COLORS = {
 DEBUG_LOG_COLOR_RESET = "\033[0m"
 
 
+def _read_debug_log_min_level() -> str:
+    raw = os.environ.get("OTOMEKAIRO_DEBUG_LOG_MIN_LEVEL")
+    if raw is None or not raw.strip():
+        return DEFAULT_DEBUG_LOG_MIN_LEVEL
+    normalized = raw.strip().upper()
+    if normalized not in DEBUG_LOG_LEVEL_ORDER:
+        raise SystemExit(
+            "OTOMEKAIRO_DEBUG_LOG_MIN_LEVEL must be one of DEBUG, INFO, WARNING, ERROR."
+        )
+    return normalized
+
+
 def debug_log(component: str, message: str, *, level: str = "INFO") -> None:
     timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
     normalized_level = level.strip().upper() if isinstance(level, str) else "INFO"
     if normalized_level not in DEBUG_LOG_LEVELS:
         normalized_level = "INFO"
     line = f"{timestamp} [{normalized_level}] [{component}] {message}"
-    print(_terminal_debug_log_line(line, normalized_level), flush=True)
+    # journalctl 向けの標準出力だけ最小レベルで間引く。ファイルと logs/stream は全レベル。
+    min_level = _read_debug_log_min_level()
+    if DEBUG_LOG_LEVEL_ORDER[normalized_level] >= DEBUG_LOG_LEVEL_ORDER[min_level]:
+        print(_terminal_debug_log_line(line, normalized_level), flush=True)
     _append_debug_log_file(line)
     _append_debug_log_stream(
         {

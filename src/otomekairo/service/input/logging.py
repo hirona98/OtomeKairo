@@ -12,7 +12,7 @@ class ServiceInputLoggingMixin:
         # 要約
         summary = {
             "self_model": len(recall_pack["self_model"]),
-            "user_model": len(recall_pack["user_model"]),
+            "person_model": len(recall_pack["person_model"]),
             "relationship_model": len(recall_pack["relationship_model"]),
             "active_topics": len(recall_pack["active_topics"]),
             "active_commitments": len(recall_pack["active_commitments"]),
@@ -224,14 +224,6 @@ class ServiceInputLoggingMixin:
         # 値は出さずキーだけに留める。
         keys = sorted(str(key) for key in context.keys())[:8]
         return ",".join(keys) if keys else "-"
-
-    def _format_list_for_log(self, values: list[Any]) -> str:
-        # 空
-        if not values:
-            return "-"
-
-        # 結果
-        return ",".join(str(value) for value in values[:3])
 
     def _format_id_list_for_log(self, values: list[str]) -> str:
         # 空

@@ -29,6 +29,7 @@
 | `source_cycle_id` | run を開始した入力サイクル |
 | `source_commitment_memory_unit_ids` | run の根拠になった commitment memory |
 | `commitment_resolution` | terminal 時の commitment 更新結果 |
+| `mcp_session` | 有限 MCP セッションの場合だけ持つ対象 server、開始時方針 snapshot、消費済み call 数 |
 
 `autonomous_run` は capability request の wire payload に載せない。
 `request_id` と `run_id` の紐付けは server 内部記録に保持する。
@@ -55,6 +56,7 @@ terminal 時の発話と terminal 監査イベントは `events` に残し、com
 {
   "objective_summary": "発言してからカメラを見て確認する。",
   "initial_step_summary": "最初の一手を判断する。",
+  "mcp_server_id": null,
   "coordination": {
     "mode": "create_new",
     "target_run_ids": [],
@@ -62,6 +64,8 @@ terminal 時の発話と terminal 監査イベントは `events` に残し、com
   }
 }
 ```
+
+`mcp_server_id` は必須で、通常の run では `null`、有限 MCP セッションでは対象 MCP server id を指定する。
 
 run の次の一手は `autonomous_step_generation` が決める。
 
@@ -133,6 +137,48 @@ pause 中ではない run は `active` に戻し、`next_run_at` を現在時刻
 pause 中の run は `paused` を維持し、再開時に `active` へ戻る状態にする。
 timeout 後に再試行、待機、完了、cancel のどれを選ぶかは `autonomous_step_generation` が判断する。
 
+## 有限 MCP セッション
+
+有限 MCP セッションは、1 件の MCP server を対象に複数の tool call を連鎖させ、設定された回数内で終了する `autonomous_run` である。ELYTH 固有の機能ではなく、`autonomous_session.enabled=true` を持つ任意の MCP server で利用できる。tool の意味と入力 schema は通常どおり接続中の `tools/list` catalog を使い、skill と tool の固定対応表や更新系分類を持たない。通常の autonomous step と同様に Agent Skill instructions を選択できるが、有限 MCP セッション内の実行 capability は対象 server の `mcp.call_tool` に限定する。
+
+開始時に server は `decision.autonomous_run.mcp_server_id` の設定を検証し、run へ次を保存する。
+
+```json
+{
+  "mcp_session": {
+    "mcp_server_id": "elyth",
+    "policy": {
+      "enabled": true,
+      "background_enabled": true,
+      "min_interval_seconds": 3600,
+      "max_tool_calls": 10
+    },
+    "tool_call_count": 0
+  }
+}
+```
+
+`policy` は開始時の設定 snapshot であり、開始後に上限や最短間隔を変更して既存 run の境界を変えない。ただし、対象 MCP server が削除または無効化された場合、あるいは現在設定の `autonomous_session.enabled` が `false` になった場合は、次 step の前に理由を記録して session を `cancelled` にする。
+
+開始境界は次のとおりとする。
+
+- 人物の明示依頼は `user_message` から開始できる。`min_interval_seconds` は人物起点を抑制しない
+- 自動開始は `background_thinking` だけから許可し、`background_enabled=true` を必要とする。`wake`、capability result、その他の入力起点から新規開始しない
+- background 開始では、同じ MCP server の nonterminal session がなく、直近 session の `created_at` から `min_interval_seconds` 以上経過している必要がある
+- 同じ MCP server に active、waiting_timer、waiting_result、paused の session がある間は `create_new` を拒否する。人物が置き換える場合は `coordination.mode=replace_existing` とし、既存 session の全 run id を対象に含める
+- background 開始は既存 session の自動置換を行わない
+
+step と終了境界は次のとおりとする。
+
+- session 内で実行できる capability は、run の `mcp_server_id` と一致する `mcp.call_tool` だけである。他の MCP server と他の capability は decision view から利用不可にし、出力されても拒否する
+- capability result 待ちの `waiting_result` は許可し、result を受けて次の tool call、発話、完了を判断できる
+- `wait_until` と `continue` による tool call を伴わない自己延長は許可しない。`none` または `speech` を選んだ step は完了へ遷移する
+- `max_tool_calls` は成功数ではなく dispatch 試行数の上限である。call を外部 dispatch より前に永続化して消費するため、dispatch 失敗、送信前チェックによる見送り、見送り後の再試行もそれぞれ 1 call と数える
+- 上限到達後は LLM を呼ばずに `completed` にする。上限値を超える dispatch は行わない
+- pause、cancel、process 再起動、capability timeout の一般契約は通常の `autonomous_run` と共有する
+
+公開 API と prompt 用要約には `mcp_server_id / tool_call_count / max_tool_calls / background_enabled` だけを含める。policy 全体、接続 URL、header、env は公開しない。
+
 process startup 時点では capability request の内部照合表が空になる。
 このため、`waiting_result` の run と `waiting_request_id` を持つ `paused` run は、再起動前の result を照合できない orphan として扱う。
 server は orphan を timeout と同じ再評価可能状態へ戻し、未完了 request で新しい能力実行を塞がない。
@@ -143,7 +189,8 @@ server は orphan を timeout と同じ再評価可能状態へ戻し、未完�
 run は必要に応じて `vision.capture`、`camera.ptz`、`wait_until`、`speech` を組み合わせる。
 次の観測時刻、継続、完了、中断は `autonomous_step_generation` が目的、履歴、現在時刻、能力可否、直近 result から判断する。
 server は特定語句の文字列一致で監視間隔や終了時刻へ変換しない。
-ユーザーが停止を明示した場合、対象 run は `cancelled` に遷移する。
+特定 run は cancel API、会話からの全run停止は `autonomous_run_action.kind=cancel_all` で `cancelled` に遷移する。
+server は会話本文から停止意図を推定しない。
 
 ## ユーザー割り込み
 
@@ -152,7 +199,7 @@ in-flight capability result は受け取る。
 ユーザー応答中は、ユーザー起点で開始した最初の step を除き、run の次 step を進めない。
 ユーザー応答中に background / capability result 起点の step が完了しても、assistant_message と capability request は送信しない。
 ユーザー応答後、`paused_by_user_interaction` の run は再開する。
-ユーザーが停止を明示した場合、対象 run は `cancelled` に遷移する。
+特定 run の cancel API または `autonomous_run_action.kind=cancel_all` を受けた run は `cancelled` に遷移する。
 
 ## 実行直列化
 

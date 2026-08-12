@@ -1,11 +1,203 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 from otomekairo.service.app import OtomeKairoService
+from otomekairo.service.autonomous_run import AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK
+from otomekairo.service.capability import PreSendCheckWithheldError
 
 
 class AutonomousRunRecoveryTests(unittest.TestCase):
+    def test_mcp_session_consumes_budget_before_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._mcp_session_run_record(
+                memory_set_id=state["selected_memory_set_id"],
+            )
+            service.store.upsert_autonomous_run(autonomous_run=run)
+
+            service._consume_mcp_session_budget(
+                run=run,
+                capability_id="mcp.call_tool",
+                input_payload={
+                    "mcp_server_id": "elyth",
+                    "tool_name": "create_post",
+                    "arguments": {"content": "candidate"},
+                },
+                current_time="2026-08-11T12:00:01+09:00",
+            )
+
+            updated = service.store.get_autonomous_run(run_id=run["run_id"])
+            self.assertEqual(updated["mcp_session"]["tool_call_count"], 1)
+            self.assertEqual(updated["updated_at"], "2026-08-11T12:00:01+09:00")
+
+    def test_mcp_session_rejects_call_after_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._mcp_session_run_record(
+                memory_set_id=state["selected_memory_set_id"],
+                tool_call_count=10,
+            )
+
+            with self.assertRaises(ValueError):
+                service._consume_mcp_session_budget(
+                    run=run,
+                    capability_id="mcp.call_tool",
+                    input_payload={
+                        "mcp_server_id": "elyth",
+                        "tool_name": "create_post",
+                        "arguments": {"content": "candidate"},
+                    },
+                    current_time="2026-08-11T12:00:01+09:00",
+                )
+
+    def test_mcp_session_cooldown_blocks_recent_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            service._now_iso = lambda: "2026-08-11T12:00:00+09:00"
+            run = self._mcp_session_run_record(
+                memory_set_id=state["selected_memory_set_id"],
+                status="completed",
+                created_at="2026-08-11T11:30:00+09:00",
+            )
+            service.store.upsert_autonomous_run(autonomous_run=run)
+
+            eligible = service._mcp_background_session_eligible(
+                mcp_server_id="elyth",
+                policy={"enabled": True, "background_enabled": True, "min_interval_seconds": 3600},
+            )
+
+            self.assertFalse(eligible)
+
+    def test_mcp_session_completes_without_llm_after_tool_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            state["mcp_servers"]["elyth"]["enabled"] = True
+            run = self._mcp_session_run_record(
+                memory_set_id=state["selected_memory_set_id"],
+                tool_call_count=10,
+            )
+            service.store.upsert_autonomous_run(autonomous_run=run)
+            service.llm = Mock()
+
+            result = service._execute_autonomous_run_step_locked(
+                state=state,
+                run_id=run["run_id"],
+                started_at="2026-08-11T12:00:01+09:00",
+                emit_speech_event=False,
+                allow_during_user_response=True,
+            )
+
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["autonomous_run"]["status"], "completed")
+            self.assertIn("tool call 上限", result["autonomous_run"]["history_summary"])
+            service.llm.generate_autonomous_step.assert_not_called()
+
+    def test_mcp_session_restricts_steps_to_target_server(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._mcp_session_run_record(memory_set_id=state["selected_memory_set_id"])
+
+            valid_step = {
+                "action": {
+                    "kind": "capability_request",
+                    "capability_request": {
+                        "capability_id": "mcp.call_tool",
+                        "input": {
+                            "mcp_server_id": "elyth",
+                            "tool_name": "create_post",
+                            "arguments": {},
+                        },
+                    },
+                    "speech": None,
+                }
+            }
+            service._validate_mcp_session_step(step=valid_step, run=run)
+
+            valid_step["action"]["capability_request"]["input"]["mcp_server_id"] = "e-stat"
+            with self.assertRaises(ValueError):
+                service._validate_mcp_session_step(step=valid_step, run=run)
+
+            valid_step["action"]["capability_request"]["capability_id"] = "vision.capture"
+            with self.assertRaises(ValueError):
+                service._validate_mcp_session_step(step=valid_step, run=run)
+
+    def test_pre_send_check_withhold_regenerates_autonomous_step_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
+            service.store.upsert_autonomous_run(autonomous_run=run)
+            step_context = SimpleNamespace(
+                current_input=SimpleNamespace(to_prompt_payload=lambda: {}),
+            )
+            service._build_autonomous_step_context = Mock(return_value=step_context)
+            service._autonomous_run_step_guard = Mock(return_value=None)
+            initial_step = {
+                "action": {
+                    "kind": "capability_request",
+                    "capability_request": {
+                        "capability_id": "mcp.call_tool",
+                        "input": {
+                            "mcp_server_id": "e-stat",
+                            "tool_name": "create_post",
+                            "arguments": {"content": "candidate"},
+                        },
+                    },
+                    "speech": None,
+                },
+                "transition": {"kind": "continue", "next_run_at": None},
+                "run_update": {"current_step_summary": "投稿する", "history_summary": "投稿する"},
+            }
+            retry_step = {
+                "action": {"kind": "none", "capability_request": None, "speech": None},
+                "transition": {"kind": "cancel", "next_run_at": None},
+                "run_update": {"current_step_summary": "送らない", "history_summary": "送らない"},
+            }
+            generate_autonomous_step = Mock(side_effect=[initial_step, retry_step])
+            service.llm = SimpleNamespace(generate_autonomous_step=generate_autonomous_step)
+            first_audit = {
+                "mcp_server_id": "e-stat",
+                "tool_name": "create_post",
+                "result_status": "withheld",
+                "outcome": "withhold",
+                "reason_code": "reviewer_withheld",
+                "review_attempt": 1,
+            }
+            service._dispatch_autonomous_run_capability_request = Mock(
+                side_effect=PreSendCheckWithheldError(audit_summary=first_audit)
+            )
+            service._record_autonomous_pre_send_check_terminal = Mock()
+            cancelled = {**run, "status": "cancelled", "completed_at": "2026-08-11T12:00:01+09:00"}
+            service._apply_autonomous_step_transition = Mock(return_value=cancelled)
+            service._finalize_autonomous_run_commitments = Mock(return_value=cancelled)
+
+            result = service._execute_autonomous_run_step_locked(
+                state=state,
+                run_id=run["run_id"],
+                started_at="2026-08-11T12:00:00+09:00",
+                source_current_input=run["source_current_input"],
+                emit_speech_event=False,
+                allow_during_user_response=True,
+            )
+
+            self.assertEqual(result["status"], "cancelled")
+            self.assertEqual(generate_autonomous_step.call_count, 2)
+            self.assertEqual(
+                service._build_autonomous_step_context.call_args.kwargs[
+                    "pre_send_check_feedback"
+                ],
+                AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK,
+            )
+            service._record_autonomous_pre_send_check_terminal.assert_called_once()
+
     def test_links_autonomous_run_to_commitment_created_by_source_cycle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))
@@ -352,13 +544,43 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             "completed_at": "2026-06-20T11:03:00+09:00" if status in {"completed", "cancelled"} else None,
             "source_cycle_id": "cycle:source",
             "source_current_input": {
-                "sender": "user",
+                "sender_kind": "person",
+                "sender_ref": "person:test",
                 "source_kind": "user_message",
-                "response_target": "user",
+                "response_target_refs": ["person:test"],
+                "interaction_context": {
+                    "interaction_ref": "interaction:test",
+                    "speaker_ref": "person:test",
+                    "participants": [{"person_ref": "person:test", "display_name": "テスト人物"}],
+                },
                 "text": "3分後に声をかけて",
             },
             "source_commitment_memory_unit_ids": source_commitment_memory_unit_ids or [],
         }
+
+    def _mcp_session_run_record(
+        self,
+        *,
+        memory_set_id: str,
+        status: str = "active",
+        created_at: str = "2026-08-11T12:00:00+09:00",
+        tool_call_count: int = 0,
+    ) -> dict:
+        run = self._commitment_run_record(memory_set_id=memory_set_id, status=status)
+        run["run_id"] = "autonomous_run:elyth-session"
+        run["created_at"] = created_at
+        run["updated_at"] = created_at
+        run["mcp_session"] = {
+            "mcp_server_id": "elyth",
+            "policy": {
+                "enabled": True,
+                "background_enabled": True,
+                "min_interval_seconds": 3600,
+                "max_tool_calls": 10,
+            },
+            "tool_call_count": tool_call_count,
+        }
+        return run
 
     def _persist_commitment(
         self,
@@ -375,7 +597,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             "scope_key": "self",
             "subject_ref": "self",
             "predicate": "notify",
-            "object_ref_or_value": "user",
+            "object_ref_or_value": "person:test",
             "summary_text": "3分後にユーザーへ声をかけること。",
             "status": "inferred",
             "commitment_state": "open",

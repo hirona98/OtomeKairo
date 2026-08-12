@@ -42,6 +42,20 @@ OtomeKairo の外部接点は、少なくとも次の面に分ける。
 
 対話面は、人との明示的な往復だけを扱う。
 設定変更や観測取得は別責務として扱う。
+テキスト対話入力を送る connector は人物識別を完了し、安定した `person_ref` と `interaction_ref` を付ける。
+OtomeKairo は人物参照を確定済み入力として扱い、表示名による同一人物推定を実行しない。
+音声入力は OtomeKairo が登録済み話者 embedding から人物参照を確定する。
+人物と相互作用の意味境界は [../foundation/人物と相互作用.md](../foundation/人物と相互作用.md) を正とする。
+
+### ブラウザ音声の責務境界
+
+ブラウザ、CocoroConsole、microphone connector はマイクから取得した音声だけを OtomeKairo へ送る。
+ブラウザ、CocoroConsole、microphone connector は STT、音声起動ワード判定、話者識別を実行しない。
+OtomeKairo は音声入力リース、VAD、STT、音声起動ワード判定、話者識別、音声人物参照、対話入力生成を担う。
+CocoroConsole は通常入力元に選択されている間だけ設定済みinput endpointから音声を取得し、OtomeKairo の設定と話者登録を操作し、対話表示と合成済みWAVの再生先選択を担う。
+OtomeKairo は発話本文からWAVを合成し、応答先clientへ配送する。
+CocoroShell はCocoroConsoleから受け取ったWAVのアバター発話動作、lip sync、音声出力を担い、TTS providerへ接続しない。
+音声入力の意味規則は [../audio/音声入力と話者識別.md](../audio/音声入力と話者識別.md)、入力wire契約は [../api/audio_stream.md](../api/audio_stream.md)、発話音声wire契約は [../api/event_stream.md](../api/event_stream.md) を正とする。
 
 ## 観測面
 
@@ -122,6 +136,7 @@ capability state の pause は runtime の実行連携操作であり、現在�
 - 現在設定の取得
 - 選択値や方針の変更
 - 人格設定、記憶集合、モデルプリセットなどの設定定義の取得
+- アバター音声プリセットとマイク設定の取得
 - 設定定義の作成、複製、差し替え、削除
 
 変更単位の意味境界は [../configuration/設定変更.md](../configuration/設定変更.md) を正とする。
@@ -179,6 +194,6 @@ stream 面は request/response API の代替ではなく、継続的な連携を
 - 接続確立の都合を通常の意味単位へ持ち込まない
 - 認証開始と通常操作を切り分ける
 - 相手識別や資格発行の責務を独立させる
-- 発行済み資格の再表示を bootstrap 面へ入れない
+- 資格取得を通常操作から分離する
 
 接続と権限の意味境界は [接続と権限境界.md](接続と権限境界.md) を正とする。

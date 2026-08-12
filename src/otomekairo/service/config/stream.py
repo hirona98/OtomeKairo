@@ -6,9 +6,10 @@ from otomekairo.capabilities import (
     capability_decision_readiness_from_manifest,
     capability_manifests,
 )
-from otomekairo.event_stream import ServerWebSocket
+from otomekairo.event_stream import EventStreamRegistrationError, ServerWebSocket
 from otomekairo.service.common import ServiceError, debug_log
 from otomekairo.service.config.constants import (
+    CAPABILITY_UNAVAILABLE_REASONS,
     EVENT_STREAM_CAPABILITY_PERMISSIONS,
     VISION_SOURCE_KINDS,
 )
@@ -24,8 +25,20 @@ CAMERA_PTZ_OPERATIONS = {
     "zoom_out",
 }
 CAMERA_PTZ_AMOUNTS = {"small", "medium"}
-EVENT_STREAM_EVENT_SUBSCRIPTIONS = {"assistant_message"}
-MCP_TRANSPORTS = {"stdio"}
+EVENT_STREAM_EVENT_SUBSCRIPTIONS = {
+    "assistant_audio",
+    "assistant_message",
+    "audio_runtime_state",
+    "conversation_input",
+    "system_notice",
+}
+MCP_TRANSPORTS = {"stdio", "streamable_http"}
+EVENT_STREAM_CLIENT_KINDS = {
+    "browser",
+    "cocoro_console",
+    "otomekairo_audio",
+    "capability_connector",
+}
 
 
 class ServiceConfigStreamMixin:
@@ -44,9 +57,16 @@ class ServiceConfigStreamMixin:
 
         # 項目
         client_id = payload.get("client_id")
+        client_kind = payload.get("client_kind")
         caps = payload.get("caps", [])
         if not isinstance(client_id, str) or not client_id.strip():
             raise ServiceError(400, "invalid_client_id", "hello.client_id must be a non-empty string.")
+        if client_kind not in EVENT_STREAM_CLIENT_KINDS:
+            raise ServiceError(
+                400,
+                "invalid_client_kind",
+                "hello.client_kind is unsupported.",
+            )
         if not isinstance(caps, list):
             raise ServiceError(400, "invalid_caps", "hello.caps must be an array.")
         event_subscriptions = self._normalize_event_subscriptions(payload.get("event_subscriptions"))
@@ -118,6 +138,7 @@ class ServiceConfigStreamMixin:
         )
         mcp_servers = self._normalize_hello_mcp_servers(
             payload=payload,
+            client_id=client_id.strip(),
             accepted_capabilities=accepted_capabilities,
         )
 
@@ -126,25 +147,29 @@ class ServiceConfigStreamMixin:
             self._event_stream_registry.register_hello(
                 session_id,
                 client_id=client_id.strip(),
+                client_kind=client_kind,
                 capabilities=accepted_capabilities,
                 rejected_bindings=rejected_bindings,
                 event_subscriptions=event_subscriptions,
                 vision_sources=vision_sources,
                 mcp_servers=mcp_servers,
             )
-        except ValueError as exc:
-            error_code = "invalid_mcp_servers" if "mcp_server" in str(exc) else "invalid_vision_sources"
-            raise ServiceError(400, error_code, str(exc)) from exc
+        except EventStreamRegistrationError as exc:
+            raise ServiceError(400, exc.error_code, str(exc)) from exc
         debug_log(
             "EventStream",
             (
                 f"hello client_id={client_id.strip()} "
+                f"client_kind={client_kind} "
                 f"accepted={sorted(accepted_capabilities)} rejected={len(rejected_bindings)} "
                 f"event_subscriptions={event_subscriptions} "
                 f"vision_sources={len(vision_sources)} "
                 f"mcp_servers={len(mcp_servers)}"
             ),
         )
+        audio_runtime = getattr(self, "_audio_runtime", None)
+        if audio_runtime is not None:
+            audio_runtime.on_event_client_connected(client_id.strip())
 
     def _normalize_event_subscriptions(self, value: Any) -> list[str]:
         if value is None:
@@ -229,7 +254,14 @@ class ServiceConfigStreamMixin:
 
     def unregister_event_stream_connection(self, session_id: str) -> None:
         # レジストリ
-        self._event_stream_registry.remove_connection(session_id)
+        client_id = self._event_stream_registry.remove_connection(session_id)
+        if (
+            client_id is not None
+            and not self._event_stream_registry.is_client_connected(client_id)
+        ):
+            audio_runtime = getattr(self, "_audio_runtime", None)
+            if audio_runtime is not None:
+                audio_runtime.on_event_client_disconnected(client_id)
 
     def close_event_streams(self) -> None:
         # レジストリ
@@ -382,6 +414,7 @@ class ServiceConfigStreamMixin:
         self,
         *,
         payload: dict[str, Any],
+        client_id: str,
         accepted_capabilities: dict[str, str],
     ) -> list[dict[str, Any]]:
         raw_servers = payload.get("mcp_servers")
@@ -404,6 +437,7 @@ class ServiceConfigStreamMixin:
 
         normalized_servers: list[dict[str, Any]] = []
         seen_server_ids: set[str] = set()
+        registered_servers = self._mcp_servers_from_state(self.store.read_state())
         for raw_server in raw_servers:
             if not isinstance(raw_server, dict):
                 raise ServiceError(400, "invalid_mcp_servers", "hello.mcp_servers must contain objects.")
@@ -412,12 +446,6 @@ class ServiceConfigStreamMixin:
                 "hello.mcp_servers[].mcp_server_id",
                 limit=80,
             )
-            if not server_id.startswith("mcp:"):
-                raise ServiceError(
-                    400,
-                    "invalid_mcp_servers",
-                    "hello.mcp_servers[].mcp_server_id must start with mcp:.",
-                )
             if server_id in seen_server_ids:
                 raise ServiceError(400, "invalid_mcp_servers", "hello.mcp_servers contains duplicate ids.")
             seen_server_ids.add(server_id)
@@ -432,6 +460,26 @@ class ServiceConfigStreamMixin:
                     "invalid_mcp_servers",
                     "hello.mcp_servers[].transport is unsupported.",
                 )
+            registered_server = registered_servers.get(server_id)
+            if not isinstance(registered_server, dict) or registered_server.get("enabled") is not True:
+                raise ServiceError(
+                    400,
+                    "invalid_mcp_servers",
+                    "hello.mcp_servers[] is not an enabled MCP server definition.",
+                )
+            if registered_server.get("client_id") != client_id:
+                raise ServiceError(
+                    400,
+                    "invalid_mcp_servers",
+                    "hello.mcp_servers[] is assigned to another client_id.",
+                )
+            if registered_server.get("transport", "stdio") != transport:
+                raise ServiceError(
+                    400,
+                    "invalid_mcp_servers",
+                    "hello.mcp_servers[].transport does not match the MCP server definition.",
+                )
+            # enabled server なら tools/list で得た catalog をそのまま登録する。
             tools = self._normalize_hello_mcp_tools(raw_server.get("tools"))
             normalized_servers.append(
                 {
@@ -443,11 +491,11 @@ class ServiceConfigStreamMixin:
         return normalized_servers
 
     def _normalize_hello_mcp_tools(self, value: Any) -> list[dict[str, Any]]:
-        if not isinstance(value, list) or not value:
+        if not isinstance(value, list):
             raise ServiceError(
                 400,
                 "invalid_mcp_servers",
-                "hello.mcp_servers[].tools must be a non-empty array.",
+                "hello.mcp_servers[].tools must be an array.",
             )
         normalized_tools: list[dict[str, Any]] = []
         seen_tool_names: set[str] = set()
@@ -670,6 +718,12 @@ class ServiceConfigStreamMixin:
         active_ongoing_action: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         capability_id = manifest["id"]
+        if capability_id == "agent_skill.run_script":
+            bound_client_ids = (
+                [self._AGENT_SKILL_RUNNER_CLIENT_ID]
+                if self._agent_skill_script_execution_available()
+                else []
+            )
         related_rejections = [
             binding
             for binding in rejected_bindings
@@ -763,6 +817,8 @@ class ServiceConfigStreamMixin:
                 unavailable_reason = "parallel_blocked"
             elif capability_id == "mcp.call_tool" and not has_mcp_tool:
                 unavailable_reason = "no_mcp_tool"
+        if unavailable_reason is not None and unavailable_reason not in CAPABILITY_UNAVAILABLE_REASONS:
+            raise ValueError(f"Unknown capability unavailable_reason: {unavailable_reason}")
 
         result = {
             "capability_id": capability_id,
@@ -808,6 +864,8 @@ class ServiceConfigStreamMixin:
         return result
 
     def _inspection_mcp_servers(self, mcp_servers: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        # 接続後の設定変更も decision view と inspection へ即時反映する。
+        registered_servers = self._mcp_servers_from_state(self.store.read_state())
         normalized: list[dict[str, Any]] = []
         for server in mcp_servers or []:
             if not isinstance(server, dict):
@@ -816,14 +874,42 @@ class ServiceConfigStreamMixin:
             transport = server.get("transport")
             if not isinstance(server_id, str) or not server_id.strip():
                 continue
-            tools = self._inspection_mcp_tools(server.get("tools"))
+            normalized_server_id = server_id.strip()
+            registered_server = registered_servers.get(normalized_server_id)
+            server_is_active = (
+                isinstance(registered_server, dict)
+                and registered_server.get("enabled") is True
+                and registered_server.get("client_id") == server.get("client_id")
+            )
+            session_view = None
+            if isinstance(registered_server, dict):
+                session = registered_server.get("autonomous_session")
+                if isinstance(session, dict):
+                    matching_runs = self._mcp_session_runs(normalized_server_id)
+                    session_view = {
+                        **session,
+                        "background_eligible": self._mcp_background_session_eligible(
+                            mcp_server_id=normalized_server_id,
+                            policy=session,
+                            matching_runs=matching_runs,
+                        ),
+                        "active_run_ids": [
+                            str(run.get("run_id") or "")
+                            for run in matching_runs
+                            if run.get("status") in {"active", "waiting_timer", "waiting_result", "paused"}
+                            and str(run.get("run_id") or "")
+                        ],
+                    }
+            # 設定上無効な server は catalog から外す。
+            tools = self._inspection_mcp_tools(server.get("tools")) if server_is_active else []
             normalized.append(
                 {
-                    "mcp_server_id": server_id.strip(),
+                    "mcp_server_id": normalized_server_id,
                     "transport": transport.strip() if isinstance(transport, str) and transport.strip() else "stdio",
                     "available": server.get("available") is True and bool(tools),
-                    "unavailable_reason": server.get("unavailable_reason") if not tools else None,
+                    "unavailable_reason": "no_mcp_tool" if not tools else None,
                     "tools": tools,
+                    "autonomous_session": session_view,
                 }
             )
         return normalized
@@ -852,6 +938,44 @@ class ServiceConfigStreamMixin:
                 }
             )
         return tools
+
+    def _mcp_session_runs(self, mcp_server_id: str) -> list[dict[str, Any]]:
+        state = self.store.read_state()
+        memory_set_id = state.get("selected_memory_set_id")
+        if not isinstance(memory_set_id, str):
+            return []
+        runs = self.store.list_autonomous_runs(memory_set_id=memory_set_id, limit=50)
+        return [
+            run
+            for run in runs
+            if isinstance(run, dict)
+            and isinstance(run.get("mcp_session"), dict)
+            and run["mcp_session"].get("mcp_server_id") == mcp_server_id
+        ]
+
+    def _mcp_background_session_eligible(
+        self,
+        *,
+        mcp_server_id: str,
+        policy: dict[str, Any],
+        matching_runs: list[dict[str, Any]] | None = None,
+    ) -> bool:
+        if policy.get("enabled") is not True or policy.get("background_enabled") is not True:
+            return False
+        matching = matching_runs if matching_runs is not None else self._mcp_session_runs(mcp_server_id)
+        if any(run.get("status") in {"active", "waiting_timer", "waiting_result", "paused"} for run in matching):
+            return False
+        if not matching:
+            return True
+        created_at_values = [
+            self._parse_iso(str(run["created_at"]))
+            for run in matching
+            if isinstance(run.get("created_at"), str) and run["created_at"].strip()
+        ]
+        if not created_at_values:
+            return True
+        elapsed = (self._parse_iso(self._now_iso()) - max(created_at_values)).total_seconds()
+        return elapsed >= int(policy.get("min_interval_seconds") or 0)
 
     def _inspection_vision_sources(self, vision_sources: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
         normalized: list[dict[str, Any]] = []

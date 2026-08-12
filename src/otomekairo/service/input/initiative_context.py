@@ -5,7 +5,6 @@ from typing import Any
 from otomekairo.llm.contexts import InitiativeContext
 from otomekairo.llm.contracts import INITIATIVE_ENTRY_ENTER_BASIS_VALUES
 from otomekairo.service.common import debug_log
-from otomekairo.world_state.models import WorldStateTrace
 
 
 class ServiceInputInitiativeContextMixin:
@@ -23,7 +22,6 @@ class ServiceInputInitiativeContextMixin:
         drive_state_summary: list[dict[str, Any]] | None,
         foreground_world_state: list[dict[str, Any]] | None,
         activity_context: dict[str, Any] | None,
-        world_state_trace: WorldStateTrace | None,
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         selected_candidate: dict[str, Any] | None,
@@ -34,11 +32,6 @@ class ServiceInputInitiativeContextMixin:
         drive_summaries = self._initiative_drive_summaries(drive_state_summary)
         pending_intent_summaries = self._initiative_pending_intent_summaries(selected_candidate)
         world_state_summary = foreground_world_state or []
-        status_refresh_world_state_summary = self._initiative_status_refresh_world_state_summary(
-            foreground_world_state=foreground_world_state,
-            world_state_trace=world_state_trace,
-            trigger_kind=trigger_kind,
-        )
         initiative_baseline = self._initiative_baseline_summary(persona)
         runtime_state_summary = self._initiative_runtime_state_summary(
             state=state,
@@ -73,7 +66,6 @@ class ServiceInputInitiativeContextMixin:
             trigger_kind=trigger_kind,
             drive_summaries=drive_summaries,
             world_state_summary=world_state_summary,
-            status_refresh_world_state_summary=status_refresh_world_state_summary,
             recent_turn_summary=recent_turn_summary,
             foreground_signal_summary=foreground_signal_summary,
             initiative_entry_summary=initiative_entry_summary,
@@ -135,18 +127,6 @@ class ServiceInputInitiativeContextMixin:
             speech_timing_summary=speech_timing_summary,
             speech_frequency_level=state["thinking_speech_level"],
         )
-
-    def _initiative_status_refresh_world_state_summary(
-        self,
-        *,
-        foreground_world_state: list[dict[str, Any]] | None,
-        world_state_trace: WorldStateTrace | None,
-        trigger_kind: str,
-    ) -> list[dict[str, Any]]:
-        if trigger_kind in {"wake", "background_thinking"}:
-            previous = world_state_trace.previous_foreground_world_state if world_state_trace is not None else None
-            return self._merge_foreground_world_state_for_reuse(foreground_world_state, previous)
-        return foreground_world_state or []
 
     def _initiative_opportunity_summary(
         self,
@@ -253,11 +233,6 @@ class ServiceInputInitiativeContextMixin:
         if visual_signals:
             payload["visual_observations"] = visual_signals
         return payload
-
-    def _initiative_foreground_thinness(self, foreground_signal_summary: dict[str, Any] | None) -> str | None:
-        if not isinstance(foreground_signal_summary, dict):
-            return None
-        return self._client_context_text(foreground_signal_summary.get("foreground_thinness"), limit=16)
 
     def _initiative_activity_context(self, activity_context: dict[str, Any] | None) -> dict[str, Any] | None:
         if not isinstance(activity_context, dict):
@@ -479,44 +454,6 @@ class ServiceInputInitiativeContextMixin:
             sources.append(payload)
         return sources[:6]
 
-    def _initiative_default_vision_source_id(self, capability_summary: dict[str, Any]) -> str | None:
-        top_level_sources = capability_summary.get("vision_sources")
-        source_id = self._default_vision_source_id_from_sources(top_level_sources)
-        if source_id is not None:
-            return source_id
-        available_items = capability_summary.get("available_items")
-        if not isinstance(available_items, list):
-            return None
-        for item in available_items:
-            if not isinstance(item, dict) or item.get("id") != "vision.capture":
-                continue
-            return self._default_vision_source_id_from_sources(item.get("vision_sources"))
-        return None
-
-    def _default_vision_source_id_from_sources(self, value: Any) -> str | None:
-        if not isinstance(value, list):
-            return None
-        for default_name in ("visual", "desktop", "camera"):
-            for source in value:
-                if not isinstance(source, dict):
-                    continue
-                default_for = source.get("default_for")
-                source_id = source.get("vision_source_id")
-                if (
-                    isinstance(default_for, list)
-                    and default_name in default_for
-                    and isinstance(source_id, str)
-                    and source_id.strip()
-                ):
-                    return source_id.strip()
-        for source in value:
-            if not isinstance(source, dict):
-                continue
-            source_id = source.get("vision_source_id")
-            if isinstance(source_id, str) and source_id.strip():
-                return source_id.strip()
-        return None
-
     def _initiative_visual_observation_signals(
         self,
         foreground_signal_summary: dict[str, Any] | None,
@@ -526,16 +463,6 @@ class ServiceInputInitiativeContextMixin:
         return self._compact_visual_observation_signals(
             foreground_signal_summary.get("visual_observations")
         )
-
-    def _initiative_primary_visual_observation_signal(
-        self,
-        foreground_signal_summary: dict[str, Any] | None,
-    ) -> dict[str, Any] | None:
-        signals = self._initiative_visual_observation_signals(foreground_signal_summary)
-        for signal in signals:
-            if self._visual_observation_signal_is_judgable(signal):
-                return signal
-        return signals[0] if signals else None
 
     def _initiative_speech_timing_summary(
         self,

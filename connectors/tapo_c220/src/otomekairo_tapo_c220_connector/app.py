@@ -8,6 +8,7 @@ from typing import Any
 from .capture import RtspStillCapture
 from .config import AppConfig
 from .http import HttpError, JsonApiClient
+from .log import emit_log
 from .ptz import OnvifPtzController
 from .stream import EventStreamClient, StreamError
 
@@ -34,19 +35,20 @@ class TapoC220Connector:
             self._log(
                 "onvif_ptz_capability=ok"
                 f" profile_count={capability.get('profile_count')}"
-                f" profile_token_present={capability.get('profile_token_present')}"
+                f" profile_token_present={capability.get('profile_token_present')}",
+                level="INFO",
             )
         except Exception as exc:  # noqa: BLE001
             failed = True
-            self._log(f"onvif_ptz_capability=failed error={self._short_error(exc)}")
+            self._log(f"onvif_ptz_capability=failed error={self._short_error(exc)}", level="ERROR")
 
         try:
             image = self.capture.capture_data_uri(timeout_seconds=self.config.camera.rtsp_open_timeout_seconds)
             prefix = image.split(",", 1)[0]
-            self._log(f"rtsp_capture=ok prefix={prefix} bytes={len(image)}")
+            self._log(f"rtsp_capture=ok prefix={prefix} bytes={len(image)}", level="INFO")
         except Exception as exc:  # noqa: BLE001
             failed = True
-            self._log(f"rtsp_capture=failed error={self._short_error(exc)}")
+            self._log(f"rtsp_capture=failed error={self._short_error(exc)}", level="ERROR")
 
         return 1 if failed else 0
 
@@ -54,7 +56,8 @@ class TapoC220Connector:
         self._log(
             "starting"
             f" client_id={self.config.connector.client_id}"
-            f" vision_source_id={self.config.connector.vision_source_id}"
+            f" vision_source_id={self.config.connector.vision_source_id}",
+            level="INFO",
         )
         while True:
             stream = EventStreamClient(
@@ -64,10 +67,10 @@ class TapoC220Connector:
                 socket_timeout_seconds=self.config.server.request_timeout_seconds,
             )
             try:
-                self._log("connecting event stream")
+                self._log("connecting event stream", level="DEBUG")
                 stream.run(hello_payload=self.config.hello_payload(), on_event=self._handle_event)
             except (OSError, StreamError, json.JSONDecodeError) as exc:
-                self._log(f"event stream disconnected: {self._short_error(exc)}")
+                self._log(f"event stream disconnected: {self._short_error(exc)}", level="WARNING")
             finally:
                 stream.close()
             time.sleep(self.config.server.reconnect_delay_seconds)
@@ -87,9 +90,9 @@ class TapoC220Connector:
     def _handle_capture_request(self, data: dict[str, Any]) -> None:
         request_id = self._request_id(data)
         if request_id is None:
-            self._log("ignored vision.capture_request without request_id")
+            self._log("ignored vision.capture_request without request_id", level="WARNING")
             return
-        self._log(f"vision.capture_request received request_id={request_id}")
+        self._log(f"vision.capture_request received request_id={request_id}", level="DEBUG")
         client_context = self._source_client_context(data)
         try:
             timeout = self._timeout_seconds(data)
@@ -100,7 +103,7 @@ class TapoC220Connector:
                 "error": None,
             }
             self._post_result(request_id=request_id, capability_id="vision.capture", result=result)
-            self._log(f"vision.capture_result completed request_id={request_id}")
+            self._log(f"vision.capture_result completed request_id={request_id}", level="DEBUG")
         except Exception as exc:  # noqa: BLE001
             result = {
                 "images": [],
@@ -108,19 +111,28 @@ class TapoC220Connector:
                 "error": self._short_error(exc),
             }
             self._post_result(request_id=request_id, capability_id="vision.capture", result=result)
-            self._log(f"vision.capture_result failed request_id={request_id} error={self._short_error(exc)}")
+            self._log(
+                f"vision.capture_result failed request_id={request_id} error={self._short_error(exc)}",
+                level="ERROR",
+            )
 
     def _handle_ptz_request(self, data: dict[str, Any]) -> None:
         request_id = self._request_id(data)
         if request_id is None:
-            self._log("ignored camera.ptz_request without request_id")
+            self._log("ignored camera.ptz_request without request_id", level="WARNING")
             return
         operation = data.get("operation")
         amount = data.get("amount")
         if not isinstance(operation, str) or not isinstance(amount, str):
-            self._log(f"ignored camera.ptz_request with invalid operation request_id={request_id}")
+            self._log(
+                f"ignored camera.ptz_request with invalid operation request_id={request_id}",
+                level="WARNING",
+            )
             return
-        self._log(f"camera.ptz_request received request_id={request_id} operation={operation} amount={amount}")
+        self._log(
+            f"camera.ptz_request received request_id={request_id} operation={operation} amount={amount}",
+            level="DEBUG",
+        )
         client_context = self._source_client_context(data)
         try:
             self.ptz.move(operation=operation, amount=amount)
@@ -132,7 +144,7 @@ class TapoC220Connector:
                 "error": None,
             }
             self._post_result(request_id=request_id, capability_id="camera.ptz", result=result)
-            self._log(f"camera.ptz_result completed request_id={request_id}")
+            self._log(f"camera.ptz_result completed request_id={request_id}", level="DEBUG")
         except Exception as exc:  # noqa: BLE001
             result = {
                 "status": "failed",
@@ -142,7 +154,10 @@ class TapoC220Connector:
                 "error": self._short_error(exc),
             }
             self._post_result(request_id=request_id, capability_id="camera.ptz", result=result)
-            self._log(f"camera.ptz_result failed request_id={request_id} error={self._short_error(exc)}")
+            self._log(
+                f"camera.ptz_result failed request_id={request_id} error={self._short_error(exc)}",
+                level="ERROR",
+            )
 
     def _post_result(self, *, request_id: str, capability_id: str, result: dict[str, Any]) -> None:
         payload = {
@@ -154,7 +169,10 @@ class TapoC220Connector:
         try:
             self.http.post("/api/capability/result", payload)
         except HttpError as exc:
-            self._log(f"capability result post failed request_id={request_id} error={self._short_error(exc)}")
+            self._log(
+                f"capability result post failed request_id={request_id} error={self._short_error(exc)}",
+                level="ERROR",
+            )
 
     def _source_client_context(self, data: dict[str, Any]) -> dict[str, str]:
         return {
@@ -192,5 +210,5 @@ class TapoC220Connector:
                 text = text.replace(secret, "***")
         return text.replace("\n", " ")[:120]
 
-    def _log(self, message: str) -> None:
-        print(f"[tapo-c220-connector] {message}", file=sys.stderr, flush=True)
+    def _log(self, message: str, *, level: str = "INFO") -> None:
+        emit_log("tapo-c220-connector", message, level=level, stream=sys.stderr)

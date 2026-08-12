@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ja">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CocoroAI ログ</title>
+  <link rel="stylesheet" href="/ui/styles.css">
+</head>
+
+<body class="log-page">
+  <div class="log-shell">
+    <header class="log-topbar">
+      <div class="brand-block">
+        <h1>CocoroAI<span class="brand-suffix"> Powered by OtomeKairo</span></h1>
+      </div>
+      <div class="log-toolbar" role="toolbar" aria-label="ログフィルタ">
+        <label class="log-filter-field">
+          レベル
+          <select id="level-filter" aria-label="レベルフィルタ">
+            <option value="">全て</option>
+            <option value="INFO" selected>INFO以上</option>
+            <option value="WARNING">WARNING以上</option>
+            <option value="ERROR">ERRORのみ</option>
+          </select>
+        </label>
+
+        <button type="button" class="plain-button" id="clear-logs">クリア</button>
+
+        <label class="log-checkbox-field">
+          <input type="checkbox" id="auto-scroll" checked>
+          自動スクロール
+        </label>
+
+        <div class="log-component-filter">
+          <button type="button" class="plain-button log-component-toggle" id="component-filter-toggle"
+            aria-haspopup="listbox" aria-expanded="false">
+            <span id="component-filter-summary">0 / 0 選択</span>
+          </button>
+          <div class="log-component-popup" id="component-filter-popup" hidden>
+            <div class="log-component-list" id="component-filter-list" role="listbox" aria-label="コンポーネントフィルタ"
+              aria-multiselectable="true"></div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <p class="log-role-note">
+      <strong>この画面:</strong> サーバが今出している運用ログの流れ。
+      <strong>見ないもの:</strong> 判断の正式な根拠（それは「判断」へ）。
+      <a href="/ui/cycles" target="_blank" rel="noopener noreferrer">判断を開く</a>
+    </p>
+
+    <main class="log-main" aria-label="ログ一覧">
+      <div class="log-table-wrap" id="log-scroll">
+        <table class="log-table">
+          <thead>
+            <tr>
+              <th class="log-col-time">時刻</th>
+              <th class="log-col-level">レベル</th>
+              <th class="log-col-component">コンポーネント</th>
+              <th class="log-col-message">メッセージ</th>
+            </tr>
+          </thead>
+          <tbody id="log-rows"></tbody>
+        </table>
+      </div>
+    </main>
+
+    <footer class="log-statusbar">
+      <span id="connection-status" class="status">接続中</span>
+      <span id="status-text" class="status">ログ待機中…</span>
+      <span id="log-count" class="status">総件数: 0</span>
+    </footer>
+  </div>
+
+  <script src="/ui/logs.js"></script>
+</body>
+
+</html>

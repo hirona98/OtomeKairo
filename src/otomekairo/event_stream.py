@@ -19,6 +19,15 @@ class WebSocketProtocolError(Exception):
     pass
 
 
+# hello 登録失敗の公開 error code を表示文から独立させる。
+class EventStreamRegistrationError(ValueError):
+    def __init__(self, message: str, *, error_code: str) -> None:
+        if error_code not in {"invalid_vision_sources", "invalid_mcp_servers"}:
+            raise ValueError(f"Unknown event stream registration error_code: {error_code}")
+        super().__init__(message)
+        self.error_code = error_code
+
+
 # ハンドシェイク
 def build_websocket_accept(key: str) -> str:
     # 要約
@@ -51,6 +60,17 @@ class ServerWebSocket:
         return payload
 
     def receive_text(self) -> str | None:
+        # テキスト専用streamはbinary messageを受理しない。
+        message = self.receive_message()
+        if message is None:
+            return None
+        message_kind, payload = message
+        if message_kind != "text":
+            raise WebSocketProtocolError("WebSocket message must be text.")
+        return payload.decode("utf-8")
+
+    def receive_message(self) -> tuple[str, bytes] | None:
+        # 音声streamはtext controlとbinary PCMを同じ接続で受理する。
         # ループ
         while True:
             opcode, payload = self._read_frame()
@@ -62,13 +82,28 @@ class ServerWebSocket:
                 continue
             if opcode == 0xA:
                 continue
-            if opcode != 0x1:
-                raise WebSocketProtocolError(f"Unsupported opcode: {opcode}")
-            return payload.decode("utf-8")
+            if opcode == 0x1:
+                return "text", payload
+            if opcode == 0x2:
+                return "binary", payload
+            raise WebSocketProtocolError(f"Unsupported opcode: {opcode}")
 
     def send_json(self, payload: dict[str, Any]) -> None:
         # エンコード
         self.send_text(json.dumps(payload, ensure_ascii=False))
+
+    def send_json_and_binary(
+        self,
+        payload: dict[str, Any],
+        binary: bytes,
+    ) -> None:
+        # 音声metadataと直後のbinary messageを他の送信から分離する。
+        text = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        with self._send_lock:
+            if self._closed:
+                return
+            self._send_frame_unlocked(opcode=0x1, payload=text)
+            self._send_frame_unlocked(opcode=0x2, payload=binary)
 
     def send_text(self, text: str) -> None:
         # エンコード
@@ -171,6 +206,7 @@ class EventStreamRegistry:
                 "session_id": session_id,
                 "websocket": websocket,
                 "client_id": None,
+                "client_kind": None,
                 "capabilities": {},
                 "permissions": sorted(set(permissions or [])),
                 "rejected_bindings": [],
@@ -202,6 +238,7 @@ class EventStreamRegistry:
         session_id: str,
         *,
         client_id: str,
+        client_kind: str,
         capabilities: dict[str, str],
         rejected_bindings: list[dict[str, Any]],
         event_subscriptions: list[str] | None = None,
@@ -252,7 +289,10 @@ class EventStreamRegistry:
                 }
             )
             if duplicate_source_ids:
-                raise ValueError(f"duplicate_vision_source_id: {', '.join(duplicate_source_ids)}")
+                raise EventStreamRegistrationError(
+                    f"duplicate_vision_source_id: {', '.join(duplicate_source_ids)}",
+                    error_code="invalid_vision_sources",
+                )
             existing_mcp_server_ids: set[str] = set()
             for existing_session in self._sessions.values():
                 if existing_session.get("session_id") == session_id:
@@ -271,10 +311,14 @@ class EventStreamRegistry:
                 }
             )
             if duplicate_mcp_server_ids:
-                raise ValueError(f"duplicate_mcp_server_id: {', '.join(duplicate_mcp_server_ids)}")
+                raise EventStreamRegistrationError(
+                    f"duplicate_mcp_server_id: {', '.join(duplicate_mcp_server_ids)}",
+                    error_code="invalid_mcp_servers",
+                )
 
             # 更新
             session["client_id"] = client_id
+            session["client_kind"] = client_kind
             session["capabilities"] = dict(capabilities)
             session["rejected_bindings"] = list(rejected_bindings)
             session["event_subscriptions"] = normalized_event_subscriptions
@@ -288,10 +332,14 @@ class EventStreamRegistry:
             except OSError:
                 continue
 
-    def remove_connection(self, session_id: str) -> None:
+    def remove_connection(self, session_id: str) -> str | None:
         # 削除
         with self._lock:
-            self._sessions.pop(session_id, None)
+            session = self._sessions.pop(session_id, None)
+        if session is None:
+            return None
+        client_id = session.get("client_id")
+        return client_id if isinstance(client_id, str) else None
 
     def has_capability(self, client_id: str, capability: str) -> bool:
         # 走査
@@ -306,61 +354,24 @@ class EventStreamRegistry:
         # 空
         return False
 
-    def client_accepts_event(self, client_id: str, event_type: str) -> bool:
-        # 走査
-        normalized_client_id = client_id.strip()
+    def subscriber_count(
+        self,
+        event_type: str,
+        *,
+        client_kind: str | None = None,
+    ) -> int:
         normalized_event_type = event_type.strip()
-        if not normalized_client_id or not normalized_event_type:
-            return False
+        normalized_client_kind = client_kind.strip() if isinstance(client_kind, str) else None
         with self._lock:
-            for session in self._sessions.values():
-                if session.get("client_id") != normalized_client_id:
-                    continue
-                event_subscriptions = session.get("event_subscriptions", [])
-                if normalized_event_type in event_subscriptions:
-                    return True
-
-        # 空
-        return False
-
-    def find_single_client_with_event_subscription(self, event_type: str) -> str | None:
-        # event を受け取れる接続中 client 群
-        normalized_event_type = event_type.strip()
-        if not normalized_event_type:
-            return None
-        with self._lock:
-            client_ids = sorted(
-                {
-                    client_id.strip()
-                    for session in self._sessions.values()
-                    if isinstance((client_id := session.get("client_id")), str)
-                    and client_id.strip()
-                    and normalized_event_type in session.get("event_subscriptions", [])
-                }
+            return sum(
+                1
+                for session in self._sessions.values()
+                if normalized_event_type in session.get("event_subscriptions", [])
+                and (
+                    normalized_client_kind is None
+                    or session.get("client_kind") == normalized_client_kind
+                )
             )
-
-        # 1 台だけのときだけ採用する
-        if len(client_ids) != 1:
-            return None
-        return client_ids[0]
-
-    def find_single_client_with_capability(self, capability: str) -> str | None:
-        # capability を持つ接続中 client 群
-        with self._lock:
-            client_ids = sorted(
-                {
-                    client_id.strip()
-                    for session in self._sessions.values()
-                    if isinstance((client_id := session.get("client_id")), str)
-                    and client_id.strip()
-                    and capability in session.get("capabilities", {})
-                }
-            )
-
-        # 1 台だけのときだけ採用する
-        if len(client_ids) != 1:
-            return None
-        return client_ids[0]
 
     def is_client_connected(self, client_id: str) -> bool:
         # 走査
@@ -578,6 +589,55 @@ class EventStreamRegistry:
 
         # 結果
         return True
+
+    def send_to_subscribers(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        *,
+        client_kind: str | None = None,
+    ) -> int:
+        # 表示eventは全購読者、音声eventは選択されたclient種別へ配送する。
+        with self._lock:
+            targets = [
+                dict(session)
+                for session in self._sessions.values()
+                if event_type in session.get("event_subscriptions", [])
+                and (client_kind is None or session.get("client_kind") == client_kind)
+            ]
+        sent_count = 0
+        for target in targets:
+            try:
+                target["websocket"].send_json(payload)
+                sent_count += 1
+            except OSError:
+                self.remove_connection(target["session_id"])
+        return sent_count
+
+    def send_to_subscribers_with_binary(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        binary: bytes,
+        *,
+        client_kind: str,
+    ) -> int:
+        # metadataとbinaryの隣接を各WebSocketの送信lockで保証する。
+        with self._lock:
+            targets = [
+                dict(session)
+                for session in self._sessions.values()
+                if event_type in session.get("event_subscriptions", [])
+                and session.get("client_kind") == client_kind
+            ]
+        sent_count = 0
+        for target in targets:
+            try:
+                target["websocket"].send_json_and_binary(payload, binary)
+                sent_count += 1
+            except OSError:
+                self.remove_connection(target["session_id"])
+        return sent_count
 
     def close_all(self) -> None:
         # スナップショット

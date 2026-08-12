@@ -1,0 +1,1 @@
+"""OtomeKairo microphone connector。"""

@@ -265,6 +265,7 @@ class LLMMockDecisionMixin:
             "autonomous_run": {
                 "objective_summary": normalized[:180],
                 "initial_step_summary": "目的に沿って最初の一手を決める。",
+                "mcp_server_id": None,
                 "coordination": self._mock_autonomous_run_coordination(
                     autonomous_run_summaries=autonomous_run_summaries,
                 ),
@@ -641,8 +642,8 @@ class LLMMockDecisionMixin:
         # commitment候補
         commitment_item = active_commitments[0] if active_commitments else None
         if commitment_item is not None:
-            scope_type = commitment_item.get("scope_type", "relationship")
-            scope_key = commitment_item.get("scope_key", "self|user")
+            scope_type = commitment_item["scope_type"]
+            scope_key = commitment_item["scope_key"]
             predicate = commitment_item.get("predicate", "follow_up")
             return {
                 "intent_kind": "conversation_follow_up",
@@ -653,8 +654,8 @@ class LLMMockDecisionMixin:
         # episode候補
         episode_item = episodic_evidence[0] if episodic_evidence else None
         if episode_item is not None:
-            scope_type = episode_item.get("primary_scope_type", "user")
-            scope_key = episode_item.get("primary_scope_key", "user")
+            scope_type = episode_item["primary_scope_type"]
+            scope_key = episode_item["primary_scope_key"]
             episode_id = episode_item.get("episode_id", "unknown")
             return {
                 "intent_kind": "conversation_follow_up",

@@ -45,7 +45,7 @@ def _runtime_config_ready() -> int:
         runtime_config = fetch_runtime_config(settings)
     except RuntimeConfigNotFound as exc:
         print(f"Tapo C220 watcher debug をスキップします: {exc}", file=sys.stderr)
-        print("先に camera source の watcher を登録し、有効化してください。", file=sys.stderr)
+        print("先に camera source の watcher を登録してください。", file=sys.stderr)
         return SKIP
     except PreflightError as exc:
         print(f"Tapo C220 watcher debug の preflight に失敗しました: {exc}", file=sys.stderr)
@@ -53,12 +53,13 @@ def _runtime_config_ready() -> int:
 
     watcher = runtime_config.get("watcher")
     camera_source = runtime_config.get("camera_source")
-    if not isinstance(watcher, dict) or watcher.get("enabled") is not True:
-        print("Tapo C220 watcher debug をスキップします: watcher が無効です。", file=sys.stderr)
+    if not isinstance(watcher, dict):
+        print("Tapo C220 watcher debug をスキップします: watcher 定義がありません。", file=sys.stderr)
         return SKIP
     if not isinstance(camera_source, dict):
         print("Tapo C220 watcher debug をスキップします: camera source がありません。", file=sys.stderr)
         return SKIP
+    # enabled=false でも idle 常駐する（本体 launcher と同じ）。
     return 0
 
 

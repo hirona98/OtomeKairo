@@ -21,7 +21,7 @@ OtomeKairo では、`reflective consolidation` 全体を LLM 任せにはしな�
 ## 目的
 
 - `summary_text` を定型文ではなく、証拠に沿った自然な要約へする
-- `self / relationship / user / topic` の違いを無理な手書き分岐ではなく、文面で柔らかく表現できるようにする
+- `self / relationship / entity / topic` の違いを無理な手書き分岐ではなく、文面で柔らかく表現できるようにする
 - `predicate` や `qualifiers` が増えても、文面生成コードを増やし続けなくて済むようにする
 - 既存の `memory_units` 契約と `reflective consolidation` の安定性を壊さない
 
@@ -93,8 +93,8 @@ LLM に渡す入力は raw `events` ではなく、圧縮済みの `episodes` �
 ```json
 {
   "scope_type": "relationship",
-  "scope_key": "self|user",
-  "scope_label": "あなたとの関係",
+  "scope_key": "self|person:external-123",
+  "scope_label": "self|person:external-123 の関係文脈",
   "summary_status_candidate": "inferred",
   "dominant_memory_types": ["relation", "interpretation"],
   "support_kinds": ["episodes", "memory_units", "persona_context", "affect_state"],
@@ -104,16 +104,13 @@ LLM に渡す入力は raw `events` ではなく、圧縮済みの `episodes` �
     "support_cycles": 3,
     "open_loops": 1
   },
-  "existing_summary_text": "最近のあなたとのやり取りでは、距離感に関する理解が少しずつ安定している。",
+  "existing_summary_text": "最近のやり取りでは、距離感に関する理解が少しずつ安定している。",
   "persona_context": {
     "initiative_baseline": {
       "level": "medium",
       "summary_text": "自発発話は中庸で、具体的な前景変化があれば短く前へ出る。"
     },
-    "reference_style": {
-      "user_natural_reference": "マスター"
-    },
-    "persona_prompt_excerpt": "必要以上に媚びず、相手を一人の人間としてまっすぐ扱う。"
+    "persona_prompt_excerpt": "必要以上に媚びず、相手を一人の相手としてまっすぐ扱う。"
   },
   "affect_state": [
     {
@@ -155,7 +152,7 @@ LLM に渡す入力は raw `events` ではなく、圧縮済みの `episodes` �
 - `formed_at` のような正本 timestamp は、生活文脈向けに整形した `formed_time_label` として渡す
 - `existing_summary_text` は安定化のために渡す
 - `relationship / self` では、selected persona から作る `persona_context` の短い summary を補助入力として渡す
-- `self` では `mood_state`、`relationship / user` では対応する `affect_state` を補助入力として渡す
+- `self` では `mood_state`、`relationship / entity` では対応する `affect_state` を補助入力として渡す
 - `support_kinds` は、その scope を再構成したときに実際に使った補助層だけを列挙する
 
 ## LLM 出力契約
@@ -164,7 +161,7 @@ LLM の出力は JSON object 1 個に固定する。
 
 ```json
 {
-  "summary_text": "最近のあなたとのやり取りでは、体調を気にかけながら無理のない進め方を探る流れが続いている。"
+  "summary_text": "最近のやり取りでは、体調を気にかけながら無理のない進め方を探る流れが続いている。"
 }
 ```
 
@@ -184,7 +181,7 @@ LLM の出力は JSON object 1 個に固定する。
 
 system prompt では、少なくとも次を明示する。
 
-- あなたは `reflective consolidation` の summary 文面だけを書く
+- `reflective consolidation` の summary 文面だけを書く
 - 新しい事実を足さない
 - 渡された evidence pack の外を推測で埋めない
 - `summary_status_candidate=inferred` なら断定しすぎない

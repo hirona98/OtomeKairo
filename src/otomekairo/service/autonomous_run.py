@@ -8,7 +8,12 @@ from typing import Any
 
 from otomekairo.llm.client import LLMError
 from otomekairo.llm.contexts import AutonomousStepContext, CurrentInput
-from otomekairo.service.capability import CapabilityDispatchError
+from otomekairo.interaction import normalize_interaction_context
+from otomekairo.service.capability import (
+    CapabilityDispatchError,
+    PreSendCheckFailureError,
+    PreSendCheckWithheldError,
+)
 from otomekairo.service.common import ServiceError, debug_log
 
 
@@ -17,6 +22,16 @@ AUTONOMOUS_RUN_CONTINUE_DELAY_SECONDS = 1
 AUTONOMOUS_RUN_IDLE_CONTINUE_DELAY_SECONDS = 5
 AUTONOMOUS_RUN_ACTIVE_STATUSES = {"active", "waiting_timer", "waiting_result", "paused"}
 AUTONOMOUS_RUN_TERMINAL_STATUSES = {"completed", "cancelled"}
+AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK = (
+    "前の MCP request は送信前チェックで見送られた。"
+    "同じ目的の安全な capability_request または action.kind=none を選ぶ。"
+)
+AUTONOMOUS_PRE_SEND_CHECK_WITHHELD_NOTICE = (
+    "外部送信候補に非公開情報が含まれる可能性があるため、送信しませんでした。"
+)
+AUTONOMOUS_PRE_SEND_CHECK_FAILURE_NOTICE = (
+    "外部送信内容の安全確認を完了できなかったため、送信しませんでした。"
+)
 
 
 class ServiceAutonomousRunMixin:
@@ -428,27 +443,23 @@ class ServiceAutonomousRunMixin:
                 for run in due_runs:
                     if stop_event.is_set():
                         return
-                    if self._user_response_cycle_active():
+                    if not self._cycle_coordinator.try_enter_background():
                         debug_log(
                             "AutonomousRun",
-                            f"scheduler skipped user_response_active run={run.get('run_id')}",
+                            f"scheduler skipped foreground_cycle_active run={run.get('run_id')}",
                             level="DEBUG",
                         )
                         continue
-                    with self._wake_execution_lock:
-                        if self._user_response_cycle_active():
-                            debug_log(
-                                "AutonomousRun",
-                                f"scheduler skipped user_response_active run={run.get('run_id')}",
-                                level="DEBUG",
+                    try:
+                        with self._wake_execution_lock:
+                            self._execute_autonomous_run_step(
+                                state=state,
+                                run_id=str(run.get("run_id") or ""),
+                                started_at=self._now_iso(),
+                                emit_speech_event=True,
                             )
-                            continue
-                        self._execute_autonomous_run_step(
-                            state=state,
-                            run_id=str(run.get("run_id") or ""),
-                            started_at=self._now_iso(),
-                            emit_speech_event=True,
-                        )
+                    finally:
+                        self._cycle_coordinator.leave_background()
             except Exception as exc:  # noqa: BLE001
                 debug_log(
                     "AutonomousRun",
@@ -549,13 +560,6 @@ class ServiceAutonomousRunMixin:
         if not current_step_summary:
             current_step_summary = "autonomous_run の最初の一手を判断する。"
         origin_kind = str(source_current_input.get("source_kind") or "user_message").strip() or "user_message"
-        if coordination["mode"] == "replace_existing":
-            self._replace_existing_autonomous_runs_from_decision(
-                state=state,
-                target_runs=coordination["target_runs"],
-                current_time=current_time,
-                reason_summary=str(coordination["reason_summary"]),
-            )
         run = {
             "run_id": f"autonomous_run:{uuid.uuid4().hex}",
             "memory_set_id": state["selected_memory_set_id"],
@@ -577,6 +581,76 @@ class ServiceAutonomousRunMixin:
                 "reason_summary": coordination["reason_summary"],
             },
         }
+        mcp_server_id = run_payload.get("mcp_server_id")
+        if mcp_server_id is not None:
+            normalized_mcp_server_id = str(mcp_server_id).strip()
+            server = self._mcp_servers_from_state(state).get(normalized_mcp_server_id)
+            session = server.get("autonomous_session") if isinstance(server, dict) else None
+            if (
+                not normalized_mcp_server_id
+                or not isinstance(server, dict)
+                or server.get("enabled") is not True
+                or not isinstance(session, dict)
+                or session.get("enabled") is not True
+            ):
+                raise ValueError("Finite MCP session target is unavailable or disabled.")
+            if origin_kind not in {"user_message", "background_thinking"}:
+                raise ValueError("Finite MCP sessions can only start from user_message or background_thinking.")
+            matching_runs = [
+                candidate
+                for candidate in self._mcp_session_runs(normalized_mcp_server_id)
+                if candidate.get("status") in AUTONOMOUS_RUN_ACTIVE_STATUSES
+            ]
+            matching_run_ids = {
+                str(candidate.get("run_id") or "")
+                for candidate in matching_runs
+                if str(candidate.get("run_id") or "")
+            }
+            if origin_kind == "background_thinking" and not self._mcp_background_session_eligible(
+                mcp_server_id=normalized_mcp_server_id,
+                policy=session,
+                matching_runs=self._mcp_session_runs(normalized_mcp_server_id),
+            ):
+                raise ValueError("Background finite MCP session is not eligible.")
+            if matching_run_ids and (
+                coordination["mode"] != "replace_existing"
+                or not matching_run_ids.issubset(set(coordination["target_run_ids"]))
+            ):
+                raise ValueError("A nonterminal finite MCP session for the target server must be replaced explicitly.")
+            run["mcp_session"] = {
+                "mcp_server_id": normalized_mcp_server_id,
+                "policy": deepcopy(session),
+                "tool_call_count": 0,
+            }
+        if coordination["mode"] == "replace_existing":
+            self._replace_existing_autonomous_runs_from_decision(
+                state=state,
+                target_runs=coordination["target_runs"],
+                current_time=current_time,
+                reason_summary=str(coordination["reason_summary"]),
+            )
+        requested_by_person_ref = source_current_input.get("sender_ref")
+        if (
+            isinstance(requested_by_person_ref, str)
+            and requested_by_person_ref.startswith("person:")
+        ):
+            run["requested_by_person_ref"] = requested_by_person_ref
+        interaction_context = source_current_input.get("interaction_context")
+        if isinstance(interaction_context, dict):
+            origin_interaction_ref = interaction_context.get("interaction_ref")
+            if isinstance(origin_interaction_ref, str) and origin_interaction_ref:
+                run["origin_interaction_ref"] = origin_interaction_ref
+            participants = interaction_context.get("participants")
+            if isinstance(participants, list):
+                run["participant_refs"] = [
+                    participant["person_ref"]
+                    for participant in participants
+                    if (
+                        isinstance(participant, dict)
+                        and isinstance(participant.get("person_ref"), str)
+                        and participant["person_ref"].startswith("person:")
+                    )
+                ]
         if isinstance(source_cycle_id, str) and source_cycle_id.strip():
             run["source_cycle_id"] = source_cycle_id.strip()
         normalized_target = self._normalize_capability_client_id(assistant_message_target_client_id)
@@ -712,6 +786,99 @@ class ServiceAutonomousRunMixin:
 
         try:
             current_time = started_at
+            unavailable_reason = self._mcp_session_unavailable_reason(state=state, run=run)
+            if unavailable_reason is not None:
+                reason_summary = unavailable_reason
+                updated_run = self._terminal_autonomous_run(
+                    run=run,
+                    current_time=current_time,
+                    status="cancelled",
+                    reason_summary=reason_summary,
+                )
+                self.store.upsert_autonomous_run(autonomous_run=updated_run)
+                updated_run = self._finalize_autonomous_run_commitments(
+                    state=state,
+                    run=updated_run,
+                    terminal_status="cancelled",
+                    current_time=current_time,
+                    evidence_events=[],
+                )
+                if isinstance(source_request_record, dict):
+                    previous_request_finished = True
+                    self._finish_capability_ongoing_action(
+                        request_record=source_request_record,
+                        current_time=current_time,
+                        terminal_kind="cancelled",
+                        reason_code="autonomous_run:cancel",
+                        terminal_reason=reason_summary,
+                        final_step_summary=reason_summary,
+                        transition_source="autonomous_run_step",
+                        decision_kind="autonomous_step:none",
+                        result_error=True,
+                        detail_summary=reason_summary,
+                    )
+                return {
+                    "status": "cancelled",
+                    "autonomous_run": updated_run,
+                    "speech_payload": None,
+                    "capability_request_summary": None,
+                    "previous_request_finished": previous_request_finished,
+                    "step": None,
+                }
+            if self._mcp_session_limit_reached(run):
+                reason_summary = "有限 MCP セッションの tool call 上限に達したため完了した。"
+                updated_run = self._terminal_autonomous_run(
+                    run={
+                        **run,
+                        "current_step_summary": reason_summary,
+                        "history_summary": self._updated_autonomous_run_history(
+                            run=run,
+                            step={
+                                "action": {"kind": "none"},
+                                "transition": {"kind": "complete"},
+                                "run_update": {
+                                    "current_step_summary": reason_summary,
+                                    "history_summary": "",
+                                },
+                            },
+                            capability_request_summary=None,
+                        ),
+                    },
+                    current_time=current_time,
+                    status="completed",
+                    reason_summary=reason_summary,
+                )
+                self.store.upsert_autonomous_run(autonomous_run=updated_run)
+                updated_run = self._finalize_autonomous_run_commitments(
+                    state=state,
+                    run=updated_run,
+                    terminal_status="completed",
+                    current_time=current_time,
+                    evidence_events=[],
+                )
+                if isinstance(source_request_record, dict):
+                    previous_request_finished = True
+                    self._finish_capability_ongoing_action(
+                        request_record=source_request_record,
+                        current_time=current_time,
+                        terminal_kind="completed",
+                        reason_code="autonomous_run:complete",
+                        terminal_reason=reason_summary,
+                        final_step_summary=reason_summary,
+                        transition_source="autonomous_run_step",
+                        decision_kind="autonomous_step:none",
+                        result_error=False,
+                        detail_summary=reason_summary,
+                    )
+                return {
+                    "status": "completed",
+                    "autonomous_run": updated_run,
+                    "speech_payload": None,
+                    "capability_request_summary": None,
+                    "previous_request_finished": previous_request_finished,
+                    "step": None,
+                }
+            selected_preset = state["model_presets"][state["selected_model_preset_id"]]
             step_context = self._build_autonomous_step_context(
                 state=state,
                 run=run,
@@ -719,7 +886,6 @@ class ServiceAutonomousRunMixin:
                 source_current_input=source_current_input,
                 last_result_context=last_result_context or run.get("last_result_context"),
             )
-            selected_preset = state["model_presets"][state["selected_model_preset_id"]]
             step = self.llm.generate_autonomous_step(
                 model_config=selected_preset,
                 persona_context=self._build_selected_persona_context(
@@ -728,6 +894,7 @@ class ServiceAutonomousRunMixin:
                 ),
                 context=step_context,
             )
+            self._validate_mcp_session_step(step=step, run=run)
             action = step["action"]
             transition = step["transition"]
             action_kind = str(action.get("kind") or "").strip()
@@ -782,6 +949,7 @@ class ServiceAutonomousRunMixin:
                 run = self.store.get_autonomous_run(run_id=run_id) or run
                 if emit_speech_event:
                     self._emit_autonomous_run_assistant_message_event(
+                        state=state,
                         run=run,
                         speech_payload=speech_payload,
                     )
@@ -815,13 +983,148 @@ class ServiceAutonomousRunMixin:
                         "step": step,
                     }
                 run = self.store.get_autonomous_run(run_id=run_id) or run
-                capability_request_summary = self._dispatch_autonomous_run_capability_request(
-                    state=state,
-                    run=run,
-                    current_time=current_time,
-                    action=action,
-                    source_current_input=step_context.current_input.to_prompt_payload(),
-                )
+                try:
+                    step_source_current_input = step_context.current_input.to_prompt_payload()
+                    step_activation = self._agent_skill_activation_summary(
+                        getattr(step_context, "agent_skill_context", None)
+                    )
+                    if step_activation is not None:
+                        step_source_current_input["agent_skill_activation"] = step_activation
+                    capability_request_summary = self._dispatch_autonomous_run_capability_request(
+                        state=state,
+                        run=run,
+                        current_time=current_time,
+                        action=action,
+                        source_current_input=step_source_current_input,
+                    )
+                except PreSendCheckWithheldError as first_withhold:
+                    # autonomous step も候補本文を戻さず、同じ run 文脈で一度だけ再生成する。
+                    step_context = self._build_autonomous_step_context(
+                        state=state,
+                        run=run,
+                        current_time=self._now_iso(),
+                        source_current_input=source_current_input,
+                        last_result_context=last_result_context or run.get("last_result_context"),
+                        pre_send_check_feedback=AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK,
+                    )
+                    step = self.llm.generate_autonomous_step(
+                        model_config=selected_preset,
+                        persona_context=self._build_selected_persona_context(
+                            state=state,
+                            role="autonomous_step_generation",
+                        ),
+                        context=step_context,
+                    )
+                    self._validate_mcp_session_step(step=step, run=run)
+                    action = step["action"]
+                    transition = step["transition"]
+                    action_kind = str(action.get("kind") or "").strip()
+                    current_time = self._now_iso()
+                    guard_result = self._autonomous_run_step_guard(
+                        run_id=run_id,
+                        current_time=current_time,
+                        allow_during_user_response=allow_during_user_response,
+                    )
+                    if guard_result is not None:
+                        previous_request_finished = self._finish_autonomous_source_request_on_hold(
+                            source_request_record=source_request_record,
+                            current_time=current_time,
+                            reason_summary="状態変更により pre-send check 後の autonomous_run step を保留した。",
+                        )
+                        return {
+                            **guard_result,
+                            "speech_payload": None,
+                            "capability_request_summary": None,
+                            "previous_request_finished": previous_request_finished,
+                            "step": step,
+                        }
+                    run = self.store.get_autonomous_run(run_id=run_id) or run
+                    if action_kind == "capability_request":
+                        step_source_current_input = step_context.current_input.to_prompt_payload()
+                        step_activation = self._agent_skill_activation_summary(
+                            getattr(step_context, "agent_skill_context", None)
+                        )
+                        if step_activation is not None:
+                            step_source_current_input["agent_skill_activation"] = step_activation
+                        capability_request_summary = self._dispatch_autonomous_run_capability_request(
+                            state=state,
+                            run=run,
+                            current_time=current_time,
+                            action=action,
+                            source_current_input=step_source_current_input,
+                            pre_send_check_attempt=2,
+                            pre_send_check_prior_attempts=[deepcopy(first_withhold.audit_summary)],
+                        )
+                        if "pre_send_check" not in capability_request_summary:
+                            self._persist_autonomous_pre_send_check_audit(
+                                run=run,
+                                current_time=current_time,
+                                audit_summary={
+                                    "result_status": "recovered",
+                                    "attempts": [deepcopy(first_withhold.audit_summary)],
+                                },
+                            )
+                    elif action_kind == "speech":
+                        speech_payload = self._generate_autonomous_run_speech(
+                            state=state,
+                            selected_preset=selected_preset,
+                            step_context=step_context,
+                            step=step,
+                        )
+                        current_time = self._now_iso()
+                        guard_result = self._autonomous_run_step_guard(
+                            run_id=run_id,
+                            current_time=current_time,
+                            allow_during_user_response=allow_during_user_response,
+                        )
+                        if guard_result is not None:
+                            previous_request_finished = self._finish_autonomous_source_request_on_hold(
+                                source_request_record=source_request_record,
+                                current_time=current_time,
+                                reason_summary="状態変更により pre-send check 後の autonomous_run speech を保留した。",
+                            )
+                            return {
+                                **guard_result,
+                                "speech_payload": None,
+                                "capability_request_summary": None,
+                                "previous_request_finished": previous_request_finished,
+                                "step": step,
+                            }
+                        run = self.store.get_autonomous_run(run_id=run_id) or run
+                        if emit_speech_event:
+                            self._emit_autonomous_run_assistant_message_event(
+                                state=state,
+                                run=run,
+                                speech_payload=speech_payload,
+                            )
+                            speech_event = self._persist_autonomous_run_speech_event(
+                                run=run,
+                                speech_payload=speech_payload,
+                                created_at=current_time,
+                                step=step,
+                                transition=transition,
+                            )
+                            if isinstance(speech_event, dict):
+                                speech_events.append(speech_event)
+                        self._persist_autonomous_pre_send_check_audit(
+                            run=run,
+                            current_time=current_time,
+                            audit_summary={
+                                "result_status": "recovered",
+                                "attempts": [deepcopy(first_withhold.audit_summary)],
+                            },
+                        )
+                    elif action_kind == "none":
+                        self._record_autonomous_pre_send_check_terminal(
+                            run=run,
+                            current_time=current_time,
+                            reason_code="pre_send_check_retry_noop",
+                            audit_summary={
+                                "result_status": "withheld",
+                                "attempts": [deepcopy(first_withhold.audit_summary)],
+                            },
+                            message=AUTONOMOUS_PRE_SEND_CHECK_WITHHELD_NOTICE,
+                        )
 
             current_time = self._now_iso()
             if action_kind == "none" or (action_kind == "speech" and not emit_speech_event):
@@ -879,6 +1182,69 @@ class ServiceAutonomousRunMixin:
                     current_time=current_time,
                     evidence_events=speech_events,
                 )
+        except (PreSendCheckWithheldError, PreSendCheckFailureError) as exc:
+            current_time = self._now_iso()
+            run = self.store.get_autonomous_run(run_id=run_id) or run
+            is_failure = isinstance(exc, PreSendCheckFailureError)
+            reason_code = (
+                "pre_send_check_failure"
+                if is_failure
+                else "pre_send_check_withheld"
+            )
+            updated_run = self._terminal_autonomous_run(
+                run=run,
+                current_time=current_time,
+                status="cancelled",
+                reason_summary="送信前チェックの結果、外部送信を行わず autonomous_run を終了した。",
+            )
+            self.store.upsert_autonomous_run(autonomous_run=updated_run)
+            updated_run = self._finalize_autonomous_run_commitments(
+                state=state,
+                run=updated_run,
+                terminal_status="cancelled",
+                current_time=current_time,
+                evidence_events=[],
+            )
+            self._record_autonomous_pre_send_check_terminal(
+                run=updated_run,
+                current_time=current_time,
+                reason_code=reason_code,
+                audit_summary=exc.audit_summary,
+                message=(
+                    AUTONOMOUS_PRE_SEND_CHECK_FAILURE_NOTICE
+                    if is_failure
+                    else AUTONOMOUS_PRE_SEND_CHECK_WITHHELD_NOTICE
+                ),
+            )
+            if isinstance(source_request_record, dict):
+                previous_request_finished = True
+                self._finish_capability_ongoing_action(
+                    request_record=source_request_record,
+                    current_time=current_time,
+                    terminal_kind="interrupted",
+                    reason_code=reason_code,
+                    terminal_reason="送信前チェックのため autonomous_run を終了した。",
+                    final_step_summary="外部送信を行わず終了した。",
+                    transition_source="autonomous_run_step",
+                    decision_kind="autonomous_step:none",
+                    result_error=is_failure,
+                    detail_summary=reason_code,
+                )
+            debug_log(
+                "AutonomousRun",
+                f"step stopped run={run_id} reason={reason_code}",
+                level="WARNING" if not is_failure else "ERROR",
+            )
+            return {
+                "status": updated_run.get("status"),
+                "autonomous_run": updated_run,
+                "speech_payload": None,
+                "capability_request_summary": None,
+                "previous_request_finished": previous_request_finished,
+                "step": None,
+                "error": reason_code,
+                "pre_send_check": deepcopy(exc.audit_summary),
+            }
         except (LLMError, KeyError, ValueError, CapabilityDispatchError) as exc:
             current_time = self._now_iso()
             run = self.store.get_autonomous_run(run_id=run_id) or run
@@ -948,19 +1314,44 @@ class ServiceAutonomousRunMixin:
         current_time: str,
         source_current_input: dict[str, Any] | None,
         last_result_context: dict[str, Any] | None,
+        pre_send_check_feedback: str | None = None,
     ) -> AutonomousStepContext:
         current_input_payload = source_current_input if isinstance(source_current_input, dict) else None
         if current_input_payload is None:
             current_input_payload = {
-                "sender": "system",
+                "sender_kind": "system",
+                "sender_ref": None,
                 "source_kind": "autonomous_run",
-                "response_target": "none",
+                "response_target_refs": [],
                 "text": f"autonomous_run step: {run.get('objective_summary')}",
             }
+        raw_interaction_context = current_input_payload.get("interaction_context")
+        interaction_context = normalize_interaction_context(
+            raw_interaction_context,
+            required=False,
+            require_speaker=False,
+        )
+        raw_response_target_refs = current_input_payload.get("response_target_refs")
+        response_target_refs = (
+            tuple(
+                value.strip()
+                for value in raw_response_target_refs
+                if isinstance(value, str) and value.strip()
+            )
+            if isinstance(raw_response_target_refs, list)
+            else ()
+        )
         current_input = CurrentInput(
-            sender=str(current_input_payload.get("sender") or "system"),
+            sender_kind=str(current_input_payload.get("sender_kind") or "system"),
+            sender_ref=(
+                str(current_input_payload["sender_ref"]).strip()
+                if isinstance(current_input_payload.get("sender_ref"), str)
+                and str(current_input_payload["sender_ref"]).strip()
+                else None
+            ),
             source_kind=str(current_input_payload.get("source_kind") or "autonomous_run"),
-            response_target=str(current_input_payload.get("response_target") or "none"),
+            response_target_refs=response_target_refs,
+            interaction_context=interaction_context,
             text=str(current_input_payload.get("text") or ""),
         )
         foreground_world_state = self._summarize_foreground_world_states(
@@ -971,27 +1362,74 @@ class ServiceAutonomousRunMixin:
             ),
             current_time=current_time,
         )
-        return AutonomousStepContext(
-            run=self._autonomous_run_prompt_summary(run),
-            current_input=current_input,
-            recent_turns=self._load_recent_turns(state),
-            time_context=self._build_time_context(current_time=current_time),
-            foreground_world_state=foreground_world_state,
-            activity_context=self._summarize_activity_context(
-                self.store.get_current_activity_state(
-                    memory_set_id=state["selected_memory_set_id"],
-                    current_time=current_time,
-                ),
-                current_time=current_time,
-            ),
-            ongoing_action_summary=self._summarize_ongoing_action(
-                self._current_ongoing_action(state=state, current_time=current_time)
-            ),
+        capability_decision_view = self._mcp_session_capability_decision_view(
+            run=run,
             capability_decision_view=self._build_capability_decision_view(
                 state=state,
                 current_time=current_time,
             ),
+        )
+        agent_skill_context = self._build_agent_skill_context(
+            model_config=state["model_presets"][state["selected_model_preset_id"]],
+            current_input=current_input,
+            trigger_kind="autonomous_run",
+            capability_decision_view=capability_decision_view,
+            run=self._autonomous_run_prompt_summary(run),
+            prior_activation=(
+                source_current_input.get("agent_skill_activation")
+                if isinstance(source_current_input, dict)
+                and isinstance(source_current_input.get("agent_skill_activation"), dict)
+                else None
+            ),
+        )
+        return AutonomousStepContext(
+            run=self._autonomous_run_prompt_summary(run),
+            current_input=current_input,
+            recent_turns=self._load_recent_turns(state, interaction_context),
+            time_context=self._build_time_context(current_time=current_time),
+            foreground_world_state=foreground_world_state,
+            activity_context=self._autonomous_run_activity_context(
+                state=state,
+                current_time=current_time,
+                interaction_context=interaction_context,
+            ),
+            ongoing_action_summary=self._summarize_ongoing_action(
+                self._current_ongoing_action(state=state, current_time=current_time)
+            ),
+            capability_decision_view=capability_decision_view,
             last_result_context=last_result_context if isinstance(last_result_context, dict) else None,
+            people_context=self._build_people_context(
+                state=state,
+                current_input=current_input,
+                structured_sources=[run, last_result_context],
+            ),
+            pre_send_check_feedback=pre_send_check_feedback,
+            agent_skill_context=agent_skill_context,
+        )
+
+    def _autonomous_run_activity_context(
+        self,
+        *,
+        state: dict[str, Any],
+        current_time: str,
+        interaction_context: Any,
+    ) -> dict[str, Any] | None:
+        # run起点の人物が確定している場合だけ、その人物の短期活動を読む。
+        participant_refs = (
+            interaction_context.participant_refs
+            if interaction_context is not None
+            else ()
+        )
+        if not participant_refs:
+            return None
+        activity_state = self.store.get_current_activity_state(
+            memory_set_id=state["selected_memory_set_id"],
+            actor_ref=participant_refs[0],
+            current_time=current_time,
+        )
+        return self._summarize_activity_context(
+            activity_state,
+            current_time=current_time,
         )
 
     def _generate_autonomous_run_speech(
@@ -1049,12 +1487,14 @@ class ServiceAutonomousRunMixin:
             initiative_context=None,
             visual_observation_context=None,
             self_state_context=None,
+            people_context=step_context.people_context or [],
             relationship_context=None,
             prediction_error_context=None,
             workspace_context=None,
             recall_hint=self._empty_recall_hint(),
             recall_pack=self._empty_recall_pack(),
             decision=decision,
+            agent_skill_context=step_context.agent_skill_context,
         )
         return self.llm.generate_speech(
             model_config=selected_preset,
@@ -1074,6 +1514,8 @@ class ServiceAutonomousRunMixin:
         current_time: str,
         action: dict[str, Any],
         source_current_input: dict[str, Any],
+        pre_send_check_attempt: int = 1,
+        pre_send_check_prior_attempts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         request_payload = action.get("capability_request")
         if not isinstance(request_payload, dict):
@@ -1084,6 +1526,13 @@ class ServiceAutonomousRunMixin:
             raise ValueError("Autonomous step capability_id is invalid.")
         if not isinstance(input_payload, dict):
             raise ValueError("Autonomous step capability input must be an object.")
+        self._consume_mcp_session_budget(
+            run=run,
+            capability_id=capability_id.strip(),
+            input_payload=input_payload,
+            current_time=current_time,
+        )
+        run = self.store.get_autonomous_run(run_id=str(run.get("run_id") or "")) or run
         result = self._dispatch_capability_request(
             memory_set_id=state["selected_memory_set_id"],
             capability_id=capability_id.strip(),
@@ -1096,6 +1545,8 @@ class ServiceAutonomousRunMixin:
             assistant_message_target_client_id=self._request_run_assistant_message_target_client_id(run),
             track_ongoing_action=True,
             autonomous_run_id=str(run.get("run_id") or "").strip(),
+            pre_send_check_attempt=pre_send_check_attempt,
+            pre_send_check_prior_attempts=pre_send_check_prior_attempts,
         )
         if not isinstance(result, dict):
             raise ValueError("Autonomous capability dispatch failed.")
@@ -1103,6 +1554,116 @@ class ServiceAutonomousRunMixin:
         if not isinstance(summary, dict):
             raise ValueError("Autonomous capability dispatch summary is missing.")
         return summary
+
+    def _validate_mcp_session_step(
+        self,
+        *,
+        step: dict[str, Any],
+        run: dict[str, Any],
+    ) -> None:
+        session = run.get("mcp_session")
+        if not isinstance(session, dict):
+            return
+        action = step.get("action")
+        request = action.get("capability_request") if isinstance(action, dict) else None
+        if not isinstance(action, dict) or action.get("kind") != "capability_request":
+            return
+        if not isinstance(request, dict) or request.get("capability_id") != "mcp.call_tool":
+            raise ValueError("Finite MCP session may execute only mcp.call_tool.")
+        input_payload = request.get("input")
+        if not isinstance(input_payload, dict):
+            raise ValueError("Finite MCP session request input is invalid.")
+        server_id = str(input_payload.get("mcp_server_id") or "").strip()
+        if server_id != session.get("mcp_server_id"):
+            raise ValueError("Finite MCP session request must target its configured MCP server.")
+
+    def _mcp_session_limit_reached(self, run: dict[str, Any]) -> bool:
+        session = run.get("mcp_session")
+        if not isinstance(session, dict):
+            return False
+        policy = session.get("policy")
+        if not isinstance(policy, dict):
+            raise ValueError("Finite MCP session policy is missing.")
+        return int(session.get("tool_call_count") or 0) >= int(policy.get("max_tool_calls") or 0)
+
+    def _mcp_session_unavailable_reason(
+        self,
+        *,
+        state: dict[str, Any],
+        run: dict[str, Any],
+    ) -> str | None:
+        session = run.get("mcp_session")
+        if not isinstance(session, dict):
+            return None
+        mcp_server_id = session.get("mcp_server_id")
+        server = self._mcp_servers_from_state(state).get(mcp_server_id)
+        if not isinstance(server, dict):
+            return "対象 MCP server が削除されたため、有限 MCP セッションを終了した。"
+        if server.get("enabled") is not True:
+            return "対象 MCP server が無効になったため、有限 MCP セッションを終了した。"
+        policy = server.get("autonomous_session")
+        if not isinstance(policy, dict) or policy.get("enabled") is not True:
+            return "対象 MCP server の有限セッションが無効になったため終了した。"
+        return None
+
+    def _consume_mcp_session_budget(
+        self,
+        *,
+        run: dict[str, Any],
+        capability_id: str,
+        input_payload: dict[str, Any],
+        current_time: str,
+    ) -> None:
+        session = run.get("mcp_session")
+        if not isinstance(session, dict):
+            return
+        if capability_id != "mcp.call_tool":
+            raise ValueError("Finite MCP session may execute only mcp.call_tool.")
+        server_id = str(input_payload.get("mcp_server_id") or "").strip()
+        if server_id != session.get("mcp_server_id"):
+            raise ValueError("Finite MCP session request must target its configured MCP server.")
+        policy = session.get("policy")
+        if not isinstance(policy, dict):
+            raise ValueError("Finite MCP session policy is missing.")
+        tool_count = int(session.get("tool_call_count") or 0)
+        if tool_count >= int(policy.get("max_tool_calls") or 0):
+            raise ValueError("Finite MCP session tool call limit reached.")
+        updated = deepcopy(run)
+        updated_session = deepcopy(session)
+        updated_session["tool_call_count"] = tool_count + 1
+        updated["mcp_session"] = updated_session
+        updated["updated_at"] = current_time
+        self.store.upsert_autonomous_run(autonomous_run=updated)
+
+    def _mcp_session_capability_decision_view(
+        self,
+        *,
+        run: dict[str, Any],
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]] | None:
+        session = run.get("mcp_session")
+        if not isinstance(session, dict) or not capability_decision_view:
+            return capability_decision_view
+        normalized = deepcopy(capability_decision_view)
+        for capability in normalized:
+            if not isinstance(capability, dict):
+                continue
+            if capability.get("id") != "mcp.call_tool":
+                capability["available"] = False
+                continue
+            for server in capability.get("mcp_servers", []):
+                if not isinstance(server, dict):
+                    continue
+                if server.get("mcp_server_id") != session.get("mcp_server_id"):
+                    server["available"] = False
+                    server["tools"] = []
+                    continue
+                server["available"] = server.get("available") is True and bool(server.get("tools"))
+            capability["available"] = any(
+                isinstance(server, dict) and server.get("available") is True
+                for server in capability.get("mcp_servers", [])
+            )
+        return normalized
 
     def _apply_autonomous_step_transition(
         self,
@@ -1116,6 +1677,13 @@ class ServiceAutonomousRunMixin:
         transition = step["transition"]
         run_update = step["run_update"]
         transition_kind = str(transition.get("kind") or "").strip()
+        if (
+            isinstance(run.get("mcp_session"), dict)
+            and action_kind != "capability_request"
+            and transition_kind in {"wait_until", "continue"}
+        ):
+            transition_kind = "complete"
+            transition = {"kind": "complete", "next_run_at": None}
         updated = {
             **run,
             "current_step_summary": str(
@@ -1290,6 +1858,24 @@ class ServiceAutonomousRunMixin:
         debug_log("AutonomousRun", f"result cycle queued request={request_label} run={run_id or '-'}", level="DEBUG")
 
     def _execute_autonomous_capability_result_cycle(
+        self,
+        *,
+        state: dict[str, Any],
+        capability_response: dict[str, Any],
+        started_at: str,
+    ) -> None:
+        # autonomous_run の非同期結果も同じ個の状態更新として会話と直列化する。
+        self._cycle_coordinator.enter_foreground()
+        try:
+            self._execute_autonomous_capability_result_cycle_inner(
+                state=state,
+                capability_response=capability_response,
+                started_at=started_at,
+            )
+        finally:
+            self._cycle_coordinator.leave_foreground()
+
+    def _execute_autonomous_capability_result_cycle_inner(
         self,
         *,
         state: dict[str, Any],
@@ -1541,7 +2127,7 @@ class ServiceAutonomousRunMixin:
                 run=run,
                 current_time=current_time,
                 status="cancelled",
-                reason_summary="ユーザーが停止を明示したため cancel した。",
+                reason_summary="conversation API の autonomous_run_action=cancel_all により cancel した。",
             )
             self.store.upsert_autonomous_run(autonomous_run=updated)
             updated = self._finalize_autonomous_run_commitments(
@@ -1553,26 +2139,6 @@ class ServiceAutonomousRunMixin:
             )
             cancelled.append(str(run.get("run_id") or ""))
         return [run_id for run_id in cancelled if run_id]
-
-    def _conversation_requests_autonomous_run_cancel(self, input_text: str) -> bool:
-        normalized = input_text.strip()
-        if not normalized:
-            return False
-        stop_terms = ("止めて", "やめて", "中止", "キャンセル", "cancel", "stop")
-        stop_command_terms = (
-            "止めて",
-            "止めてください",
-            "やめて",
-            "やめてください",
-            "中止",
-            "キャンセル",
-            "cancel",
-            "stop",
-        )
-        run_terms = ("自律", "run", "実行", "それ", "今の")
-        if normalized in stop_command_terms or normalized.rstrip("。.!！") in stop_command_terms:
-            return True
-        return any(term in normalized for term in stop_terms) and any(term in normalized for term in run_terms)
 
     def _link_autonomous_run_source_commitments(
         self,
@@ -1679,6 +2245,91 @@ class ServiceAutonomousRunMixin:
         }
         self.store.append_events(events=[event])
         return event
+
+    def _record_autonomous_pre_send_check_terminal(
+        self,
+        *,
+        run: dict[str, Any],
+        current_time: str,
+        reason_code: str,
+        audit_summary: dict[str, Any],
+        message: str,
+    ) -> None:
+        interaction_ref = run.get("origin_interaction_ref")
+        participant_refs = run.get("participant_refs")
+        conversation_visible = (
+            isinstance(interaction_ref, str)
+            and bool(interaction_ref)
+            and isinstance(participant_refs, list)
+            and bool(participant_refs)
+        )
+        normalized_participants = participant_refs if isinstance(participant_refs, list) else []
+        notice = {
+            "source_kind": "pre_send_check",
+            "code": reason_code,
+            "message": message,
+            "conversation_visible": conversation_visible,
+            "interaction_ref": interaction_ref if isinstance(interaction_ref, str) else None,
+            "recipient_person_refs": normalized_participants,
+        }
+        self._broadcast_system_notice(notice)
+        events = [
+            {
+                "event_id": f"event:{uuid.uuid4().hex}",
+                "cycle_id": self._autonomous_run_event_cycle_id(run),
+                "memory_set_id": run["memory_set_id"],
+                "kind": "pre_send_check",
+                "role": "system",
+                "text": None,
+                "created_at": current_time,
+                "source_kind": "autonomous_run",
+                "run_id": run.get("run_id"),
+                "pre_send_check": deepcopy(audit_summary),
+            }
+        ]
+        if conversation_visible:
+            events.append(
+                {
+                    "event_id": f"event:{uuid.uuid4().hex}",
+                    "cycle_id": self._autonomous_run_event_cycle_id(run),
+                    "memory_set_id": run["memory_set_id"],
+                    "kind": "system_notice",
+                    "role": "system",
+                    "text": message,
+                    "code": reason_code,
+                    "interaction_ref": interaction_ref,
+                    "speaker_ref": None,
+                    "participant_refs": normalized_participants,
+                    "created_at": current_time,
+                    "source_kind": "autonomous_run",
+                    "run_id": run.get("run_id"),
+                }
+            )
+        self.store.append_events(events=events)
+
+    def _persist_autonomous_pre_send_check_audit(
+        self,
+        *,
+        run: dict[str, Any],
+        current_time: str,
+        audit_summary: dict[str, Any],
+    ) -> None:
+        self.store.append_events(
+            events=[
+                {
+                    "event_id": f"event:{uuid.uuid4().hex}",
+                    "cycle_id": self._autonomous_run_event_cycle_id(run),
+                    "memory_set_id": run["memory_set_id"],
+                    "kind": "pre_send_check",
+                    "role": "system",
+                    "text": None,
+                    "created_at": current_time,
+                    "source_kind": "autonomous_run",
+                    "run_id": run.get("run_id"),
+                    "pre_send_check": deepcopy(audit_summary),
+                }
+            ]
+        )
 
     def _append_autonomous_run_terminal_event(
         self,
@@ -1820,38 +2471,44 @@ class ServiceAutonomousRunMixin:
     def _emit_autonomous_run_assistant_message_event(
         self,
         *,
+        state: dict[str, Any],
         run: dict[str, Any],
         speech_payload: dict[str, Any],
     ) -> None:
-        target_client_id = self._request_run_assistant_message_target_client_id(run)
-        if target_client_id is None:
-            target_client_id = self._event_stream_registry.find_single_client_with_event_subscription("assistant_message")
-        if target_client_id is None:
-            debug_log("AutonomousRun", f"assistant_message skipped no_client run={run.get('run_id')}", level="DEBUG")
-            return
-        event = {
-            "event_id": self._next_stream_event_id(),
-            "type": "assistant_message",
-            "data": {
-                "source_kind": "autonomous_run",
-                "run_id": run.get("run_id"),
-                "system_text": "[autonomous_run]",
-                "message": speech_payload["speech_text"],
-            },
-        }
-        if not self._event_stream_registry.client_accepts_event(target_client_id, "assistant_message"):
+        interaction_ref = run.get("origin_interaction_ref")
+        participant_refs = run.get("participant_refs")
+        if (
+            not isinstance(interaction_ref, str)
+            or not interaction_ref
+            or not isinstance(participant_refs, list)
+            or not participant_refs
+        ):
             debug_log(
                 "AutonomousRun",
-                f"assistant_message skipped client_not_subscribed client={target_client_id}",
+                f"assistant_message skipped no_interaction run={run.get('run_id')}",
                 level="DEBUG",
             )
             return
-        sent = self._event_stream_registry.send_to_client(target_client_id, event)
+        persona_id = state["selected_persona_id"]
+        persona = state["personas"][persona_id]
+        sent, _ = self._emit_assistant_message_with_audio(
+            event_data={
+                "cycle_id": self._autonomous_run_event_cycle_id(run),
+                "source_kind": "autonomous_run",
+                "run_id": run.get("run_id"),
+                "persona_id": persona_id,
+                "persona_display_name": persona["display_name"],
+                "interaction_ref": interaction_ref,
+                "recipient_person_refs": participant_refs,
+                "system_text": "[autonomous_run]",
+            },
+            speech_text=speech_payload["speech_text"],
+        )
         debug_log(
             "AutonomousRun",
             (
                 f"assistant_message sent={sent} run={run.get('run_id')} "
-                f"client={target_client_id} speech_chars={len(speech_payload['speech_text'])}"
+                f"speech_chars={len(speech_payload['speech_text'])}"
             ),
             level="DEBUG",
         )
@@ -1874,7 +2531,7 @@ class ServiceAutonomousRunMixin:
         return [self._autonomous_run_prompt_summary(run) for run in runs]
 
     def _autonomous_run_prompt_summary(self, run: dict[str, Any]) -> dict[str, Any]:
-        return {
+        summary = {
             "run_id": run.get("run_id"),
             "status": run.get("status"),
             "objective_summary": run.get("objective_summary"),
@@ -1888,10 +2545,14 @@ class ServiceAutonomousRunMixin:
             "created_at": run.get("created_at"),
             "updated_at": run.get("updated_at"),
         }
+        mcp_session = self._autonomous_run_mcp_session_summary(run)
+        if mcp_session is not None:
+            summary["mcp_session"] = mcp_session
+        return summary
 
     def _autonomous_run_public_summary(self, run: dict[str, Any], *, current_time: str) -> dict[str, Any]:
         _ = current_time
-        return {
+        summary = {
             "run_id": run.get("run_id"),
             "memory_set_id": run.get("memory_set_id"),
             "status": run.get("status"),
@@ -1907,4 +2568,20 @@ class ServiceAutonomousRunMixin:
             "created_at": run.get("created_at"),
             "updated_at": run.get("updated_at"),
             "completed_at": run.get("completed_at"),
+        }
+        mcp_session = self._autonomous_run_mcp_session_summary(run)
+        if mcp_session is not None:
+            summary["mcp_session"] = mcp_session
+        return summary
+
+    def _autonomous_run_mcp_session_summary(self, run: dict[str, Any]) -> dict[str, Any] | None:
+        session = run.get("mcp_session")
+        if not isinstance(session, dict):
+            return None
+        policy = session.get("policy")
+        return {
+            "mcp_server_id": session.get("mcp_server_id"),
+            "tool_call_count": session.get("tool_call_count"),
+            "max_tool_calls": policy.get("max_tool_calls") if isinstance(policy, dict) else None,
+            "background_enabled": policy.get("background_enabled") if isinstance(policy, dict) else None,
         }

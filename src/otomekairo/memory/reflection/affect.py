@@ -50,7 +50,7 @@ class MemoryReflectionAffectMixin:
             target_scope_type = optional_text(affect.get("target_scope_type"))
             target_scope_key = optional_text(affect.get("target_scope_key"))
             affect_label = optional_text(affect.get("affect_label"))
-            if target_scope_type not in {"relationship", "user"}:
+            if target_scope_type not in {"relationship", "entity"}:
                 continue
             if target_scope_key is None or affect_label is None:
                 continue
@@ -127,7 +127,7 @@ class MemoryReflectionAffectMixin:
             )
             if key in updated_keys:
                 continue
-            if existing.get("target_scope_type") not in {"relationship", "user"}:
+            if existing.get("target_scope_type") not in {"relationship", "entity"}:
                 continue
             if days_since(existing.get("updated_at"), finished_at) < REFLECTION_AFFECT_STATE_WEAKEN_AFTER_DAYS:
                 continue

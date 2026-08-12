@@ -18,7 +18,7 @@ OtomeKairo は、対話入力、API起床要求、観測能力の結果、外部
 - ユーザーが現在している活動の推定
 - ユーザーが直前までしていた活動の推定
 - 活動内容、活動対象、現在活動か直前活動かの短い状態
-- 活動主体。通常は `user`、AI 本体の ongoing action と構造的に分かる場合だけ `self`
+- 活動主体。人物の活動は `person`、AI 本体の ongoing action と構造的に分かる場合だけ `self`
 - 推定の確からしさ、更新時刻、失効時刻
 - 推定に使った source kind と source ref の要約
 
@@ -48,7 +48,8 @@ OtomeKairo は、対話入力、API起床要求、観測能力の結果、外部
 | `activity_id` | 状態の識別子 |
 | `memory_set_id` | 記憶集合 |
 | `label` | 判断へ渡す短い自然文の活動モード要約 |
-| `actor` | 活動主体。`user / self / unknown` のいずれか |
+| `actor_ref` | 活動対象の安定参照。人物状態では `person:*` |
+| `actor` | 活動主体の種別。`person / self / unknown` のいずれか |
 | `target` | 活動対象。アプリ名、作品名、相手、作業対象など |
 | `status` | 保存内部の生存状態。`active / ended` のいずれか |
 | `confidence` | 推定の確からしさ |
@@ -88,8 +89,8 @@ LLM は文字列一致で活動を確定しない。
 LLM は複数 source の意味を見て、活動候補を返す。
 コード側もアプリ名やタイトルの文字列一致で活動内容を決めない。
 文字列比較は同一活動の統合、重複抑制、inspection の補助に限定する。
-`desktop / virtual` の vision source と `source_owner=user_environment` はユーザー側の環境観測として扱い、activity candidate の `actor=user` にする。
-`source_owner=self` の camera 観測は OtomeKairo の視覚根拠として扱い、観測対象がユーザー活動だと判断できる場合だけ `actor=user` の activity candidate に使う。
+`desktop / virtual` の vision source と `source_owner=user_environment` は人物側の環境観測として扱い、人物文脈が確定している場合だけ activity candidate の `actor=person` にする。
+`source_owner=self` の camera 観測は OtomeKairo の視覚根拠として扱い、観測対象の人物参照が確定している場合だけ `actor=person` の activity candidate に使う。
 activity の `label / reason_summary` はユーザー側の観測事実から構成する。
 assistant の直近発話、約束、待機姿勢は activity とは別文脈として扱う。
 activity の `label` は具体的な内容名や対象名ではなく、判断と発話でそのまま使える短い活動モードにする。
@@ -116,7 +117,7 @@ LLM の出力は JSON object 1 個に固定する。
 {
   "activity_candidates": [
     {
-      "actor": "user",
+      "actor": "person",
       "label": "活動モードを短く表す自然文",
       "target": "活動対象を短く表す文字列",
       "confidence_hint": "high",
@@ -135,7 +136,7 @@ LLM の出力は JSON object 1 個に固定する。
 - `activity_candidates` は最大 1 件の配列にする
 - 候補がない場合は空配列にする
 - 各候補は `actor / label / target / confidence_hint / salience_hint / ttl_hint / transition / reason_summary` だけを持つ
-- `actor` は `user / self / unknown` のいずれかにする
+- `actor` は `person / self / unknown` のいずれかにする
 - `label` は活動内容を自然文で短く表す
 - `confidence_hint`、`salience_hint` は `low / medium / high` のいずれかにする
 - `ttl_hint` は `short / medium / long` のいずれかにする
@@ -159,9 +160,11 @@ LLM の出力は JSON object 1 個に固定する。
 `transition=end` では、既存 activity を `previous_activity` に移し、current を空にする。
 `transition=none` または候補なしでは、既存 activity を保存したまま、期限切れだけを処理する。
 保存内部では、current activity を `active`、終了済み activity を `ended` として扱う。
+current activity は `memory_set_id / actor_ref` ごとに1件を持つ。
+人物参照が無い定期思考は人物の activity state を読み書きしない。
 LLM は `status` を出力しない。
 
-現在入力が user message で、直前 activity が短時間以内に存在する場合、`previous_activity` を判断文脈へ出す。
+現在入力の `source_kind=user_message` で、直前 activity が短時間以内に存在する場合、`previous_activity` を判断文脈へ出す。
 これは現在入力だけでは参照先が曖昧な発話を、直前活動の文脈で解釈するために使う。
 
 ## 判断入力
@@ -170,7 +173,7 @@ LLM は `status` を出力しない。
 `previous_activity` は直前活動だけを表し、現在進行中の活動として扱わない。
 判断文脈へ出す `activity_context` には `status` を含めない。
 判断文脈へ出す `activity_context.current_activity.actor` は speech の主体境界に使う。
-`actor=user` の活動に触れる発話は、ユーザー側の状況へのコメントとして表現する。
+`actor=person` の活動に触れる発話は、`actor_ref` の人物側の状況へのコメントとして表現する。
 判断文脈へ出す `activity_context.current_activity` には、活動推定 LLM が返した `transition` を含める。
 判断文脈へ出す `activity_context.current_activity / previous_activity` には、時刻そのものではなく `started_age_label / duration_label / ended_age_label` のような生活文脈向けラベルを含める。
 これにより、長く続いた直前活動が `直前` という終了時点だけへ圧縮されないようにする。
@@ -178,7 +181,7 @@ LLM は `status` を出力しない。
 ```json
 {
   "current_activity": {
-    "actor": "user",
+    "actor": "person",
     "label": "現在活動を短く表す自然文",
     "transition": "switch",
     "confidence": 0.7,
@@ -188,7 +191,7 @@ LLM は `status` を出力しない。
     "age_label": "直前"
   },
   "previous_activity": {
-    "actor": "user",
+    "actor": "person",
     "label": "直前活動を短く表す自然文",
     "target": "直前活動の対象",
     "started_age_label": "6時間前",
@@ -200,7 +203,7 @@ LLM は `status` を出力しない。
 ```
 
 `activity_context` はユーザー発話ではない。
-`current_input.sender=user` の本文と混ぜない。
+`current_input.sender_kind=person` の本文と混ぜない。
 自律 initiative では、`activity_context` をタイミング判断の補助材料として扱う。
 コードは `label / target` の語句一致で活動分類を固定しない。
 コードは `activity_context` だけを理由に `suppression_level` を上げない。

@@ -357,7 +357,7 @@ class EvidenceResolver:
 
     def _resolve_recall_items(self, recall_pack: dict[str, Any]) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
-        for section in ("event_evidence", "episodic_evidence", "user_model", "relationship_model", "self_model"):
+        for section in ("event_evidence", "episodic_evidence", "person_model", "relationship_model", "self_model"):
             values = recall_pack.get(section, [])
             if not isinstance(values, list):
                 continue
@@ -494,7 +494,7 @@ class EvidenceResolver:
         sections: dict[str, list[dict[str, Any]]] = {}
         for section_name in (
             "self_model",
-            "user_model",
+            "person_model",
             "relationship_model",
             "active_topics",
             "active_commitments",

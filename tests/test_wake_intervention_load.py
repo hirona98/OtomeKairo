@@ -99,7 +99,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
             trigger_kind="background_thinking",
             drive_summaries=[],
             world_state_summary=[],
-            status_refresh_world_state_summary=[],
             recent_turn_summary=[],
             foreground_signal_summary={
                 "visual_observations": [
@@ -128,7 +127,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
             trigger_kind="background_thinking",
             drive_summaries=[],
             world_state_summary=[],
-            status_refresh_world_state_summary=[],
             recent_turn_summary=[],
             foreground_signal_summary={
                 "visual_observations": [
@@ -192,9 +190,11 @@ class WakeInterventionLoadTests(unittest.TestCase):
             started_at="2026-06-22T22:30:00+09:00",
             input_text="定期思考。",
             current_input=CurrentInput(
-                sender="system",
+                sender_kind="system",
+                sender_ref=None,
                 source_kind="background_thinking",
-                response_target="none",
+                response_target_refs=(),
+                interaction_context=None,
                 text="定期思考。",
             ),
             recent_turns=[],
@@ -254,9 +254,11 @@ class WakeInterventionLoadTests(unittest.TestCase):
 
         payload = service._build_workspace_context(
             current_input=CurrentInput(
-                sender="system",
+                sender_kind="system",
+                sender_ref=None,
                 source_kind="background_thinking",
-                response_target="none",
+                response_target_refs=(),
+                interaction_context=None,
                 text="定期思考。",
             ),
             recall_pack={},
@@ -327,9 +329,11 @@ class WakeInterventionLoadTests(unittest.TestCase):
 
         payload = service._build_workspace_context(
             current_input=CurrentInput(
-                sender="system",
+                sender_kind="system",
+                sender_ref=None,
                 source_kind="background_thinking",
-                response_target="none",
+                response_target_refs=(),
+                interaction_context=None,
                 text="定期思考。",
             ),
             recall_pack={},
@@ -365,7 +369,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         summary = service._initiative_recent_turn_summary(
             [
                 {"role": "assistant", "text": "さっき触れた内容。"},
-                {"role": "user", "text": "了解。"},
+                {"role": "person", "text": "了解。"},
             ]
         )
 
@@ -373,7 +377,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
             summary,
             [
                 {"role": "assistant", "text": "さっき触れた内容。"},
-                {"role": "user", "text": "了解。"},
+                {"role": "person", "text": "了解。"},
             ],
         )
 
@@ -426,7 +430,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         summary = service._initiative_activity_summary(
             {
                 "label": "アプリケーション起動検討",
-                "actor": "user",
+                "actor": "person",
                 "target": "desktop",
                 "transition": "start",
                 "started_age_label": "直前",

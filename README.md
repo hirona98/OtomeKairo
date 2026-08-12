@@ -22,6 +22,8 @@ CocoroAIのコアとして動作する。
 
 このスクリプトは `.venv` を作成し、`pyproject.toml` に定義した依存関係をインストールする。
 開発環境で `./scripts/run_dev_server.sh` を使う場合は、このセットアップを先に実行する。
+VSCode の F5 も起動前に同じ系統の準備を行うが、既に入っている editable パッケージは再 install しない。
+依存定義を変えた直後に確実に入れ直す場合は `OTOMEKAIRO_FORCE_PIP_INSTALL=1` を付けて prepare / setup を再実行する。
 
 ```bash
 ./scripts/run_dev_server.sh
@@ -34,17 +36,32 @@ CocoroAIのコアとして動作する。
 - `var/otomekairo/` をデータ保存先にして HTTPS サーバを起動する
 - `PYTHONPATH=src` を付けて `.venv` の Python からサーバを起動する
 - 既定ポート `55601` を使う
+- `0.0.0.0:55601` で listen する
+- 起動前に前回の `otomekairo.run` が残っていれば `scripts/free_server_port.sh` で解放する
+- `Address already in use` が続くとき（特に WSL2）は次を順に試す
+  1. `./scripts/free_server_port.sh 55601`
+  2. `./scripts/free_server_port.sh 55601 --force`
+  3. Windows 側で `wsl --shutdown`（PC 再起動より軽い）
 
 データはデフォルトで `var/otomekairo/` に保存する。
 デバッグログは `var/otomekairo/server.log` に保存する。
+標準出力（journalctl）の最小レベルは既定で `WARNING`（`OTOMEKAIRO_DEBUG_LOG_MIN_LEVEL` で変更）。`server.log` と `logs/stream` は全レベルを残す。
 ログは既定で 5MiB を超えるとローテーションし、`server.log` 本体と 3 世代を合わせて最大約 20MiB 保持する。
 
 ブラウザ UI は同じ HTTPS サーバから配信する。
-開発環境では次へアクセスする。
+同じ PC の開発環境では次へアクセスする。
 ブラウザ UI は token 入力なしで同じサーバのチャット API と設定 API を呼び出す。
+設定画面では、アバターごとの STT / TTS、保存する音声入力元と入力デバイス、話者識別を編集できる。
+会話欄で音声入力を開始すると、設定画面から話者登録を実行できる。
 
 ```text
 https://127.0.0.1:55601/ui/
+```
+
+LAN 内の別 PC からは次へアクセスする。
+
+```text
+https://<このPCのIPアドレス>:55601/ui/
 ```
 
 ## daemon 実行
@@ -100,7 +117,7 @@ Tapo C220 connector、Tapo C220 watcher、MCP client connector は起動時に O
 camera source または MCP server が未登録の場合、該当 process は起動しない。
 Tapo C220 watcher は `camera_source.watcher.enabled=true` のときだけ起動する。
 connector と watcher を有効にする前に、ブラウザ UI、CocoroConsole、設定 API のいずれかで camera source と MCP server を登録する。
-初回登録がまだの場合は、daemon 有効化前に `OTOMEKAIRO_HOST=0.0.0.0 ./scripts/run_dev_server.sh` で server だけを起動して設定する。
+初回登録がまだの場合は、daemon 有効化前に `./scripts/run_dev_server.sh` で server だけを起動して設定する。
 
 ## LLM 接続
 
@@ -114,7 +131,7 @@ connector と watcher を有効にする前に、ブラウザ UI、CocoroConsole
 設定定義の意味は `docs/` を正とする。
 API key は設定値として扱い、コード、ログ、サンプルへ書かない。
 
-現行形式と異なる `config.db` は起動時に拒否する。旧設定DBは別名で保管し、新しい `config.db` を初期化して設定し直す。`memory.db` は保持する。
+現行形式と異なる `config.db` と `memory.db` は起動時に拒否する。旧DBは別名で保管し、新しいDBを初期化する。設定は新しい `config.db` へ設定し直す。
 
 ## 検証
 

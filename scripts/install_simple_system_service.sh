@@ -25,6 +25,17 @@ if ! id "${SERVICE_USER}" >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! getent group audio >/dev/null 2>&1; then
+  echo "audio group が存在しません。Ubuntu のaudio環境を確認してください。" >&2
+  exit 1
+fi
+
+if ! grep -q "libportaudio\\.so" < <(ldconfig -p); then
+  echo "PortAudio が見つかりません。sudo apt install libportaudio2 を実行してください。" >&2
+  exit 1
+fi
+
+usermod -a -G audio "${SERVICE_USER}"
 chown -R "${SERVICE_USER}:${SERVICE_USER}" "${EXPECTED_REPO_ROOT}"
 runuser -u "${SERVICE_USER}" -- "${EXPECTED_REPO_ROOT}/scripts/prepare_service_env.sh"
 
@@ -38,6 +49,7 @@ After=network-online.target
 [Service]
 Type=simple
 User=${SERVICE_USER}
+SupplementaryGroups=audio
 WorkingDirectory=${EXPECTED_REPO_ROOT}
 Environment=PYTHONUNBUFFERED=1
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin

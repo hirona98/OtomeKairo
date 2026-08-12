@@ -28,10 +28,13 @@ class ServerConfig:
 @dataclass(frozen=True)
 class McpServerConfig:
     mcp_server_id: str
-    command: str
+    transport: str
+    command: str | None
     args: list[str]
     env: dict[str, str]
     cwd: str | None
+    url: str | None
+    headers: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -95,23 +98,85 @@ def _mcp_server_configs(value: Any) -> list[McpServerConfig]:
     seen: set[str] = set()
     for item in value:
         server = _object(item, "mcp_servers[]")
+        # 設定正本と同じく、mcp_server_id は接頭辞なしの名前。
         server_id = _required_string(server, "mcp_server_id", "mcp_servers[].mcp_server_id")
-        if not server_id.startswith("mcp:"):
-            raise ConfigError("mcp_servers[].mcp_server_id must start with mcp:.")
         if server_id in seen:
             raise ConfigError("mcp_servers contains duplicate mcp_server_id.")
         seen.add(server_id)
         env_values = _string_dict(server.get("env", {}), "mcp_servers[].env")
-        servers.append(
-            McpServerConfig(
+        transport = _required_string(server, "transport", "mcp_servers[].transport")
+        common_fields = {"mcp_server_id", "connector_kind", "client_id", "enabled", "transport"}
+        if transport == "stdio":
+            _reject_unknown_fields(
+                server,
+                common_fields | {"command", "args", "cwd", "env"},
+                "stdio mcp_servers[]",
+            )
+            _reject_present_fields(server, {"url", "headers"}, "stdio mcp_servers[]")
+            config = McpServerConfig(
                 mcp_server_id=server_id,
+                transport=transport,
                 command=_required_string(server, "command", "mcp_servers[].command"),
                 args=_string_list(server.get("args", []), "mcp_servers[].args"),
                 env=env_values,
                 cwd=_optional_string(server.get("cwd"), "mcp_servers[].cwd"),
+                url=None,
+                headers={},
             )
-        )
+        elif transport == "streamable_http":
+            _reject_unknown_fields(
+                server,
+                common_fields | {"url", "headers"},
+                "streamable_http mcp_servers[]",
+            )
+            _reject_present_fields(server, {"command", "args", "cwd", "env"}, "streamable_http mcp_servers[]")
+            url = _required_string(server, "url", "mcp_servers[].url")
+            _validate_streamable_http_url(url)
+            config = McpServerConfig(
+                mcp_server_id=server_id,
+                transport=transport,
+                command=None,
+                args=[],
+                env={},
+                cwd=None,
+                url=url,
+                headers=_streamable_http_headers(server.get("headers", {})),
+            )
+        else:
+            raise ConfigError("mcp_servers[].transport is unsupported.")
+        servers.append(config)
     return servers
+
+
+def _reject_present_fields(payload: dict[str, Any], fields: set[str], label: str) -> None:
+    present = sorted(set(payload) & fields)
+    if present:
+        raise ConfigError(f"{label} cannot contain: {', '.join(present)}.")
+
+
+def _reject_unknown_fields(payload: dict[str, Any], fields: set[str], label: str) -> None:
+    unknown = sorted(set(payload) - fields)
+    if unknown:
+        raise ConfigError(f"{label} contains unsupported fields: {', '.join(unknown)}.")
+
+
+def _streamable_http_headers(value: Any) -> dict[str, str]:
+    headers = _string_dict(value, "mcp_servers[].headers")
+    reserved = {"accept", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id"}
+    for key, header_value in headers.items():
+        if not key.strip() or any(character in key for character in "\r\n:"):
+            raise ConfigError("mcp_servers[].headers contains an invalid name.")
+        if key.strip().lower() in reserved:
+            raise ConfigError(f"mcp_servers[].headers.{key} is protocol-managed.")
+        if not header_value.strip() or "\r" in header_value or "\n" in header_value:
+            raise ConfigError(f"mcp_servers[].headers.{key} must be a non-empty single-line string.")
+    return headers
+
+
+def _validate_streamable_http_url(value: str) -> None:
+    parsed = urlparse(value)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password or parsed.fragment:
+        raise ConfigError("mcp_servers[].url must be an HTTPS URL without userinfo or fragment.")
 
 
 def _read_json_config(path: Path | None) -> dict[str, Any]:
@@ -144,7 +209,7 @@ def _resolve_access_token(
     local_token = _local_config_access_token(server=server, environ=environ, config_path=config_path)
     if local_token:
         return local_token
-    bootstrap_token = _bootstrap_first_console_token(
+    bootstrap_token = _acquire_console_access_token(
         base_url=base_url,
         tls_verify=tls_verify,
         request_timeout_seconds=request_timeout_seconds,
@@ -195,7 +260,7 @@ def _read_config_db_access_token(db_path: Path) -> str:
     return token.strip() if isinstance(token, str) and token.strip() else ""
 
 
-def _bootstrap_first_console_token(*, base_url: str, tls_verify: bool, request_timeout_seconds: float) -> str:
+def _acquire_console_access_token(*, base_url: str, tls_verify: bool, request_timeout_seconds: float) -> str:
     client = JsonApiClient(
         base_url=base_url,
         access_token="",
@@ -204,7 +269,7 @@ def _bootstrap_first_console_token(*, base_url: str, tls_verify: bool, request_t
         trace=trace_writer_from_env(),
     )
     try:
-        data = client.post("/api/bootstrap/register-first-console", {})
+        data = client.post("/api/bootstrap/acquire-console-access-token", {})
     except HttpError:
         return ""
     token = data.get("console_access_token")

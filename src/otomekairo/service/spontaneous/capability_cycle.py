@@ -5,6 +5,10 @@ from typing import Any
 
 from otomekairo.llm.client import LLMError
 from otomekairo.recall.builder import RecallPackSelectionError
+from otomekairo.service.capability import (
+    CapabilityResultValidationError,
+    PreSendCheckFailureError,
+)
 from otomekairo.service.common import ServiceError, debug_log
 
 
@@ -29,19 +33,13 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 result_payload=result_payload,
                 current_time=accepted_at,
             )
-        except ValueError as exc:
+        except CapabilityResultValidationError as exc:
             self._mark_capability_runtime_failure(
                 capability_id=capability_id,
                 current_time=accepted_at,
                 failure_summary=str(exc),
             )
-            if "client_id" in str(exc):
-                raise ServiceError(
-                    409,
-                    "capability_result_client_id_mismatch",
-                    "client_id does not match the pending capability target.",
-                ) from exc
-            raise ServiceError(400, "invalid_capability_result", str(exc)) from exc
+            raise ServiceError(exc.status_code, exc.error_code, str(exc)) from exc
         if response is None:
             debug_log(
                 log_channel,
@@ -127,12 +125,31 @@ class ServiceSpontaneousCapabilityCycleMixin:
         capability_response: dict[str, Any],
         started_at: str,
     ) -> None:
+        # 非同期結果も同じ個の状態更新として会話と直列化する。
+        self._cycle_coordinator.enter_foreground()
+        try:
+            self._execute_async_capability_result_cycle_inner(
+                state=state,
+                capability_response=capability_response,
+                started_at=started_at,
+            )
+        finally:
+            self._cycle_coordinator.leave_foreground()
+
+    def _execute_async_capability_result_cycle_inner(
+        self,
+        *,
+        state: dict[str, Any],
+        capability_response: dict[str, Any],
+        started_at: str,
+    ) -> None:
         request_record = capability_response.get("request_record")
         capability_id = self._capability_result_capability_id(capability_response)
         image_count = self._capability_result_payload_image_count(capability_response)
         capability_request_summary = self._capability_request_summary(request_record)
         assistant_message_target_client_id = self._request_record_assistant_message_target_client_id(request_record)
-        user_facing_result = self._capability_result_response_target(capability_request_summary) == "user"
+        interaction_context = self._capability_result_interaction_context(capability_request_summary)
+        user_facing_result = bool(self._capability_result_response_target_refs(capability_request_summary))
         self._activate_capability_ongoing_action(
             request_record=request_record,
             current_time=started_at,
@@ -142,7 +159,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
             ),
         )
         cycle_id = self._new_cycle_id()
-        recent_turns = self._load_recent_turns(state)
+        recent_turns = self._load_recent_turns(state, interaction_context)
         runtime_summary = self._build_runtime_summary(state)
         pending_intent_selection = self._empty_pending_intent_selection_trace()
         client_context = self._build_capability_result_client_context(capability_response)
@@ -184,6 +201,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 cycle_id=cycle_id,
                 trigger_kind="capability_result",
                 client_context=client_context,
+                interaction_context=interaction_context,
                 observation_summary=observation_summary,
                 capability_request_summary=capability_request_summary,
                 assistant_message_target_client_id=assistant_message_target_client_id,
@@ -203,6 +221,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 runtime_summary=runtime_summary,
                 input_text=input_text,
                 client_context=client_context,
+                interaction_context=interaction_context,
                 pipeline=pipeline,
                 trigger_kind="capability_result",
                 input_event_kind="capability_result",
@@ -218,9 +237,11 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 capability_request_summary=capability_request_summary,
                 ongoing_action_transition_summary=ongoing_action_transition_summary,
             )
+            self._broadcast_system_notice(response.get("system_notice"))
             self._emit_capability_result_assistant_message_event(
                 cycle_id=cycle_id,
                 capability_response=capability_response,
+                interaction_context=interaction_context,
                 pipeline=pipeline,
             )
             self._apply_capability_runtime_state_followup(
@@ -257,6 +278,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 runtime_summary=runtime_summary,
                 input_text=input_text,
                 client_context=client_context,
+                interaction_context=interaction_context,
                 failure_reason=str(exc),
                 trigger_kind="capability_result",
                 input_event_kind="capability_result",
@@ -290,6 +312,25 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 failure_reason=str(exc),
             )
         except (LLMError, KeyError, ValueError) as exc:
+            review_failure = isinstance(exc, PreSendCheckFailureError)
+            review_notice = None
+            if review_failure:
+                review_notice = {
+                    "source_kind": "pre_send_check",
+                    "code": "pre_send_check_failure",
+                    "message": "外部送信内容の安全確認を完了できなかったため、送信しませんでした。",
+                    "conversation_visible": interaction_context is not None,
+                    "interaction_ref": (
+                        interaction_context.interaction_ref
+                        if interaction_context is not None
+                        else None
+                    ),
+                    "recipient_person_refs": (
+                        list(interaction_context.participant_refs)
+                        if interaction_context is not None
+                        else []
+                    ),
+                }
             failed_followup_capability_request_summary, failed_transition_summary = (
                 self._exception_capability_dispatch_trace(exc)
             )
@@ -315,6 +356,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 runtime_summary=runtime_summary,
                 input_text=input_text,
                 client_context=client_context,
+                interaction_context=interaction_context,
                 failure_reason=str(exc),
                 trigger_kind="capability_result",
                 input_event_kind="capability_result",
@@ -324,7 +366,19 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 capability_request_summary=capability_request_summary,
                 followup_capability_request_summary=failed_followup_capability_request_summary,
                 ongoing_action_transition_summary=ongoing_action_transition_summary,
+                failure_event_kind=(
+                    "pre_send_check_failure"
+                    if review_failure
+                    else "recall_hint_failure"
+                ),
+                failure_event_payload=(
+                    {"pre_send_check": exc.audit_summary}
+                    if review_failure
+                    else None
+                ),
+                system_notice=review_notice,
             )
+            self._broadcast_system_notice(review_notice)
             self._emit_input_failure_logs(
                 cycle_id=cycle_id,
                 trigger_kind="capability_result",
@@ -438,6 +492,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
         *,
         cycle_id: str,
         capability_response: dict[str, Any],
+        interaction_context: Any,
         pipeline: dict[str, Any],
     ) -> None:
         speech_payload = pipeline.get("speech_payload")
@@ -446,43 +501,36 @@ class ServiceSpontaneousCapabilityCycleMixin:
             return
 
         request_record = capability_response.get("request_record")
-        target_client_id = self._request_record_assistant_message_target_client_id(request_record)
-        if target_client_id is None:
-            debug_log("CapabilityResult", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_client", level="DEBUG")
+        if interaction_context is None:
+            debug_log(
+                "CapabilityResult",
+                f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_interaction",
+                level="DEBUG",
+            )
             return
 
         request_id = capability_response.get("request_id")
         capability_id = self._capability_result_capability_id(capability_response)
         if isinstance(request_record, dict):
             request_id = request_record.get("request_id", request_id)
-        event = {
-            "event_id": self._next_stream_event_id(),
-            "type": "assistant_message",
-            "data": {
+        sent, _ = self._emit_assistant_message_with_audio(
+            event_data={
                 "cycle_id": cycle_id,
                 "source_kind": "capability_result",
                 "request_id": request_id,
                 "capability_id": capability_id,
+                "persona_id": pipeline["persona_id"],
+                "persona_display_name": pipeline["persona_display_name"],
+                "interaction_ref": interaction_context.interaction_ref,
+                "recipient_person_refs": list(interaction_context.participant_refs),
                 "system_text": f"[capability_result] {capability_id}",
-                "message": speech_payload["speech_text"],
             },
-        }
-        if not self._event_stream_registry.client_accepts_event(target_client_id, "assistant_message"):
-            debug_log(
-                "CapabilityResult",
-                (
-                    f"{self._short_cycle_id(cycle_id)} assistant_message skipped "
-                    f"client_not_subscribed client={target_client_id}"
-                ),
-                level="DEBUG",
-            )
-            return
-        sent = self._event_stream_registry.send_to_client(target_client_id, event)
+            speech_text=speech_payload["speech_text"],
+        )
         debug_log(
             "CapabilityResult",
             (
                 f"{self._short_cycle_id(cycle_id)} assistant_message sent={sent} "
-                f"client={target_client_id} "
                 f"speech_chars={len(speech_payload['speech_text'])}"
             ),
             level="DEBUG",

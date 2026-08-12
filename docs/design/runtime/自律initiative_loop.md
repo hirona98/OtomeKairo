@@ -40,7 +40,7 @@ initiative loop は、少なくとも次を入力にする。
 - capability decision view
 - 直近会話の短い要約
 - 自発発話抑制状態
-- `current_input` の `sender / source_kind / response_target`
+- `current_input` の `sender_kind / sender_ref / source_kind / response_target_refs / interaction_context`
 
 LLM には offset 付き timestamp を主要表現として渡さない。
 コードは deadline、timeout、失効判定を duration と offset 付きローカル timestamp で計算する。
@@ -74,7 +74,7 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 
 `initiative_context` は inspection へ要約を残す。
 `initiative_context` そのものを永続的な状態正本にしない。
-`persona_context_summary` は `initiative_baseline`、`reference_style`、`persona_prompt_excerpt` を持つ。
+`persona_context_summary` は `initiative_baseline` と `persona_prompt_excerpt` を持つ。
 `initiative_context` は `initiative_baseline` を単独の人格判断値として扱わず、`persona_context_summary.initiative_baseline` と前景文脈を合わせて扱う。
 `initiative_entry_summary` は `entry_kind / entry_basis / reason_summary` を含む。
 `entry_basis` は `activity_mode_transition / strong_interest / same_activity_detail_change / observation_only` のいずれかである。
@@ -101,7 +101,7 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 `activity_context.previous_activity` は直前活動の参照情報として扱う。
 `activity_context.current_activity.transition` は直前活動に対する `start / continue / switch / end / none` の推定として扱う。
 `activity_context.current_activity / previous_activity` の `started_age_label / duration_label / ended_age_label` は、活動がいつ始まりどの程度続いたかを生活文脈で比較するための判断材料である。
-`activity_context.current_activity.actor` は活動主体を表す。`actor=user` はユーザー側の活動、`actor=self` は AI 本体の活動である。
+`activity_context.current_activity.actor` は活動主体を表す。`actor=person` は `actor_ref` の人物側の活動、`actor=self` は AI 本体の活動である。
 activity の `label / target` は自然文として LLM へ渡す。
 タイミング判断と結果選択は、activity を含む `initiative_context` 全体で行う。
 
@@ -218,13 +218,15 @@ LLM の自由文をそのまま状態遷移へ使わない。
 `wake_policy.observations` は 定期思考 の判断前に enabled 項目だけを順番に取得する。
 visual capture の source、result、保存、inspection の詳細は [../capability/視覚機能.md](../capability/視覚機能.md) を正とする。
 思考前観測 の運用時刻は `wake_policy` と process-local runtime で扱い、成功結果は内部観測と自律判断の材料として扱う。
+visual capture を含む enabled observation の無効→有効直後の初回 5 秒待機と、その後の初回 due は [../api/状態と設定.md](../api/状態と設定.md) を正とする。
 思考前観測 として同期取得する capability result は、`ongoing_action` 外の内部観測として扱う。
-優先順位は `user_message > capability result handling > due autonomous_run > background_thinking` にする。
-ユーザー向け応答サイクルが進行中の間、server は `background_thinking` の自発発話判断を `noop` にする。
+会話入力、手動 wake、capability result handling は FIFO で直列化する。
+これらのサイクルが実行中または待機中なら、server はその周期の due autonomous run と `background_thinking` を開始しない。
 ユーザー入力開始時、server は active / due `autonomous_run` を `paused_by_user_interaction` として pause する。
 in-flight capability result は受け取るが、ユーザー向け応答中は run の次 step を進めない。
 ユーザー応答後、pause 理由が `paused_by_user_interaction` の run を再開する。
-ユーザーが停止を明示した場合、対象 run を cancel する。
+特定 run は cancel API、会話からの全run停止は `autonomous_run_action.kind=cancel_all` で cancel する。
+server は会話本文から停止意図を推定しない。
 `background_thinking` の観測中に `conversation_input` または `speech` が新しく増えた場合、server は観測前の直近会話 snapshot を使って発話せず、`noop` にする。
 visual capture の変化は `first_seen / changed / stable / same_as_recent_speech` の `change_state` に正規化し、正規化規則は [../capability/視覚機能.md](../capability/視覚機能.md) を正とする。
 `first_seen / changed` は新規性の前景シグナルとして扱う。
@@ -233,14 +235,14 @@ visual capture の変化は `first_seen / changed / stable / same_as_recent_spee
 薄い視覚前景だけで成立する新規性は、`noop` または `pending_intent` と同じ盤面で比較する。
 活動遷移に触れる発話は、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして表現する。
 `source_owner=self` の camera 視覚観測は OtomeKairo 自身の視覚根拠として扱う。
-`source_owner=user_environment` の視覚観測、`world_state.visual_context`、`activity_context.actor=user` はユーザー側の状況として扱う。
+`source_owner=user_environment` の視覚観測、`world_state.visual_context`、`activity_context.actor=person` は対応する `person_ref` の人物側の状況として扱う。
 この文脈から speech する場合、`speech_stance=comment_on_user_context` として、ユーザー側の状況へのコメントとして表現する。
-`current_input.sender=system` かつ `current_input.response_target=none` の `wake / background_thinking` では、decision は観測、候補、現在文脈を比較して `speech / noop / pending_intent / capability_request` を選ぶ。
+`current_input.sender_kind=system` かつ `current_input.response_target_refs=空配列` の `wake / background_thinking` では、decision は観測、候補、現在文脈を比較して `speech / noop / pending_intent / capability_request` を選ぶ。
 `wake / background_thinking` の `noop` 理由は、観測、候補、進行中応答、重複発話境界のいずれかに根拠づける。
-定期思考から dispatch した capability request の result は、source request の `source_current_input.response_target=none` を引き継ぐ。
+定期思考から dispatch した capability request の result は、source request の `source_current_input.response_target_refs=空配列` を引き継ぐ。
 この capability result は内部観測結果として扱い、外向き結果を `noop` として trace に残す。
 直近で発話済みの内容と異なる visual capture も観測内容の変化として渡す。
-LLM は `initiative_entry_summary`、`activity_context`、`drive_state`、`world_state`、`response_target`、候補理由、抑制要約を合わせて `speech / noop / pending_intent / capability_request` を選ぶ。
+LLM は `initiative_entry_summary`、`activity_context`、`drive_state`、`world_state`、`response_target_refs`、候補理由、抑制要約を合わせて `speech / noop / pending_intent / capability_request` を選ぶ。
 同じ内容の反復は `same_as_recent_speech` と同一 dedupe の直近発話で扱う。
 複数 observation がある場合も、server は取得結果を整理したあとに 1 回だけ initiative 判断を行う。
 system wake 起点で明示 source context が無い `visual_context / body / schedule / social_context / environment / location` 候補は、推測候補として正規化時に破棄する。
@@ -321,11 +323,11 @@ API起床の自律判断 matrix は次の 16 件に固定する。
 | `missing-location-status-probe` | 場所状態に関わる強い `drive_state` があり、場所 `world_state` が無い | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`location.status` request |
 | `schedule-grounded-speech` | 近い予定の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
 | `social-grounded-speech` | 対人文脈の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
-| `body-grounded-speech` | 身体状態の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`fresh_world_state_capability_ids=["body.status"]` |
-| `external-fresh-speech` | 外部サービスの新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=thin`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`fresh_world_state_capability_ids=["external.status"]` |
-| `device-fresh-speech` | 端末状態の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=thin`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`fresh_world_state_capability_ids=["device.status"]` |
-| `environment-fresh-speech` | 作業環境の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=mixed`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`fresh_world_state_capability_ids=["environment.status"]` |
-| `location-fresh-speech` | 場所状態の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=mixed`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`fresh_world_state_capability_ids=["location.status"]` |
+| `body-grounded-speech` | 身体状態の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
+| `external-fresh-speech` | 外部サービスの新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=thin`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
+| `device-fresh-speech` | 端末状態の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=thin`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
+| `environment-fresh-speech` | 作業環境の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=mixed`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
+| `location-fresh-speech` | 場所状態の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=mixed`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
 | `ongoing-waiting-noop` | `ongoing_action.status=waiting_result` がある | `selected_candidate_family=ongoing_action`、`blocking_reason_summary` に waiting_result を残し、`decision.kind=noop` |
 
 定期思考（`background_thinking`）制御 matrix は次の 4 件に固定する。
@@ -341,14 +343,12 @@ matrix の共通判定境界は前述の `initiative_context`、LLM とコード
 `visual_context` だけの前景は thin foreground として扱う。
 視覚観測の `change_state=first_seen / changed` は通常の initiative 判断へ進み、`initiative_entry_check` を追加で呼ばない。
 構造値が強い `drive_state` があり、対応する grounded foreground がない場合、発話より追加観測が自然かを同じ判断盤面で比較する。
-構造値が強い `drive_state` が特定の status family を要求する場合は、対応 state type の鮮度に応じて既存要約または capability を選ぶ。
-鮮度判定は、判断前から存在した foreground `world_state` と、同じ `wake / background_thinking` cycle の 思考前観測 から反映された foreground `world_state` を使う。
-再取得抑止に使う `world_state` は、判断前の foreground `world_state` または同じ cycle の 思考前観測 から反映された foreground `world_state` に限定する。
-`wake / background_thinking` cycle が `speech` になった場合、server は `assistant_message` event を `source_kind=wake / background_thinking` で client へ送る。
-送信先 client は `assistant_message` を購読している client に限定する。
-cycle の client context にある client が `assistant_message` を購読している場合はその client へ送る。
-cycle の client context から決まらない場合、`assistant_message` を購読している接続中 client が 1 件だけのときだけその client へ送る。
-decision contract validation の repair 対象は、契約 shape、capability availability と権限、`fresh_world_state_available=true` の capability request、同じ `vision_source_id` の新鮮な `vision.capture` request、ユーザー入力への応答義務に限定する。
+構造値が強い `drive_state` が特定の status family を要求する場合は、foreground `world_state` と capability の対象を合わせて LLM が既存要約または追加取得を選ぶ。
+非視覚 capability は state type の一致だけで機械的に遮断しない。
+`vision.capture` の再取得抑止には、判断前の foreground `world_state` または同じ `wake / background_thinking` cycle の思考前観測から反映された、同じ `vision_source_id` の `visual_context` を使う。
+`wake / background_thinking` cycle の発話通知と配送条件は [../api/event_stream.md](../api/event_stream.md) を正とする。
+人物と相互作用に紐づかない定期思考の発話は外部へ配送しない。
+decision contract validation の repair 対象は、契約 shape、capability availability と権限、同じ `vision_source_id` の新鮮な `vision.capture` request、ユーザー入力への応答義務に限定する。
 `speech / noop / pending_intent` の妥当性は LLM decision と decision summary で追跡し、contract validation は契約・実行境界に閉じる。
 `preferred_result_kind=capability_request` は追加観測の提案として扱う。
 重複再取得の制御点は判断文脈と decision contract validation に限定する。

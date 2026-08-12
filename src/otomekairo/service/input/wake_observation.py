@@ -8,6 +8,19 @@ from otomekairo.service.common import debug_log
 from otomekairo.service.input.source_owner import visual_source_owner
 
 
+# 思考前観測の再試行と trace が共有する機械判定値。
+WAKE_OBSERVATION_FAILURE_CODES = frozenset(
+    {
+        "invalid_input",
+        "source_unavailable",
+        "dispatch_failed",
+        "invalid_result",
+        "capability_result_failed",
+        "result_processing_failed",
+    }
+)
+
+
 class ServiceInputWakeObservationMixin:
     def _run_wake_policy_observations(
         self,
@@ -130,6 +143,7 @@ class ServiceInputWakeObservationMixin:
         if not isinstance(input_payload, dict):
             return self._wake_policy_observation_failure_summary(
                 observation=observation,
+                failure_code="invalid_input",
                 reason_summary="思考前観測 input が不正。",
             )
         resolved_input_payload = self._resolve_wake_policy_observation_input(
@@ -139,6 +153,7 @@ class ServiceInputWakeObservationMixin:
         if resolved_input_payload is None:
             return self._wake_policy_observation_failure_summary(
                 observation=observation,
+                failure_code="source_unavailable",
                 reason_summary="対象 vision source が接続されていない。",
             )
         resolved_observation = {
@@ -164,17 +179,20 @@ class ServiceInputWakeObservationMixin:
         except CapabilityDispatchError as exc:
             return self._wake_policy_observation_failure_summary(
                 observation=observation,
+                failure_code="dispatch_failed",
                 reason_summary=str(exc),
                 capability_request_summary=exc.capability_request_summary,
             )
         except ValueError as exc:
             return self._wake_policy_observation_failure_summary(
                 observation=observation,
+                failure_code="dispatch_failed",
                 reason_summary=str(exc),
             )
         if not isinstance(capability_response, dict):
             return self._wake_policy_observation_failure_summary(
                 observation=observation,
+                failure_code="invalid_result",
                 reason_summary="capability response が空。",
             )
         return self._apply_wake_policy_observation_result(
@@ -244,6 +262,7 @@ class ServiceInputWakeObservationMixin:
             client_context=client_context,
             capability_response=capability_response,
         )
+        interaction_context = self._capability_result_interaction_context(capability_request_summary)
         try:
             client_context, observation_summary, input_text = self._prepare_capability_result_context(
                 state=state,
@@ -268,6 +287,11 @@ class ServiceInputWakeObservationMixin:
                 observation_summary=observation_summary,
                 capability_request_summary=capability_request_summary,
                 persona_context=self._build_selected_persona_context(state=state, role="world_state"),
+                current_person_ref=(
+                    interaction_context.participant_refs[0]
+                    if interaction_context is not None and interaction_context.participant_refs
+                    else None
+                ),
             )
             visual_observation_context = self._build_visual_observation_decision_context(
                 trigger_kind="capability_result",
@@ -280,6 +304,7 @@ class ServiceInputWakeObservationMixin:
                 current_input=self._build_current_input(
                     input_text=input_text,
                     trigger_kind="capability_result",
+                    interaction_context=interaction_context,
                     capability_request_summary=capability_request_summary,
                 ).to_prompt_payload(),
                 recent_turns=[],
@@ -332,6 +357,7 @@ class ServiceInputWakeObservationMixin:
             )
             return self._wake_policy_observation_failure_summary(
                 observation=observation,
+                failure_code="result_processing_failed",
                 reason_summary=str(exc),
                 capability_request_summary=capability_request_summary,
             )
@@ -389,6 +415,7 @@ class ServiceInputWakeObservationMixin:
         has_error = isinstance(error, str) and error.strip()
         payload["status"] = "failed" if has_error else "succeeded"
         if has_error:
+            payload["failure_code"] = "capability_result_failed"
             payload["reason_summary"] = error.strip()
         request_id = capability_response.get("request_id")
         if isinstance(request_id, str) and request_id.strip():
@@ -419,11 +446,15 @@ class ServiceInputWakeObservationMixin:
         self,
         *,
         observation: dict[str, Any],
+        failure_code: str,
         reason_summary: str,
         capability_request_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if failure_code not in WAKE_OBSERVATION_FAILURE_CODES:
+            raise ValueError(f"Unknown wake observation failure_code: {failure_code}")
         payload = self._wake_policy_observation_base_summary(observation)
         payload["status"] = "failed"
+        payload["failure_code"] = failure_code
         payload["reason_summary"] = reason_summary.strip()
         if isinstance(capability_request_summary, dict):
             payload["capability_request_summary"] = capability_request_summary

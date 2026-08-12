@@ -36,7 +36,6 @@ WAIT_SERVER_TIMEOUT_SECONDS = 20.0
 WAIT_QUEUE_DRAIN_TIMEOUT_SECONDS = 30.0
 WAIT_CAPTURE_RECOVERY_TIMEOUT_SECONDS = 30.0
 WAIT_RESTART_PENDING_TIMEOUT_SECONDS = 8.0
-WAIT_PENDING_INTENT_SEED_TIMEOUT_SECONDS = 20.0
 WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS = 20.0
 WAIT_ONGOING_ACTION_CLEAR_TIMEOUT_SECONDS = 20.0
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 10.0
@@ -286,6 +285,7 @@ class SimpleWebSocketClient:
         hello_payload: dict[str, Any] = {
             "type": "hello",
             "client_id": client_id,
+            "client_kind": "capability_connector",
             "caps": caps,
         }
         if vision_sources is not None:
@@ -478,7 +478,6 @@ class LongSmokeRunner:
         self.real_llm_memory_trace_shape_digest: dict[str, Any] = {}
         self.real_llm_memory_trace_shape_verified = False
         self.restart_probe_cycle_ids: list[str] = []
-        self.pending_intent_seed_cycle_ids: list[str] = []
         self.capture_empty_result_request_ids: list[str] = []
         self.capture_mismatch_request_ids: list[str] = []
         self.capture_invalid_images_request_ids: list[str] = []
@@ -749,7 +748,7 @@ class LongSmokeRunner:
             )
             return
 
-        bootstrap = self.api.post("/api/bootstrap/register-first-console", {})
+        bootstrap = self.api.post("/api/bootstrap/acquire-console-access-token", {})
         token = bootstrap.get("console_access_token")
         if not isinstance(token, str) or not token:
             raise SmokeError("bootstrap did not return console_access_token.")
@@ -784,7 +783,10 @@ class LongSmokeRunner:
             self._assert_current_editor_state_ready(editor_state)
 
         if self.args.profile == "real-llm-smoke":
-            current["wake_policy"] = {"mode": "disabled"}
+            current["wake_policy"] = {
+                "mode": "disabled",
+                "interval_seconds": self.args.wake_interval_seconds,
+            }
         else:
             current["wake_policy"] = {
                 "mode": "interval",
@@ -859,7 +861,10 @@ class LongSmokeRunner:
             raise SmokeError("real LLM config state selected model/memory definitions were not found.")
 
         current = editor_state["current"]
-        current["wake_policy"] = {"mode": "disabled"}
+        current["wake_policy"] = {
+            "mode": "disabled",
+            "interval_seconds": self.args.wake_interval_seconds,
+        }
 
         for model_preset in editor_state["model_presets"]:
             if model_preset.get("model_preset_id") != self.selected_model_preset_id:
@@ -2001,52 +2006,6 @@ class LongSmokeRunner:
             else:
                 raise SmokeError("vision.capture did not produce the injected empty result trace.")
 
-    def _seed_pending_intent_probe_candidate(self) -> str:
-        marker = "LongSmokePendingIntentProbeMarker"
-        first_cycle_id = self._post_conversation(
-            text=f"{marker} のレビュー相談を続けたいです。",
-            source="long_smoke_pending_intent_seed",
-            client_id="long-smoke-pending-intent-seed",
-            active_app="LongSmokePendingIntentSeed",
-            window_title=f"{marker} seed-1",
-        )
-        self.pending_intent_seed_cycle_ids.append(first_cycle_id)
-        self._wait_for_memory_jobs_to_drain()
-
-        second_cycle_id = self._post_conversation(
-            text=f"{marker} の件はまた今度あとで確認したいです。",
-            source="long_smoke_pending_intent_seed",
-            client_id="long-smoke-pending-intent-seed",
-            active_app="LongSmokePendingIntentSeed",
-            window_title=f"{marker} seed-2",
-        )
-        self.pending_intent_seed_cycle_ids.append(second_cycle_id)
-
-        deadline = time.monotonic() + WAIT_PENDING_INTENT_SEED_TIMEOUT_SECONDS
-        while time.monotonic() < deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            trace = self.api.get(f"/api/inspection/cycles/{second_cycle_id}")
-            decision_trace = trace.get("decision_trace", {})
-            result_trace = trace.get("result_trace", {})
-            if not isinstance(decision_trace, dict) or not isinstance(result_trace, dict):
-                time.sleep(0.25)
-                continue
-            if decision_trace.get("result_kind") != "pending_intent":
-                time.sleep(0.25)
-                continue
-            pending_intent_summary = result_trace.get("pending_intent_summary")
-            if not isinstance(pending_intent_summary, dict):
-                time.sleep(0.25)
-                continue
-            log(
-                "pending_intent seed confirmed"
-                f" cycle_id={second_cycle_id}"
-                f" dedupe_key={pending_intent_summary.get('dedupe_key')}"
-            )
-            return marker
-        raise SmokeError("pending_intent probe seed did not create a pending_intent candidate.")
-
     def _queue_capture_context_override(self, override: dict[str, Any]) -> None:
         with self._capture_lock:
             self._capture_context_overrides.append(override)
@@ -2113,7 +2072,16 @@ class LongSmokeRunner:
             time.sleep(0.25)
 
     def _set_wake_policy_disabled(self) -> None:
-        self.api.post("/api/config/update-wake-policy", {"wake_policy": {"mode": "disabled"}})
+        current = self.api.get("/api/config")["settings_snapshot"]["wake_policy"]
+        self.api.post(
+            "/api/config/update-wake-policy",
+            {
+                "wake_policy": {
+                    "mode": "disabled",
+                    "interval_seconds": current["interval_seconds"],
+                }
+            },
+        )
 
     def _set_wake_policy_interval(self, *, interval_seconds: int) -> None:
         self.api.post(
@@ -3207,7 +3175,7 @@ class LongSmokeRunner:
         device_state_summary = f"{marker}: 端末接続は安定しており、作業を続けられる。"
         self._seed_initiative_probe_drive(
             drive_id=f"drive:{case_id}",
-            drive_kind="user_attention",
+            drive_kind="person_attention",
             summary_text=f"{marker}: 端末の接続状態を確認してから短く判断したい。",
             focus_scope_key=marker,
         )
@@ -3404,7 +3372,6 @@ class LongSmokeRunner:
             expected_selected_family="autonomous",
             expected_foreground_thinness="grounded",
             expected_world_state_type="schedule",
-            expected_fresh_world_state_capability_id="schedule.status",
         )
         return case_id, trace
 
@@ -3441,7 +3408,6 @@ class LongSmokeRunner:
             expected_selected_family="autonomous",
             expected_foreground_thinness="grounded",
             expected_world_state_type="social_context",
-            expected_fresh_world_state_capability_id="social.status",
         )
         return case_id, trace
 
@@ -3478,7 +3444,6 @@ class LongSmokeRunner:
             expected_selected_family="autonomous",
             expected_foreground_thinness="grounded",
             expected_world_state_type="body",
-            expected_fresh_world_state_capability_id="body.status",
         )
         return case_id, trace
 
@@ -3493,21 +3458,19 @@ class LongSmokeRunner:
             client_id="real-llm-initiative-external",
             active_app="RealLLMInitiativeExternal",
             expected_foreground_thinness="thin",
-            expected_fresh_world_state_capability_id="external.status",
         )
 
     def _run_real_llm_initiative_probe_device_speech(self) -> tuple[str, dict[str, Any]]:
         return self._run_real_llm_initiative_probe_fresh_status_speech(
             case_id="device-fresh-speech",
             marker="RealLLMInitiativeDeviceSpeechMarker",
-            drive_kind="user_attention",
+            drive_kind="person_attention",
             drive_summary="端末の接続状態に合わせて短く判断したい。",
             world_state_type="device",
             world_summary="端末接続は安定しており、電源も利用できる。",
             client_id="real-llm-initiative-device",
             active_app="RealLLMInitiativeDevice",
             expected_foreground_thinness="thin",
-            expected_fresh_world_state_capability_id="device.status",
         )
 
     def _run_real_llm_initiative_probe_environment_speech(self) -> tuple[str, dict[str, Any]]:
@@ -3521,7 +3484,6 @@ class LongSmokeRunner:
             client_id="real-llm-initiative-environment",
             active_app="RealLLMInitiativeEnvironment",
             expected_foreground_thinness="mixed",
-            expected_fresh_world_state_capability_id="environment.status",
         )
 
     def _run_real_llm_initiative_probe_location_speech(self) -> tuple[str, dict[str, Any]]:
@@ -3535,7 +3497,6 @@ class LongSmokeRunner:
             client_id="real-llm-initiative-location",
             active_app="RealLLMInitiativeLocation",
             expected_foreground_thinness="mixed",
-            expected_fresh_world_state_capability_id="location.status",
         )
 
     def _run_real_llm_initiative_probe_fresh_status_speech(
@@ -3550,7 +3511,6 @@ class LongSmokeRunner:
         client_id: str,
         active_app: str,
         expected_foreground_thinness: str,
-        expected_fresh_world_state_capability_id: str,
     ) -> tuple[str, dict[str, Any]]:
         self._seed_initiative_probe_drive(
             drive_id=f"drive:{case_id}",
@@ -3582,7 +3542,6 @@ class LongSmokeRunner:
             expected_selected_family="autonomous",
             expected_foreground_thinness=expected_foreground_thinness,
             expected_world_state_type=world_state_type,
-            expected_fresh_world_state_capability_id=expected_fresh_world_state_capability_id,
         )
         return case_id, trace
 
@@ -3959,7 +3918,6 @@ class LongSmokeRunner:
         expected_foreground_thinness: str | None = None,
         expected_suppression_level: str | None = None,
         expected_world_state_type: str | None = None,
-        expected_fresh_world_state_capability_id: str | None = None,
         allow_missing_initiative_context: bool = False,
     ) -> None:
         cycle_summary = trace.get("cycle_summary", {})
@@ -3996,13 +3954,6 @@ class LongSmokeRunner:
                 for item in world_state_summaries
             ):
                 raise SmokeError(f"real-llm initiative {case_id} world_state_summaries did not include expected type.")
-        if expected_fresh_world_state_capability_id is not None:
-            fresh_capability_ids = self._fresh_world_state_capability_ids_from_trace(trace)
-            if expected_fresh_world_state_capability_id not in fresh_capability_ids:
-                raise SmokeError(
-                    f"real-llm initiative {case_id} did not record fresh world_state reuse for "
-                    f"{expected_fresh_world_state_capability_id}."
-                )
         if expected_selected_family is None:
             return
         candidate = self._initiative_probe_selected_family(initiative_context)
@@ -4024,58 +3975,6 @@ class LongSmokeRunner:
             if family.get("selected") is True or family.get("family") == selected_family:
                 return family
         return None
-
-    def _fresh_world_state_capability_ids_from_trace(self, trace: dict[str, Any]) -> list[str]:
-        decision_trace = trace.get("decision_trace", {})
-        internal_context = (
-            decision_trace.get("internal_context_summary")
-            if isinstance(decision_trace, dict)
-            else None
-        )
-        capability_decision_view = (
-            internal_context.get("capability_decision_view")
-            if isinstance(internal_context, dict)
-            else None
-        )
-        if not isinstance(capability_decision_view, list):
-            return []
-        capability_ids = sorted(
-            {
-                item.get("id")
-                for item in capability_decision_view
-                if isinstance(item, dict)
-                and item.get("fresh_world_state_available") is True
-                and isinstance(item.get("id"), str)
-            }
-        )
-        return [capability_id for capability_id in capability_ids if isinstance(capability_id, str)]
-
-    def _fresh_world_state_readiness_digests_from_trace(
-        self,
-        trace: dict[str, Any],
-    ) -> dict[str, dict[str, Any]]:
-        decision_trace = trace.get("decision_trace", {})
-        internal_context = (
-            decision_trace.get("internal_context_summary")
-            if isinstance(decision_trace, dict)
-            else None
-        )
-        capability_decision_view = (
-            internal_context.get("capability_decision_view")
-            if isinstance(internal_context, dict)
-            else None
-        )
-        if not isinstance(capability_decision_view, list):
-            return {}
-        digests: dict[str, dict[str, Any]] = {}
-        for item in capability_decision_view:
-            if not isinstance(item, dict) or item.get("fresh_world_state_available") is not True:
-                continue
-            capability_id = item.get("id")
-            readiness_digest = item.get("fresh_world_state_readiness_digest")
-            if isinstance(capability_id, str) and capability_id and isinstance(readiness_digest, dict):
-                digests[capability_id] = readiness_digest
-        return digests
 
     def _real_llm_initiative_probe_case_results(
         self,
@@ -4125,8 +4024,6 @@ class LongSmokeRunner:
                 "suppression_level": suppression_summary.get("suppression_level"),
                 "capability_id": request_summary.get("capability_id"),
                 "capability_request_status": request_summary.get("status"),
-                "fresh_world_state_capability_ids": self._fresh_world_state_capability_ids_from_trace(trace),
-                "fresh_world_state_readiness_digests": self._fresh_world_state_readiness_digests_from_trace(trace),
             }
         return case_results
 
@@ -5654,7 +5551,6 @@ class LongSmokeRunner:
             "recall_quality_probe_verified": self.recall_quality_probe_verified,
             "recall_quality_probe_digest": self.recall_quality_probe_digest,
             "restart_probe_cycle_ids": self.restart_probe_cycle_ids,
-            "pending_intent_seed_cycle_ids": self.pending_intent_seed_cycle_ids,
             "trigger_counts": trigger_counts,
             "failed_cycle_ids": failed_cycle_ids,
             "capture_request_count": self.capture_request_count,
@@ -6313,7 +6209,6 @@ class LongSmokeRunner:
                 "foreground_thinness": "grounded",
                 "capability_id": "schedule.status",
                 "capability_request_status": "dispatched",
-                "fresh_world_state_capability_ids": [],
             },
             "missing-social-status-probe": {
                 "trigger_kind": "wake",
@@ -6324,7 +6219,6 @@ class LongSmokeRunner:
                 "foreground_thinness": "thin",
                 "capability_id": "social.status",
                 "capability_request_status": "dispatched",
-                "fresh_world_state_capability_ids": [],
             },
             "stale-external-status-probe": {
                 "trigger_kind": "wake",
@@ -6335,7 +6229,6 @@ class LongSmokeRunner:
                 "foreground_thinness": "thin",
                 "capability_id": "external.status",
                 "capability_request_status": "dispatched",
-                "fresh_world_state_capability_ids": [],
             },
             "missing-device-status-probe": {
                 "trigger_kind": "wake",
@@ -6346,7 +6239,6 @@ class LongSmokeRunner:
                 "foreground_thinness": "thin",
                 "capability_id": "device.status",
                 "capability_request_status": "dispatched",
-                "fresh_world_state_capability_ids": [],
             },
             "missing-body-status-probe": {
                 "trigger_kind": "wake",
@@ -6357,7 +6249,6 @@ class LongSmokeRunner:
                 "foreground_thinness": "thin",
                 "capability_id": "body.status",
                 "capability_request_status": "dispatched",
-                "fresh_world_state_capability_ids": [],
             },
             "missing-environment-status-probe": {
                 "trigger_kind": "wake",
@@ -6368,7 +6259,6 @@ class LongSmokeRunner:
                 "foreground_thinness": "thin",
                 "capability_id": "environment.status",
                 "capability_request_status": "dispatched",
-                "fresh_world_state_capability_ids": [],
             },
             "missing-location-status-probe": {
                 "trigger_kind": "wake",
@@ -6379,56 +6269,48 @@ class LongSmokeRunner:
                 "foreground_thinness": "thin",
                 "capability_id": "location.status",
                 "capability_request_status": "dispatched",
-                "fresh_world_state_capability_ids": [],
             },
             "schedule-grounded-speech": {
                 "trigger_kind": "wake",
                 "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "grounded",
-                "fresh_world_state_capability_ids": ["schedule.status"],
             },
             "social-grounded-speech": {
                 "trigger_kind": "wake",
                 "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "grounded",
-                "fresh_world_state_capability_ids": ["social.status"],
             },
             "body-grounded-speech": {
                 "trigger_kind": "wake",
                 "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "grounded",
-                "fresh_world_state_capability_ids": ["body.status"],
             },
             "external-fresh-speech": {
                 "trigger_kind": "wake",
                 "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "thin",
-                "fresh_world_state_capability_ids": ["external.status"],
             },
             "device-fresh-speech": {
                 "trigger_kind": "wake",
                 "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "thin",
-                "fresh_world_state_capability_ids": ["device.status"],
             },
             "environment-fresh-speech": {
                 "trigger_kind": "wake",
                 "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "mixed",
-                "fresh_world_state_capability_ids": ["environment.status"],
             },
             "location-fresh-speech": {
                 "trigger_kind": "wake",
                 "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "mixed",
-                "fresh_world_state_capability_ids": ["location.status"],
             },
             "ongoing-waiting-noop": {
                 "trigger_kind": "wake",
@@ -6450,27 +6332,6 @@ class LongSmokeRunner:
                         f"real-llm-smoke initiative probe compact result {case_id}.{key} "
                         f"was {case_result.get(key)}, expected {expected_value}."
                     )
-            expected_fresh_ids = expected_items.get("fresh_world_state_capability_ids")
-            if isinstance(expected_fresh_ids, list):
-                fresh_digests = case_result.get("fresh_world_state_readiness_digests")
-                if not isinstance(fresh_digests, dict):
-                    raise SmokeError(f"real-llm-smoke initiative probe readiness digest was invalid: {case_id}")
-                if not expected_fresh_ids and fresh_digests:
-                    raise SmokeError(f"real-llm-smoke initiative probe recorded unexpected readiness digest: {case_id}")
-                for capability_id in expected_fresh_ids:
-                    digest = fresh_digests.get(capability_id)
-                    if not isinstance(digest, dict):
-                        raise SmokeError(
-                            f"real-llm-smoke initiative probe did not record readiness digest for {capability_id}."
-                        )
-                    if digest.get("world_state_type_matched") is not True:
-                        raise SmokeError(
-                            f"real-llm-smoke initiative probe readiness digest did not match for {capability_id}."
-                        )
-                    if digest.get("world_state_type") != digest.get("foreground_world_state_type"):
-                        raise SmokeError(
-                            f"real-llm-smoke initiative probe readiness world_state_type mismatch for {capability_id}."
-                        )
         initiative_traces = summary.get("real_llm_initiative_probe_traces")
         if not isinstance(initiative_traces, dict) or set(initiative_traces) != expected_initiative_cases:
             raise SmokeError("real-llm-smoke initiative probe traces were incomplete.")
@@ -7882,7 +7743,18 @@ class LongSmokeRunner:
         extra_client_context: dict[str, str] | None = None,
     ) -> str:
         payload = {
+            "message_id": f"chat_message:{os.urandom(16).hex()}",
             "text": text,
+            "interaction_context": {
+                "interaction_ref": "interaction:long-smoke:direct",
+                "speaker_ref": "person:long-smoke:operator",
+                "participants": [
+                    {
+                        "person_ref": "person:long-smoke:operator",
+                        "display_name": "Long Smoke Operator",
+                    }
+                ],
+            },
             "client_context": {
                 "source": source,
                 "client_id": client_id,

@@ -10,7 +10,30 @@
       "options": {
         "cwd": "${workspaceFolder}"
       },
-      "problemMatcher": []
+      "problemMatcher": [],
+      "presentation": {
+        // 準備完了後に「任意のキーで閉じる」ターミナルを残さない。
+        "reveal": "silent",
+        "panel": "shared",
+        "showReuseMessage": false,
+        "close": true
+      }
+    },
+    {
+      // microphone connector 用 venv を準備する。
+      "label": "microphone: prepare debug env",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/prepare_microphone_connector_debug_env.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared",
+        "showReuseMessage": false,
+        "close": true
+      }
     },
     {
       // connector 用 venv を準備する。
@@ -20,7 +43,13 @@
       "options": {
         "cwd": "${workspaceFolder}"
       },
-      "problemMatcher": []
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared",
+        "showReuseMessage": false,
+        "close": true
+      }
     },
     {
       // watcher 用 venv を準備する。
@@ -30,17 +59,25 @@
       "options": {
         "cwd": "${workspaceFolder}"
       },
-      "problemMatcher": []
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared",
+        "showReuseMessage": false,
+        "close": true
+      }
     },
     {
       // F5 起動前に server、connector、watcher の実行環境を準備する。
+      // 各 venv は独立しているので並列でよい。ensure 側が不要な pip を省略する。
       "label": "otomekairo: prepare full debug env",
       "dependsOn": [
         "otomekairo: prepare debug env",
+        "microphone: prepare debug env",
         "tapo_c220: prepare debug env",
         "tapo_c220_watcher: prepare debug env"
       ],
-      "dependsOrder": "sequence",
+      "dependsOrder": "parallel",
       "problemMatcher": []
     }
   ]

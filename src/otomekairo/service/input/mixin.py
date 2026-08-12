@@ -197,7 +197,7 @@ class ServiceInputMixin(
     def _empty_recall_hint(self) -> dict[str, Any]:
         # 結果
         return {
-            "primary_recall_focus": "user",
+            "primary_recall_focus": "person",
             "secondary_recall_focuses": [],
             "confidence": 0.0,
             "time_reference": "none",
@@ -211,7 +211,7 @@ class ServiceInputMixin(
         # 結果
         return {
             "self_model": [],
-            "user_model": [],
+            "person_model": [],
             "relationship_model": [],
             "active_topics": [],
             "active_commitments": [],
@@ -262,7 +262,7 @@ class ServiceInputMixin(
             },
             "selected_recall_sections": {
                 "self_model": [],
-                "user_model": [],
+                "person_model": [],
                 "relationship_model": [],
                 "active_topics": [],
                 "active_commitments": [],
@@ -284,7 +284,7 @@ class ServiceInputMixin(
         return {
             "candidate_section_counts": {
                 "self_model": 0,
-                "user_model": 0,
+                "person_model": 0,
                 "relationship_model": 0,
                 "active_topics": 0,
                 "active_commitments": 0,
@@ -328,6 +328,7 @@ class ServiceInputMixin(
         *,
         state: dict[str, Any],
         recall_hint: dict[str, Any],
+        current_person_ref: str | None,
         current_time: str,
     ) -> dict[str, Any]:
         # クエリ
@@ -337,7 +338,10 @@ class ServiceInputMixin(
         )
         affect_states = self.store.list_affect_states_for_context(
             memory_set_id=state["selected_memory_set_id"],
-            scope_filters=self._build_context_scope_filters(recall_hint),
+            scope_filters=self._build_context_scope_filters(
+                recall_hint,
+                current_person_ref=current_person_ref,
+            ),
             limit=3,
         )
         recent_episode_affects = []
@@ -477,12 +481,28 @@ class ServiceInputMixin(
         )
         return stable_json(signature_items)
 
-    def _build_context_scope_filters(self, recall_hint: dict[str, Any]) -> list[tuple[str, str]]:
+    def _build_context_scope_filters(
+        self,
+        recall_hint: dict[str, Any],
+        *,
+        current_person_ref: str | None,
+    ) -> list[tuple[str, str]]:
         # 既定値
-        filters: list[tuple[str, str]] = [("user", "user"), ("relationship", "self|user")]
+        filters: list[tuple[str, str]] = []
+        if isinstance(current_person_ref, str) and current_person_ref:
+            filters.extend(
+                [
+                    ("entity", current_person_ref),
+                    ("relationship", f"self|{current_person_ref}"),
+                ]
+            )
         primary_recall_focus = recall_hint["primary_recall_focus"]
-        if primary_recall_focus in {"commitment", "user", "relationship"}:
-            filters.append(("relationship", "self|user"))
+        if (
+            primary_recall_focus in {"commitment", "person", "relationship"}
+            and isinstance(current_person_ref, str)
+            and current_person_ref
+        ):
+            filters.append(("relationship", f"self|{current_person_ref}"))
 
         # focus scope群
         filters.extend(self._parse_focus_scopes(recall_hint.get("focus_scopes", [])))
@@ -508,7 +528,7 @@ class ServiceInputMixin(
             normalized = scope.strip()
             if not normalized:
                 continue
-            if normalized in {"self", "user"}:
+            if normalized == "self":
                 parsed.append((normalized, normalized))
                 continue
             scope_type, separator, scope_key = normalized.partition(":")
@@ -534,7 +554,16 @@ class ServiceInputMixin(
             return "evening"
         return "night"
 
-    def _load_recent_turns(self, state: dict) -> list[dict]:
+    def _load_recent_turns(
+        self,
+        state: dict,
+        interaction_context: Any = None,
+    ) -> list[dict]:
+        # 会話履歴は現在のinteractionだけから構成する。
+        interaction_ref = getattr(interaction_context, "interaction_ref", None)
+        if not isinstance(interaction_ref, str) or not interaction_ref.strip():
+            return []
+
         # ウィンドウ設定
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         prompt_window = selected_preset["prompt_window"]
@@ -544,6 +573,7 @@ class ServiceInputMixin(
         # 検索
         return self.store.load_recent_turns(
             memory_set_id=state["selected_memory_set_id"],
+            interaction_ref=interaction_ref,
             since_iso=threshold.isoformat(),
             limit=turn_limit,
         )
@@ -575,9 +605,15 @@ class ServiceInputMixin(
             count = self._wake_runtime_state.get("active_user_response_cycle_count")
         return isinstance(count, int) and count > 0
 
-    def _recent_turns_added_since(self, *, state: dict[str, Any], started_at: str) -> bool:
+    def _recent_turns_added_since(
+        self,
+        *,
+        state: dict[str, Any],
+        started_at: str,
+        interaction_context: Any = None,
+    ) -> bool:
         # wake 開始後に会話 turn が追加された場合、開始時 snapshot は古い。
-        for turn in self._load_recent_turns(state):
+        for turn in self._load_recent_turns(state, interaction_context):
             created_at = turn.get("created_at") if isinstance(turn, dict) else None
             if isinstance(created_at, str) and created_at > started_at:
                 return True
@@ -627,7 +663,6 @@ class ServiceInputMixin(
         display_name_value = value.get("display_name")
         display_name = self._clamp(display_name_value, limit=120) if isinstance(display_name_value, str) else None
         initiative_baseline = value.get("initiative_baseline")
-        reference_style = value.get("reference_style")
         prompt_text_value = value.get("persona_prompt_text")
         prompt_text = self._clamp(prompt_text_value, limit=240) if isinstance(prompt_text_value, str) else None
         payload: dict[str, Any] = {}
@@ -642,12 +677,6 @@ class ServiceInputMixin(
                     compact_baseline[key] = text
             if compact_baseline:
                 payload["initiative_baseline"] = compact_baseline
-        if isinstance(reference_style, dict):
-            user_natural_reference = reference_style.get("user_natural_reference")
-            if isinstance(user_natural_reference, str) and user_natural_reference.strip():
-                payload["reference_style"] = {
-                    "user_natural_reference": user_natural_reference.strip(),
-                }
         if prompt_text is not None:
             payload["persona_prompt_excerpt"] = prompt_text
         return payload

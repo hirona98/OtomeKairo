@@ -204,7 +204,7 @@ def _resolve_access_token(
         if token:
             return token
 
-    token = _bootstrap_first_console_token(
+    token = _acquire_console_access_token(
         base_url=base_url,
         tls_verify=tls_verify,
         timeout_seconds=timeout_seconds,
@@ -262,13 +262,13 @@ def _read_config_db_access_token(db_path: Path) -> str:
     return token.strip() if isinstance(token, str) and token.strip() else ""
 
 
-def _bootstrap_first_console_token(*, base_url: str, tls_verify: bool, timeout_seconds: float) -> str:
+def _acquire_console_access_token(*, base_url: str, tls_verify: bool, timeout_seconds: float) -> str:
     context = ssl.create_default_context()
     if not tls_verify:
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
     request = urllib.request.Request(
-        url=f"{base_url}/api/bootstrap/register-first-console",
+        url=f"{base_url}/api/bootstrap/acquire-console-access-token",
         data=b"{}",
         method="POST",
         headers={"Accept": "application/json", "Content-Type": "application/json"},

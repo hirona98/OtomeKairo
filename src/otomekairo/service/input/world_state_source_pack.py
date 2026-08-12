@@ -41,6 +41,7 @@ class ServiceInputWorldStateSourcePackMixin:
         observation_summary: dict[str, Any] | None,
         capability_request_summary: dict[str, Any] | None,
         persona_context: Any,
+        current_person_ref: str | None,
     ) -> tuple[WorldStateTrace, list[dict[str, Any]]]:
         previous_foreground_world_state = (
             self._summarize_foreground_world_states(
@@ -73,6 +74,7 @@ class ServiceInputWorldStateSourcePackMixin:
                 selected_candidate=selected_candidate,
                 observation_summary=observation_summary,
                 persona_context=persona_context,
+                current_person_ref=current_person_ref,
             )
             source_pack_contexts = self._summarize_world_state_source_pack_contexts(source_pack)
             source_pack_state_type_hooks = self._summarize_world_state_state_type_hooks(source_pack)
@@ -285,6 +287,7 @@ class ServiceInputWorldStateSourcePackMixin:
         selected_candidate: dict[str, Any] | None,
         observation_summary: dict[str, Any] | None,
         persona_context: Any,
+        current_person_ref: str | None,
     ) -> WorldStateSourcePack:
         payload = WorldStateSourcePack(
             trigger_kind=trigger_kind,
@@ -293,6 +296,7 @@ class ServiceInputWorldStateSourcePackMixin:
             source_ref=source_ref,
             time_context=llm_local_time_text(started_at).replace("\n", " / "),
             client_context=self._build_world_state_client_context(client_context),
+            current_person_ref=current_person_ref,
             persona_context=persona_context.to_prompt_payload(),
         )
         visual_context = self._build_world_state_visual_context(
@@ -442,6 +446,14 @@ class ServiceInputWorldStateSourcePackMixin:
         observation_summary: dict[str, Any] | None,
         source_kind: str,
     ) -> WorldStateExternalServiceContext | None:
+        capability_id = (
+            observation_summary.get("capability_id")
+            if isinstance(observation_summary, dict)
+            else None
+        )
+        if capability_id == "mcp.call_tool":
+            return self._build_world_state_mcp_external_service_context(observation_summary)
+
         client_summary_text = self._client_context_text(client_context.get("external_service_summary"), limit=160)
         summary_text = client_summary_text
         result_summary_text = None
@@ -475,6 +487,41 @@ class ServiceInputWorldStateSourcePackMixin:
             service=service,
             summary_source_hint=summary_source_hint,
             capability_id=capability_id_text,
+        )
+
+    def _build_world_state_mcp_external_service_context(
+        self,
+        observation_summary: dict[str, Any],
+    ) -> WorldStateExternalServiceContext | None:
+        # MCP の結果は成功した要約だけを意味判断へ渡し、失敗や raw payload は状態候補にしない。
+        if (
+            observation_summary.get("status") != "completed"
+            or observation_summary.get("is_error") is not False
+            or self._client_context_text(observation_summary.get("error"), limit=240) is not None
+        ):
+            return None
+        result_summary_text = self._client_context_text(
+            observation_summary.get("mcp_result_summary"),
+            limit=300,
+        )
+        mcp_server_id = self._client_context_text(
+            observation_summary.get("mcp_server_id"),
+            limit=120,
+        )
+        tool_name = self._client_context_text(
+            observation_summary.get("tool_name"),
+            limit=120,
+        )
+        if result_summary_text is None or mcp_server_id is None or tool_name is None:
+            return None
+        return WorldStateExternalServiceContext(
+            summary_text=result_summary_text,
+            result_summary_text=result_summary_text,
+            service=f"{mcp_server_id}/{tool_name}",
+            mcp_server_id=mcp_server_id,
+            tool_name=tool_name,
+            summary_source_hint="capability_result.client_context.mcp_result_summary",
+            capability_id="mcp.call_tool",
         )
 
     def _build_world_state_body_context(
@@ -874,8 +921,13 @@ class ServiceInputWorldStateSourcePackMixin:
                 if isinstance(value, str) and value.strip():
                     payload[key] = value
         if isinstance(context, WorldStateExternalServiceContext):
-            if isinstance(context.service, str) and context.service.strip():
-                payload["service"] = context.service
+            for key, value in (
+                ("service", context.service),
+                ("mcp_server_id", context.mcp_server_id),
+                ("tool_name", context.tool_name),
+            ):
+                if isinstance(value, str) and value.strip():
+                    payload[key] = value
         elif isinstance(context, WorldStateScheduleContext):
             if isinstance(context.pending_intent, WorldStatePendingIntent):
                 if (
@@ -911,7 +963,14 @@ class ServiceInputWorldStateSourcePackMixin:
             evidence_summary = self._world_state_source_evidence_summary(context)
             if evidence_summary is None:
                 continue
-            scope_type, scope_key = WORLD_STATE_SCOPE_BY_TYPE[state_type]
+            # 対人状態は current_person_ref が示す人物との関係へ結び付ける。
+            if state_type == "social_context":
+                if source_pack.current_person_ref is None:
+                    continue
+                scope_type = "relationship"
+                scope_key = f"self|{source_pack.current_person_ref}"
+            else:
+                scope_type, scope_key = WORLD_STATE_SCOPE_BY_TYPE[state_type]
             candidates.append(
                 WorldStateSourceCandidate(
                     candidate_ref=f"state_source:{state_type}",

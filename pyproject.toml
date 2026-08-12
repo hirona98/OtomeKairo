@@ -10,10 +10,14 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache License 2.0" }
 authors = [
-  { name = "hiro9" }
+  { name = "hirona" }
 ]
 dependencies = [
+  "kaldi-native-fbank>=1.22.3",
   "litellm>=1.0.0",
+  "numpy>=2.0.0",
+  "onnxruntime>=1.20.0",
+  "PyYAML>=6.0.0",
   "pytest>=8.0.0",
   "sqlite-vec>=0.1.6"
 ]
@@ -25,7 +29,9 @@ otomekairo-run = "otomekairo.run:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"otomekairo.web.static" = ["*.html", "*.js", "*.css"]
+"otomekairo" = ["default_console_motion.json"]
+"otomekairo.audio.model_assets" = ["*.json", "*.md", "*.onnx"]
+"otomekairo.web.static" = ["*.html", "*.js", "*.css", "*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

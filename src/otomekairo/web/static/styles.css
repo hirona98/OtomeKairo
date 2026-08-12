@@ -8,9 +8,27 @@
   --line: #d8e0eb;
   --accent: #4873cf;
   --accent-dark: #335caf;
+  --navigation-hover-bg: #eaf0fc;
+  --navigation-active-bg: #dde8fa;
+  --navigation-active-text: #285fb7;
   --assistant: #b5c7eb;
-  --danger: #b42318;
+  --danger: #d32f2f;
+  --danger-hover: #f44336;
+  --danger-pressed: #c62828;
   --ok: #137333;
+  /* セマンティック面。chip / badge / status / info 枠で共有する。 */
+  --ok-border: #b7dfc2;
+  --ok-bg: #eefaf1;
+  --error-border: #f0c2c2;
+  --error-bg: #fff1f1;
+  --waiting: #7a5200;
+  --waiting-border: #e6d4a8;
+  --waiting-bg: #fff8ea;
+  --info-border: #b9ccf3;
+  --info-bg: #eef4ff;
+  --info-text: #2a3f66;
+  --dashboard-bg: #f5f7fb;
+  --item-line: #e8edf4;
   --space-1: 4px;
   --space-2: 6px;
   --space-3: 8px;
@@ -22,10 +40,23 @@
   --input-padding-x: 8px;
   --panel-padding: 12px;
   --panel-gap: 10px;
-  --label-size: 12px;
-  --field-size: 12px;
-  --heading-size: 16px;
-  --title-size: 16px;
+  /* フォント段階。設定画面は body までを使い、micro はダッシュボード高密度用。 */
+  --font-title: 20px;
+  --font-heading: 16px;
+  --font-nav-category: 14px;
+  --font-body: 12px;
+  --font-secondary: 11px;
+  --font-micro: 10px;
+  --label-size: var(--font-body);
+  --field-size: var(--font-body);
+  --heading-size: var(--font-heading);
+  --title-size: var(--font-heading);
+  --setting-label-width: 170px;
+  /* 入力幅トークン。field-width-* クラスで付与する。 */
+  --field-width-peek: 4.5em;
+  --field-width-short: 96px;
+  --field-width-medium: 320px;
+  --field-width-long: 480px;
 }
 
 * {
@@ -60,16 +91,23 @@ button {
   background: var(--accent);
   color: #ffffff;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-body);
 }
 
-button:hover {
+/* 個別ボタンのhover指定を優先できる詳細度に保つ。 */
+button:where(:not(:disabled)):hover {
   background: var(--accent-dark);
 }
 
 button:disabled {
-  cursor: not-allowed;
   opacity: 0.55;
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
 }
 
 input,
@@ -130,15 +168,15 @@ p {
 }
 
 .brand-block h1 {
-  font-size: var(--title-size);
+  font-size: var(--font-title);
   font-weight: 700;
   line-height: 1.15;
 }
 
-#server-summary {
-  margin-top: 2px;
-  color: rgba(255, 255, 255, 0.84);
-  font-size: 11px;
+.brand-suffix {
+  font-size: 0.6em;
+  font-weight: 600;
+  opacity: 0.9;
 }
 
 .topbar-actions,
@@ -151,25 +189,438 @@ p {
 }
 
 .icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 30px;
   min-width: 30px;
   min-height: 30px;
   padding: 0;
-  border-color: rgba(255, 255, 255, 0.7);
-  background: rgba(255, 255, 255, 0.14);
-  font-size: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 6px;
+  /* 通常時の塗りはヘッダと同じ色にする。 */
+  background: var(--accent);
+  color: #ffffff;
+  font-size: var(--font-nav-category);
   line-height: 1;
+  text-decoration: none;
+  cursor: pointer;
 }
 
 .icon-button:hover {
   background: rgba(255, 255, 255, 0.26);
 }
 
-.chat-layout {
+.dashboard-toggle {
+  width: auto;
+  min-width: 48px;
+  padding: 0 8px;
+  font-size: var(--font-body);
+}
+
+/* 確認メニュー: いま / 判断 / ログ の入口を1つにまとめる。 */
+.confirm-menu {
+  position: relative;
+}
+
+.confirm-menu-popup {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(31, 40, 51, 0.16);
+}
+
+/* display:flex が [hidden] を上書きしないようにする。 */
+.confirm-menu-popup[hidden] {
+  display: none;
+}
+
+.confirm-menu-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--font-body);
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.confirm-menu-item:hover {
+  background: var(--navigation-hover-bg);
+}
+
+.confirm-menu-hint {
+  font-size: var(--font-micro);
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.workspace-layout {
   display: grid;
+  /* いまパネルを広めに取り、内部は多列で幅を埋める。 */
+  grid-template-columns: minmax(360px, 1.35fr) minmax(280px, 1fr);
   min-height: 0;
   overflow: hidden;
   padding: 0;
+}
+
+.workspace-layout.dashboard-hidden {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.workspace-layout.dashboard-hidden .dashboard-panel {
+  display: none;
+}
+
+.dashboard-panel {
+  /* いまパネルだけ、高密度用 micro / secondary を 1 段だけ大きくする。 */
+  --font-secondary: 12px;
+  --font-micro: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  min-height: 0;
+  padding: var(--space-2);
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  background: var(--dashboard-bg);
+  overscroll-behavior: contain;
+}
+
+.dashboard-header {
+  position: sticky;
+  top: calc(-1 * var(--space-2));
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex: 0 0 auto;
+  margin: calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) 0;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--dashboard-bg) 96%, transparent);
+}
+
+.dashboard-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
+
+.dashboard-title {
+  color: var(--text);
+  font-size: var(--font-secondary);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.dashboard-updated {
+  color: var(--muted);
+  font-size: var(--font-micro);
+  line-height: 1.2;
+}
+
+.dashboard-role-note {
+  margin: 0;
+  padding: 0 var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-micro);
+  line-height: 1.35;
+}
+
+/* 情報枠。console-info-box と同じ info トークンを使う。 */
+.dashboard-headline,
+.console-info-box {
+  border: 1px solid var(--info-border);
+  border-radius: 6px;
+  background: var(--info-bg);
+  color: var(--info-text);
+  line-height: 1.35;
+}
+
+.dashboard-headline {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-body);
+}
+
+.dashboard-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.dashboard-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--muted);
+  font-size: var(--font-micro);
+  line-height: 1.15;
+}
+
+.dashboard-chip.ok {
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.dashboard-chip.error {
+  border-color: var(--error-border);
+  background: var(--error-bg);
+  color: var(--danger);
+}
+
+.dashboard-chip.waiting {
+  border-color: var(--waiting-border);
+  background: var(--waiting-bg);
+  color: var(--waiting);
+}
+
+/* セクションを横並びにし、幅の空きを埋める。 */
+.dashboard-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-1);
+  align-items: start;
+  flex: 0 0 auto;
+}
+
+.dashboard-section {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.dashboard-section-wide {
+  grid-column: 1 / -1;
+}
+
+.dashboard-section>summary {
+  padding: 5px 8px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: var(--font-secondary);
+  font-weight: 700;
+  line-height: 1.25;
+  list-style-position: inside;
+}
+
+.dashboard-section[open]>summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.dashboard-list {
+  display: grid;
+  gap: 0;
+}
+
+/* 横断セクション内の項目は多列で詰める。auto-fit で余り列を畳む。 */
+.dashboard-list-dense {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+}
+
+.dashboard-list-dense .dashboard-empty {
+  grid-column: 1 / -1;
+}
+
+.dashboard-list-dense .dashboard-item {
+  height: 100%;
+  border-right: 1px solid var(--item-line);
+  border-bottom: 1px solid var(--item-line);
+}
+
+.dashboard-list-dense .dashboard-item:last-child {
+  border-bottom: 1px solid var(--item-line);
+}
+
+.dashboard-empty {
+  padding: var(--space-2) var(--space-3);
+  color: var(--muted);
+  font-size: var(--font-micro);
+  line-height: 1.3;
+}
+
+.dashboard-item {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px var(--space-3);
+  border-bottom: 1px solid var(--item-line);
+  color: inherit;
+  text-decoration: none;
+}
+
+a.dashboard-item:hover {
+  background: var(--navigation-hover-bg);
+}
+
+.dashboard-item:last-child {
+  border-bottom: 0;
+}
+
+.message-cycle-link {
+  display: inline-block;
+  margin-top: 6px;
+  color: var(--accent-dark);
+  font-size: var(--font-secondary);
+}
+
+.dashboard-item-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.dashboard-item-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-secondary);
+  font-weight: 650;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-badge {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #edf1f7;
+  color: var(--muted);
+  font-size: var(--font-micro);
+  line-height: 1.5;
+}
+
+.dashboard-badge.ok {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.dashboard-badge.error {
+  background: var(--error-bg);
+  color: var(--danger);
+}
+
+.dashboard-badge.waiting {
+  background: var(--waiting-bg);
+  color: var(--waiting);
+}
+
+.dashboard-item-body {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-micro);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.dashboard-item-meta {
+  color: var(--muted);
+  font-size: var(--font-micro);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: 1px;
+}
+
+.dashboard-item-actions button {
+  min-height: 20px;
+  padding: 1px 6px;
+  font-size: var(--font-micro);
+}
+
+.danger-button {
+  border-color: transparent;
+  background: var(--danger);
+  color: whitesmoke;
+}
+
+.danger-button:where(:not(:disabled)):hover {
+  background: var(--danger-hover);
+}
+
+.danger-button:where(:not(:disabled)):active {
+  background: var(--danger-pressed);
+}
+
+.dashboard-item-actions .danger-button {
+  border-color: transparent;
+  background: var(--danger);
+  color: whitesmoke;
+}
+
+.dashboard-item-actions .danger-button:where(:not(:disabled)):hover {
+  background: var(--danger-hover);
+}
+
+/* 直近の判断は入力→結果と理由を詰めて表示する。 */
+.cycle-timeline .dashboard-item {
+  position: relative;
+  gap: 1px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  padding-left: 16px;
+}
+
+.cycle-timeline .dashboard-item-body {
+  white-space: pre-line;
+  -webkit-line-clamp: 4;
+}
+
+.cycle-timeline .dashboard-item::before {
+  position: absolute;
+  top: 9px;
+  left: 6px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  content: "";
+}
+
+.cycle-timeline .dashboard-item.failed::before {
+  background: var(--danger);
 }
 
 .chat-panel {
@@ -183,38 +634,60 @@ p {
 .messages {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-4);
   min-height: 0;
-  padding: 14px 14px 8px;
+  padding: var(--space-6) var(--space-6) var(--space-3);
   overscroll-behavior: contain;
   overflow-y: auto;
 }
 
 .message {
   display: grid;
-  gap: 4px;
+  align-items: end;
+  column-gap: 6px;
   max-width: min(78ch, 86%);
 }
 
-.message.user {
+.message.person {
+  grid-template-columns: auto minmax(0, 1fr);
   align-self: flex-end;
 }
 
-.message.assistant,
-.message.system {
+.message.assistant {
+  grid-template-columns: minmax(0, 1fr) auto;
   align-self: flex-start;
 }
 
+.message.system {
+  display: block;
+  align-self: flex-start;
+}
+
+.message-content {
+  display: grid;
+  min-width: 0;
+}
+
+.message.person .message-content {
+  justify-items: end;
+}
+
+.message.assistant .message-content {
+  justify-items: start;
+}
+
 .bubble {
+  max-width: 100%;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   padding: 8px 10px;
   border-radius: 8px;
-  font-size: 13px;
+  /* 周辺の表示密度は保ち、会話本文だけをわずかに大きくする。 */
+  font-size: calc(var(--font-body) + 1px);
   line-height: 1.5;
 }
 
-.message.user .bubble {
+.message.person .bubble {
   border-bottom-right-radius: 0;
   background: var(--accent);
   color: #ffffff;
@@ -232,13 +705,26 @@ p {
   color: var(--text);
 }
 
-.meta {
+.message-time,
+.message-display-name {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-secondary);
 }
 
-.message.user .meta {
+.message-time {
+  margin-bottom: 2px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.message.person .message-display-name {
+  margin: 0 2px 2px 0;
   text-align: right;
+}
+
+.message.assistant .message-display-name {
+  margin: 0 0 2px 2px;
+  text-align: left;
 }
 
 .message-image {
@@ -253,14 +739,155 @@ p {
 .composer {
   display: grid;
   gap: var(--space-3);
-  padding: 10px 12px;
+  padding: var(--space-4) var(--space-5);
   border-top: 1px solid var(--line);
   background: #ffffff;
 }
 
-input[readonly] {
+/* ツールバー行。保存済み入力元を表示し、device select は aria-label で補う。 */
+.web-microphone-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.web-input-source-label {
   color: var(--muted);
-  background: #f8fafc;
+  font-size: var(--field-size);
+  white-space: nowrap;
+}
+
+.web-microphone-controls>select {
+  flex: 1 1 160px;
+  min-width: min(100%, 140px);
+  max-width: var(--field-width-medium);
+}
+
+.web-microphone-controls>select[hidden] {
+  display: none;
+}
+
+.web-microphone-controls>button {
+  flex: 0 0 auto;
+}
+
+/* 音声入力トグル。OFF は画像ボタンと同系統だがアイコンは muted で薄く。ON は accent。 */
+.mic-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height);
+  min-width: var(--control-height);
+  padding: 0;
+  border-color: var(--line);
+  background: #ffffff;
+  color: var(--muted);
+  line-height: 0;
+}
+
+.mic-toggle:where(:not(:disabled)):hover {
+  background: #eef3fb;
+  color: var(--muted);
+}
+
+.mic-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.mic-toggle[aria-pressed="true"]:where(:not(:disabled)):hover {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+  color: #ffffff;
+}
+
+.mic-toggle-icon {
+  display: block;
+  flex: 0 0 auto;
+}
+
+/* 音声観測メータ。サーバ audio_runtime_state を表示するだけ。行間は控えめに詰める。 */
+.audio-meters {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-1) 0 0;
+}
+
+.audio-meters-settings {
+  margin: var(--space-2) 0 var(--space-2) var(--setting-label-width, 170px);
+  padding: var(--space-3);
+  border: 1px solid var(--info-border);
+  border-radius: 6px;
+  background: var(--info-bg);
+}
+
+/* value は固定幅。桁変化で track（バー）幅を変えない。 */
+.audio-meter-row {
+  display: grid;
+  grid-template-columns: 5.5em minmax(0, 1fr) 12em;
+  gap: var(--space-2);
+  align-items: center;
+  min-height: 17px;
+  font-size: var(--font-secondary);
+  color: var(--muted);
+}
+
+.audio-meter-label {
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.audio-meter-track {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--item-line);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.audio-meter-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 80ms linear;
+}
+
+.audio-meter-row[data-active="true"] .audio-meter-fill {
+  background: var(--ok);
+}
+
+.audio-meter-row[data-active="false"] .audio-meter-fill {
+  background: var(--accent);
+}
+
+.audio-meter-row[data-empty="true"] .audio-meter-fill {
+  width: 0% !important;
+  background: var(--item-line);
+}
+
+.audio-meter-threshold {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--waiting);
+  pointer-events: none;
+}
+
+.audio-meter-value {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
 }
 
 #message-input {
@@ -281,6 +908,8 @@ input[readonly] {
   justify-content: stretch;
 }
 
+/* 副ボタン。file-button は plain と同系統。 */
+.plain-button,
 .file-button {
   display: inline-flex;
   align-items: center;
@@ -292,7 +921,12 @@ input[readonly] {
   background: #ffffff;
   color: var(--text);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-body);
+}
+
+.plain-button:hover,
+.file-button:hover {
+  background: #eef3fb;
 }
 
 .composer-actions .file-button,
@@ -328,30 +962,28 @@ input[readonly] {
   object-fit: cover;
 }
 
-.plain-button {
-  border-color: var(--line);
-  background: #ffffff;
-  color: var(--text);
-}
-
-.plain-button:hover {
-  background: #eef3fb;
-}
-
 .statusbar {
   display: flex;
   align-items: center;
   gap: var(--space-4);
   min-height: 28px;
-  padding: 5px 10px;
+  padding: 5px var(--space-4);
   border-top: 1px solid var(--line);
   background: #ffffff;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-secondary);
 }
 
 .status {
   color: var(--muted);
+}
+
+.status.processing {
+  color: var(--waiting);
+}
+
+.status.error {
+  color: var(--danger);
 }
 
 .settings-backdrop {
@@ -367,8 +999,8 @@ input[readonly] {
   right: 0;
   z-index: 30;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  width: min(840px, 100vw);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(1120px, 100vw);
   height: 100vh;
   background: #ffffff;
   box-shadow: none;
@@ -397,7 +1029,7 @@ input[readonly] {
   border-color: var(--line);
   background: #ffffff;
   color: var(--text);
-  font-size: 18px;
+  font-size: var(--font-heading);
   line-height: 0;
   padding-bottom: 2px;
 }
@@ -407,43 +1039,76 @@ input[readonly] {
   line-height: 1.15;
 }
 
-.settings-tabs {
-  display: flex;
-  gap: 0;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--line);
+.settings-mobile-navigation {
+  display: none;
 }
 
-.tab-button {
-  min-width: 76px;
-  min-height: 34px;
-  border: 0;
+.settings-layout {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  min-height: 0;
   border-top: 1px solid var(--line);
+}
+
+.settings-navigation {
+  min-height: 0;
+  padding: 8px 0 14px;
+  overflow-y: auto;
   border-right: 1px solid var(--line);
-  border-radius: 0;
-  background: #f8fafc;
-  color: var(--text);
-  font-size: 12px;
-}
-
-.tab-button:hover {
-  background: #eef3f8;
-}
-
-.tab-button.active {
   background: #ffffff;
-  color: var(--accent);
+}
+
+.settings-navigation-category {
+  margin: 20px 14px 6px;
+  color: #222222;
+  font-size: var(--font-nav-category);
   font-weight: 700;
 }
 
-.tab-button.active:hover {
-  background: #f8fafc;
+.settings-navigation-category:first-child {
+  margin-top: 8px;
+}
+
+.settings-nav-button {
+  display: block;
+  width: calc(100% - 12px);
+  min-height: 34px;
+  margin: 1px 6px;
+  padding: 8px 18px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #444444;
+  text-align: left;
+}
+
+.settings-nav-button:where(:not(:disabled)):hover {
+  background: var(--navigation-hover-bg);
+  color: #444444;
+}
+
+.settings-nav-button.active {
+  background: var(--navigation-active-bg);
+  color: var(--navigation-active-text);
+  font-weight: 600;
+}
+
+.settings-nav-button.active:where(:not(:disabled)):hover {
+  background: var(--navigation-active-bg);
+  color: var(--navigation-active-text);
+}
+
+.settings-content {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
 }
 
 .settings-body {
   min-height: 0;
   overflow: auto;
-  padding: var(--panel-padding);
+  padding: 18px 20px 24px;
 }
 
 .tab-page {
@@ -455,30 +1120,262 @@ input[readonly] {
   gap: var(--panel-gap);
 }
 
-.form-grid {
+.model-settings-page {
+  align-content: start;
+}
+
+/* 設定フォームの共通行。label 幅は全設定ページで揃える。 */
+.settings-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
   gap: 10px;
 }
 
-label,
-.wide-label {
+.setting-row {
+  display: grid;
+  grid-template-columns: var(--setting-label-width) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.setting-row>label {
+  color: var(--muted);
+}
+
+.setting-row-top {
+  align-items: start;
+}
+
+/* 入力幅。未指定は右列いっぱい（full）。 */
+.field-width-peek {
+  /* APIキーなど、値全体を伏せず先頭だけが見える幅。値そのものは切り捨てない。 */
+  width: var(--field-width-peek) !important;
+  max-width: 100%;
+  flex: 0 0 var(--field-width-peek);
+}
+
+.field-width-short {
+  width: var(--field-width-short) !important;
+  max-width: 100%;
+  flex: 0 0 var(--field-width-short);
+}
+
+.field-width-medium {
+  width: 100%;
+  max-width: var(--field-width-medium);
+}
+
+.field-width-long {
+  width: 100%;
+  max-width: var(--field-width-long);
+}
+
+.field-width-full {
+  width: 100%;
+  max-width: none;
+}
+
+.console-control-with-hint {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.inline-suffix-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: var(--label-size);
+}
+
+.inline-suffix-control input {
+  flex: 0 0 var(--field-width-short);
+  width: var(--field-width-short);
+  max-width: 100%;
+}
+
+.console-info-box {
+  padding: var(--space-5);
+  font-size: var(--label-size);
+  line-height: 1.5;
+}
+
+.api-documentation-group,
+.api-doc-sections {
+  display: grid;
+  gap: 10px;
+}
+
+/* API 説明の本文のみ専用。外側の details は advanced-settings を使う。 */
+.api-doc-body {
+  margin: 10px 0 0;
+  padding: 2px;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: var(--font-body);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+/* 秘密値入力 + コピー / 貼り付けボタンの共通列。幅は入力側の field-width-* を優先する。 */
+.secret-field-controls button {
+  white-space: nowrap;
+}
+
+.model-web-search-field {
+  margin-top: 4px;
+}
+
+.speech-engine-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.speech-engine-panel[hidden] {
+  display: none;
+}
+
+/* 設定画面内の展開パネルは advanced-settings 一種に統一する。 */
+.advanced-settings {
+  padding: 8px 10px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fafbfd;
+}
+
+.advanced-settings summary {
+  cursor: pointer;
+  color: var(--text);
+  font-size: var(--font-body);
+  font-weight: 600;
+}
+
+.advanced-settings[open] summary {
+  margin-bottom: 10px;
+}
+
+.advanced-settings>.settings-list {
+  margin-top: 0;
+}
+
+/* レンジは setting-row と同じラベル幅に揃え、値表示を右に置く。 */
+.range-field {
+  display: grid;
+  grid-template-columns: var(--setting-label-width) minmax(0, 1fr) 70px;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: var(--label-size);
+}
+
+.range-field input {
+  min-height: auto;
+  padding: 0;
+}
+
+.range-field output {
+  color: var(--text);
+  text-align: right;
+}
+
+.speaker-enrollment {
+  display: grid;
+  gap: 10px;
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.speaker-list {
+  display: grid;
+  gap: 6px;
+  min-height: 74px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafc;
+  color: var(--muted);
+  font-size: var(--font-body);
+}
+
+.speaker-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.speaker-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.speaker-registration-status {
+  color: var(--muted);
+  font-size: var(--font-secondary);
+  white-space: nowrap;
+}
+
+.speaker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.speaker-actions button {
+  min-height: 26px;
+  padding: 3px 7px;
+}
+
+.speaker-registration-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 設定行内のラベルはテキストのみ。input を label 子にしない。 */
+.setting-row>label,
+.range-field>label {
+  display: block;
+  color: var(--muted);
+  font-size: var(--label-size);
+}
+
+/* 上ラベル積み上げ。設定の setting-row では使わない。 */
+.stack-label {
   display: grid;
   gap: 4px;
   color: var(--muted);
   font-size: var(--label-size);
 }
 
-label input,
-label select,
-label textarea {
+.stack-label input,
+.stack-label select,
+.stack-label textarea,
+.settings-mobile-navigation select {
   color: var(--text);
   font-size: var(--field-size);
 }
 
-.form-grid .wide-label {
-  grid-column: 1 / -1;
+input:not([type="checkbox"]):disabled,
+select:disabled,
+textarea:disabled {
+  border-color: #c4ccd7;
+  background: #e8ebf0;
+  color: var(--muted);
+  -webkit-text-fill-color: var(--muted);
+  opacity: 1;
+}
+
+input[type="checkbox"]:disabled {
+  opacity: 0.55;
 }
 
 .persona-prompt-field {
@@ -499,14 +1396,21 @@ label textarea {
   order: -1;
 }
 
-.system-policy-grid {
-  align-items: end;
+.pre-send-check-mcp-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
 }
 
-.system-policy-checkbox {
-  grid-column: 1 / -1;
-  align-self: end;
-  margin-bottom: 1px;
+.pre-send-check-mcp-list .checkbox-field {
+  width: 100%;
+}
+
+.pre-send-check-mcp-empty {
+  color: var(--muted);
+  font-size: var(--label-size);
+  line-height: 1.4;
 }
 
 .field-hint {
@@ -516,19 +1420,9 @@ label textarea {
   font-size: var(--label-size);
 }
 
-.field-caption {
-  color: var(--muted);
-  font-size: var(--label-size);
-}
-
 .selector-row select {
   min-width: 0;
-  flex: 1;
-}
-
-.model-preset-name-row {
-  display: grid;
-  max-width: 520px;
+  flex: 1 1 240px;
 }
 
 .settings-group {
@@ -541,33 +1435,36 @@ label textarea {
 .settings-group legend {
   padding: 0 6px;
   color: var(--text);
-  font-size: 13px;
-  font-weight: 400;
-}
-
-.settings-group-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.memory-settings-card {
-  display: grid;
-  gap: 10px;
+  font-size: var(--font-body);
+  font-weight: 600;
 }
 
 .inline-control-row {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  min-width: 0;
 }
 
-.api-key-field input {
-  flex: 0 0 90px;
+.conversation-display-name-manage {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
-.api-key-field button {
-  white-space: nowrap;
+.conversation-display-name-manage input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.conversation-display-name-manage button {
+  flex: 0 0 auto;
+  min-width: 64px;
+}
+
+.field-hint-indent {
+  margin-left: var(--setting-label-width);
 }
 
 .capability-columns {
@@ -581,18 +1478,32 @@ label textarea {
   gap: 8px;
 }
 
-.mcp-form-grid {
-  grid-template-columns: 1fr;
+.wake-camera-observations {
+  display: grid;
+  gap: 6px;
 }
 
 .settings-actions {
+  display: flex;
+  align-items: center;
   justify-content: flex-end;
-  padding: 10px 12px;
-  border-top: 1px solid var(--line);
+  gap: var(--space-3);
+  padding: 15px;
+  border-top: 1px solid #e0e0e0;
+  background: #f5f5f5;
+}
+
+.settings-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .settings-actions button {
-  min-width: 82px;
+  width: 80px;
+  min-width: 80px;
+  height: 30px;
+  min-height: 30px;
 }
 
 .notice {
@@ -606,7 +1517,7 @@ label textarea {
   background: #17202a;
   color: #ffffff;
   box-shadow: 0 8px 28px rgba(20, 30, 40, 0.24);
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 
 .notice.error {
@@ -614,6 +1525,37 @@ label textarea {
 }
 
 @media (max-width: 760px) {
+  .workspace-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(190px, 42%) minmax(0, 1fr);
+  }
+
+  .workspace-layout.dashboard-hidden {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .dashboard-panel {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  /* 狭い画面ではセクションを縦積みに戻す。 */
+  .dashboard-body {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-section-wide {
+    grid-column: auto;
+  }
+
+  .dashboard-list-dense {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-list-dense .dashboard-item {
+    border-right: 0;
+  }
+
   .messages {
     padding: 10px;
   }
@@ -623,11 +1565,92 @@ label textarea {
   }
 
   .settings-panel {
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
     width: 100vw;
   }
 
-  .form-grid,
+  .settings-mobile-navigation {
+    display: grid;
+    gap: 4px;
+    padding: 8px 12px 10px;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-size: var(--label-size);
+  }
+
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+    border-top: 0;
+  }
+
+  .settings-navigation {
+    display: none;
+  }
+
+  .settings-body {
+    padding: 12px;
+  }
+
   .capability-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .range-field,
+  .speaker-registration-row {
+    grid-template-columns: 1fr;
+  }
+
+  /* 狭い画面では track を上段、value を下段に置く。 */
+  .audio-meter-row {
+    grid-template-columns: 4.5em minmax(0, 1fr) 12em;
+    grid-template-areas:
+      "label track track"
+      ". value value";
+  }
+
+  .audio-meter-label {
+    grid-area: label;
+  }
+
+  .audio-meter-track {
+    grid-area: track;
+  }
+
+  .audio-meter-value {
+    grid-area: value;
+    text-align: right;
+  }
+
+  .audio-meters-settings {
+    margin-left: 0;
+  }
+
+  .field-width-short,
+  .field-width-medium,
+  .field-width-long {
+    max-width: none;
+    width: 100% !important;
+    flex: 1 1 auto;
+  }
+
+  /* APIキーの peek 幅は狭い画面でも先頭だけ見える幅を維持する。 */
+  .field-width-peek {
+    width: var(--field-width-peek) !important;
+    max-width: 100%;
+    flex: 0 0 var(--field-width-peek);
+  }
+
+  .range-field output {
+    text-align: left;
+  }
+
+  .inline-control-row {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .setting-row {
     grid-template-columns: 1fr;
   }
 
@@ -638,5 +1661,561 @@ label textarea {
 
   .selector-row select {
     flex-basis: 100%;
+  }
+
+  .web-microphone-controls>select {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  .speaker-row {
+    grid-template-columns: 1fr;
+  }
+
+  .speaker-actions {
+    justify-content: flex-start;
+  }
+
+  .conversation-display-name-manage {
+    flex-wrap: wrap;
+  }
+
+  .field-hint-indent {
+    margin-left: 0;
+  }
+
+  .log-topbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .log-toolbar {
+    width: 100%;
+  }
+
+  .log-col-component {
+    width: 96px;
+  }
+}
+
+/* ログ専用画面（/ui/logs）。会話 UI とは別レイアウト。 */
+.log-page {
+  overflow: hidden;
+}
+
+.log-shell {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.log-role-note {
+  margin: 0;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--info-bg);
+  color: var(--info-text);
+  font-size: var(--font-secondary);
+  line-height: 1.45;
+}
+
+.log-role-note a {
+  color: var(--accent-dark);
+  margin-left: 0.5em;
+}
+
+.log-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 10px 14px;
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.log-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.log-filter-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-secondary);
+  color: #ffffff;
+}
+
+.log-filter-field select {
+  width: auto;
+  min-width: 120px;
+  border-color: rgba(255, 255, 255, 0.55);
+}
+
+.log-checkbox-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-secondary);
+  color: #ffffff;
+  cursor: pointer;
+  user-select: none;
+}
+
+.log-topbar .plain-button {
+  border-color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.log-topbar .plain-button:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.log-component-filter {
+  position: relative;
+}
+
+.log-component-toggle {
+  min-width: 140px;
+  justify-content: space-between;
+}
+
+.log-component-popup {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 260px;
+  max-width: 360px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(31, 40, 51, 0.16);
+  color: var(--text);
+}
+
+.log-component-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+
+.log-component-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 150px;
+  min-height: 22px;
+  font-size: var(--font-secondary);
+  cursor: pointer;
+}
+
+.log-component-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-main {
+  min-height: 0;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.log-table-wrap {
+  height: 100%;
+  overflow: auto;
+}
+
+.log-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: var(--font-secondary);
+  line-height: 1.25;
+}
+
+.log-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--dashboard-bg);
+  color: var(--muted);
+  font-weight: 600;
+  text-align: left;
+}
+
+.log-table tbody tr {
+  border-bottom: 1px solid var(--item-line);
+}
+
+.log-table tbody tr:nth-child(even) {
+  background: #f9fafc;
+}
+
+.log-table td {
+  padding: 2px 8px;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.log-col-time {
+  width: 96px;
+  white-space: nowrap;
+}
+
+.log-col-level {
+  width: 72px;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.log-col-component {
+  width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-col-message {
+  width: auto;
+}
+
+.log-message-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.25;
+  max-height: calc(1.25em * 3);
+  word-break: break-word;
+}
+
+.log-level-debug .log-col-level {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.log-level-info .log-col-level {
+  color: var(--accent-dark);
+}
+
+.log-level-warning .log-col-level {
+  color: var(--waiting);
+}
+
+.log-level-error .log-col-level {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.log-statusbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-5);
+  padding: 6px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--dashboard-bg);
+  font-size: var(--font-secondary);
+  color: var(--muted);
+}
+
+/* 判断専用画面（/ui/cycles） */
+.cycle-page {
+  overflow: hidden;
+}
+
+.cycle-shell {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.cycle-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 10px 14px;
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.cycle-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.cycle-topbar .plain-button {
+  border-color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  text-decoration: none;
+}
+
+.cycle-topbar .plain-button:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.cycle-role-note {
+  margin: 0;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--info-bg);
+  color: var(--info-text);
+  font-size: var(--font-secondary);
+  line-height: 1.45;
+}
+
+.cycle-main {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.cycle-list-panel {
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid var(--line);
+  background: var(--dashboard-bg);
+}
+
+.cycle-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.cycle-list-item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--item-line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.cycle-list-item:hover {
+  background: var(--navigation-hover-bg);
+}
+
+.cycle-list-item.is-selected {
+  background: var(--navigation-active-bg);
+}
+
+.cycle-list-item.is-failed .cycle-list-title {
+  color: var(--danger);
+}
+
+.cycle-list-time {
+  color: var(--muted);
+  font-size: var(--font-micro);
+}
+
+.cycle-list-title {
+  font-size: var(--font-secondary);
+  font-weight: 650;
+}
+
+.cycle-list-body {
+  color: var(--muted);
+  font-size: var(--font-micro);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cycle-detail-panel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.cycle-detail-header {
+  padding: 10px 14px 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cycle-detail-header h2 {
+  font-size: var(--font-heading);
+  font-weight: 700;
+  word-break: break-all;
+}
+
+.cycle-detail-meta {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: var(--font-secondary);
+}
+
+.cycle-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--dashboard-bg);
+}
+
+.cycle-tab {
+  min-height: 32px;
+  padding: 6px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--font-body);
+  font-weight: 600;
+}
+
+.cycle-tab:hover {
+  background: var(--navigation-hover-bg);
+  color: var(--text);
+}
+
+.cycle-tab.is-active {
+  border-bottom-color: var(--accent);
+  background: #ffffff;
+  color: var(--accent-dark);
+}
+
+.cycle-tab-panels {
+  min-height: 0;
+  overflow: auto;
+}
+
+.cycle-tab-panel {
+  padding: 12px 14px;
+}
+
+.cycle-overview {
+  display: grid;
+  gap: 10px;
+}
+
+.cycle-overview-section {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.cycle-overview-section h3 {
+  margin: 0 0 6px;
+  font-size: var(--font-body);
+  font-weight: 700;
+}
+
+.cycle-overview-body {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: var(--font-secondary);
+  line-height: 1.45;
+}
+
+.cycle-stages {
+  display: grid;
+  gap: 8px;
+}
+
+.cycle-stage {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 0 10px 8px;
+}
+
+.cycle-stage>summary {
+  cursor: pointer;
+  padding: 8px 0;
+  font-weight: 650;
+  font-size: var(--font-body);
+}
+
+.cycle-json-block {
+  margin-bottom: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 0 10px 8px;
+}
+
+.cycle-json-block>summary {
+  cursor: pointer;
+  padding: 8px 0;
+  font-weight: 650;
+}
+
+.cycle-json {
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 6px;
+  background: #f7f9fc;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: var(--font-micro);
+  line-height: 1.35;
+  white-space: pre;
+}
+
+.cycle-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-secondary);
+}
+
+.cycle-statusbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-5);
+  padding: 6px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--dashboard-bg);
+  font-size: var(--font-secondary);
+  color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .cycle-main {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(160px, 36vh) minmax(0, 1fr);
+  }
+
+  .cycle-list-panel {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
   }
 }

@@ -73,7 +73,7 @@ class EventStreamClient:
                         boundary="otomekairo_event",
                         direction="receive",
                         kind=str(event.get("type", "event")),
-                        payload=event,
+                        payload=_trace_event_payload(event),
                     )
                 on_event(event)
         finally:
@@ -203,3 +203,18 @@ class EventStreamClient:
         if self._socket is None:
             raise StreamError("event stream is not connected.")
         return self._socket
+
+
+def _trace_event_payload(event: dict[str, Any]) -> dict[str, Any]:
+    # MCP の実引数は production trace へ複写しない。
+    if event.get("type") != "mcp.call_tool_request":
+        return event
+    data = event.get("data")
+    if not isinstance(data, dict):
+        return event
+    return {
+        **event,
+        "data": {
+            key: value for key, value in data.items() if key != "arguments"
+        },
+    }

@@ -110,7 +110,7 @@ LLM に渡すのは runtime candidate の生オブジェクトではなく、req
       "text": "無理ならまたあとで少し聞かせてください。"
     },
     {
-      "role": "user",
+      "role": "person",
       "text": "今日は少し疲れてる。また今度。"
     }
   ],

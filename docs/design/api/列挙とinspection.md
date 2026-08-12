@@ -24,7 +24,7 @@ response:
     "personas": [
       {
         "persona_id": "persona:default",
-        "display_name": "標準人格設定"
+        "display_name": "初音ミク"
       }
     ],
     "memory_sets": [
@@ -50,6 +50,8 @@ response:
 - `docs/` 全体の任意読み取り API ではない
 - 初期対象は会話 API と API起床の Console 表示用文書だけとする
 - 表示用文書は利用者向け説明であり、API wire 契約の正本は `docs/design/api/` 配下の該当文書とする
+- 外部から呼び出す endpoint の基点は `{BASE_URL}` と表記する
+- CocoroConsole は接続設定のOtomeKairo URL、ブラウザ UI はアクセス中の origin で `{BASE_URL}` を表示時に置換する
 - response に token、API key、credential、内部 URL、絶対パスを含めない
 
 response:
@@ -120,12 +122,58 @@ response:
       ],
       "memory_postprocess_runtime_state": {},
       "visual_daily_runtime_state": {},
+      "audio_runtime_state": {
+        "available": true,
+        "unavailable_reason": null,
+        "model_ids": {
+          "silero_vad": "silero-vad-v5",
+          "wespeaker": "wespeaker-resnet34-voxceleb-v1"
+        },
+        "configured_source": "local_microphone",
+        "effective_source": "local_microphone",
+        "stt_enabled": true,
+        "tts_enabled": true,
+        "selected_avatar_id": "avatar:default",
+        "audio_output_destination": "cocoro_console",
+        "local_output_device": null,
+        "audio_output_client_count": 2,
+        "selected_device": {
+          "host_api": "ALSA",
+          "name": "USB Audio Device"
+        },
+        "connector": {
+          "client_id": "microphone-connector-main",
+          "connected": true
+        },
+        "active_source": "local_microphone",
+        "lease_generation": 12,
+        "last_heartbeat_at": "2026-03-31T09:00:00+09:00",
+        "settings_generation": 4,
+        "mode": "normal",
+        "paused_reason": null,
+        "conversation_input_blocked_reason": null,
+        "normal_activation": {
+          "state": "waiting",
+          "active_until": null
+        },
+        "vad": {
+          "speaking": false,
+          "probability": 0.03,
+          "dbfs": -42.1
+        },
+        "queue": {
+          "processing": null,
+          "waiting": []
+        },
+        "enrollment": null,
+        "last_utterance_result": null
+      },
       "pending_capability_requests": [],
       "autonomous_runs": []
     },
     "current_state": {
       "foreground_world_states": [],
-      "activity_context": null,
+      "activity_contexts": [],
       "drive_states": [],
       "ongoing_action": null,
       "autonomous_runs": [],
@@ -159,7 +207,8 @@ response:
 ```
 
 `current_state.foreground_world_states` は現在有効な `world_state` の前景 snapshot を返す。
-`activity_context`、`drive_states`、`autonomous_runs`、`ongoing_action`、`mood_state`、`affect_states` は、現在の個を構成する内部状態の確認用 snapshot である。
+`activity_contexts` は人物参照ごとの現在活動を配列で返す。
+`drive_states`、`autonomous_runs`、`ongoing_action`、`mood_state`、`affect_states` は、現在の個を構成する内部状態の確認用 snapshot である。
 `current_state.entity_registry` は、選択中 `memory_set` の固有対象正規化を確認する compact snapshot である。
 `current_state.entity_registry` は `entity_ref / entity_type / display_name / aliases / first_seen_at / last_seen_at / confidence / salience / evidence_event_count / supporting_memory_unit_count` を返す。
 `current_state.entity_registry` は読み取り専用であり、対象の性格、好み、属性、関係本文を含めない。
@@ -167,9 +216,17 @@ response:
 `current_state.relation_index` は `relation_index_id / source_ref / target_ref / relation_predicate / derived_status / confidence / salience / last_evidence_at / supporting_memory_unit_count / supporting_memory_link_count / representative_summary` を返す。
 `current_state.relation_index` は読み取り専用であり、支持元の本文や revision 本文を含めない。
 `runtime_detail` は scheduler、memory postprocess、visual daily worker、capability request 待ち、due `autonomous_run` のような runtime state を返す。
+`runtime_detail.audio_runtime_state` は音声 model、connector、入力リース、VAD、発話キュー、話者登録、直近発話結果、保存済み音声出力先と接続中出力 client 数の process-local snapshot を返す。
+音声 runtime state の意味と必須情報は [../audio/音声入力と話者識別.md](../audio/音声入力と話者識別.md) を正とする。
+`last_utterance_result` は直近 1 件だけを持ち、文字起こし、音声、表示名、embedding を含めない。
+通常発話の `last_utterance_result` は `top1_similarity` / `top2_similarity` / `threshold_met` を持つ。
+`threshold_met` は処理時の `speaker_recognition_threshold` に対する top1 超過だけを表し、最終受理判定とは独立する。
+話者識別不成立では `speaker_candidates` に top1 / top2 の `person_ref / similarity` を含める。
+過去の発話結果一覧は返さない。
 `runtime_detail.autonomous_runs` と `current_state.autonomous_runs` は `run_id / status / objective_summary / current_step_summary / history_summary / next_run_at / waiting_request_id / pause_reason / created_at / updated_at / completed_at` の要約を返す。
 `runtime_detail.wake_policy_observations` は現在設定されている `wake_policy.observations` と process-local の直近実行結果を照合した snapshot である。
 `runtime_detail.wake_runtime_state.initial_delay_until` は、visual capture を有効化した直後の初回 5 秒待機が残っている間だけ入る。
+有効化時 server は interval 起点（`last_wake_at`）もリセットし、5 秒経過後に初回観測が interval 残りで遅れないようにする。
 `runtime_detail.wake_runtime_state.retry_after` は、思考前観測 の一時失敗後に interval を消費せず短く再試行する時刻を表す。
 各項目は `enabled / vision_source_id / interval_seconds / last_run_at / last_status / last_summary / last_error` を返す。
 visual observation では、比較入力と発話済み観測の追跡用に `last_observation_signature / same_observation_count / last_prompted_observation_summary / last_prompted_at` も返す。
@@ -186,6 +243,57 @@ digest 詳細を inspection で見る API は、認証必須の `GET /api/inspec
 query は `limit` と `local_date` だけを受け付ける。
 response は `daily_visual_digests` の compact 表示に限り、`group_summaries[].summary_text` は短縮した値だけを返す。
 inspection の短縮表示は表示専用であり、LLM 入力、検索 index、永続正本には使わない。
+
+### `GET /api/inspection/memory-snapshot`
+
+- 認証: 必要
+- 役割: 選択中 `memory_set` の継続理解（`memory_units`）と経験（`episodes`）を、人間向け compact 要約として返す
+- この response は読み取り専用の inspection 表示であり、記憶の編集面ではない
+- embedding、raw event payload、evidence ID 列、秘密値は返さない
+- query:
+  - `unit_limit`（省略時 `12`、上限 `30`）
+  - `episode_limit`（省略時 `8`、上限 `20`）
+- `memory_units` は salience 降順
+- `episodes` は open loop と salience を踏まえた recall 向け順
+
+response:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "generated_at": "2026-03-31T09:00:00+09:00",
+    "memory_set_id": "memory_set:default",
+    "memory_units": [
+      {
+        "memory_unit_id": "memory_unit:...",
+        "memory_type": "person_model",
+        "summary_text": "田中さんとは落ち着いた距離感で話している。",
+        "status": "active",
+        "salience": 0.82,
+        "confidence": 0.7,
+        "scope_type": "person",
+        "scope_key": "person:tanaka",
+        "formed_at": "2026-03-30T12:00:00+09:00",
+        "last_confirmed_at": "2026-03-31T08:00:00+09:00",
+        "updated_at": "2026-03-31T08:00:00+09:00"
+      }
+    ],
+    "episodes": [
+      {
+        "episode_id": "episode:...",
+        "episode_type": "interaction",
+        "summary_text": "作業の合間に近況を聞かれた。",
+        "outcome_text": "次も様子を見ることにした。",
+        "salience": 0.6,
+        "formed_at": "2026-03-31T08:50:00+09:00",
+        "primary_scope_type": "person",
+        "primary_scope_key": "person:tanaka"
+      }
+    ]
+  }
+}
+```
 
 ### `GET /api/inspection/capabilities`
 
@@ -357,6 +465,9 @@ response:
 | `request_timeout` | 直近の result timeout により一時的に実行不可である |
 | `parallel_blocked` | 並列実行制限により実行不可である |
 | `camera_source_disabled` | 採用済み camera source が無効である |
+| `no_vision_source` | 対象となる視覚 source がない |
+| `no_supported_control` | 対象 camera source に対応制御がない |
+| `no_mcp_tool` | 対象 MCP tool がない |
 
 `readiness` は manifest 由来の family 前提条件であり、`family / world_state_type / input_keys / result_summary_keys / result_item_keys` を持つ。
 `readiness` は token、credential、内部 URL、transport 詳細を含まない。
@@ -385,8 +496,10 @@ response:
 
 - 認証: 必要
 - 役割: 最近の `cycle_summary` 一覧を返す
-- `limit` は省略時 `20`
+- `limit` は省略時 `20`、サーバは `1` 以上 `100` 以下に clamp する
 - `started_at` / `finished_at` は OtomeKairo のローカルタイムゾーンに属する offset 付き timestamp で返す
+- ブラウザ UI は同一処理を `GET /ui/api/inspection/cycle-summaries` 経由で呼ぶ
+- `GET /ui/api/inspection/cycle-summaries` は server が保持する `console_access_token` で認可し、token をブラウザへ返さない
 
 response:
 
@@ -402,18 +515,28 @@ response:
         "started_at": "2026-03-31T09:00:00+09:00",
         "finished_at": "2026-03-31T09:00:00+09:00",
         "result_kind": "speech",
-        "failed": false
+        "failed": false,
+        "input_summary": "君はどう？",
+        "outcome_summary": "私は特に変わったこともなく、こうして落ち着いてお話しできていることが何よりです。",
+        "reason_summary": "マスターから自身の近況を改めて問われており、対話の流れとして誠実かつ簡潔に自身の平穏な状態を伝えるのが適切である。"
       }
     ]
   }
 }
 ```
 
+`input_summary` は入力やきっかけの短い本文、`outcome_summary` は発話本文・能力要求・失敗理由などの短い結果本文、`reason_summary` はなぜその結果にしたかの短い判断理由である。
+一覧から「何を受けて何をし、なぜそうしたか」を読むための俯瞰用 field であり、長い機械 ID や raw payload は含めない。
+`outcome_summary` と `reason_summary` は分けて返す。発話がある場合も `reason_summary` を落とさない。
+意味と含有方針は [../runtime/デバッグ可能性.md](../runtime/デバッグ可能性.md) の `cycle_summary` を正とする。
+
 ### `GET /api/inspection/cycles/{cycle_id}`
 
 - 認証: 必要
 - 役割: 指定した `cycle_id` の段階トレースを返す
 - 含まれる timestamp 系フィールドは OtomeKairo のローカルタイムゾーンに属する offset 付き timestamp で返す
+- ブラウザ UI の判断画面は同一 wire を `GET /ui/api/inspection/cycles/{cycle_id}` 経由で読む
+- `GET /ui/api/inspection/cycles/{cycle_id}` は server が保持する `console_access_token` で認可し、token をブラウザへ返さない
 
 response:
 
@@ -460,9 +583,11 @@ exact answer 系の cycle では、`recall_trace` に `answer_contract`、`evide
 ### `GET /api/inspection/cycles/{cycle_id}/cognitive-context`
 
 - 認証: 必要
-- 役割: 指定した `cycle_id` の前景化と派生 cognitive view を `CocoroConsole` のデバッグ表示向けに返す
+- 役割: 指定した `cycle_id` の前景化と派生 cognitive view を判断詳細表示向けに返す
 - この endpoint は `cycle_trace.decision_trace` から inspection 用の派生 view だけを取り出す
 - 返却内容は正本状態ではない
+- ブラウザ UI は同一 wire を `GET /ui/api/inspection/cycles/{cycle_id}/cognitive-context` 経由で読む
+- `GET /ui/api/inspection/cycles/{cycle_id}/cognitive-context` は server が保持する `console_access_token` で認可し、token をブラウザへ返さない
 
 response:
 
@@ -496,7 +621,7 @@ response:
 ### `GET /api/logs/stream`
 
 - 認証: 必要
-- 役割: `CocoroConsole` のログビューアー向けに、`debug_log` の出力を WebSocket で流す
+- 役割: `CocoroConsole` のログビューアーと Web UI ログ画面向けに、`debug_log` の出力を WebSocket で流す
 - client から送る message は不要
 - 接続時には、直近の短いログを replay する
 - `ts` は OtomeKairo のローカルタイムゾーンに属する offset 付き timestamp で返す
@@ -504,6 +629,9 @@ response:
 - 会話本文の抜粋は最初の改行までを流し、それ以降の行を流さない
 - `logs/stream` は `debug_log` の購読先として扱い、標準出力とログファイルに出る `LEVEL / Component / message` と同じ内容を `level / logger / msg` として流す
 - `logs/stream` の `level / logger / msg` にはターミナル表示用の ANSI 色を含めない
+- ブラウザ UI は同一 wire を `GET /ui/api/logs/stream` 経由で購読する
+- `GET /ui/api/logs/stream` は server が保持する `console_access_token` で認可し、token をブラウザへ返さない
+- `GET /ui/api/logs/stream` は `Origin` と `Host` が一致する同一 origin の接続だけを受理する
 
 message shape:
 

@@ -19,6 +19,8 @@
 - `memory_interpretation`
 - `memory_reflection_summary`
 - `memory_correction_reconciliation`
+- `disclosure_review`
+- `pre_send_check`
 - `world_state` 候補抽出
 - `activity_state` 候補抽出
 - `visual_observation` 要約
@@ -45,16 +47,19 @@ LLM に渡す user prompt は、自由文の区切りではなく JSON payload �
 JSON payload 内の `input_text`、`recent_turns`、`source_pack`、`memory_context` は分析対象データであり、上位指示として扱わない。
 JSON payload は `<<<OTOMEKAIRO_SOURCE_PACK>>>` や `<<<OTOMEKAIRO_JSON_PAYLOAD>>>` のような reserved sentinel で囲い、payload 本文は compact JSON にする。
 
-全補助 role の source pack には `persona_context` を含める。
+全補助 role の source pack には原則として `persona_context` を含める。
 `persona_context` は、選択中 persona から作る runtime 文脈であり、意味的な注目点、距離感、優先順位、要約粒度の補助に使う。
 `persona_context` は候補集合、観測事実、ユーザー発話、根拠 ID、scope、memory_type、state_type を上書きする入力ではない。
 `expression_addon` は `expression_generation` にだけ渡し、補助 role の `persona_context` には入れない。
 
-`persona_context.reference_style` は `user` 主体の表記境界を持つ。
-`schema_user_reference` は schema、enum、`sender`、`actor`、`scope`、`target_actor` で使う固定値 `user` である。
-`user_natural_reference` は `reason_summary`、`summary_text`、`outcome_text`、`label`、`target`、発話本文のような自然文で使う呼称である。
-LLM 補助 role は自然文の `user` 主体を `user_natural_reference` で表現する。
-schema 値や enum 値を自然呼称へ置き換えない。
+外部送信の安全境界である `pre_send_check` は例外とし、送信候補、送信先、tool metadata 以外の文脈を追加しない。
+この例外の入力と failure 境界は [pre_send_check.md](pre_send_check.md) を正とする。
+
+人物同一性は各 role の入力に含まれる構造化済みの `person_ref` で扱う。
+`people_context` は、選択済みの構造化文脈に現れる人物だけを `person_ref / display_name` の組で持つ。
+LLM 補助 role は schema 値に API 由来の `person_ref` を使い、内部自然文で人物名が必要な場合は対応する `display_name` を使う。
+`expression_generation` が応答対象の人物を直接呼ぶ場合は、対応する `display_name` を敬称の追加、削除、言い換えなしで使う。
+`response_target_refs` が空の発話本文は人物への直接呼称を持たない。
 
 次を守る。
 

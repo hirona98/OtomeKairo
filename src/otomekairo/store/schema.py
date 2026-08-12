@@ -10,7 +10,7 @@ from otomekairo.service.common import debug_log
 
 # 定数
 MEMORY_DB_FILE_NAME = "memory.db"
-CURRENT_MEMORY_DB_VERSION = 16
+CURRENT_MEMORY_DB_VERSION = 17
 SUPPORTED_MEMORY_DB_VERSIONS = {0, CURRENT_MEMORY_DB_VERSION}
 
 
@@ -74,6 +74,9 @@ class StoreSchemaMixin:
                 kind TEXT NOT NULL,
                 role TEXT,
                 text TEXT,
+                interaction_ref TEXT,
+                speaker_ref TEXT,
+                participant_refs_json TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 payload_json TEXT NOT NULL
             );
@@ -86,6 +89,9 @@ class StoreSchemaMixin:
 
             CREATE INDEX IF NOT EXISTS idx_events_kind_created_at
             ON events(kind, created_at);
+
+            CREATE INDEX IF NOT EXISTS idx_events_interaction_created_at
+            ON events(memory_set_id, interaction_ref, created_at);
 
             CREATE TABLE IF NOT EXISTS retrieval_runs (
                 cycle_id TEXT PRIMARY KEY,
@@ -243,6 +249,7 @@ class StoreSchemaMixin:
             CREATE TABLE IF NOT EXISTS activity_states (
                 activity_id TEXT PRIMARY KEY,
                 memory_set_id TEXT NOT NULL,
+                actor_ref TEXT NOT NULL,
                 activity_label TEXT NOT NULL,
                 status TEXT NOT NULL,
                 confidence REAL NOT NULL,
@@ -257,7 +264,7 @@ class StoreSchemaMixin:
             ON activity_states(memory_set_id, expires_at, salience, updated_at);
 
             CREATE INDEX IF NOT EXISTS idx_activity_states_current
-            ON activity_states(memory_set_id, status, updated_at);
+            ON activity_states(memory_set_id, actor_ref, status, updated_at);
 
             CREATE TABLE IF NOT EXISTS episodes (
                 episode_id TEXT PRIMARY KEY,

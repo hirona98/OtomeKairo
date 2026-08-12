@@ -301,6 +301,8 @@ class StoreVectorMixin:
 
         # 作成
         if schema_row is None:
+            # 作成失敗後は例外文ではなく実在する schema を確認する。
+            creation_error: sqlite3.OperationalError | None = None
             try:
                 conn.execute(
                     f"""
@@ -309,8 +311,7 @@ class StoreVectorMixin:
                     """
                 )
             except sqlite3.OperationalError as exc:
-                if str(exc).endswith("already exists") is False:
-                    raise
+                creation_error = exc
             schema_row = conn.execute(
                 """
                 SELECT sql
@@ -321,6 +322,8 @@ class StoreVectorMixin:
                 (table_name,),
             ).fetchone()
             if schema_row is None:
+                if creation_error is not None:
+                    raise creation_error
                 raise RuntimeError(f"{table_name} was not available after creation attempt.")
 
         # 検証
