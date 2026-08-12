@@ -330,6 +330,27 @@ class TtsRuntimeTests(unittest.TestCase):
             ["browser"],
         )
 
+    def test_runtime_preserves_ambient_delivery_context(self) -> None:
+        definition = deepcopy(build_default_avatar()["tts"])
+        definition["enabled"] = True
+        service = _Service(definition)
+        runtime = TtsRuntime(service, _StaticProvider(_pcm16_wav()))
+        self.addCleanup(runtime.close)
+
+        reservation = runtime.reserve(
+            cycle_id="cycle:test",
+            source_kind="background_thinking",
+            interaction_ref=None,
+            recipient_person_refs=[],
+            speech_text="テスト",
+        )
+        runtime.activate(reservation)
+
+        self.assertTrue(service._event_stream_registry.delivered.wait(1.0))
+        event, _ = service._event_stream_registry.binary_deliveries[0]
+        self.assertIsNone(event["data"]["interaction_ref"])
+        self.assertEqual(event["data"]["recipient_person_refs"], [])
+
     def test_runtime_uses_cocoro_console_when_connected(self) -> None:
         definition = deepcopy(build_default_avatar()["tts"])
         definition["enabled"] = True

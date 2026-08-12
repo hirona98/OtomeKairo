@@ -22,7 +22,7 @@ class _TtsDelivery:
     destination: str
     cycle_id: str
     source_kind: str
-    interaction_ref: str
+    interaction_ref: str | None
     recipient_person_refs: list[str]
     speech_text: str
     tts_definition: dict[str, Any]
@@ -73,7 +73,7 @@ class TtsRuntime:
         *,
         cycle_id: str,
         source_kind: str,
-        interaction_ref: str,
+        interaction_ref: str | None,
         recipient_person_refs: list[str],
         speech_text: str,
     ) -> TtsDeliveryReservation:

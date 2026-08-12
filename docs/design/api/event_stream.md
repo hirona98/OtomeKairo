@@ -139,7 +139,11 @@ event type の分類軸は次に固定する。
 - server は `system_notice` を購読中の全 client へ履歴再送なしで配信する
 - server は `audio_output_settings.destination` が示す `client_kind` のうち、`assistant_audio` を購読する起動中の全 client へ同じ合成済み WAV を配信する
 - `assistant_message.data.source_kind` は発話生成の起点を示し、event type を増やして起点ごとの発話通知を分けない
-- `assistant_message.data.interaction_ref / recipient_person_refs` は論理配送先を示す
+- `assistant_message.data.interaction_ref / recipient_person_refs` は人物へ向けた発話の論理配送先を示す
+- `source_kind=wake / background_thinking` の周囲への独話は `interaction_ref=null / recipient_person_refs=[]` とする
+- 周囲への独話では人物、直近の `interaction_ref`、購読 client を論理配送先として補完しない
+- `conversation / capability_result / autonomous_run` と、人物へ向けた `wake` は、非空の `interaction_ref / recipient_person_refs` を持つ
+- `interaction_ref` だけ、または `recipient_person_refs` だけを持つ配送形は不正とする
 - capability result follow-up の発話通知は `assistant_message` に `source_kind=capability_result`、`request_id`、`capability_id` を入れる
 - `wake / background_thinking` の発話通知は `assistant_message` に `source_kind=wake / background_thinking`、`trigger_kind` を入れる
 
@@ -260,11 +264,13 @@ server -> client の代表例（capability request 1 件と通知系）:
 `pre_send_check` の notice は candidate、LLM 理由、秘密値を含めない。
 起点人物がいる場合だけ `conversation_visible=true` とし、client は assistant message ではなく system message として会話欄にも表示する。
 `assistant_message.data.message_id / created_at / message / persona_id / persona_display_name / interaction_ref / recipient_person_refs` は全発話通知で必須とする。
+`interaction_ref / recipient_person_refs` は key 自体を省略せず、周囲への独話では値を `null / []` とする。
 `persona_id / persona_display_name` はその発話生成で使った人格設定の ID とプリセット名であり、client は受信時の現在設定から再解決しない。
 `assistant_message.data.audio_delivery` と HTTP response の `speech.audio_delivery` は `delivery_id / status / error_code` を持つ。
 `audio_delivery.status` は `queued / disabled / failed` のいずれかとする。
 `queued` のときだけ `delivery_id` を返し、`disabled` のときは `error_code=null`、`failed` のときは `tts_target_unavailable / tts_queue_full` のいずれかを返す。
 `assistant_audio.data` は `delivery_id / destination / cycle_id / source_kind / interaction_ref / recipient_person_refs / status / media_type / byte_count / error_code` を持つ。
+`assistant_audio.data.interaction_ref / recipient_person_refs` は対応する `assistant_message` と同じ論理配送形を保持し、周囲への独話では `null / []` とする。
 `assistant_audio.data.destination` は保存設定ではなく、その発話で確定した実際の配送先を表す。保存先が `cocoro_console` でも、発話受付時にCocoroConsoleが未接続でOtomeKairoへ配送する場合は `otomekairo` とする。
 音声合成に成功した場合、server は `status=succeeded / media_type=audio/wav / byte_count>0 / error_code=null` の JSON message と、その直後の1個の binary messageを同じ送信lock内で配送する。
 binary message は RIFF/WAVE の PCM 16-bit または IEEE float 32-bit とし、長さを `byte_count` と一致させる。
