@@ -41,7 +41,7 @@ OtomeKairo では、`event_evidence` 全体を LLM 任せにはしない。
 
 - `event_evidence` を使うかどうかの判定
 - `_select_event_evidence_ids()` の基本方針
-- `EVENT_EVIDENCE_LIMIT=3` の件数上限
+- `EVENT_EVIDENCE_LIMIT=8` の件数上限
 - `events` の広い再読や時系列再構成
 - 正確引用を標準責務にすること
 - `RecallPack` の section 構成
@@ -62,7 +62,7 @@ event 単位の LLM 圧縮は、選定済み event の順序を index として�
 
 ここで event 単位の呼び出しにする理由は次である。
 
-- selected event は最大 3 件で、call 数が膨らまない
+- selected event は最大 8 件で、call 数が膨らみすぎない
 - 1 件だけ失敗しても他の `event_evidence` を残せる
 - `event_id` と生成失敗の対応を inspection で追いやすい
 

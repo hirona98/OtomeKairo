@@ -7,8 +7,8 @@ from otomekairo.memory.utils import normalized_text_list
 
 ACTIVE_MEMORY_STATUSES = ("inferred", "confirmed")
 ACTIVE_COMMITMENT_STATES = ("open", "waiting_confirmation", "on_hold")
-ASSOCIATION_MEMORY_LIMIT = 6
-ASSOCIATION_EPISODE_LIMIT = 4
+ASSOCIATION_MEMORY_LIMIT = 12
+ASSOCIATION_EPISODE_LIMIT = 8
 ASSOCIATION_QUERY_KIND_WEIGHTS = {
     "input": 1.0,
     "entity": 0.92,

@@ -8,16 +8,16 @@ from otomekairo.llm.contexts import PersonaContext
 
 
 # 定数
-EVENT_EVIDENCE_LIMIT = 3
-EVENT_EVIDENCE_MAX_WORKERS = 3
+EVENT_EVIDENCE_LIMIT = 8
+EVENT_EVIDENCE_MAX_WORKERS = 4
 EVENT_EVIDENCE_FOCUSES = {
     "commitment",
     "fact",
     "relationship",
     "episodic",
 }
-EVENT_EVIDENCE_SOURCE_SUMMARY_LIMIT = 2
-PRECISE_EVENT_EVIDENCE_LIMIT = 3
+EVENT_EVIDENCE_SOURCE_SUMMARY_LIMIT = 6
+PRECISE_EVENT_EVIDENCE_LIMIT = 8
 PRECISE_EVENT_EVIDENCE_FOCUS_HISTORY = {
     "commitment",
     "relationship",

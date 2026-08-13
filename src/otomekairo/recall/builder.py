@@ -22,11 +22,13 @@ MEMORY_LINK_RECALL_LABEL_PRIORITY = [
     "about_same_scope",
     "affects",
 ]
-MEMORY_LINK_RECALL_HINT_LIMIT = 3
-MEMORY_LINK_RECALL_TRACE_LIMIT = 8
-VISUAL_OBSERVATION_RECALL_LIMIT = 3
-VISUAL_DAILY_DIGEST_RECALL_LIMIT = 2
-RELATION_INDEX_RECALL_LIMIT = 12
+MEMORY_LINK_RECALL_HINT_LIMIT = 8
+MEMORY_LINK_RECALL_TRACE_LIMIT = 16
+VISUAL_OBSERVATION_RECALL_LIMIT = 8
+VISUAL_DAILY_DIGEST_RECALL_LIMIT = 4
+RELATION_INDEX_RECALL_LIMIT = 24
+VISUAL_DAILY_GROUP_SUMMARY_LIMIT = 8
+VISUAL_DAILY_MEMORY_CANDIDATE_LIMIT = 8
 
 
 # recall構築
@@ -224,8 +226,8 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         candidate_memory_links = self.store.list_memory_links_for_recall(
             memory_set_id=memory_set_id,
             memory_unit_ids=self._collect_selected_ids(candidate_sections, key="memory_unit_id"),
-            limit_per_unit=2,
-            total_limit=40,
+            limit_per_unit=4,
+            total_limit=80,
         )
         self._attach_memory_link_summaries_to_sections(
             sections=candidate_sections,
@@ -263,8 +265,8 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         memory_links = self.store.list_memory_links_for_recall(
             memory_set_id=memory_set_id,
             memory_unit_ids=selected_memory_ids,
-            limit_per_unit=3,
-            total_limit=24,
+            limit_per_unit=8,
+            total_limit=80,
         )
         self._attach_memory_link_summaries_to_sections(
             sections=sections,
@@ -1587,12 +1589,12 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             self._to_visual_daily_group_summary(item)
             for item in record.get("group_summaries", [])
             if isinstance(item, dict)
-        ][:3]
+        ][:VISUAL_DAILY_GROUP_SUMMARY_LIMIT]
         memory_candidate_summaries = [
             self._to_visual_daily_memory_candidate_summary(item)
             for item in record.get("memory_candidate_summaries", [])
             if isinstance(item, dict)
-        ][:3]
+        ][:VISUAL_DAILY_MEMORY_CANDIDATE_LIMIT]
         return {
             "source_kind": "daily_visual_digest",
             "digest_id": record["digest_id"],

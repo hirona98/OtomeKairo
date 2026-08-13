@@ -99,15 +99,15 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
     "risk_flags": ["mixed_intent"]
   },
   "constraints": {
-    "global_recall_limit": 14,
+    "global_recall_limit": 40,
     "section_limits": {
-      "self_model": 2,
-      "person_model": 4,
-      "relationship_model": 3,
-      "active_topics": 2,
-      "active_commitments": 3,
-      "episodic_evidence": 2,
-      "conflicts": 2
+      "self_model": 4,
+      "person_model": 8,
+      "relationship_model": 8,
+      "active_topics": 4,
+      "active_commitments": 8,
+      "episodic_evidence": 6,
+      "conflicts": 4
     }
   },
   "candidate_sections": [

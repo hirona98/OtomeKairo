@@ -11,15 +11,15 @@ from otomekairo.recall.association import ACTIVE_MEMORY_STATUSES
 
 
 SECTION_LIMITS = {
-    "self_model": 2,
-    "person_model": 4,
-    "relationship_model": 3,
-    "active_topics": 2,
-    "active_commitments": 3,
-    "episodic_evidence": 2,
-    "conflicts": 2,
+    "self_model": 4,
+    "person_model": 8,
+    "relationship_model": 8,
+    "active_topics": 4,
+    "active_commitments": 8,
+    "episodic_evidence": 6,
+    "conflicts": 4,
 }
-GLOBAL_RECALL_LIMIT = 14
+GLOBAL_RECALL_LIMIT = 40
 
 
 class RecallPackSelectionError(LLMError):

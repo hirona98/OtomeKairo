@@ -6,6 +6,7 @@ from typing import Any
 
 from otomekairo.llm.client import LLMError
 from otomekairo.service.common import debug_log
+from otomekairo.service.input.constants import WORLD_STATE_FOREGROUND_LIMIT
 from otomekairo.service.input.source_owner import first_visual_source_owner
 
 
@@ -180,7 +181,7 @@ class ServiceInputActivityMixin:
         if visual_observation_context:
             payload["visual_observation_context"] = visual_observation_context
         if foreground_world_state:
-            payload["foreground_world_state"] = foreground_world_state[:4]
+            payload["foreground_world_state"] = foreground_world_state[:WORLD_STATE_FOREGROUND_LIMIT]
         previous_context = self._summarize_activity_context(previous_activity_state, current_time=started_at)
         if previous_context:
             payload["previous_activity_context"] = previous_context
