@@ -168,6 +168,13 @@ timeout 後に再試行、待機、完了、cancel のどれを選ぶかは `aut
 - 同じ MCP server に active、waiting_timer、waiting_result、paused の session がある間は `create_new` を拒否する。人物が置き換える場合は `coordination.mode=replace_existing` とし、既存 session の全 run id を対象に含める
 - background 開始は既存 session の自動置換を行わない
 
+判断用の `CapabilityDecisionView.mcp.call_tool` は、単発 tool 実行用の `mcp_servers` と有限セッション開始用の `finite_session_targets` を分ける。`finite_session_targets[]` は `mcp_server_id / active_run_ids` を持つ。
+`user_message` では利用可能かつ `autonomous_session.enabled=true` の server を載せ、background の最短間隔は適用しない。`background_thinking` ではさらに `background_enabled=true`、nonterminal session なし、最短間隔経過済みの server だけを載せる。他の起点では空配列にする。
+
+`decision.autonomous_run.mcp_server_id` は `finite_session_targets[].mcp_server_id` からだけ選ぶ。候補外の server を選んだ出力は decision contract の contextual validation で拒否し、通常の契約不正と同じく 1 回だけ repair する。開始候補がない場合、同じ MCP 操作を `mcp_server_id=null` の通常 run へ切り替えず、`pending_intent` または `noop` を判断する。
+
+decision contract 通過後、開始直前に最新設定、起点、nonterminal session、最短間隔を再検証する。判断中の設定変更や並行開始で境界を満たさなくなった場合は session を作らず、明示的な `internal_failure` として記録する。
+
 step と終了境界は次のとおりとする。
 
 - session 内で実行できる capability は、run の `mcp_server_id` と一致する `mcp.call_tool` だけである。他の MCP server と他の capability は decision view から利用不可にし、出力されても拒否する

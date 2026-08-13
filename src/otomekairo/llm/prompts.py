@@ -1152,9 +1152,10 @@ def _decision_capability_run_rules(*, include_person_start: bool) -> str:
     body = (
         "capability_request は CapabilityDecisionView に available=true で載っている能力が必要なときに選びます。\n"
         "autonomous_run は、継続する行動や観測、未完了の向きを目的として保持するときに選びます。次の一手は autonomous_step_generation が決めます。\n"
-        "有限 MCP セッションは、対象 server が available=true かつ autonomous_session.enabled=true のときだけ開始できます。"
-        "background_thinking ではさらに background_enabled=true と background_eligible=true が必要です。"
+        "有限 MCP セッションは CapabilityDecisionView の mcp.call_tool.finite_session_targets に載る server だけ開始できます。"
+        "autonomous_run.mcp_server_id は finite_session_targets[].mcp_server_id から選びます。"
         "active_run_ids が非空なら coordination.mode=replace_existing とし、その全 run id を target_run_ids に含めます。"
+        "対象 server が finite_session_targets に無い場合、同じ MCP 操作を mcp_server_id=null の通常 run で代替せず、pending_intent または noop を選びます。"
         "通常の run は mcp_server_id=null です。\n"
         "capability_request.input は required_input に従う最小 object です。target_client_id や資格情報は入れません。\n"
         "OngoingActionSummary.status=waiting_result のときは新しい capability_request を出しません。\n"

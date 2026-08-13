@@ -48,11 +48,6 @@ class ServiceInputDecisionComparisonMixin:
             persona_context=kwargs["persona_context"],
             context=self_context,
         )
-        self._validate_mcp_session_decision(
-            decision=self_decision,
-            capability_decision_view=kwargs.get("capability_decision_view"),
-            trigger_kind=kwargs["trigger_kind"],
-        )
         debug_log(
             "Pipeline",
             (

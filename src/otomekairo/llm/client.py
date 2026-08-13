@@ -407,6 +407,10 @@ class LLMClient:
             payload=payload,
             context=context,
         )
+        self._validate_decision_finite_mcp_session_start(
+            payload=payload,
+            context=context,
+        )
         if payload.get("kind") == "capability_request":
             self._validate_capability_request_for_context(
                 request_payload=payload.get("capability_request"),
@@ -507,6 +511,79 @@ class LLMClient:
                     "Decision autonomous_run.coordination.target_run_ids には "
                     "AutonomousRunSummaries に含まれる run_id だけを指定してください。"
                 )
+
+    def _validate_decision_finite_mcp_session_start(
+        self,
+        *,
+        payload: dict[str, Any],
+        context: DecisionContext,
+    ) -> None:
+        if payload.get("kind") != "autonomous_run":
+            return
+        autonomous_run = payload.get("autonomous_run")
+        if not isinstance(autonomous_run, dict):
+            return
+        mcp_server_id = autonomous_run.get("mcp_server_id")
+        if mcp_server_id is None:
+            return
+        normalized_server_id = str(mcp_server_id).strip()
+        if context.trigger_kind not in {"user_message", "background_thinking"}:
+            raise LLMError(
+                "有限 MCP セッションは user_message または background_thinking からだけ開始できます。"
+            )
+        mcp_capability = self._capability_decision_view_entry(
+            capability_decision_view=context.capability_decision_view,
+            capability_id="mcp.call_tool",
+        )
+        targets = (
+            mcp_capability.get("finite_session_targets")
+            if isinstance(mcp_capability, dict)
+            else None
+        )
+        target = next(
+            (
+                candidate
+                for candidate in targets or []
+                if isinstance(candidate, dict)
+                and candidate.get("mcp_server_id") == normalized_server_id
+            ),
+            None,
+        )
+        if not isinstance(target, dict):
+            available_ids = [
+                str(candidate.get("mcp_server_id") or "").strip()
+                for candidate in targets or []
+                if isinstance(candidate, dict)
+                and str(candidate.get("mcp_server_id") or "").strip()
+            ]
+            available_summary = ",".join(available_ids) if available_ids else "なし"
+            raise LLMError(
+                "Decision autonomous_run.mcp_server_id は "
+                "CapabilityDecisionView の finite_session_targets に含まれる server だけを指定してください。"
+                f"現在の開始候補={available_summary}。"
+                "対象が候補にない場合、同じ MCP 操作を通常の autonomous_run で代替せず、"
+                "pending_intent または noop を選んでください。"
+            )
+        active_run_ids = {
+            run_id
+            for run_id in target.get("active_run_ids", [])
+            if isinstance(run_id, str) and run_id
+        }
+        if not active_run_ids:
+            return
+        coordination = autonomous_run.get("coordination")
+        mode = coordination.get("mode") if isinstance(coordination, dict) else None
+        target_run_ids = {
+            run_id
+            for run_id in coordination.get("target_run_ids", [])
+            if isinstance(run_id, str) and run_id
+        } if isinstance(coordination, dict) else set()
+        if mode != "replace_existing" or not active_run_ids.issubset(target_run_ids):
+            raise LLMError(
+                "有限 MCP セッションの進行中 run があるため、"
+                "coordination.mode=replace_existing とし、finite_session_targets.active_run_ids を"
+                "すべて target_run_ids に含めてください。"
+            )
 
     def generate_autonomous_step(
         self,

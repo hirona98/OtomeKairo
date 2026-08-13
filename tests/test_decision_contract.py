@@ -61,6 +61,12 @@ def _mcp_capability_view() -> list[dict]:
                     ],
                 }
             ],
+            "finite_session_targets": [
+                {
+                    "mcp_server_id": "elyth",
+                    "active_run_ids": [],
+                }
+            ],
         }
     ]
 
@@ -114,6 +120,61 @@ def _capability_decision(capability_id: str, input_payload: dict) -> dict:
             "capability_request",
             required_targets=("outward_speech", "self_activity"),
             reason_summary="必要な能力を実行する。",
+        ),
+    }
+
+
+def _finite_mcp_session_decision(*, mode: str = "create_new", target_run_ids: list[str] | None = None) -> dict:
+    return {
+        "kind": "autonomous_run",
+        "reason_code": "mcp_session:start",
+        "reason_summary": "対象 MCP の有限セッションを開始する。",
+        "requires_confirmation": False,
+        "pending_intent": None,
+        "capability_request": None,
+        "autonomous_run": {
+            "objective_summary": "対象 MCP 内の確認を完了する。",
+            "initial_step_summary": "最初の tool を判断する。",
+            "mcp_server_id": "elyth",
+            "coordination": {
+                "mode": mode,
+                "target_run_ids": target_run_ids or [],
+                "reason_summary": "有限セッションの開始状態を調整する。",
+            },
+        },
+        "foreground_selection": {
+            "primary_factor_ref": None,
+            "supporting_factor_refs": [],
+            "suppressed_factors": [],
+            "summary_text": "MCP 操作を主因にした。",
+        },
+        "target_stances": build_decision_target_stances_for_kind(
+            "autonomous_run",
+            required_targets=("outward_speech", "self_activity"),
+            reason_summary="対象 MCP の有限セッションを開始する。",
+        ),
+    }
+
+
+def _noop_decision() -> dict:
+    return {
+        "kind": "noop",
+        "reason_code": "hold",
+        "reason_summary": "今は開始可能な有限セッションがないため見送る。",
+        "requires_confirmation": False,
+        "pending_intent": None,
+        "capability_request": None,
+        "autonomous_run": None,
+        "foreground_selection": {
+            "primary_factor_ref": None,
+            "supporting_factor_refs": [],
+            "suppressed_factors": [],
+            "summary_text": "開始可能性を比較した。",
+        },
+        "target_stances": build_decision_target_stances_for_kind(
+            "noop",
+            required_targets=("outward_speech",),
+            reason_summary="今は開始可能な有限セッションがないため見送る。",
         ),
     }
 
@@ -411,6 +472,58 @@ class DecisionContractTests(unittest.TestCase):
 
         self.assertEqual(actual, valid)
         self.assertEqual(complete.call_count, 2)
+
+    def test_decision_repairs_background_finite_session_outside_start_targets(self) -> None:
+        capability_view = _mcp_capability_view()
+        capability_view[0]["finite_session_targets"] = []
+        context = replace(
+            _decision_context(capability_view),
+            trigger_kind="background_thinking",
+        )
+        valid = _noop_decision()
+
+        with patch(
+            "otomekairo.llm.client.complete_text",
+            side_effect=[json.dumps(_finite_mcp_session_decision()), json.dumps(valid)],
+        ) as complete:
+            actual = LLMClient().generate_decision(
+                model_config={"model": "real-model"},
+                persona_context=_persona_context(),
+                context=context,
+            )
+
+        self.assertEqual(actual, valid)
+        self.assertEqual(complete.call_count, 2)
+
+    def test_decision_requires_active_finite_session_replacement_ids(self) -> None:
+        capability_view = _mcp_capability_view()
+        capability_view[0]["finite_session_targets"][0]["active_run_ids"] = [
+            "autonomous_run:active"
+        ]
+        context = replace(
+            _decision_context(capability_view),
+            autonomous_run_summaries=[
+                {
+                    "run_id": "autonomous_run:active",
+                    "status": "active",
+                }
+            ],
+        )
+        client = LLMClient()
+
+        with self.assertRaises(LLMError):
+            client._validate_decision_contract_for_context(
+                payload=_finite_mcp_session_decision(),
+                context=context,
+            )
+
+        client._validate_decision_contract_for_context(
+            payload=_finite_mcp_session_decision(
+                mode="replace_existing",
+                target_run_ids=["autonomous_run:active"],
+            ),
+            context=context,
+        )
 
     def test_decision_repairs_missing_manifest_input(self) -> None:
         invalid = _capability_decision(

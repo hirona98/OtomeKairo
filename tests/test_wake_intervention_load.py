@@ -946,9 +946,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
                 super().__init__()
                 self.llm = DualCallLLM()
 
-            def _validate_mcp_session_decision(self, **kwargs) -> None:
-                _ = kwargs
-
             def _build_decision_context(self, **kwargs):
                 from types import SimpleNamespace
 

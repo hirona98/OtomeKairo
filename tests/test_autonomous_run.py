@@ -74,6 +74,55 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
 
             self.assertFalse(eligible)
 
+    def test_background_session_start_revalidates_cooldown_as_explicit_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            state["mcp_servers"]["elyth"]["enabled"] = True
+            service.store.write_state(state)
+            service.store.upsert_autonomous_run(
+                autonomous_run=self._mcp_session_run_record(
+                    memory_set_id=state["selected_memory_set_id"],
+                    status="completed",
+                    created_at="2026-08-11T11:30:00+09:00",
+                )
+            )
+
+            with self.assertRaisesRegex(ValueError, "Background finite MCP session is not eligible"):
+                service._start_autonomous_run_from_decision(
+                    state=state,
+                    current_time="2026-08-11T12:00:00+09:00",
+                    decision=self._finite_mcp_session_decision(),
+                    source_current_input={
+                        "sender_kind": "system",
+                        "source_kind": "background_thinking",
+                        "text": "定期思考。",
+                    },
+                    source_cycle_id="cycle:test",
+                    assistant_message_target_client_id=None,
+                )
+
+    def test_session_start_revalidates_latest_mcp_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            stale_state = service.store.read_state()
+            stale_state["mcp_servers"]["elyth"]["enabled"] = True
+
+            with self.assertRaisesRegex(ValueError, "target is unavailable or disabled"):
+                service._start_autonomous_run_from_decision(
+                    state=stale_state,
+                    current_time="2026-08-11T12:00:00+09:00",
+                    decision=self._finite_mcp_session_decision(),
+                    source_current_input={
+                        "sender_kind": "person",
+                        "sender_ref": "person:test",
+                        "source_kind": "user_message",
+                        "text": "ELYTH を見て。",
+                    },
+                    source_cycle_id="cycle:test",
+                    assistant_message_target_client_id=None,
+                )
+
     def test_mcp_session_completes_without_llm_after_tool_limit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))
@@ -581,6 +630,21 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             "tool_call_count": tool_call_count,
         }
         return run
+
+    def _finite_mcp_session_decision(self) -> dict:
+        return {
+            "kind": "autonomous_run",
+            "autonomous_run": {
+                "objective_summary": "ELYTH の通知を確認する。",
+                "initial_step_summary": "最初の tool を判断する。",
+                "mcp_server_id": "elyth",
+                "coordination": {
+                    "mode": "create_new",
+                    "target_run_ids": [],
+                    "reason_summary": "新しい有限セッションを始める。",
+                },
+            },
+        }
 
     def _persist_commitment(
         self,

@@ -782,6 +782,7 @@ class ServiceInputPipelineMixin:
         capability_decision_view = self._build_capability_decision_view(
             state=state,
             current_time=started_at,
+            trigger_kind=trigger_kind,
         )
         capability_decision_view = self._annotate_capability_decision_view_with_fresh_visual_context(
             capability_decision_view=capability_decision_view,
@@ -2098,11 +2099,6 @@ class ServiceInputPipelineMixin:
             persona_context=persona_context,
             context=decision_context,
         )
-        self._validate_mcp_session_decision(
-            decision=decision,
-            capability_decision_view=capability_decision_view,
-            trigger_kind=trigger_kind,
-        )
         debug_log(
             "Pipeline",
             f"{cycle_label} decision done kinds={self._decision_kind_log(decision)} reason={self._clamp(decision['reason_summary'])}",
@@ -2475,50 +2471,6 @@ class ServiceInputPipelineMixin:
             pre_send_check_feedback=pre_send_check_feedback,
             comparison_scope=comparison_scope,
         )
-
-    def _validate_mcp_session_decision(
-        self,
-        *,
-        decision: dict[str, Any],
-        capability_decision_view: list[dict[str, Any]] | None,
-        trigger_kind: str,
-    ) -> None:
-        if decision.get("kind") != "autonomous_run":
-            return
-        run_payload = decision.get("autonomous_run")
-        if not isinstance(run_payload, dict):
-            return
-        mcp_server_id = run_payload.get("mcp_server_id")
-        if mcp_server_id is None:
-            return
-        if trigger_kind not in {"user_message", "background_thinking"}:
-            raise ValueError("Finite MCP sessions can only start from user_message or background_thinking.")
-        server_view = None
-        for capability in capability_decision_view or []:
-            if not isinstance(capability, dict) or capability.get("id") != "mcp.call_tool":
-                continue
-            for server in capability.get("mcp_servers", []):
-                if isinstance(server, dict) and server.get("mcp_server_id") == mcp_server_id:
-                    server_view = server
-                    break
-        if not isinstance(server_view, dict) or server_view.get("available") is not True:
-            raise ValueError("Finite MCP session target is unavailable.")
-        session = server_view.get("autonomous_session")
-        if not isinstance(session, dict) or session.get("enabled") is not True:
-            raise ValueError("Finite MCP session is disabled for the target server.")
-        active_run_ids = {
-            run_id
-            for run_id in session.get("active_run_ids", [])
-            if isinstance(run_id, str) and run_id
-        }
-        coordination = run_payload.get("coordination")
-        mode = coordination.get("mode") if isinstance(coordination, dict) else None
-        target_run_ids = set(coordination.get("target_run_ids", [])) if isinstance(coordination, dict) else set()
-        if active_run_ids and (mode != "replace_existing" or not active_run_ids.issubset(target_run_ids)):
-            raise ValueError("A nonterminal finite MCP session for the target server must be replaced explicitly.")
-        if trigger_kind == "background_thinking":
-            if session.get("background_enabled") is not True or session.get("background_eligible") is not True:
-                raise ValueError("Background finite MCP session is not eligible.")
 
     def _build_speech_context(
         self,

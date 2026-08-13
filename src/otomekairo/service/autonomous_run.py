@@ -585,7 +585,8 @@ class ServiceAutonomousRunMixin:
         mcp_server_id = run_payload.get("mcp_server_id")
         if mcp_server_id is not None:
             normalized_mcp_server_id = str(mcp_server_id).strip()
-            server = self._mcp_servers_from_state(state).get(normalized_mcp_server_id)
+            current_state = self.store.read_state()
+            server = self._mcp_servers_from_state(current_state).get(normalized_mcp_server_id)
             session = server.get("autonomous_session") if isinstance(server, dict) else None
             if (
                 not normalized_mcp_server_id
@@ -611,6 +612,7 @@ class ServiceAutonomousRunMixin:
                 mcp_server_id=normalized_mcp_server_id,
                 policy=session,
                 matching_runs=self._mcp_session_runs(normalized_mcp_server_id),
+                current_time=current_time,
             ):
                 raise ValueError("Background finite MCP session is not eligible.")
             if matching_run_ids and (
