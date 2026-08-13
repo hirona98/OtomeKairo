@@ -432,7 +432,8 @@ capability 実行を開始した場合は、`POST /api/conversation` と同じ `
 - `source_current_input.response_target_refs=<current person_ref>` の capability request は request record に外向き応答先 client を内部保存し、follow-up capability request へ引き継ぐ
 - capability result follow-up の assistant message は、capability result を返した client ではなく request record の外向き応答先 client へ送る
 - `wake` の判断で `camera.ptz` を dispatch した場合も同じ `source_current_input` を保存し、result follow-up から同じ camera source の `vision.capture` を内部観測として発行できる
-- `reference` 由来の visual observation は wake 判断へ渡す。`change_state=first_seen / changed` は前景候補として扱い、発話可否は観測差分だけで決めず `speech / noop / pending_intent` の意味判断で比較する
+- `reference` 由来の visual observation は wake 判断へ渡す。`change_state=first_seen / changed` は前景候補として扱い、発話可否は観測差分だけで決めず判断全体の意味判断で比較する
+- API起床は定期思考の `last_wake_at` を更新しない。視覚 wakeup は定期思考の代替ではない
 - visual observation の意味変化は `visual_observation` の `change_state / change_basis / change_reason_summary` を正とする。signature は runtime 追跡用の診断値として扱う
 
 #### 定期思考との関係

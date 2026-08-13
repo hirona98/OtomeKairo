@@ -90,7 +90,10 @@ class ServiceInputWakePipelineMixin:
                 interaction_context=interaction_context,
             )
         ):
-            self._set_last_wake_at(started_at)
+            self._consume_background_thinking_interval(
+                trigger_kind=trigger_kind,
+                current_time=started_at,
+            )
             reason_summary = "定期思考の観測中にユーザー向け会話が進んだため、自発発話は行わない。"
             debug_log("Wake", f"{cycle_label} skipped user_response_changed")
             return (
@@ -129,7 +132,10 @@ class ServiceInputWakePipelineMixin:
                 if retryable_observation_failure:
                     self._set_wake_retry_after(started_at)
                 else:
-                    self._set_last_wake_at(started_at)
+                    self._consume_background_thinking_interval(
+                        trigger_kind=trigger_kind,
+                        current_time=started_at,
+                    )
                 if retryable_observation_failure:
                     reason_summary = "思考前観測 の vision source が未接続だったため、interval を消費せず短く再試行する。"
                 elif (
@@ -153,7 +159,10 @@ class ServiceInputWakePipelineMixin:
                     input_text,
                     client_context,
                 )
-            self._set_last_wake_at(started_at)
+            self._consume_background_thinking_interval(
+                trigger_kind=trigger_kind,
+                current_time=started_at,
+            )
             debug_log("Wake", f"{cycle_label} autonomous path no_selected_candidate")
 
         # 発話抑制
@@ -162,7 +171,10 @@ class ServiceInputWakePipelineMixin:
                 dedupe_key=selected_candidate["dedupe_key"],
                 current_time=started_at,
             ):
-                self._set_last_wake_at(started_at)
+                self._consume_background_thinking_interval(
+                    trigger_kind=trigger_kind,
+                    current_time=started_at,
+                )
                 debug_log(
                     "Wake",
                     f"{cycle_label} skipped recently_replied candidate={selected_candidate.get('candidate_id')}",
@@ -177,8 +189,10 @@ class ServiceInputWakePipelineMixin:
                     client_context,
                 )
 
-            # トリガー集計
-            self._set_last_wake_at(started_at)
+            self._consume_background_thinking_interval(
+                trigger_kind=trigger_kind,
+                current_time=started_at,
+            )
 
         # 起床入力
         pipeline = self._run_input_pipeline(
@@ -196,6 +210,11 @@ class ServiceInputWakePipelineMixin:
             reference_context=reference_context,
         )
         return pipeline, input_text, client_context
+
+    def _consume_background_thinking_interval(self, *, trigger_kind: str, current_time: str) -> None:
+        if trigger_kind != "background_thinking":
+            return
+        self._set_last_wake_at(current_time)
 
     def _has_autonomous_initiative_context(
         self,

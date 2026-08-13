@@ -529,6 +529,8 @@ class ServiceInputPipelineMixin:
         cycle_label: str,
     ) -> dict[str, Any]:
         if self._should_skip_recall_interpretation_for_wake_visual_observation(
+            state=state,
+            current_time=started_at,
             current_input=current_input,
             client_context=client_context,
         ):
@@ -621,14 +623,18 @@ class ServiceInputPipelineMixin:
     def _should_skip_recall_interpretation_for_wake_visual_observation(
         self,
         *,
+        state: dict[str, Any],
+        current_time: str,
         current_input: CurrentInput,
         client_context: dict[str, Any],
     ) -> bool:
-        return (
-            current_input.sender_kind == "system"
-            and current_input.source_kind in {"wake", "background_thinking"}
-            and client_context.get("autonomous_visual_observation_direct_entry") is True
-        )
+        if (
+            current_input.sender_kind != "system"
+            or current_input.source_kind not in {"wake", "background_thinking"}
+            or client_context.get("autonomous_visual_observation_direct_entry") is not True
+        ):
+            return False
+        return not bool(self._due_standing_concerns(state=state, current_time=current_time))
 
     def _build_visual_observation_direct_recall_inputs(
         self,

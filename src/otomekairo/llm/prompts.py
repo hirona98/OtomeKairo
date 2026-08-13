@@ -1100,6 +1100,7 @@ def _build_decision_system_prompt(persona_context: PersonaContext) -> str:
             "トリガー固有の判断制約がある場合は internal context message の trigger_policy に入ります。\n"
             "WorkspaceContext.workspace_candidates は、記憶、外界状態、志向状態、継続行動、能力候補を同じ盤面に並べた前景化候補です。\n"
             "kind=standing_concern は、しばらく関わっていない気にかけている場です。実行指示ではありません。"
+            "視覚観測は感覚、standing_concern は向きです。人物側の視覚に発話しないことと、向きへ今関わることは別の比較です。"
             "今見に行く自然さがあれば capability_request または autonomous_run を比較し、今でなければ noop や pending_intent と比較してよいです。\n"
             "decision.kind と同じ判断の中で、今もっとも意識へ上げる primary factor、補助する supporting factors、控える suppressed factors を foreground_selection に記録してください。\n"
             "noop を選ぶ場合も、控える理由を表す WorkspaceContext の suppression 候補を primary factor にできます。\n"
@@ -1306,8 +1307,12 @@ def _build_decision_trigger_policy(
                 (
                     "background_thinking: 定期思考による自己評価です。観測、候補、抑制、能力提案を比較し、"
                     "speech / noop / pending_intent / capability_request / autonomous_run から 1 つ選んでください。"
+                    "ここでの問いは、感覚への反応可否ではなく、感覚と向きを同じ盤面で見て今の個として何をするかです。"
                     "ここでの speech は、観測差分の実況ではなく、現在の個の短い見方として一言にまとまる独り言です。"
                     "standing_concern は気にかけている場であり、定時作業の指示ではありません。"
+                    "カメラや画面の視覚観測は感覚、standing_concern は向きです。"
+                    "視覚へ発話しないあとも、向きへ今関わる自然さがあれば capability_request または autonomous_run を比べてください。"
+                    "向きまで見送る noop の reason_summary は、今その場へ関わらない理由で書いてください。"
                 ),
                 (
                     "校正: background_thinking では、短い独話として前へ出る自然さを 10 段階で内的に見積もり、"
@@ -1347,11 +1352,13 @@ def _build_decision_trigger_policy(
                 (
                     "選択: noop は、反復、直近で同じ内容に触れた事実、明示された距離希望、"
                     "進行中応答、結果待ち、プライバシー境界、観測失敗、観測不足、"
-                    "構造化済み抑制根拠がある場合、または短い独話として一言にまとまらない場合に選んでください。"
+                    "構造化済み抑制根拠、今その向きへ関わらないことがある場合に選んでください。"
+                    "人物側の視覚に発話しないこと、独話として画面がまとまらないことは speech を選ばない理由であり、"
+                    "standing_concern が残っているときのサイクル終了理由ではありません。"
                     "foreground_signal_summary.foreground_thinness=thin は自動 speech にしないでください。ただし、軽い節目としてまとまる場合は speech と比較してください。"
                     "stable や同一活動継続は自動 speech にしないでください。ただし、継続そのものに現在の個の短い見方が立つ場合は speech と比較してください。"
                     "noop の reason_summary は、該当する具体根拠名で説明し、"
-                    "活動事実や距離感の補助だけを主理由にしないでください。"
+                    "活動事実、距離感の補助、画面やカメラに触れないことだけを主理由にしないでください。"
                 ),
                 (
                     "選択: capability_request は、candidate_families に capability 提案があり、"
@@ -1369,10 +1376,11 @@ def _build_decision_trigger_policy(
                 ),
                 (
                     "抑制境界: noop を選ぶ場合は、明示された距離希望、直近重複、進行中応答、"
-                    "結果待ち、プライバシー境界、観測失敗、観測不足、構造化済み抑制根拠、独話としてまとまらないことのいずれかを"
+                    "結果待ち、プライバシー境界、観測失敗、観測不足、構造化済み抑制根拠、今その向きへ関わらないことのいずれかを"
                     "主理由にしてください。作業中、閲覧中、検討中、入力中などの活動事実、"
-                    "foreground_signal_summary.foreground_thinness=thin、内的注意状態、距離感の補助は"
-                    "前景説明または補助材料として扱い、補助だけを reason_summary の主理由にしないでください。"
+                    "foreground_signal_summary.foreground_thinness=thin、内的注意状態、距離感の補助、"
+                    "画面やカメラに触れないことは前景説明または補助材料として扱い、"
+                    "補助だけを reason_summary の主理由にしないでください。"
                 ),
                 (
                     "PersonaContext は距離感と表現補助です。人格として自然という理由だけで、"

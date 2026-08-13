@@ -20,6 +20,7 @@ class DummyWakeReferenceService(ServiceInputWakeReferenceMixin):
 class DummyImmediateWakePipeline(ServiceInputWakePipelineMixin):
     def __init__(self) -> None:
         self.due_called = False
+        self.due_should_skip = True
         self.input_pipeline_called = False
         self.last_wake_at = None
 
@@ -39,7 +40,7 @@ class DummyImmediateWakePipeline(ServiceInputWakePipelineMixin):
     def _wake_is_due(self, *, state: dict, current_time: str) -> dict:
         _ = state, current_time
         self.due_called = True
-        return {"should_skip": True, "reason_summary": "not due"}
+        return {"should_skip": self.due_should_skip, "reason_summary": "not due"}
 
     def _clamp(self, value: object, limit: int = 200) -> str:
         _ = limit
@@ -60,11 +61,15 @@ class DummyImmediateWakePipeline(ServiceInputWakePipelineMixin):
         _ = state, started_at, cycle_id
         return client_context
 
+    def _summarize_activity_context(self, activity_state, *, current_time: str):
+        _ = activity_state, current_time
+        return None
+
     def _user_response_cycle_active(self) -> bool:
         return False
 
-    def _recent_turns_added_since(self, *, state: dict, started_at: str) -> bool:
-        _ = state, started_at
+    def _recent_turns_added_since(self, *, state: dict, started_at: str, interaction_context=None) -> bool:
+        _ = state, started_at, interaction_context
         return False
 
     def _run_autonomous_initiative_entry_check(
@@ -247,7 +252,25 @@ class WakeReferenceTests(unittest.TestCase):
 
         self.assertFalse(service.due_called)
         self.assertTrue(service.input_pipeline_called)
-        self.assertEqual(service.last_wake_at, "2026-07-05T12:00:00+09:00")
+        self.assertIsNone(service.last_wake_at)
         self.assertEqual(input_text, "wake input")
         self.assertEqual(pipeline["trigger_kind"], "wake")
         self.assertEqual(pipeline["reference_context"], {"summary": {"uri": "/tmp/reference.txt"}})
+
+    def test_background_thinking_consumes_interval(self) -> None:
+        service = DummyImmediateWakePipeline()
+        service.due_should_skip = False
+
+        service._run_wake_pipeline(
+            state={"wake_policy": {"mode": "interval", "interval_seconds": 300}},
+            started_at="2026-07-05T12:00:00+09:00",
+            trigger_kind="background_thinking",
+            client_context={},
+            interaction_context=None,
+            recent_turns=[],
+            selected_candidate={"candidate_id": "candidate:test", "dedupe_key": "dedupe:test"},
+        )
+
+        self.assertTrue(service.due_called)
+        self.assertTrue(service.input_pipeline_called)
+        self.assertEqual(service.last_wake_at, "2026-07-05T12:00:00+09:00")

@@ -712,7 +712,7 @@ class ServiceSpontaneousWakeMixin:
         else:
             parts.append(
                 "観測、drive_state、直近文脈、候補を合わせて、"
-                "speech / noop / pending_intent を判断する自律判断機会として見る。"
+                "関わる、保留する、見送る、能力を使うのどれが自然かを見る。"
             )
         return " ".join(parts)
 

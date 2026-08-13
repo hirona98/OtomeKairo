@@ -265,6 +265,58 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertEqual(recall_inputs["recall_pack"]["candidate_count"], 0)
         self.assertEqual(recall_inputs["evidence_pack"]["status"], "summary")
 
+    def test_due_standing_concern_keeps_recall_on_visual_direct_entry(self) -> None:
+        service = DummyInputService()
+        current_input = CurrentInput(
+            sender_kind="system",
+            sender_ref=None,
+            source_kind="background_thinking",
+            response_target_refs=(),
+            interaction_context=None,
+            text="定期思考。",
+        )
+        client_context = {"autonomous_visual_observation_direct_entry": True}
+
+        self.assertFalse(
+            service._should_skip_recall_interpretation_for_wake_visual_observation(
+                state={
+                    "standing_concerns": [
+                        {
+                            "concern_id": "elyth",
+                            "enabled": True,
+                            "min_interval_seconds": 600,
+                            "concern_summary": "ELYTHの場。届いている反応やリプライがあるかは気にかける。",
+                        }
+                    ]
+                },
+                current_time="2026-08-13T12:20:00+09:00",
+                current_input=current_input,
+                client_context=client_context,
+            )
+        )
+        self.assertTrue(
+            service._should_skip_recall_interpretation_for_wake_visual_observation(
+                state={"standing_concerns": []},
+                current_time="2026-08-13T12:20:00+09:00",
+                current_input=current_input,
+                client_context=client_context,
+            )
+        )
+
+    def test_wake_input_text_keeps_capability_on_the_board(self) -> None:
+        service = DummyInputService()
+        text = service._build_wake_input_text(
+            state={
+                "selected_persona_id": "persona:default",
+                "personas": {"persona:default": {"initiative_baseline": "medium"}},
+            },
+            client_context={"source": "background_thinking_scheduler"},
+            selected_candidate=None,
+        )
+
+        self.assertNotIn("speech / noop / pending_intent", text)
+        self.assertIn("関わる、保留する、見送る、能力を使う", text)
+
     def test_workspace_context_includes_visual_repetition_suppression_candidate(self) -> None:
         service = DummyInputService()
         initiative_context = InitiativeContext(

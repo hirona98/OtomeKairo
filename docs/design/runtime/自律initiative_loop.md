@@ -122,7 +122,8 @@ initiative loop は、候補を次の 3 系統に分ける。
 視覚観測の `first_seen / changed` で通常判断へ direct entry する場合も、判断前観測で更新された `activity_context` は `initiative_context` と `workspace_context` に残す。
 direct entry は視覚新規性だけへ判断材料を縮約する仕組みではなく、活動遷移、継続時間、source の整合、抑制候補を同じ盤面で比較する入口である。
 due な気にかけていることは自発系の材料であり、偽の `drive_state` にはしない。意味境界は [気にかけていること.md](気にかけていること.md) を正とする。
-`background_thinking` は定期思考による自己評価である。
+direct entry でも due な関心があるときは想起解釈を省略せず、盤面を視覚反応へ縮約しない。
+`background_thinking` は定期思考による自己評価である。定期思考の問いは、感覚への反応可否ではなく、感覚と向きを同じ盤面で見て今の個として何をするかである。
 `decision_generation` は観測、候補、抑制、能力提案を比較し、`speech / noop / pending_intent / capability_request` から 1 つ選ぶ。
 `visual_observations[].change_state=first_seen / changed` は前景候補、`stable` は現在状態の継続シグナル、`same_as_recent_speech` は直近重複の抑制候補である。
 `background_thinking` の `speech` は、観測差分の実況ではなく、現在の個の短い見方として一言にまとまる独り言である。
@@ -143,17 +144,14 @@ due な気にかけていることは自発系の材料であり、偽の `drive
 操作媒体、対象種別、身体動作の組み合わせが、同じ活動モード内の対象差し替えでは説明できないほど変わる場合はこの抑制に含めない。
 `speech` は会話開始ではなく、反応要求を含まない短い独り言として比較する。
 `pending_intent` は、あとで再評価する材料だけを残す場合に選ぶ。
-`noop` は、直近で同じ内容に触れた事実、明示された距離希望、進行中応答、結果待ち、プライバシー境界、観測失敗、観測不足、構造化済み抑制根拠がある場合、または短い独話として一言にまとまらない場合に選ぶ。
+`noop` の意味と、視覚発話抑制との分離は [判断と行動.md](判断と行動.md) を正とする。向きまで見送る条件は [気にかけていること.md](気にかけていること.md) を正とする。
 `foreground_signal_summary.foreground_thinness=thin` は自動 `speech` にしない。ただし、軽い節目としてまとまる場合は `speech` と比較する。
 `change_state=stable` と同一活動継続は自動 `speech` にしない。ただし、継続そのものに現在の個の短い見方が立つ場合は `speech` と比較する。
-`noop` の `reason_summary` は、該当する具体根拠名で説明し、活動事実や距離感の補助だけを主理由にしない。
 `capability_request` は、`candidate_families` に capability 提案があり、現在判断に追加観測が必要な場合に選ぶ。
 同一活動内の画面・表示対象・操作単位の変化、作業や閲覧の継続、安定状態は現在状態の材料である。
 `speech` は助言、依頼、支援提案、反応要求ではなく、観測事実に基づく一文の独話的な状況認識として作る。
 `background_thinking` の `speech` は独り言として扱い、相手の反応や会話継続を前提にしない。
 支援提案、作業停止の促し、休息促し、身体注意、画面への一般コメント、長い感想は控える理由側に置く。
-`noop` を選ぶ場合は、明示された距離希望、直近重複、進行中応答、結果待ち、プライバシー境界、観測失敗、観測不足、構造化済み抑制根拠、独話としてまとまらないことのいずれかを主理由にする。
-作業中、閲覧中、検討中、入力中などの活動事実、`foreground_signal_summary.foreground_thinness=thin`、内的注意状態、距離感の補助だけを `reason_summary` の主理由にしない。
 `persona_context` は距離感と表現補助であり、観測にない内容を `speech` に押し上げない。
 `foreground_drive_summaries` に入っていない `drive_state`、`freshness_hint=stale`、`stability_hint=weak`、`signal_strength=0.0` の `drive_state` は背景材料として扱い、薄い視覚前景と合わせる場合は `speech` の支柱にせず、補助材料としてだけ扱う。
 反復に近い詳細更新、同一活動内の画面・表示対象・操作単位の小さな変化、観測対象の表層的な変化、姿勢や操作の細かな変化、同じ活動モード内の対象名や表示内容だけの差し替え、一般的な注意や助言に留まる内容は、自動 `speech` にせず、軽い節目としてまとまる場合だけ `speech` と比較する。
@@ -198,6 +196,7 @@ LLM は次を担う。
 コードは次を担う。
 
 - wake の due 判定
+- `last_wake_at` は `background_thinking` が interval を消費したときだけ更新すること。API 起床は定期思考の interval 起点を動かさない
 - 思考前観測の取得、視覚記録、`world_state`、`activity_context` への反映
 - `drive_state / ongoing_action / pending_intent / initiative_entry_summary` による自律評価対象の前景化制御
 - due な気にかけていることがあるとき、`initiative_entry_check` の skip だけで定期思考を打ち切らないこと。意味境界は [気にかけていること.md](気にかけていること.md) を正とする
@@ -234,13 +233,13 @@ visual capture の変化は `first_seen / changed / stable / same_as_recent_spee
 `first_seen / changed` は新規性の前景シグナルとして扱う。
 `same_as_recent_speech` は直近発話との重複シグナル、`stable` は現在状態の継続シグナルとして扱う。
 新規性と反復性は、`drive_state`、`world_state`、`activity_context`、`pending_intent`、抑制要約と同じ盤面で比較する。
-薄い視覚前景だけで成立する新規性は、`noop` または `pending_intent` と同じ盤面で比較する。
+薄い視覚前景だけで成立する新規性は発話を義務づけない。due な関心があるときは向きの比較を残し、視覚へ発話しないことだけで `noop` にしない。
 活動遷移に触れる発話は、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして表現する。
 `source_owner=self` の camera 視覚観測は OtomeKairo 自身の視覚根拠として扱う。
 `source_owner=user_environment` の視覚観測、`world_state.visual_context`、`activity_context.actor=person` は対応する `person_ref` の人物側の状況として扱う。
 この文脈から speech する場合、`speech_stance=comment_on_user_context` として、ユーザー側の状況へのコメントとして表現する。
 `current_input.sender_kind=system` かつ `current_input.response_target_refs=空配列` の `wake / background_thinking` では、decision は観測、候補、現在文脈を比較して `speech / noop / pending_intent / capability_request` を選ぶ。
-`wake / background_thinking` の `noop` 理由は、観測、候補、進行中応答、重複発話境界のいずれかに根拠づける。
+`wake / background_thinking` の `noop` 理由は [判断と行動.md](判断と行動.md) に従う。視覚発話抑制だけを根拠に向きまで閉じない。
 定期思考から dispatch した capability request の result は、source request の `source_current_input.response_target_refs=空配列` を引き継ぐ。
 この capability result は内部観測結果として扱い、外向き結果を `noop` として trace に残す。
 直近で発話済みの内容と異なる visual capture も観測内容の変化として渡す。
@@ -263,9 +262,9 @@ initiative loop は、前へ出る理由と見送る理由を判断入力に含�
 - `persona_context_summary.initiative_baseline.level=low` であること
 
 visual observation の `change_state=first_seen / changed` は自律判断の前景材料にする。
-autonomous family の availability は、強い `initiative_entry_summary`、構造値が強い `drive_state`、または視覚観測の `first_seen / changed` で組み立てる。
+autonomous family の availability は、強い `initiative_entry_summary`、構造値が強い `drive_state`、視覚観測の `first_seen / changed`、または due な気にかけていることで組み立てる。
 autonomous family の priority は、`drive_state`、現在文脈、前景世界状態、候補理由の強さで決める。
-`foreground_thinness=thin`、`trigger_kind=background_thinking`、`suppression_level=high` は、LLM が `speech / noop / pending_intent` を判断するための文脈事実として渡す。
+`foreground_thinness=thin`、`trigger_kind=background_thinking`、`suppression_level=high` は、LLM が結果を判断するための文脈事実として渡す。視覚発話抑制は向きまで閉じない。
 同じ `dedupe_key` の直近発話は server の重複発話境界として扱う。
 同じ `dedupe_key` の直近発話だけを `suppression_level=high` にする。
 `autonomous_run.status=waiting_result` と `ongoing_action.status=waiting_result` は LLM へ渡す判断材料として扱う。
@@ -342,8 +341,8 @@ API起床の自律判断 matrix は次の 16 件に固定する。
 | `background-interval-not-due` | `last_wake_at` 相当の直後に長い interval を設定する | `background_thinking_scheduler_active=true` を観測し、新しい定期思考 cycle を作らない |
 
 matrix の共通判定境界は前述の `initiative_context`、LLM とコードの責務、自発発話抑制に従う。
-`visual_context` だけの前景は thin foreground として扱う。
-視覚観測の `change_state=first_seen / changed` は通常の initiative 判断へ進み、`initiative_entry_check` を追加で呼ばない。
+`visual_context` だけの前景は thin foreground として扱う。due な気にかけていることがあるときは、薄い視覚前景だけで `noop` を期待しない。
+視覚観測の `change_state=first_seen / changed` は通常の initiative 判断へ進み、`initiative_entry_check` を追加で呼ばない。due な関心があるときは想起解釈を省略せず、盤面を視覚反応へ縮約しない。
 構造値が強い `drive_state` があり、対応する grounded foreground がない場合、発話より追加観測が自然かを同じ判断盤面で比較する。
 構造値が強い `drive_state` が特定の status family を要求する場合は、foreground `world_state` と capability の対象を合わせて LLM が既存要約または追加取得を選ぶ。
 非視覚 capability は state type の一致だけで機械的に遮断しない。
