@@ -369,6 +369,144 @@ class WakeInterventionLoadTests(unittest.TestCase):
         refs = {item["factor_ref"] for item in isolated["workspace_candidates"]}
         self.assertEqual(refs, {"standing_concern:elyth", "capability:mcp.call_tool"})
 
+    def test_outward_speech_workspace_drops_self_activity_means(self) -> None:
+        service = DummyInputService()
+        isolated = service._outward_speech_workspace(
+            {
+                "workspace_candidates": [
+                    {
+                        "factor_ref": "standing_concern:elyth",
+                        "kind": "standing_concern",
+                    },
+                    {
+                        "factor_ref": "visual_observation_signal:camera",
+                        "kind": "visual_observation",
+                    },
+                    {
+                        "factor_ref": "capability:mcp.call_tool",
+                        "kind": "capability",
+                    },
+                    {
+                        "factor_ref": "initiative:autonomous",
+                        "kind": "initiative_candidate",
+                    },
+                    {
+                        "factor_ref": "suppression:visual_repetition",
+                        "kind": "suppression",
+                    },
+                    {
+                        "factor_ref": "current_input:background_thinking",
+                        "kind": "current_input",
+                        "summary_text": "関わる、能力を使うのどれが自然かを見る。",
+                    },
+                ]
+            },
+            current_input_text="自己評価。いま短い見方として外へ出るかを見る。",
+        )
+        refs = {item["factor_ref"] for item in isolated["workspace_candidates"]}
+        self.assertEqual(
+            refs,
+            {
+                "visual_observation_signal:camera",
+                "suppression:visual_repetition",
+                "current_input:background_thinking",
+            },
+        )
+        current_input = next(
+            item
+            for item in isolated["workspace_candidates"]
+            if item["factor_ref"] == "current_input:background_thinking"
+        )
+        self.assertEqual(current_input["summary_text"], "自己評価。いま短い見方として外へ出るかを見る。")
+
+    def test_outward_speech_context_drops_access_means(self) -> None:
+        service = DummyInputService()
+        current_input = CurrentInput(
+            sender_kind="system",
+            sender_ref=None,
+            source_kind="background_thinking",
+            response_target_refs=(),
+            interaction_context=None,
+            text="定期思考。関わる、保留する、見送る、能力を使うのどれが自然かを見る。",
+        )
+        initiative_context = InitiativeContext(
+            trigger_kind="background_thinking",
+            opportunity_summary="気にかけている場がしばらく前景に出ていない。",
+            initiative_entry_summary=None,
+            time_context_summary={},
+            foreground_signal_summary={
+                "visual_observations": [{"change_state": "stable"}],
+            },
+            activity_context=None,
+            initiative_baseline={},
+            persona_context_summary={},
+            runtime_state_summary={},
+            recent_turn_summary=[],
+            drive_summaries=[],
+            pending_intent_summaries=[],
+            world_state_summary=[],
+            ongoing_action_summary={"status": "waiting_result"},
+            capability_summary={"available_count": 1},
+            candidate_families=[
+                InitiativeCandidateFamily(
+                    family="autonomous",
+                    available=True,
+                    selected=True,
+                    priority_score=1.0,
+                    reason_summary="場へ行く。",
+                )
+            ],
+            selected_candidate_family="autonomous",
+            speech_timing_state={"background_trigger": True},
+            suppression_summary={},
+            speech_timing_summary="",
+        )
+        context = service._build_outward_speech_decision_context(
+            current_input=current_input,
+            trigger_kind="background_thinking",
+            recent_turns=[],
+            time_context={},
+            affect_context={},
+            drive_state_summary=None,
+            foreground_world_state=None,
+            activity_context=None,
+            agent_skill_context=None,
+            initiative_context=initiative_context,
+            visual_observation_context={"source": "vision_capture_result"},
+            self_state_context=None,
+            people_context=[],
+            relationship_context=None,
+            prediction_error_context=None,
+            default_mode_context=None,
+            workspace_context={
+                "workspace_candidates": [
+                    {"factor_ref": "standing_concern:elyth", "kind": "standing_concern"},
+                    {"factor_ref": "visual_observation:current", "kind": "visual_observation"},
+                ]
+            },
+            recall_hint={},
+            recall_pack={},
+            reference_context=None,
+            pre_send_check_feedback=None,
+        )
+
+        self.assertEqual(context.comparison_scope, "outward_speech")
+        self.assertEqual(context.current_input.text, "自己評価。いま短い見方として外へ出るかを見る。")
+        self.assertIsNone(context.capability_decision_view)
+        self.assertIsNone(context.ongoing_action_summary)
+        self.assertIsNone(context.autonomous_run_summaries)
+        refs = {
+            item["factor_ref"]
+            for item in (context.workspace_context or {}).get("workspace_candidates", [])
+        }
+        self.assertEqual(refs, {"visual_observation:current"})
+        self.assertEqual(
+            context.initiative_context.opportunity_summary,
+            "外界の観測と直近文脈があり、短い見方として外へ出るかを見る。",
+        )
+        self.assertEqual(context.initiative_context.selected_candidate_family, None)
+        self.assertFalse(context.initiative_context.candidate_families[0].available)
+
     def test_compose_separated_decisions_keeps_both_reasons(self) -> None:
         service = DummyInputService()
         composed = service._compose_separated_decisions(
@@ -569,6 +707,12 @@ class WakeInterventionLoadTests(unittest.TestCase):
 
                 _ = kwargs
                 return SimpleNamespace(comparison_scope="self_activity")
+
+            def _build_outward_speech_decision_context(self, **kwargs):
+                from types import SimpleNamespace
+
+                _ = kwargs
+                return SimpleNamespace(comparison_scope="outward_speech")
 
         service = DualCallService()
         composed = service._run_separated_activity_decisions(

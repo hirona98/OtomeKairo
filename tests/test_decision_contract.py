@@ -1,5 +1,6 @@
 import json
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
 from otomekairo.llm.client import LLMClient
@@ -8,6 +9,11 @@ from otomekairo.llm.contracts import (
     LLMError,
     build_decision_target_stances_for_kind,
     validate_decision_contract,
+)
+from otomekairo.llm.prompts import (
+    build_decision_messages,
+    build_decision_repair_prompt,
+    _build_decision_trigger_policy,
 )
 
 
@@ -590,6 +596,96 @@ class DecisionContractTests(unittest.TestCase):
                 )
 
         self.assertEqual(complete.call_count, 2)
+
+
+class DecisionPromptScopeTests(unittest.TestCase):
+    def _system_prompt(self, comparison_scope: str) -> str:
+        context = replace(_decision_context([]), comparison_scope=comparison_scope)
+        messages = build_decision_messages(
+            persona_context=_persona_context(),
+            context=context,
+        )
+        return messages[0]["content"]
+
+    def test_self_activity_prompt_asks_orientation_not_reply(self) -> None:
+        system = self._system_prompt("self_activity")
+        self.assertIn("今、気にかけている場や継続中の自身の活動へ関わるか", system)
+        self.assertIn("capability_request / autonomous_run / pending_intent / noop", system)
+        self.assertIn("向きと CapabilityDecisionView の catalog から autonomous_run を始めてよい", system)
+        self.assertIn("target_stances は self_activity を 1 件だけ持ちます", system)
+        self.assertNotIn("伝達、能力実行、保留、見送り、継続目的開始のどれが", system)
+        self.assertNotIn("人物発話自体が未来実行", system)
+        self.assertNotIn("outward_speech は毎回必須です", system)
+
+    def test_outward_speech_prompt_asks_short_view_not_visit(self) -> None:
+        system = self._system_prompt("outward_speech")
+        self.assertIn("今、外へ短い見方を出すか", system)
+        self.assertIn("speech / noop / pending_intent", system)
+        self.assertIn("target_stances は outward_speech を 1 件だけ持ちます", system)
+        self.assertNotIn("今見に行く自然さがあれば capability_request", system)
+        self.assertNotIn("向きと CapabilityDecisionView の catalog から autonomous_run", system)
+        self.assertNotIn("有限 MCP セッションは CapabilityDecisionView", system)
+
+    def test_full_prompt_keeps_combined_question(self) -> None:
+        system = self._system_prompt("full")
+        self.assertIn("伝達、能力実行、保留、見送り、継続目的開始のどれが", system)
+        self.assertIn("outward_speech は毎回必須です", system)
+
+    def test_repair_prompt_follows_comparison_scope(self) -> None:
+        self_repair = build_decision_repair_prompt("kind が不正です。", "self_activity")
+        outward_repair = build_decision_repair_prompt("kind が不正です。", "outward_speech")
+        self.assertIn("capability_request / autonomous_run / pending_intent / noop", self_repair)
+        self.assertIn("target_stances は self_activity を 1 件だけ持ちます", self_repair)
+        self.assertNotIn("outward_speech は毎回必須です", self_repair)
+        self.assertIn("speech / noop / pending_intent", outward_repair)
+        self.assertIn("target_stances は outward_speech を 1 件だけ持ちます", outward_repair)
+        self.assertNotIn("今見に行く自然さがあれば capability_request", outward_repair)
+
+    def test_trigger_policy_splits_initiative_question(self) -> None:
+        from otomekairo.llm.contexts import InitiativeContext
+
+        initiative = InitiativeContext(
+            trigger_kind="background_thinking",
+            opportunity_summary="気にかけている場がしばらく前景に出ていない。",
+            initiative_entry_summary=None,
+            time_context_summary={},
+            foreground_signal_summary={},
+            activity_context=None,
+            initiative_baseline={},
+            persona_context_summary={},
+            runtime_state_summary={},
+            recent_turn_summary=[],
+            drive_summaries=[],
+            pending_intent_summaries=[],
+            world_state_summary=[],
+            ongoing_action_summary=None,
+            capability_summary={},
+            candidate_families=[],
+            selected_candidate_family="autonomous",
+            speech_timing_state={},
+            suppression_summary={},
+            speech_timing_summary="",
+            speech_frequency_level=5,
+        )
+        self_policies = _build_decision_trigger_policy(
+            initiative_context=initiative,
+            capability_result_context=None,
+            comparison_scope="self_activity",
+        )
+        outward_policies = _build_decision_trigger_policy(
+            initiative_context=initiative,
+            capability_result_context=None,
+            comparison_scope="outward_speech",
+        )
+        self_text = "\n".join(self_policies)
+        outward_text = "\n".join(outward_policies)
+        self.assertIn("向きへ関わるか", self_text)
+        self.assertIn("向きと catalog から autonomous_run を始めてよい", self_text)
+        self.assertNotIn("短い見方として一言にまとまる独り言", self_text)
+        self.assertIn("短い見方を外へ出すか", outward_text)
+        self.assertIn("短い見方として一言にまとまる独り言", outward_text)
+        self.assertNotIn("speech / noop / pending_intent / capability_request / autonomous_run から 1 つ", outward_text)
+        self.assertNotIn("向きへ今関わる自然さがあれば", outward_text)
 
 
 if __name__ == "__main__":

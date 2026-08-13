@@ -54,34 +54,7 @@ class ServiceInputDecisionComparisonMixin:
                 f"reason={self._clamp(self_decision['reason_summary'])}"
             ),
         )
-        outward_context = self._build_decision_context(
-            input_text=kwargs["input_text"],
-            current_input=kwargs["current_input"],
-            trigger_kind=kwargs["trigger_kind"],
-            recent_turns=kwargs["recent_turns"],
-            time_context=kwargs["time_context"],
-            affect_context=kwargs["affect_context"],
-            drive_state_summary=kwargs["drive_state_summary"],
-            foreground_world_state=kwargs["foreground_world_state"],
-            activity_context=kwargs["activity_context"],
-            ongoing_action_summary=kwargs["ongoing_action_summary"],
-            autonomous_run_summaries=kwargs["autonomous_run_summaries"],
-            capability_decision_view=kwargs["capability_decision_view"],
-            agent_skill_context=kwargs["agent_skill_context"],
-            initiative_context=kwargs["initiative_context"],
-            capability_result_context=kwargs["capability_result_context"],
-            visual_observation_context=kwargs["visual_observation_context"],
-            self_state_context=kwargs["self_state_context"],
-            people_context=kwargs["people_context"],
-            relationship_context=kwargs["relationship_context"],
-            prediction_error_context=kwargs["prediction_error_context"],
-            default_mode_context=kwargs["default_mode_context"],
-            workspace_context=kwargs["workspace_context"],
-            recall_hint=kwargs["recall_hint"],
-            recall_pack=kwargs["recall_pack"],
-            reference_context=kwargs.get("reference_context"),
-            comparison_scope="outward_speech",
-        )
+        outward_context = self._build_outward_speech_decision_context(**kwargs)
         debug_log("Pipeline", f"{cycle_label} outward_speech decision start", level="DEBUG")
         outward_decision = self.llm.generate_decision(
             model_config=kwargs["model_config"],
@@ -142,7 +115,10 @@ class ServiceInputDecisionComparisonMixin:
             relationship_context=None,
             prediction_error_context=None,
             default_mode_context=None,
-            workspace_context=self._self_activity_workspace(kwargs.get("workspace_context")),
+            workspace_context=self._self_activity_workspace(
+                kwargs.get("workspace_context"),
+                current_input_text=isolated_input.text,
+            ),
             recall_hint=kwargs.get("recall_hint") or {},
             recall_pack=kwargs.get("recall_pack") or {},
             reference_context=None,
@@ -178,6 +154,8 @@ class ServiceInputDecisionComparisonMixin:
     def _self_activity_workspace(
         self,
         workspace_context: dict[str, Any] | None,
+        *,
+        current_input_text: str | None = None,
     ) -> dict[str, Any] | None:
         if not isinstance(workspace_context, dict):
             return None
@@ -190,6 +168,12 @@ class ServiceInputDecisionComparisonMixin:
                 continue
             kind = candidate.get("kind")
             factor_ref = str(candidate.get("factor_ref") or "")
+            if kind == "current_input":
+                rewritten = dict(candidate)
+                if isinstance(current_input_text, str) and current_input_text.strip():
+                    rewritten["summary_text"] = current_input_text
+                kept.append(rewritten)
+                continue
             if kind in {"standing_concern", "ongoing_action", "autonomous_run", "drive_state"}:
                 kept.append(candidate)
                 continue
@@ -205,6 +189,117 @@ class ServiceInputDecisionComparisonMixin:
             **workspace_context,
             "workspace_candidates": kept,
         }
+
+    def _build_outward_speech_decision_context(self, **kwargs: Any) -> DecisionContext:
+        current_input = kwargs["current_input"]
+        isolated_input = CurrentInput(
+            sender_kind="system",
+            sender_ref=None,
+            source_kind=current_input.source_kind,
+            response_target_refs=(),
+            interaction_context=current_input.interaction_context,
+            text="自己評価。いま短い見方として外へ出るかを見る。",
+        )
+        return self._build_decision_context(
+            input_text=isolated_input.text,
+            current_input=isolated_input,
+            trigger_kind=kwargs["trigger_kind"],
+            recent_turns=kwargs["recent_turns"],
+            time_context=kwargs["time_context"],
+            affect_context=kwargs["affect_context"],
+            drive_state_summary=kwargs["drive_state_summary"],
+            foreground_world_state=kwargs["foreground_world_state"],
+            activity_context=kwargs["activity_context"],
+            ongoing_action_summary=None,
+            autonomous_run_summaries=None,
+            capability_decision_view=None,
+            agent_skill_context=kwargs.get("agent_skill_context"),
+            initiative_context=self._outward_speech_initiative_context(kwargs.get("initiative_context")),
+            capability_result_context=None,
+            visual_observation_context=kwargs.get("visual_observation_context"),
+            self_state_context=kwargs.get("self_state_context"),
+            people_context=kwargs.get("people_context"),
+            relationship_context=kwargs.get("relationship_context"),
+            prediction_error_context=kwargs.get("prediction_error_context"),
+            default_mode_context=kwargs.get("default_mode_context"),
+            workspace_context=self._outward_speech_workspace(
+                kwargs.get("workspace_context"),
+                current_input_text=isolated_input.text,
+            ),
+            recall_hint=kwargs.get("recall_hint") or {},
+            recall_pack=kwargs.get("recall_pack") or {},
+            reference_context=kwargs.get("reference_context"),
+            pre_send_check_feedback=kwargs.get("pre_send_check_feedback"),
+            comparison_scope="outward_speech",
+        )
+
+    def _outward_speech_workspace(
+        self,
+        workspace_context: dict[str, Any] | None,
+        *,
+        current_input_text: str | None = None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(workspace_context, dict):
+            return None
+        candidates = workspace_context.get("workspace_candidates")
+        if not isinstance(candidates, list):
+            return workspace_context
+        dropped_kinds = {
+            "standing_concern",
+            "ongoing_action",
+            "autonomous_run",
+            "capability",
+            "capability_result",
+        }
+        dropped_initiative_refs = {
+            "initiative:autonomous",
+            "initiative:ongoing_action",
+        }
+        kept = []
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            kind = candidate.get("kind")
+            factor_ref = str(candidate.get("factor_ref") or "")
+            if kind in dropped_kinds:
+                continue
+            if kind == "initiative_candidate" and factor_ref in dropped_initiative_refs:
+                continue
+            if kind == "current_input":
+                rewritten = dict(candidate)
+                if isinstance(current_input_text, str) and current_input_text.strip():
+                    rewritten["summary_text"] = current_input_text
+                kept.append(rewritten)
+                continue
+            kept.append(candidate)
+        return {
+            **workspace_context,
+            "workspace_candidates": kept,
+        }
+
+    def _outward_speech_initiative_context(
+        self,
+        initiative_context: InitiativeContext | None,
+    ) -> InitiativeContext | None:
+        if initiative_context is None:
+            return None
+        families = []
+        selected_family = None
+        for family in initiative_context.candidate_families:
+            if family.family in {"autonomous", "ongoing_action"}:
+                families.append(replace(family, available=False, selected=False))
+                continue
+            families.append(family)
+            if family.selected is True and family.available is True:
+                selected_family = family.family
+        return replace(
+            initiative_context,
+            opportunity_summary="外界の観測と直近文脈があり、短い見方として外へ出るかを見る。",
+            ongoing_action_summary=None,
+            capability_summary={},
+            candidate_families=families,
+            selected_candidate_family=selected_family,
+        )
 
     def _self_activity_initiative_context(
         self,

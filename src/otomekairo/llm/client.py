@@ -462,7 +462,10 @@ class LLMClient:
                     payload=payload,
                     context=context,
                 ),
-                repair_prompt_builder=build_decision_repair_prompt,
+                repair_prompt_builder=lambda error: build_decision_repair_prompt(
+                    error,
+                    context.comparison_scope,
+                ),
                 failure_message="Decision の生成に失敗しました。解析可能な応答が得られませんでした。",
                 operation=operation,
             )
