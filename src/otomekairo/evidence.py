@@ -9,7 +9,7 @@ from otomekairo.memory.utils import localize_timestamp_fields
 
 # 定数
 EVIDENCE_ITEM_LIMIT = 12
-TRACE_SECTION_ITEM_LIMIT = 6
+TRACE_SECTION_ITEM_LIMIT = 3
 DATE_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 JAPANESE_DATE_PATTERN = re.compile(r"\b\d{4}年\d{1,2}月\d{1,2}日\b")
 

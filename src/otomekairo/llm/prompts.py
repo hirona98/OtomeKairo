@@ -2356,7 +2356,7 @@ def _compact_speech_initiative_context(initiative_context: InitiativeContext | N
         visual_observations = foreground_signal_summary.get("visual_observations")
         if isinstance(visual_observations, list):
             compact_visual_observations: list[dict[str, Any]] = []
-            for observation in visual_observations[:8]:
+            for observation in visual_observations[:3]:
                 if not isinstance(observation, dict):
                     continue
                 compact_observation: dict[str, Any] = {}
