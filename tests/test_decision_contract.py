@@ -11,6 +11,7 @@ from otomekairo.llm.contracts import (
     validate_decision_contract,
 )
 from otomekairo.llm.prompts import (
+    _build_speech_system_prompt,
     build_decision_messages,
     build_decision_repair_prompt,
     _build_decision_trigger_policy,
@@ -621,6 +622,8 @@ class DecisionPromptScopeTests(unittest.TestCase):
         system = self._system_prompt("outward_speech")
         self.assertIn("今、外へ短い見方を出すか", system)
         self.assertIn("speech / noop / pending_intent", system)
+        self.assertIn("観測事実に基づく一文の状況認識", system)
+        self.assertIn("助言、依頼、支援提案、休息促し、身体注意、画面への一般コメントは speech ではなく控える理由", system)
         self.assertIn("target_stances は outward_speech を 1 件だけ持ちます", system)
         self.assertNotIn("今見に行く自然さがあれば capability_request", system)
         self.assertNotIn("向きと CapabilityDecisionView の catalog から autonomous_run", system)
@@ -679,13 +682,33 @@ class DecisionPromptScopeTests(unittest.TestCase):
         )
         self_text = "\n".join(self_policies)
         outward_text = "\n".join(outward_policies)
-        self.assertIn("standing_concern は実行指示ではありません", self_text)
-        self.assertIn("向きと catalog から autonomous_run を始めてよい", self_text)
+        self.assertIn("InitiativeContext は今回の自律判断機会の材料", self_text)
+        self.assertIn("preferred_capability_id がある candidate_family は capability_request の提案", self_text)
+        self.assertNotIn("standing_concern は実行指示ではありません", self_text)
+        self.assertNotIn("向きと catalog から autonomous_run を始めてよい", self_text)
         self.assertNotIn("短い独り言", self_text)
         self.assertIn("speech は短い独り言", outward_text)
         self.assertIn("speech_frequency_level は 5", outward_text)
         self.assertNotIn("向きと catalog から autonomous_run", outward_text)
         self.assertNotIn("speech / noop / pending_intent / capability_request / autonomous_run から 1 つ", outward_text)
+
+    def test_trigger_policy_is_empty_without_trigger_context(self) -> None:
+        for comparison_scope in ("self_activity", "outward_speech"):
+            with self.subTest(comparison_scope=comparison_scope):
+                self.assertEqual(
+                    _build_decision_trigger_policy(
+                        initiative_context=None,
+                        capability_result_context=None,
+                        comparison_scope=comparison_scope,
+                    ),
+                    [],
+                )
+
+    def test_expression_prompt_keeps_autonomous_speech_as_situation_recognition(self) -> None:
+        system = _build_speech_system_prompt()
+        self.assertIn("観測事実に基づく状況認識", system)
+        self.assertIn("助言、依頼、支援提案、休息促し、身体注意、評価は本文へ足しません", system)
+        self.assertIn("具体的な固有名、表示対象名、作品名、ページ内容は主題化しません", system)
 
 
 if __name__ == "__main__":

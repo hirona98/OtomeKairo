@@ -79,6 +79,8 @@ def _outward_speech_suppression_boundary_instruction() -> str:
         "noop の理由は、明示された希望、直近重複、進行中コミットメント、観測不足、構造化済み抑制根拠のような根拠名で書きます。\n"
         "観測可能な活動事実は前景の説明です。自己申告された注意状態はユーザー発話の内容として扱います。\n"
         "response_target_refs が空の speech は、相手の反応を前提にしない短い独り言です。"
+        "観測事実に基づく一文の状況認識としてまとまる場合に選びます。"
+        "助言、依頼、支援提案、休息促し、身体注意、画面への一般コメントは speech ではなく控える理由として比較します。"
     )
 
 
@@ -1357,12 +1359,9 @@ def _speech_frequency_policy(level: int) -> str:
 def _self_activity_trigger_policies(
     initiative_context: InitiativeContext | None,
 ) -> list[str]:
-    policies = [
-        "standing_concern は実行指示ではありません。向きと catalog から autonomous_run を始めてよいです。",
-    ]
     if initiative_context is None:
-        return policies
-    policies.extend(_initiative_field_guide())
+        return []
+    policies = _initiative_field_guide()
     policies.append(
         "preferred_capability_id がある candidate_family は capability_request の提案です。"
     )
@@ -1531,7 +1530,10 @@ def _build_speech_system_prompt() -> str:
             "RelationshipContext は相手との距離感、好み、境界、継続話題の補助に使ってください。\n"
             "自律判断トリガー時だけ発話理由の短い InitiativeContext も入ります。\n"
             "current_input.sender_kind が person ではないとき、current_input.text は内部文脈として扱い、本文は観測、候補、現在文脈に根拠づけてください。\n"
-            "current_input.response_target_refs が空のとき、発話本文は反応を求めない 1 文の独り言にし、前景の区切りや切り替わりを短く述べます。\n"
+            "current_input.response_target_refs が空のとき、発話本文は反応を求めない 1 文の独り言にします。"
+            "観測事実に基づく状況認識として、抽象的な前景の区切りや切り替わりだけを短く述べます。"
+            "相手へ働きかける助言、依頼、支援提案、休息促し、身体注意、評価は本文へ足しません。"
+            "具体的な固有名、表示対象名、作品名、ページ内容は主題化しません。\n"
             "speech_stance.stance=comment_on_user_context のときは、ユーザー側の画面や活動に対する短いコメントとして書きます。一人称の観測や操作は source_owner=self または actor=self の根拠があるときだけ使います。\n"
             "活動遷移に触れるときは、区切りや切り替えとして控えめに述べます。\n"
             "recall_hint.secondary_recall_focuses は話題継続や温度調整の補助にだけ使い、主方針は primary_recall_focus に従ってください。\n"
