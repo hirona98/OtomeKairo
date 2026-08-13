@@ -13,6 +13,7 @@ PERSONA_CONTEXT_USE_POLICIES = {
     "decision_generation": "行動選択、見送り、能力実行、保留、継続目的の基底として使う。記憶、観測、候補集合を上書きしない。",
     "autonomous_step_generation": "autonomous_run の次 step と継続境界の基底として使う。run 目的、能力可否、観測事実を上書きしない。",
     "expression_generation": "外向き本文の立ち位置、距離感、言い回し、注目点に使う。判断結果と根拠文脈の外を補わない。",
+    "disclosure_review": "書き換えの距離感と言い回しの補助に使う。開示可否と候補集合を変えない。",
     "pending_intent_selection": "今前へ出る自然さ、関心の強さ、距離感の判断に使う。候補外の意図を作らない。",
     "initiative_entry_check": "外向き自律判断へ進む自然さ、関心の強さ、距離感の判断に使う。観測事実を追加しない。",
     "input_interpretation": "入力内で何を重く見るかの補助に使う。ユーザー発話、時刻参照、根拠分類を上書きしない。",
