@@ -13,6 +13,7 @@ from otomekairo.llm.contexts import (
 from otomekairo.interaction import InteractionContext
 from otomekairo.service.capability import PreSendCheckWithheldError
 from otomekairo.service.common import debug_log
+from otomekairo.llm.contracts import build_decision_target_stances_for_kind
 from otomekairo.service.standing_concerns import standing_concern_factor_ref
 
 
@@ -419,6 +420,26 @@ class ServiceInputPipelineMixin:
             "autonomous_run_summary": None,
             "autonomous_run_step_result": None,
         }
+
+    def _hold_decision_target_stances(
+        self,
+        decision: dict[str, Any],
+        *,
+        reason_summary: str,
+    ) -> list[dict[str, str]]:
+        existing_targets: list[str] = []
+        current_stances = decision.get("target_stances")
+        if isinstance(current_stances, list):
+            existing_targets = [
+                item.get("target")
+                for item in current_stances
+                if isinstance(item, dict) and item.get("target") in {"outward_speech", "self_activity"}
+            ]
+        return build_decision_target_stances_for_kind(
+            "noop",
+            required_targets=existing_targets or ("outward_speech",),
+            reason_summary=reason_summary,
+        )
 
     def _pre_send_check_terminal_noop(
         self,
@@ -2162,6 +2183,10 @@ class ServiceInputPipelineMixin:
                     "pending_intent": None,
                     "capability_request": None,
                     "autonomous_run": None,
+                    "target_stances": self._hold_decision_target_stances(
+                        decision,
+                        reason_summary=reason_summary,
+                    ),
                 }
             )
             debug_log("Pipeline", f"{cycle_label} speech skipped capability_result_response_targets_empty")
@@ -2183,6 +2208,10 @@ class ServiceInputPipelineMixin:
                     "pending_intent": None,
                     "capability_request": None,
                     "autonomous_run": None,
+                    "target_stances": self._hold_decision_target_stances(
+                        decision,
+                        reason_summary=reason_summary,
+                    ),
                 }
             )
             debug_log("Pipeline", f"{cycle_label} speech skipped background_thinking_user_response_active")
@@ -2287,16 +2316,21 @@ class ServiceInputPipelineMixin:
             ],
         }
         if outcome == "withhold":
+            withheld_reason = "他の人物に由来する記憶の開示判定で発話を見送った。"
             decision.update(
                 {
                     "kind": "noop",
                     "reason_code": "disclosure_review_withheld",
-                    "reason_summary": "他の人物に由来する記憶の開示判定で発話を見送った。",
+                    "reason_summary": withheld_reason,
                     "requires_confirmation": False,
                     "pending_intent": None,
                     "capability_request": None,
                     "autonomous_run": None,
                     "disclosure_review": audit,
+                    "target_stances": self._hold_decision_target_stances(
+                        decision,
+                        reason_summary=withheld_reason,
+                    ),
                 }
             )
             return None

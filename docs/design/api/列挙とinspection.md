@@ -607,6 +607,7 @@ response:
     "cycle_id": "cycle:...",
     "cycle_summary": {},
     "foreground_selection": {},
+    "target_stances": [],
     "workspace_context_summary": {},
     "self_state_context": {},
     "relationship_context": {},
@@ -617,6 +618,7 @@ response:
 ```
 
 `foreground_selection` は判断時点で主役、補助、抑制へ分けた workspace candidate 参照である。
+`target_stances` は外向き伝達と自身の活動の `advance / hold` である。無いときは空配列を返す。意味境界は [../runtime/判断と行動.md](../runtime/判断と行動.md) を正とする。
 `workspace_context_summary` は候補盤面の要約であり、workspace 全量ではない。
 `self_state_context`、`relationship_context`、`prediction_error_context`、`default_mode_context` は判断時点の派生 view であり、記憶、世界状態、感情状態の正本ではない。
 存在しない派生 view は空 object として返す。

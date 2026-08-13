@@ -14,6 +14,7 @@ from otomekairo.memory.utils import (
     stable_json,
 )
 from otomekairo.llm.contexts import PersonaContext, build_persona_context
+from otomekairo.llm.contracts import build_decision_target_stances_for_kind
 from otomekairo.service.common import ServiceError
 from otomekairo.service.input.constants import (
     RECALL_HINT_RECENT_TURN_LIMIT,
@@ -93,6 +94,13 @@ class ServiceInputMixin(
             "foreground_selection": self._first_dict(
                 decision_trace.get("foreground_selection"),
                 internal_context.get("foreground_selection"),
+            ),
+            "target_stances": (
+                decision_trace["target_stances"]
+                if isinstance(decision_trace.get("target_stances"), list)
+                else internal_context["target_stances"]
+                if isinstance(internal_context.get("target_stances"), list)
+                else []
             ),
             "workspace_context_summary": self._first_dict(
                 decision_trace.get("workspace_context_summary"),
@@ -192,6 +200,11 @@ class ServiceInputMixin(
                     "suppressed_factors": [],
                     "summary_text": reason_summary,
                 },
+                "target_stances": build_decision_target_stances_for_kind(
+                    "noop",
+                    required_targets=("outward_speech", "self_activity"),
+                    reason_summary=reason_summary,
+                ),
             },
             "speech_payload": None,
         }

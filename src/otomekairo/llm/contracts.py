@@ -76,6 +76,19 @@ WORLD_STATE_TTL_HINT_VALUES = {
     "medium",
     "long",
 }
+DECISION_TARGET_VALUES = {
+    "outward_speech",
+    "self_activity",
+}
+DECISION_TARGET_STANCE_VALUES = {
+    "advance",
+    "hold",
+}
+SELF_ACTIVITY_WORKSPACE_KINDS = {
+    "standing_concern",
+    "ongoing_action",
+    "autonomous_run",
+}
 ACTIVITY_TRANSITION_VALUES = {
     "start",
     "continue",
@@ -641,8 +654,85 @@ def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
         raise LLMError("RecallHint confidence は 0.0 以上 1.0 以下である必要があります。")
 
 
+def required_decision_targets(
+    *,
+    kind: str,
+    workspace_context: dict[str, Any] | None = None,
+    initiative_context: Any = None,
+) -> tuple[str, ...]:
+    targets = ["outward_speech"]
+    if (
+        kind in {"capability_request", "autonomous_run", "pending_intent"}
+        or _workspace_has_self_activity(workspace_context)
+        or _initiative_has_self_activity(initiative_context)
+    ):
+        targets.append("self_activity")
+    return tuple(targets)
+
+
+def build_decision_target_stances_for_kind(
+    kind: str,
+    *,
+    required_targets: tuple[str, ...] | list[str],
+    reason_summary: str,
+) -> list[dict[str, str]]:
+    summary = reason_summary.strip() or "判断理由"
+    stances: list[dict[str, str]] = []
+    for target in required_targets:
+        if target == "outward_speech":
+            stance = "advance" if kind == "speech" else "hold"
+        else:
+            stance = "advance" if kind in {"capability_request", "autonomous_run"} else "hold"
+        stances.append(
+            {
+                "target": target,
+                "stance": stance,
+                "reason_summary": summary,
+            }
+        )
+    return stances
+
+
+def _workspace_has_self_activity(workspace_context: dict[str, Any] | None) -> bool:
+    if not isinstance(workspace_context, dict):
+        return False
+    candidates = workspace_context.get("workspace_candidates")
+    if not isinstance(candidates, list):
+        return False
+    return any(
+        isinstance(candidate, dict) and candidate.get("kind") in SELF_ACTIVITY_WORKSPACE_KINDS
+        for candidate in candidates
+    )
+
+
+def _initiative_has_self_activity(initiative_context: Any) -> bool:
+    if initiative_context is None:
+        return False
+    families = getattr(initiative_context, "candidate_families", None)
+    if families is None and isinstance(initiative_context, dict):
+        families = initiative_context.get("candidate_families")
+    for family in families or []:
+        if hasattr(family, "family"):
+            name = family.family
+            available = family.available
+        elif isinstance(family, dict):
+            name = family.get("family")
+            available = family.get("available")
+        else:
+            continue
+        if name in {"autonomous", "ongoing_action"} and available is True:
+            return True
+    return False
+
+
 # decision検証
-def validate_decision_contract(payload: dict[str, Any]) -> None:
+def validate_decision_contract(
+    payload: dict[str, Any],
+    *,
+    workspace_context: dict[str, Any] | None = None,
+    initiative_context: Any = None,
+    required_targets: tuple[str, ...] | list[str] | None = None,
+) -> None:
     # 必須キー群
     required_keys = {
         "kind",
@@ -653,6 +743,7 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
         "capability_request",
         "autonomous_run",
         "foreground_selection",
+        "target_stances",
     }
     _validate_exact_keys(payload, required_keys, "Decision")
 
@@ -752,6 +843,17 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
     elif payload["autonomous_run"] is not None:
         raise LLMError("Decision kind が autonomous_run 以外のとき、autonomous_run は null である必要があります。")
     _validate_decision_foreground_selection(payload["foreground_selection"])
+    if required_targets is None:
+        required_targets = required_decision_targets(
+            kind=str(payload.get("kind") or ""),
+            workspace_context=workspace_context,
+            initiative_context=initiative_context,
+        )
+    _validate_decision_target_stances(
+        payload["target_stances"],
+        kind=str(payload.get("kind") or ""),
+        required_targets=required_targets,
+    )
 
 
 def _validate_decision_foreground_selection(value: Any) -> None:
@@ -801,6 +903,58 @@ def _validate_decision_foreground_selection(value: Any) -> None:
     summary_text = value.get("summary_text")
     if not isinstance(summary_text, str) or not summary_text.strip():
         raise LLMError("Decision foreground_selection.summary_text は空でない文字列です。")
+
+
+def _validate_decision_target_stances(
+    value: Any,
+    *,
+    kind: str,
+    required_targets: tuple[str, ...] | list[str],
+) -> None:
+    if not isinstance(value, list) or not value:
+        raise LLMError("Decision target_stances は 1 件以上の配列である必要があります。")
+    if len(value) > 2:
+        raise LLMError("Decision target_stances は最大 2 件です。")
+    seen_targets: set[str] = set()
+    stance_by_target: dict[str, str] = {}
+    for item in value:
+        _validate_exact_keys(item, {"target", "stance", "reason_summary"}, "Decision target_stances[]")
+        target = item.get("target")
+        stance = item.get("stance")
+        reason_summary = item.get("reason_summary")
+        if target not in DECISION_TARGET_VALUES:
+            raise LLMError("Decision target_stances[].target が不正です。")
+        if stance not in DECISION_TARGET_STANCE_VALUES:
+            raise LLMError("Decision target_stances[].stance が不正です。")
+        if not isinstance(reason_summary, str) or not reason_summary.strip():
+            raise LLMError("Decision target_stances[].reason_summary は空でない文字列です。")
+        if target in seen_targets:
+            raise LLMError("Decision target_stances の target に重複があります。")
+        seen_targets.add(target)
+        stance_by_target[str(target)] = str(stance)
+    missing_targets = [target for target in required_targets if target not in seen_targets]
+    if missing_targets:
+        raise LLMError(
+            "Decision target_stances に必要な対象がありません。"
+            f" missing={','.join(missing_targets)}"
+        )
+    if kind == "speech" and stance_by_target.get("outward_speech") != "advance":
+        raise LLMError("Decision kind=speech のときは target_stances.outward_speech を advance にしてください。")
+    if kind in {"capability_request", "autonomous_run"} and stance_by_target.get("self_activity") != "advance":
+        raise LLMError(
+            f"Decision kind={kind} のときは target_stances.self_activity を advance にしてください。"
+        )
+    if kind == "pending_intent" and stance_by_target.get("self_activity") not in {None, "hold"}:
+        raise LLMError("Decision kind=pending_intent のときは target_stances.self_activity を hold にしてください。")
+    if kind == "speech" and stance_by_target.get("self_activity") == "advance":
+        raise LLMError("Decision kind=speech では target_stances.self_activity を advance にできません。")
+    if kind == "noop":
+        held = [target for target, stance in stance_by_target.items() if stance != "hold"]
+        if held:
+            raise LLMError(
+                "Decision kind=noop のときは載っている target_stances をすべて hold にしてください。"
+                f" advanced={','.join(held)}"
+            )
 
 
 # autonomous step検証

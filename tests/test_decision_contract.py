@@ -6,6 +6,7 @@ from otomekairo.llm.client import LLMClient
 from otomekairo.llm.contexts import AutonomousStepContext, CurrentInput, DecisionContext, PersonaContext
 from otomekairo.llm.contracts import (
     LLMError,
+    build_decision_target_stances_for_kind,
     validate_decision_contract,
 )
 
@@ -102,6 +103,11 @@ def _capability_decision(capability_id: str, input_payload: dict) -> dict:
             "suppressed_factors": [],
             "summary_text": "能力要求を選んだ。",
         },
+        "target_stances": build_decision_target_stances_for_kind(
+            "capability_request",
+            required_targets=("outward_speech", "self_activity"),
+            reason_summary="必要な能力を実行する。",
+        ),
     }
 
 
@@ -135,6 +141,11 @@ class DecisionContractTests(unittest.TestCase):
                 "suppressed_factors": [],
                 "summary_text": "ユーザー発話を主因にした。",
             },
+            "target_stances": build_decision_target_stances_for_kind(
+                "speech",
+                required_targets=("outward_speech",),
+                reason_summary="ユーザー発話へ返す。",
+            ),
         }
 
         validate_decision_contract(payload)
@@ -163,11 +174,109 @@ class DecisionContractTests(unittest.TestCase):
                 "suppressed_factors": [],
                 "summary_text": "MCP 操作を主因にした。",
             },
+            "target_stances": build_decision_target_stances_for_kind(
+                "autonomous_run",
+                required_targets=("outward_speech", "self_activity"),
+                reason_summary="対象 MCP を有限回操作する。",
+            ),
         }
 
         validate_decision_contract(payload)
 
         payload["autonomous_run"]["mcp_server_id"] = ""
+        with self.assertRaises(LLMError):
+            validate_decision_contract(payload)
+
+    def test_decision_contract_requires_target_stances(self) -> None:
+        payload = {
+            "kind": "speech",
+            "reason_code": "reply",
+            "reason_summary": "ユーザー発話へ返す。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+            "capability_request": None,
+            "autonomous_run": None,
+            "foreground_selection": {
+                "primary_factor_ref": "current_input:user_message",
+                "supporting_factor_refs": [],
+                "suppressed_factors": [],
+                "summary_text": "ユーザー発話を主因にした。",
+            },
+        }
+
+        with self.assertRaises(LLMError):
+            validate_decision_contract(payload)
+
+    def test_noop_with_standing_concern_requires_self_activity_hold(self) -> None:
+        workspace = {
+            "workspace_candidates": [
+                {
+                    "factor_ref": "standing_concern:elyth",
+                    "kind": "standing_concern",
+                    "summary_text": "ELYTHの場。",
+                }
+            ]
+        }
+        payload = {
+            "kind": "noop",
+            "reason_code": "hold_speech",
+            "reason_summary": "作業中なので問いかけない。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+            "capability_request": None,
+            "autonomous_run": None,
+            "foreground_selection": {
+                "primary_factor_ref": "standing_concern:elyth",
+                "supporting_factor_refs": [],
+                "suppressed_factors": [],
+                "summary_text": "外向きだけ控えた。",
+            },
+            "target_stances": build_decision_target_stances_for_kind(
+                "noop",
+                required_targets=("outward_speech",),
+                reason_summary="作業中なので問いかけない。",
+            ),
+        }
+
+        with self.assertRaises(LLMError):
+            validate_decision_contract(payload, workspace_context=workspace)
+
+        payload["target_stances"] = build_decision_target_stances_for_kind(
+            "noop",
+            required_targets=("outward_speech", "self_activity"),
+            reason_summary="今その場へ関わらない。",
+        )
+        validate_decision_contract(payload, workspace_context=workspace)
+
+    def test_speech_cannot_advance_self_activity(self) -> None:
+        payload = {
+            "kind": "speech",
+            "reason_code": "reply",
+            "reason_summary": "ユーザー発話へ返す。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+            "capability_request": None,
+            "autonomous_run": None,
+            "foreground_selection": {
+                "primary_factor_ref": "current_input:user_message",
+                "supporting_factor_refs": [],
+                "suppressed_factors": [],
+                "summary_text": "ユーザー発話を主因にした。",
+            },
+            "target_stances": [
+                {
+                    "target": "outward_speech",
+                    "stance": "advance",
+                    "reason_summary": "返す。",
+                },
+                {
+                    "target": "self_activity",
+                    "stance": "advance",
+                    "reason_summary": "同時に場へ行く。",
+                },
+            ],
+        }
+
         with self.assertRaises(LLMError):
             validate_decision_contract(payload)
 

@@ -124,6 +124,7 @@ direct entry は視覚新規性だけへ判断材料を縮約する仕組みで�
 due な気にかけていることは自発系の材料であり、偽の `drive_state` にはしない。意味境界は [気にかけていること.md](気にかけていること.md) を正とする。
 direct entry でも due な関心があるときは想起解釈を省略せず、盤面を視覚反応へ縮約しない。
 `background_thinking` は定期思考による自己評価である。定期思考の問いは、感覚への反応可否ではなく、感覚と向きを同じ盤面で見て今の個として何をするかである。
+外向き伝達を控えることと、自身の活動を控えることは別対象である。`kind=noop` は載っている対象をすべて控えたときだけ使う。対象の分け方は [判断と行動.md](判断と行動.md) を正とする。
 `decision_generation` は観測、候補、抑制、能力提案を比較し、`speech / noop / pending_intent / capability_request` から 1 つ選ぶ。
 `visual_observations[].change_state=first_seen / changed` は前景候補、`stable` は現在状態の継続シグナル、`same_as_recent_speech` は直近重複の抑制候補である。
 `background_thinking` の `speech` は、観測差分の実況ではなく、現在の個の短い見方として一言にまとまる独り言である。

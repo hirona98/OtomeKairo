@@ -4,7 +4,12 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from otomekairo.llm.contexts import AutonomousStepContext, DecisionContext
-from otomekairo.llm.contracts import validate_autonomous_step_contract, validate_decision_contract
+from otomekairo.llm.contracts import (
+    build_decision_target_stances_for_kind,
+    required_decision_targets,
+    validate_autonomous_step_contract,
+    validate_decision_contract,
+)
 from otomekairo.llm.mocks.capability import MOCK_CAPABILITY_REQUEST_RULES
 
 
@@ -91,7 +96,25 @@ class LLMMockDecisionMixin:
         payload.setdefault("capability_request", None)
         payload.setdefault("autonomous_run", None)
         payload.setdefault("foreground_selection", self._mock_foreground_selection(context))
-        validate_decision_contract(payload)
+        payload.setdefault(
+            "target_stances",
+            build_decision_target_stances_for_kind(
+                str(payload.get("kind") or "speech"),
+                required_targets=required_decision_targets(
+                    kind=str(payload.get("kind") or "speech"),
+                    workspace_context=(
+                        context.workspace_context if isinstance(context.workspace_context, dict) else None
+                    ),
+                    initiative_context=context.initiative_context,
+                ),
+                reason_summary=str(payload.get("reason_summary") or "mock decision"),
+            ),
+        )
+        validate_decision_contract(
+            payload,
+            workspace_context=context.workspace_context if isinstance(context.workspace_context, dict) else None,
+            initiative_context=context.initiative_context,
+        )
         return payload
 
     def _mock_foreground_selection(self, context: DecisionContext) -> dict[str, Any]:

@@ -18,6 +18,13 @@ class CognitiveContextInspectionTests(unittest.TestCase):
                         "summary_text": "入力を主役にした。",
                     },
                     "workspace_context_summary": {"candidate_count": 1},
+                    "target_stances": [
+                        {
+                            "target": "outward_speech",
+                            "stance": "advance",
+                            "reason_summary": "返す。",
+                        }
+                    ],
                 },
             }
         )
@@ -27,6 +34,7 @@ class CognitiveContextInspectionTests(unittest.TestCase):
 
         self.assertEqual(payload["cycle_id"], "cycle:test")
         self.assertEqual(payload["workspace_context_summary"]["candidate_count"], 1)
+        self.assertEqual(payload["target_stances"][0]["target"], "outward_speech")
         self.assertEqual(payload["self_state_context"], {})
         self.assertEqual(payload["relationship_context"], {})
         self.assertEqual(payload["prediction_error_context"], {})

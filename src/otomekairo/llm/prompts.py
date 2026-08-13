@@ -686,7 +686,7 @@ def build_decision_repair_prompt(validation_error: str) -> str:
         + "\n"
         + _outward_speech_suppression_boundary_instruction()
         + "\n"
-        "トップレベルキーは kind, reason_code, reason_summary, requires_confirmation, pending_intent, capability_request, autonomous_run, foreground_selection の 8 つだけです。\n"
+        "トップレベルキーは kind, reason_code, reason_summary, requires_confirmation, pending_intent, capability_request, autonomous_run, foreground_selection, target_stances の 9 つだけです。\n"
         "speech_text, text, message, content, output などの発話本文キーは禁止です。\n"
         "kind は speech, noop, pending_intent, capability_request, autonomous_run のいずれかだけです。\n"
         "kind=speech のときは pending_intent, capability_request, autonomous_run を null にしてください。\n"
@@ -705,6 +705,12 @@ def build_decision_repair_prompt(validation_error: str) -> str:
         "foreground_selection.primary_factor_ref は WorkspaceContext.workspace_candidates[].factor_ref から 1 件、候補がない場合だけ null です。\n"
         "foreground_selection.supporting_factor_refs は primary 以外の factor_ref を最大 3 件入れてください。\n"
         "foreground_selection.suppressed_factors は factor_ref と reason_summary だけを持つ object の配列で、見送った主な候補を最大 5 件入れてください。\n"
+        "target_stances は target, stance, reason_summary だけを持つ object の配列です。\n"
+        "target は outward_speech または self_activity、stance は advance または hold です。\n"
+        "outward_speech は毎回必須です。WorkspaceContext に standing_concern / ongoing_action / autonomous_run があるとき、または autonomous family が available なときは self_activity も必須です。\n"
+        "kind=speech では outward_speech=advance です。kind=capability_request または autonomous_run では self_activity=advance です。\n"
+        "kind=noop では載っている対象をすべて hold にしてください。外向きだけ控えて自身の活動を進めるなら kind は capability_request または autonomous_run です。\n"
+        "人物側の状況は outward_speech の hold 理由にだけ使ってください。self_activity の hold は向き自身の理由で書いてください。\n"
         "validator_error が同じ vision_source_id の新鮮な visual_context を示す場合は、その既存要約を根拠に kind=noop または kind=speech を返してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。"
     )
@@ -1101,6 +1107,7 @@ def _build_decision_system_prompt(persona_context: PersonaContext) -> str:
             "WorkspaceContext.workspace_candidates は、記憶、外界状態、志向状態、継続行動、能力候補を同じ盤面に並べた前景化候補です。\n"
             "kind=standing_concern は、しばらく関わっていない気にかけている場です。実行指示ではありません。"
             "視覚観測は感覚、standing_concern は向きです。人物側の視覚に発話しないことと、向きへ今関わることは別の比較です。"
+            "target_stances で外向き伝達と自身の活動を分けて記録してください。人物側の状況は outward_speech の hold にだけ使えます。"
             "今見に行く自然さがあれば capability_request または autonomous_run を比較し、今でなければ noop や pending_intent と比較してよいです。\n"
             "decision.kind と同じ判断の中で、今もっとも意識へ上げる primary factor、補助する supporting factors、控える suppressed factors を foreground_selection に記録してください。\n"
             "noop を選ぶ場合も、控える理由を表す WorkspaceContext の suppression 候補を primary factor にできます。\n"
@@ -1149,7 +1156,7 @@ def _build_decision_system_prompt(persona_context: PersonaContext) -> str:
         ),
         (
             "出力契約",
-            "返すキーは必ず次の 8 個です:\n"
+            "返すキーは必ず次の 9 個です:\n"
             '- kind: "speech" または "noop" または "pending_intent" または "capability_request" または "autonomous_run"\n'
             "- reason_code: string\n"
             "- reason_summary: string\n"
@@ -1158,6 +1165,7 @@ def _build_decision_system_prompt(persona_context: PersonaContext) -> str:
             "- capability_request: null または object\n"
             "- autonomous_run: null または object\n"
             "- foreground_selection: object\n"
+            "- target_stances: object 配列\n"
             "この role は発話本文を生成しません。speech_text, text, message, content, output などの本文キーは禁止です。\n"
             "発話本文は後続の expression_generation が生成します。\n"
             "kind が pending_intent のときだけ pending_intent object を返してください。\n"
@@ -1176,7 +1184,13 @@ def _build_decision_system_prompt(persona_context: PersonaContext) -> str:
             "foreground_selection object のキーは primary_factor_ref, supporting_factor_refs, suppressed_factors, summary_text の 4 個に固定してください。\n"
             "foreground_selection.primary_factor_ref は WorkspaceContext.workspace_candidates[].factor_ref から選び、候補がない場合だけ null にしてください。\n"
             "foreground_selection.supporting_factor_refs は primary 以外の factor_ref を最大 3 件にしてください。\n"
-            "foreground_selection.suppressed_factors の各 object は factor_ref, reason_summary の 2 個に固定してください。",
+            "foreground_selection.suppressed_factors の各 object は factor_ref, reason_summary の 2 個に固定してください。\n"
+            "target_stances の各 object は target, stance, reason_summary の 3 個に固定してください。\n"
+            "target は outward_speech または self_activity、stance は advance または hold です。\n"
+            "outward_speech は毎回必須です。standing_concern、ongoing_action、autonomous_run、または available な autonomous family があるときは self_activity も必須です。\n"
+            "kind=speech では outward_speech=advance、kind=capability_request または autonomous_run では self_activity=advance です。\n"
+            "kind=noop は載っている対象をすべて hold したときだけです。外向きだけ控える判断を noop にしないでください。\n"
+            "人物側の状況は outward_speech の hold 理由にだけ使い、self_activity の hold は向き自身の理由で書いてください。",
         ),
         (
             "禁止",
@@ -1312,7 +1326,8 @@ def _build_decision_trigger_policy(
                     "standing_concern は気にかけている場であり、定時作業の指示ではありません。"
                     "カメラや画面の視覚観測は感覚、standing_concern は向きです。"
                     "視覚へ発話しないあとも、向きへ今関わる自然さがあれば capability_request または autonomous_run を比べてください。"
-                    "向きまで見送る noop の reason_summary は、今その場へ関わらない理由で書いてください。"
+                    "人物側の作業や集中は outward_speech の hold 理由であり、self_activity まで閉じる理由ではありません。"
+                    "向きまで見送る noop の reason_summary と self_activity の hold 理由は、今その場へ関わらない理由で書いてください。"
                 ),
                 (
                     "校正: background_thinking では、短い独話として前へ出る自然さを 10 段階で内的に見積もり、"

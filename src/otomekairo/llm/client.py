@@ -19,6 +19,7 @@ from otomekairo.llm.contracts import (
     _validate_exact_keys,
     normalize_answer_contract_payload,
     normalize_recall_hint_payload,
+    build_decision_target_stances_for_kind,
     validate_activity_state_contract,
     validate_answer_contract_contract,
     validate_autonomous_step_contract,
@@ -475,7 +476,11 @@ class LLMClient:
         payload: dict[str, Any],
         context: DecisionContext,
     ) -> None:
-        validate_decision_contract(payload)
+        validate_decision_contract(
+            payload,
+            workspace_context=context.workspace_context if isinstance(context.workspace_context, dict) else None,
+            initiative_context=context.initiative_context,
+        )
         self._validate_decision_foreground_selection_refs(
             payload=payload,
             context=context,
@@ -655,16 +660,29 @@ class LLMClient:
         reason_summary = str(exc).replace("\n", " ").strip()
         if len(reason_summary) > 220:
             reason_summary = reason_summary[:219] + "…"
+        summary = reason_summary or "同じ vision_source_id の新鮮な visual_context を判断根拠に使う。"
+        existing_targets = []
+        current_stances = payload.get("target_stances")
+        if isinstance(current_stances, list):
+            existing_targets = [
+                item.get("target")
+                for item in current_stances
+                if isinstance(item, dict) and item.get("target") in {"outward_speech", "self_activity"}
+            ]
         payload.update(
             {
                 "kind": "noop",
                 "reason_code": "fresh_visual_context_reuse_noop",
-                "reason_summary": reason_summary
-                or "同じ vision_source_id の新鮮な visual_context を判断根拠に使う。",
+                "reason_summary": summary,
                 "requires_confirmation": False,
                 "pending_intent": None,
                 "capability_request": None,
                 "autonomous_run": None,
+                "target_stances": build_decision_target_stances_for_kind(
+                    "noop",
+                    required_targets=existing_targets or ("outward_speech",),
+                    reason_summary=summary,
+                ),
             }
         )
         debug_log(

@@ -636,6 +636,7 @@ class ServiceInputTraceBuildMixin:
                 "default_mode_context": default_mode_context,
                 "workspace_context_summary": self._summarize_workspace_context(workspace_context),
                 "foreground_selection": decision.get("foreground_selection"),
+                "target_stances": decision.get("target_stances"),
                 "recall_pack_summary": self._summarize_recall_pack(recall_pack),
                 "memory_link_context": self._summarize_memory_link_context(
                     recall_pack.get("memory_link_context")
@@ -671,6 +672,8 @@ class ServiceInputTraceBuildMixin:
             trace["workspace_context_summary"] = self._summarize_workspace_context(workspace_context)
         if isinstance(decision.get("foreground_selection"), dict):
             trace["foreground_selection"] = decision["foreground_selection"]
+        if isinstance(decision.get("target_stances"), list):
+            trace["target_stances"] = decision["target_stances"]
         return trace
 
     def _summarize_workspace_context(self, workspace_context: dict[str, Any] | None) -> dict[str, Any] | None:

@@ -8,6 +8,7 @@ from typing import Any
 
 from otomekairo.llm.client import LLMError
 from otomekairo.llm.contexts import AutonomousStepContext, CurrentInput
+from otomekairo.llm.contracts import build_decision_target_stances_for_kind
 from otomekairo.interaction import normalize_interaction_context
 from otomekairo.service.capability import (
     CapabilityDispatchError,
@@ -1461,6 +1462,11 @@ class ServiceAutonomousRunMixin:
                 "suppressed_factors": [],
                 "summary_text": "autonomous_step_generation が発話一手を選んだ。",
             },
+            "target_stances": build_decision_target_stances_for_kind(
+                "speech",
+                required_targets=("outward_speech",),
+                reason_summary=reason_summary,
+            ),
         }
         speech_context = self._build_speech_context(
             input_text=step_context.current_input.text,
