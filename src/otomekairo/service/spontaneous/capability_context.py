@@ -424,6 +424,14 @@ class ServiceSpontaneousCapabilityContextMixin:
             value = enriched_client_context.get(key)
             if isinstance(value, str) and value.strip():
                 enriched_observation_summary[key] = value.strip()
+        observed_persons = enriched_client_context.get("observed_persons")
+        if isinstance(observed_persons, list) and observed_persons:
+            enriched_observation_summary["observed_persons"] = observed_persons
+            enriched_observation_summary["observed_person_refs"] = [
+                person["person_ref"]
+                for person in observed_persons
+                if isinstance(person, dict) and isinstance(person.get("person_ref"), str)
+            ]
         input_text = self._build_capability_result_input_text(
             client_context=enriched_client_context,
             capability_response=capability_response,

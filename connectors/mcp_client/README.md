@@ -41,6 +41,8 @@ OtomeKairo access token は、`OTOMEKAIRO_ACCESS_TOKEN`、ローカル `config.d
 
 ELYTH は他の MCP server と同じ connector と `tools/list` catalog で扱う。Streamable HTTP の設定例と有限 MCP セッションの設定 wire は [状態と設定](../../docs/design/api/状態と設定.md#put-apiconfigmcp-serversmcp_server_id) を参照する。
 
+tool 結果の `actor` / `author` に `handle` と `display_name` があるとき、connector は `person:mcp:<mcp_server_id>:<handle>` を `client_context.observed_persons[]` として渡す。人物識別の正本は [人物と相互作用](../../docs/design/foundation/人物と相互作用.md) である。
+
 ELYTH API token は `headers.Authorization` に `Bearer ...` として保存する。repository、sample、通常ログ、trace に実 token を残さない。
 
 ## stdio MCP の例

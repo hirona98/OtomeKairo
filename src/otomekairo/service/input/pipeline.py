@@ -60,6 +60,7 @@ PERSON_REFERENCE_LIST_FIELDS = {
     "response_target_refs",
     "recipient_person_refs",
     "target_person_refs",
+    "observed_person_refs",
 }
 PERSON_SCOPE_FIELDS = {
     "scope_key",
@@ -1071,6 +1072,9 @@ class ServiceInputPipelineMixin:
                 display_names[participant.person_ref] = participant.display_name
         for source in structured_sources:
             ordered_refs.extend(self._structured_person_refs(source))
+            for person in self._observed_persons_from_structured_source(source):
+                ordered_refs.append(person["person_ref"])
+                display_names.setdefault(person["person_ref"], person["display_name"])
         person_refs = list(dict.fromkeys(ordered_refs))
         if not person_refs:
             return []
@@ -1141,6 +1145,39 @@ class ServiceInputPipelineMixin:
                 continue
             refs.extend(self._structured_person_refs(item))
         return refs
+
+    def _observed_persons_from_structured_source(self, value: Any) -> list[dict[str, str]]:
+        persons: list[dict[str, str]] = []
+        if isinstance(value, list):
+            for item in value:
+                persons.extend(self._observed_persons_from_structured_source(item))
+            return persons
+        if not isinstance(value, dict):
+            return persons
+        raw_persons = value.get("observed_persons")
+        if isinstance(raw_persons, list):
+            for item in raw_persons:
+                if not isinstance(item, dict):
+                    continue
+                person_ref = item.get("person_ref")
+                display_name = item.get("display_name")
+                if not isinstance(person_ref, str) or not person_ref.startswith("person:"):
+                    continue
+                if not isinstance(display_name, str) or not display_name.strip():
+                    continue
+                persons.append(
+                    {
+                        "person_ref": person_ref,
+                        "display_name": display_name.strip(),
+                    }
+                )
+        for key, item in value.items():
+            if key == "observed_persons":
+                continue
+            if key in PERSON_REFERENCE_FIELDS or key in PERSON_REFERENCE_LIST_FIELDS or key in PERSON_SCOPE_FIELDS:
+                continue
+            persons.extend(self._observed_persons_from_structured_source(item))
+        return persons
 
     def _person_refs_from_scope_value(self, value: Any) -> list[str]:
         if not isinstance(value, str):

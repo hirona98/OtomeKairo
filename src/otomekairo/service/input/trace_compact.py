@@ -618,6 +618,31 @@ class ServiceInputTraceCompactMixin:
                 continue
             if key == "readiness_digest" and isinstance(value, dict):
                 payload[key] = value
+                continue
+            if key == "observed_person_refs" and isinstance(value, list):
+                refs = [
+                    ref.strip()
+                    for ref in value
+                    if isinstance(ref, str) and ref.startswith("person:") and ref.strip()
+                ]
+                if refs:
+                    payload[key] = refs
+                continue
+            if key == "observed_persons" and isinstance(value, list):
+                persons = [
+                    {
+                        "person_ref": item["person_ref"].strip(),
+                        "display_name": item["display_name"].strip(),
+                    }
+                    for item in value
+                    if isinstance(item, dict)
+                    and isinstance(item.get("person_ref"), str)
+                    and item["person_ref"].startswith("person:")
+                    and isinstance(item.get("display_name"), str)
+                    and item["display_name"].strip()
+                ]
+                if persons:
+                    payload[key] = persons
         if not payload:
             return None
         return payload

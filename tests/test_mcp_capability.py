@@ -259,6 +259,66 @@ class McpCapabilityTests(unittest.TestCase):
         self.assertEqual(payload["client_context"]["mcp_content_item_count"], 1)
         self.assertTrue(payload["client_context"]["mcp_structured_content_present"])
 
+    def test_mcp_call_tool_result_keeps_valid_observed_persons(self) -> None:
+        service = DummyService()
+
+        payload = service._normalize_mcp_call_tool_result_payload(
+            result_payload={
+                "status": "completed",
+                "mcp_server_id": "elyth",
+                "tool_name": "get_notifications",
+                "is_error": False,
+                "content": [],
+                "structured_content": None,
+                "client_context": {
+                    "mcp_result_summary": "通知がある。",
+                    "observed_persons": [
+                        {
+                            "person_ref": "person:mcp:elyth:rin_ichinose",
+                            "display_name": "一ノ瀬 凜",
+                        }
+                    ],
+                },
+                "error": None,
+            }
+        )
+
+        self.assertEqual(
+            payload["client_context"]["observed_persons"],
+            [
+                {
+                    "person_ref": "person:mcp:elyth:rin_ichinose",
+                    "display_name": "一ノ瀬 凜",
+                }
+            ],
+        )
+
+    def test_mcp_call_tool_result_rejects_display_name_identity(self) -> None:
+        service = DummyService()
+
+        with self.assertRaises(ServiceError) as raised:
+            service._normalize_mcp_call_tool_result_payload(
+                result_payload={
+                    "status": "completed",
+                    "mcp_server_id": "elyth",
+                    "tool_name": "get_notifications",
+                    "is_error": False,
+                    "content": [],
+                    "structured_content": None,
+                    "client_context": {
+                        "observed_persons": [
+                            {
+                                "person_ref": "person:一ノ瀬凜",
+                                "display_name": "一ノ瀬 凜",
+                            }
+                        ],
+                    },
+                    "error": None,
+                }
+            )
+
+        self.assertEqual(raised.exception.error_code, "invalid_capability_result")
+
     def test_mcp_catalog_exposes_all_server_tools_and_session_policy(self) -> None:
         service = DummyService()
         self._configure_elyth(service)

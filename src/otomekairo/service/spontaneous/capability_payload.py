@@ -147,6 +147,14 @@ class ServiceSpontaneousCapabilityPayloadMixin:
         normalized_client_context = dict(client_context or {})
         normalized_client_context["mcp_content_item_count"] = len(content)
         normalized_client_context["mcp_structured_content_present"] = structured_content is not None
+        observed_persons = self._normalize_mcp_observed_persons(
+            normalized_client_context.get("observed_persons"),
+            mcp_server_id=mcp_server_id.strip(),
+        )
+        if observed_persons:
+            normalized_client_context["observed_persons"] = observed_persons
+        elif "observed_persons" in normalized_client_context:
+            del normalized_client_context["observed_persons"]
         return {
             "status": status,
             "mcp_server_id": mcp_server_id.strip(),
@@ -270,6 +278,66 @@ class ServiceSpontaneousCapabilityPayloadMixin:
             summary_chars = len(summary_text) if isinstance(summary_text, str) else 0
             return f"{spec.accepted_detail_label}={summary_chars} error={bool(result_payload.get('error'))}"
         return f"result_keys={len(result_payload)} error={bool(result_payload.get('error'))}"
+
+    def _normalize_mcp_observed_persons(
+        self,
+        value: Any,
+        *,
+        mcp_server_id: str,
+    ) -> list[dict[str, str]]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ServiceError(
+                400,
+                "invalid_capability_result",
+                "mcp.call_tool result.client_context.observed_persons must be an array.",
+            )
+        prefix = f"person:mcp:{mcp_server_id}:"
+        seen: set[str] = set()
+        persons: list[dict[str, str]] = []
+        for item in value:
+            if not isinstance(item, dict):
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "mcp.call_tool result.client_context.observed_persons[] must be an object.",
+                )
+            extra_keys = set(item) - {"person_ref", "display_name"}
+            if extra_keys:
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "mcp.call_tool result.client_context.observed_persons[] may only have person_ref and display_name.",
+                )
+            person_ref = item.get("person_ref")
+            display_name = item.get("display_name")
+            if (
+                not isinstance(person_ref, str)
+                or not person_ref.startswith(prefix)
+                or person_ref == prefix
+            ):
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "mcp.call_tool result.client_context.observed_persons[].person_ref is invalid.",
+                )
+            if not isinstance(display_name, str) or not display_name.strip():
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "mcp.call_tool result.client_context.observed_persons[].display_name must be a non-empty string.",
+                )
+            if person_ref in seen:
+                continue
+            seen.add(person_ref)
+            persons.append(
+                {
+                    "person_ref": person_ref,
+                    "display_name": display_name.strip(),
+                }
+            )
+        return persons
 
     def _capability_result_context_hook_name(self, capability_id: str) -> str | None:
         hook_name = self._capability_state_policy(capability_id).get("result_context_hook")

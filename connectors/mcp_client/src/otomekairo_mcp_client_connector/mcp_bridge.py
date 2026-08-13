@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from contextlib import asynccontextmanager, nullcontext
 from typing import Any
@@ -11,6 +10,7 @@ from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
 from .config import McpServerConfig
+from .observed_persons import content_summary
 
 
 async def list_tools(server: McpServerConfig) -> list[dict[str, Any]]:
@@ -47,11 +47,13 @@ async def call_tool(server: McpServerConfig, *, tool_name: str, arguments: dict[
         is_error = payload.get("isError")
         if not isinstance(is_error, bool):
             is_error = bool(payload.get("is_error"))
+        normalized_content = content if isinstance(content, list) else []
+        normalized_structured = structured_content if isinstance(structured_content, dict) else None
         return {
             "is_error": is_error,
-            "content": content if isinstance(content, list) else [],
-            "structured_content": structured_content if isinstance(structured_content, dict) else None,
-            "summary": _content_summary(content if isinstance(content, list) else []),
+            "content": normalized_content,
+            "structured_content": normalized_structured,
+            "summary": content_summary(normalized_content, normalized_structured),
         }
 
 
@@ -119,16 +121,3 @@ def _to_plain(value: Any) -> Any:
     return value
 
 
-def _content_summary(content: list[Any]) -> str:
-    text_parts: list[str] = []
-    for item in content:
-        payload = _to_plain(item)
-        if not isinstance(payload, dict):
-            continue
-        if payload.get("type") == "text" and isinstance(payload.get("text"), str):
-            text_parts.append(payload["text"].strip())
-    if text_parts:
-        return " ".join(part for part in text_parts if part)
-    if content:
-        return json.dumps(_to_plain(content), ensure_ascii=False)
-    return ""

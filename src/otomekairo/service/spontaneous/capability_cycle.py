@@ -193,6 +193,12 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 input_text=input_text,
                 capability_response=capability_response,
             )
+            self._register_mcp_observed_persons(
+                state=state,
+                observation_summary=observation_summary,
+                observed_at=started_at,
+                evidence_event_ids=[],
+            )
             pipeline = self._run_input_pipeline(
                 state=state,
                 started_at=started_at,

@@ -212,7 +212,7 @@ validator 失敗時は 1 回だけ再生成する。
 - `vision.capture` result は `source_kind` に関係なく `visual_context` 候補にする
 - `vision.capture` result follow-up の判断入力では、対象 `vision_source_id` と異なる `visual_context` を除外する
 - `body / device` は state_type ごとの foreground slot 単位で置換する
-- `external_service` は `service` 単位で統合または置換する。MCP は大文字小文字を保持した `mcp_server_id` と `tool_name` を個別に percent-encode し、`<encoded server>/<encoded tool>` を統合 key に使う
+- `external_service` は `service` 単位で統合または置換する。MCP は大文字小文字を保持した `mcp_server_id` を percent-encode し、その server の最新観測で置換する。`tool_name` は source の説明に残し、統合 key には使わない
 - `schedule` は generic summary を `schedule:self` へ置き、selected pending-intent または real schedule slot がある場合は `slot_key` 単位 state と併存させる
 - それ以外は同じ `state_type / scope_type / scope_key` の近い状態を統合または置換する
 - `visual_context` と `environment` は短い TTL を標準にする

@@ -569,6 +569,9 @@ class ServiceAutonomousRunMixin:
             "origin_kind": origin_kind,
             "current_step_summary": current_step_summary,
             "history_summary": "",
+            "observed_result_summaries": [],
+            "observed_persons": [],
+            "result_events": [],
             "next_run_at": current_time,
             "waiting_request_id": None,
             "pause_reason": None,
@@ -1710,7 +1713,7 @@ class ServiceAutonomousRunMixin:
             ),
             "updated_at": current_time,
             "last_step": deepcopy(step),
-            "last_result_context": None,
+            "last_result_context": run.get("last_result_context"),
         }
 
         if action_kind == "capability_request":
@@ -1937,6 +1940,23 @@ class ServiceAutonomousRunMixin:
                 observation_summary=observation_summary,
                 capability_request_summary=capability_request_summary,
             )
+            result_event = self._persist_autonomous_capability_result_event(
+                run=run,
+                capability_id=capability_id,
+                observation_summary=observation_summary,
+                input_text=input_text,
+                created_at=started_at,
+            )
+            self._register_mcp_observed_persons(
+                state=state,
+                observation_summary=observation_summary,
+                observed_at=started_at,
+                evidence_event_ids=(
+                    [result_event["event_id"]]
+                    if isinstance(result_event, dict) and isinstance(result_event.get("event_id"), str)
+                    else []
+                ),
+            )
             with self._autonomous_run_execution_lock(run_id.strip()):
                 run = self.store.get_autonomous_run(run_id=run_id.strip()) or run
                 if run.get("status") in AUTONOMOUS_RUN_TERMINAL_STATUSES:
@@ -1958,6 +1978,21 @@ class ServiceAutonomousRunMixin:
                     "waiting_request_id": None,
                     "next_run_at": started_at if next_status == "active" else run.get("next_run_at"),
                     "last_result_context": last_result_context,
+                    "observed_result_summaries": self._append_autonomous_observed_result_summaries(
+                        run=run,
+                        capability_id=capability_id,
+                        observation_summary=observation_summary,
+                        result_payload=capability_response,
+                        created_at=started_at,
+                    ),
+                    "observed_persons": self._merge_autonomous_observed_persons(
+                        run=run,
+                        observation_summary=observation_summary,
+                    ),
+                    "result_events": self._append_autonomous_result_events(
+                        run=run,
+                        result_event=result_event,
+                    ),
                     "history_summary": self._append_autonomous_result_history(
                         run=run,
                         capability_id=capability_id,
@@ -2025,6 +2060,131 @@ class ServiceAutonomousRunMixin:
                 f"result cycle failed run={run_id} error={type(exc).__name__}: {self._clamp(str(exc))}",
                 level="ERROR",
             )
+
+    def _persist_autonomous_capability_result_event(
+        self,
+        *,
+        run: dict[str, Any],
+        capability_id: str,
+        observation_summary: dict[str, Any] | None,
+        input_text: str,
+        created_at: str,
+    ) -> dict[str, Any]:
+        observed_persons = self._observed_persons_from_mcp_observation(observation_summary)
+        event = {
+            "event_id": f"event:{uuid.uuid4().hex}",
+            "cycle_id": self._autonomous_run_event_cycle_id(run),
+            "memory_set_id": run["memory_set_id"],
+            "kind": "capability_result",
+            "role": "system",
+            "text": input_text,
+            "created_at": created_at,
+            "source_kind": "autonomous_run",
+            "run_id": run.get("run_id"),
+            "capability_id": capability_id,
+            "mcp_server_id": (
+                observation_summary.get("mcp_server_id")
+                if isinstance(observation_summary, dict)
+                else None
+            ),
+            "tool_name": (
+                observation_summary.get("tool_name")
+                if isinstance(observation_summary, dict)
+                else None
+            ),
+            "mcp_result_summary": (
+                observation_summary.get("mcp_result_summary")
+                if isinstance(observation_summary, dict)
+                else None
+            ),
+            "observed_persons": observed_persons,
+            "observed_person_refs": [person["person_ref"] for person in observed_persons],
+            "interaction_ref": run.get("origin_interaction_ref"),
+            "speaker_ref": None,
+            "participant_refs": run.get("participant_refs") or [],
+        }
+        self.store.append_events(events=[event])
+        return event
+
+    def _append_autonomous_observed_result_summaries(
+        self,
+        *,
+        run: dict[str, Any],
+        capability_id: str,
+        observation_summary: dict[str, Any] | None,
+        result_payload: dict[str, Any],
+        created_at: str,
+    ) -> list[dict[str, Any]]:
+        existing = run.get("observed_result_summaries")
+        summaries = [deepcopy(item) for item in existing] if isinstance(existing, list) else []
+        tool_name = None
+        summary_text = None
+        if isinstance(observation_summary, dict):
+            raw_tool = observation_summary.get("tool_name")
+            if isinstance(raw_tool, str) and raw_tool.strip():
+                tool_name = raw_tool.strip()
+            raw_summary = observation_summary.get("mcp_result_summary")
+            if isinstance(raw_summary, str) and raw_summary.strip():
+                summary_text = raw_summary.strip()
+        if summary_text is None:
+            summary_text = self._capability_result_followup_hint_summary(
+                capability_id=capability_id,
+                observation_summary=observation_summary,
+                result_payload=result_payload,
+            )
+        if not isinstance(summary_text, str) or not summary_text.strip():
+            summary_text = f"{capability_id} の結果を受け取った。"
+        summaries.append(
+            {
+                "capability_id": capability_id,
+                "tool_name": tool_name,
+                "summary_text": summary_text.strip(),
+                "created_at": created_at,
+            }
+        )
+        return summaries
+
+    def _merge_autonomous_observed_persons(
+        self,
+        *,
+        run: dict[str, Any],
+        observation_summary: dict[str, Any] | None,
+    ) -> list[dict[str, str]]:
+        existing = run.get("observed_persons")
+        merged: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for source in (existing if isinstance(existing, list) else [], self._observed_persons_from_mcp_observation(observation_summary)):
+            for item in source:
+                if not isinstance(item, dict):
+                    continue
+                person_ref = item.get("person_ref")
+                display_name = item.get("display_name")
+                if not isinstance(person_ref, str) or not person_ref.startswith("person:"):
+                    continue
+                if not isinstance(display_name, str) or not display_name.strip():
+                    continue
+                if person_ref in seen:
+                    continue
+                seen.add(person_ref)
+                merged.append(
+                    {
+                        "person_ref": person_ref,
+                        "display_name": display_name.strip(),
+                    }
+                )
+        return merged
+
+    def _append_autonomous_result_events(
+        self,
+        *,
+        run: dict[str, Any],
+        result_event: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        existing = run.get("result_events")
+        events = [deepcopy(item) for item in existing] if isinstance(existing, list) else []
+        if isinstance(result_event, dict) and isinstance(result_event.get("event_id"), str):
+            events.append(deepcopy(result_event))
+        return events
 
     def _append_autonomous_result_history(
         self,
@@ -2368,6 +2528,14 @@ class ServiceAutonomousRunMixin:
             "terminal_status": terminal_status,
             "objective_summary": run.get("objective_summary"),
             "history_summary": run.get("history_summary"),
+            "observed_result_summaries": run.get("observed_result_summaries") or [],
+            "observed_persons": run.get("observed_persons") or [],
+            "observed_person_refs": [
+                person["person_ref"]
+                for person in (run.get("observed_persons") or [])
+                if isinstance(person, dict) and isinstance(person.get("person_ref"), str)
+            ],
+            "last_result_context": run.get("last_result_context"),
         }
         self.store.append_events(events=[event])
         return event
@@ -2477,7 +2645,226 @@ class ServiceAutonomousRunMixin:
             ),
             level="DEBUG",
         )
+        return self._consolidate_autonomous_run_terminal(
+            state=state,
+            run=updated,
+            terminal_status=terminal_status,
+            current_time=current_time,
+            evidence_events=evidence_events,
+            terminal_event=terminal_event,
+        )
+
+    def _consolidate_autonomous_run_terminal(
+        self,
+        *,
+        state: dict[str, Any],
+        run: dict[str, Any],
+        terminal_status: str,
+        current_time: str,
+        evidence_events: list[dict[str, Any]],
+        terminal_event: dict[str, Any],
+    ) -> dict[str, Any]:
+        existing = run.get("terminal_consolidation")
+        if isinstance(existing, dict) and existing.get("result_status") in {"succeeded", "failed"}:
+            return run
+        cycle_id = self._new_cycle_id()
+        input_text = self._autonomous_run_terminal_memory_input_text(
+            run=run,
+            terminal_status=terminal_status,
+            evidence_events=evidence_events,
+        )
+        speech_payload = None
+        speech_text = None
+        for event in evidence_events:
+            if isinstance(event, dict) and event.get("kind") == "speech":
+                text = event.get("text")
+                if isinstance(text, str) and text.strip():
+                    speech_text = text.strip()
+        if speech_text is not None:
+            speech_payload = {"speech_text": speech_text}
+        source_current_input = run.get("source_current_input")
+        interaction_context = None
+        if isinstance(source_current_input, dict):
+            try:
+                interaction_context = normalize_interaction_context(
+                    source_current_input.get("interaction_context")
+                )
+            except (TypeError, ValueError):
+                interaction_context = None
+        participant_refs = tuple(
+            ref
+            for ref in (run.get("participant_refs") or [])
+            if isinstance(ref, str) and ref.startswith("person:")
+        )
+        current_input = CurrentInput(
+            sender_kind="system",
+            sender_ref=None,
+            source_kind="autonomous_run",
+            response_target_refs=participant_refs,
+            interaction_context=interaction_context,
+            text=input_text,
+        )
+        people_context = self._build_people_context(
+            state=state,
+            current_input=current_input,
+            structured_sources=[run, run.get("last_result_context")],
+        )
+        events = [
+            *[
+                deepcopy(event)
+                for event in (run.get("result_events") or [])
+                if isinstance(event, dict)
+            ],
+            *[deepcopy(event) for event in evidence_events if isinstance(event, dict)],
+            deepcopy(terminal_event),
+        ]
+        decision = {
+            "kind": "speech" if speech_payload is not None else "noop",
+            "reason_code": f"autonomous_run_{terminal_status}",
+            "reason_summary": str(run.get("current_step_summary") or run.get("history_summary") or "autonomous_run が終了した。"),
+        }
+        recall_hint = {
+            **self._empty_recall_hint(),
+            "primary_recall_focus": "episodic",
+            "time_reference": "recent",
+            "mentioned_entities": [
+                person["person_ref"]
+                for person in people_context
+                if isinstance(person, dict) and isinstance(person.get("person_ref"), str)
+            ][:4],
+        }
+        cycle_summary = self._build_cycle_summary(
+            cycle_id=cycle_id,
+            started_at=current_time,
+            finished_at=current_time,
+            state=state,
+            trigger_kind="autonomous_run",
+            result_kind=decision["kind"],
+            failed=False,
+            input_text=input_text,
+            decision=decision,
+            speech_payload=speech_payload,
+        )
+        retrieval_run = {
+            "cycle_id": cycle_id,
+            "selected_memory_set_id": state["selected_memory_set_id"],
+            "started_at": current_time,
+            "finished_at": current_time,
+            "result_status": "skipped",
+        }
+        cycle_trace = {
+            "cycle_id": cycle_id,
+            "cycle_summary": cycle_summary,
+            "input_trace": {
+                "trigger_kind": "autonomous_run",
+                "run_id": run.get("run_id"),
+                "terminal_status": terminal_status,
+            },
+        }
+        try:
+            self.store.persist_cycle_records(
+                events=[],
+                retrieval_run=retrieval_run,
+                cycle_summary=cycle_summary,
+                cycle_trace=cycle_trace,
+            )
+            memory_trace = self._finalize_memory_trace(
+                cycle_id=cycle_id,
+                finished_at=current_time,
+                state=state,
+                input_text=input_text,
+                events=events,
+                pipeline={
+                    "recall_hint": recall_hint,
+                    "decision": decision,
+                    "speech_payload": speech_payload,
+                    "current_input": current_input.to_prompt_payload(),
+                    "people_context": people_context,
+                },
+                trigger_kind="autonomous_run",
+                input_event_kind="autonomous_run_terminal",
+                input_event_role="system",
+            )
+            consolidation = {
+                "result_status": "succeeded",
+                "cycle_id": cycle_id,
+                "episode_id": memory_trace.get("episode_id") if isinstance(memory_trace, dict) else None,
+                "updated_at": current_time,
+            }
+        except Exception as exc:  # noqa: BLE001
+            debug_log(
+                "AutonomousRun",
+                f"terminal consolidation failed run={run.get('run_id')} error={type(exc).__name__}: {self._clamp(str(exc))}",
+                level="ERROR",
+            )
+            consolidation = {
+                "result_status": "failed",
+                "cycle_id": cycle_id,
+                "failure_reason": str(exc),
+                "updated_at": current_time,
+            }
+        updated = {
+            **run,
+            "terminal_consolidation": consolidation,
+            "updated_at": current_time,
+        }
+        self.store.upsert_autonomous_run(autonomous_run=updated)
+        debug_log(
+            "AutonomousRun",
+            (
+                f"terminal consolidation run={run.get('run_id')} "
+                f"status={consolidation.get('result_status')} "
+                f"cycle={self._short_cycle_id(cycle_id)}"
+            ),
+        )
         return updated
+
+    def _autonomous_run_terminal_memory_input_text(
+        self,
+        *,
+        run: dict[str, Any],
+        terminal_status: str,
+        evidence_events: list[dict[str, Any]],
+    ) -> str:
+        parts = [
+            f"autonomous_run が {terminal_status} になった。",
+        ]
+        objective = run.get("objective_summary")
+        if isinstance(objective, str) and objective.strip():
+            parts.append(f"目的は {objective.strip()}。")
+        history = run.get("history_summary")
+        if isinstance(history, str) and history.strip():
+            parts.append(f"実行履歴は {history.strip()}。")
+        observed_summaries = run.get("observed_result_summaries")
+        if isinstance(observed_summaries, list):
+            for item in observed_summaries:
+                if not isinstance(item, dict):
+                    continue
+                tool_name = item.get("tool_name")
+                summary_text = item.get("summary_text")
+                if isinstance(summary_text, str) and summary_text.strip():
+                    if isinstance(tool_name, str) and tool_name.strip():
+                        parts.append(f"{tool_name.strip()} の結果は {summary_text.strip()}")
+                    else:
+                        parts.append(summary_text.strip())
+        for event in evidence_events:
+            if not isinstance(event, dict) or event.get("kind") != "speech":
+                continue
+            text = event.get("text")
+            if isinstance(text, str) and text.strip():
+                parts.append(f"外向き発話は {text.strip()}")
+        observed_persons = run.get("observed_persons")
+        if isinstance(observed_persons, list) and observed_persons:
+            names = [
+                f"{item['display_name']} ({item['person_ref']})"
+                for item in observed_persons
+                if isinstance(item, dict)
+                and isinstance(item.get("display_name"), str)
+                and isinstance(item.get("person_ref"), str)
+            ]
+            if names:
+                parts.append("観測した人物は " + "、".join(names) + "。")
+        return " ".join(parts)
 
     def _autonomous_run_event_cycle_id(self, run: dict[str, Any]) -> str:
         source_cycle_id = run.get("source_cycle_id")
@@ -2565,6 +2952,7 @@ class ServiceAutonomousRunMixin:
         mcp_session = self._autonomous_run_mcp_session_summary(run)
         if mcp_session is not None:
             summary["mcp_session"] = mcp_session
+        self._attach_autonomous_observation_summary(summary, run)
         return summary
 
     def _autonomous_run_public_summary(self, run: dict[str, Any], *, current_time: str) -> dict[str, Any]:
@@ -2589,7 +2977,21 @@ class ServiceAutonomousRunMixin:
         mcp_session = self._autonomous_run_mcp_session_summary(run)
         if mcp_session is not None:
             summary["mcp_session"] = mcp_session
+        self._attach_autonomous_observation_summary(summary, run)
         return summary
+
+    def _attach_autonomous_observation_summary(self, summary: dict[str, Any], run: dict[str, Any]) -> None:
+        observed_summaries = run.get("observed_result_summaries")
+        if isinstance(observed_summaries, list) and observed_summaries:
+            summary["observed_result_summaries"] = deepcopy(observed_summaries)
+        observed_persons = run.get("observed_persons")
+        if isinstance(observed_persons, list) and observed_persons:
+            summary["observed_persons"] = deepcopy(observed_persons)
+            summary["observed_person_refs"] = [
+                person["person_ref"]
+                for person in observed_persons
+                if isinstance(person, dict) and isinstance(person.get("person_ref"), str)
+            ]
 
     def _autonomous_run_mcp_session_summary(self, run: dict[str, Any]) -> dict[str, Any] | None:
         session = run.get("mcp_session")

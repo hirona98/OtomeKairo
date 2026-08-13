@@ -88,6 +88,7 @@ source pack は次だけを持つ。
 
 `content` と `structured_content` は秘密値、資格情報、内部 URL を除き、判断に足る要約へ限る。
 長い本文や巨大 payload をそのまま渡さない。
+結果に含まれる主体の `person_ref` 化は MCP connector の `observed_persons` を正とし、この観測 role は表示名から人物を推定しない。
 
 出力は次の exact shape とする。
 

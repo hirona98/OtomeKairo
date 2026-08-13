@@ -488,6 +488,16 @@ class LLMMockMemoryMixin:
         current_input = memory_context.get("current_input") if isinstance(memory_context, dict) else None
         sender_ref = current_input.get("sender_ref") if isinstance(current_input, dict) else None
         if not isinstance(sender_ref, str) or not sender_ref.startswith("person:"):
+            people_context = memory_context.get("people_context") if isinstance(memory_context, dict) else None
+            for person in people_context if isinstance(people_context, list) else []:
+                if not isinstance(person, dict):
+                    continue
+                person_ref = person.get("person_ref")
+                display_name = person.get("display_name")
+                if isinstance(person_ref, str) and person_ref.startswith("person:"):
+                    if isinstance(display_name, str) and display_name.strip():
+                        return person_ref, display_name.strip()
+                    return person_ref, None
             return None, None
         interaction_context = current_input.get("interaction_context")
         participants = (

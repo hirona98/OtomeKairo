@@ -287,7 +287,64 @@ class ServiceInputCapabilityContextMixin:
         compact_observation_summary = self._compact_capability_followup_observation_summary(observation_summary)
         if isinstance(compact_observation_summary, dict):
             payload["observation_summary"] = compact_observation_summary
+        observed_persons = self._observed_persons_from_mcp_observation(observation_summary)
+        if observed_persons:
+            payload["observed_persons"] = observed_persons
+            payload["observed_person_refs"] = [person["person_ref"] for person in observed_persons]
         return payload
+
+    def _observed_persons_from_mcp_observation(
+        self,
+        observation_summary: dict[str, Any] | None,
+    ) -> list[dict[str, str]]:
+        if not isinstance(observation_summary, dict):
+            return []
+        raw_persons = observation_summary.get("observed_persons")
+        if not isinstance(raw_persons, list):
+            return []
+        persons: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for item in raw_persons:
+            if not isinstance(item, dict):
+                continue
+            person_ref = item.get("person_ref")
+            display_name = item.get("display_name")
+            if not isinstance(person_ref, str) or not person_ref.startswith("person:mcp:"):
+                continue
+            if not isinstance(display_name, str) or not display_name.strip():
+                continue
+            if person_ref in seen:
+                continue
+            seen.add(person_ref)
+            persons.append(
+                {
+                    "person_ref": person_ref,
+                    "display_name": display_name.strip(),
+                }
+            )
+        return persons
+
+    def _register_mcp_observed_persons(
+        self,
+        *,
+        state: dict[str, Any],
+        observation_summary: dict[str, Any] | None,
+        observed_at: str,
+        evidence_event_ids: list[str],
+    ) -> None:
+        persons = self._observed_persons_from_mcp_observation(observation_summary)
+        if not persons:
+            return
+        memory_set_id = state.get("selected_memory_set_id")
+        if not isinstance(memory_set_id, str) or not memory_set_id.strip():
+            return
+        self.store.register_interaction_participants(
+            memory_set_id=memory_set_id,
+            participants=persons,
+            observed_at=observed_at,
+            evidence_event_ids=evidence_event_ids,
+            source_kinds=["mcp_observed_person"],
+        )
 
     def _capability_result_allowed_followup_capability_ids(self, source_capability_id: str) -> list[str]:
         allowed = [source_capability_id]

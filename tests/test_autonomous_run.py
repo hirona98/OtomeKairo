@@ -4,12 +4,19 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from otomekairo.llm.contexts import CurrentInput
 from otomekairo.service.app import OtomeKairoService
 from otomekairo.service.autonomous_run import AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK
 from otomekairo.service.capability import PreSendCheckWithheldError
 
 
 class AutonomousRunRecoveryTests(unittest.TestCase):
+    def _use_mock_model(self, service: OtomeKairoService, state: dict) -> dict:
+        preset_id = state["selected_model_preset_id"]
+        state["model_presets"][preset_id]["model"] = "mock-test"
+        service.store.write_state(state)
+        return service.store.read_state()
+
     def test_mcp_session_consumes_budget_before_dispatch(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))
@@ -279,7 +286,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
     def test_terminal_run_resolves_commitment_after_late_source_link(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))
-            state = service.store.read_state()
+            state = self._use_mock_model(service, service.store.read_state())
             memory_set_id = state["selected_memory_set_id"]
             commitment = self._persist_commitment(
                 service=service,
@@ -319,7 +326,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
     def test_completed_autonomous_run_marks_linked_commitment_done(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))
-            state = service.store.read_state()
+            state = self._use_mock_model(service, service.store.read_state())
             memory_set_id = state["selected_memory_set_id"]
             commitment = self._persist_commitment(
                 service=service,
@@ -365,7 +372,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
     def test_cancelled_autonomous_run_marks_linked_commitment_cancelled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))
-            state = service.store.read_state()
+            state = self._use_mock_model(service, service.store.read_state())
             memory_set_id = state["selected_memory_set_id"]
             commitment = self._persist_commitment(
                 service=service,
@@ -502,6 +509,165 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 service.store.get_autonomous_run(run_id=mismatched["run_id"])["waiting_request_id"],
                 "vision_capture_request:expected",
             )
+
+    def test_capability_result_is_persisted_and_last_result_survives_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._mcp_session_run_record(memory_set_id=state["selected_memory_set_id"])
+            run["source_cycle_id"] = "cycle:source"
+            run["origin_interaction_ref"] = "interaction:test"
+            run["participant_refs"] = ["person:test"]
+            run["last_result_context"] = {
+                "source_capability_id": "mcp.call_tool",
+                "observation_summary": {"mcp_result_summary": "返信を投稿した。"},
+            }
+            service.store.upsert_autonomous_run(autonomous_run=run)
+
+            event = service._persist_autonomous_capability_result_event(
+                run=run,
+                capability_id="mcp.call_tool",
+                observation_summary={
+                    "mcp_server_id": "elyth",
+                    "tool_name": "get_notifications",
+                    "mcp_result_summary": '{"data":{"items":[]}}',
+                    "observed_persons": [
+                        {
+                            "person_ref": "person:mcp:elyth:rin_ichinose",
+                            "display_name": "一ノ瀬 凜",
+                        }
+                    ],
+                },
+                input_text="MCP tool は elyth/get_notifications。",
+                created_at="2026-08-13T20:52:46+09:00",
+            )
+            self.assertEqual(event["kind"], "capability_result")
+            self.assertEqual(event["tool_name"], "get_notifications")
+            self.assertEqual(event["observed_person_refs"], ["person:mcp:elyth:rin_ichinose"])
+
+            updated = service._apply_autonomous_step_transition(
+                run={
+                    **run,
+                    "last_result_context": {"source_capability_id": "mcp.call_tool"},
+                },
+                step={
+                    "action": {
+                        "kind": "speech",
+                        "capability_request": None,
+                        "speech": {
+                            "reason_code": "done",
+                            "reason_summary": "対応した。",
+                        },
+                    },
+                    "transition": {"kind": "complete", "next_run_at": None},
+                    "run_update": {
+                        "current_step_summary": "既読処理を完了した。",
+                        "history_summary": "既読処理を実行し完了しました。",
+                    },
+                },
+                action_kind="speech",
+                current_time="2026-08-13T20:53:14+09:00",
+                capability_request_summary=None,
+            )
+            self.assertEqual(updated["status"], "completed")
+            self.assertEqual(updated["last_result_context"]["source_capability_id"], "mcp.call_tool")
+
+    def test_people_context_includes_observed_mcp_persons(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+
+            people = service._build_people_context(
+                state=state,
+                current_input=CurrentInput(
+                    sender_kind="system",
+                    sender_ref=None,
+                    source_kind="autonomous_run",
+                    response_target_refs=(),
+                    interaction_context=None,
+                    text="通知を確認した。",
+                ),
+                structured_sources=[
+                    {
+                        "observed_persons": [
+                            {
+                                "person_ref": "person:mcp:elyth:rin_ichinose",
+                                "display_name": "一ノ瀬 凜",
+                            }
+                        ],
+                        "observed_person_refs": ["person:mcp:elyth:rin_ichinose"],
+                    }
+                ],
+            )
+
+            self.assertEqual(
+                people,
+                [
+                    {
+                        "person_ref": "person:mcp:elyth:rin_ichinose",
+                        "display_name": "一ノ瀬 凜",
+                    }
+                ],
+            )
+
+    def test_terminal_consolidation_records_observed_person_episode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = self._use_mock_model(service, service.store.read_state())
+            run = self._mcp_session_run_record(memory_set_id=state["selected_memory_set_id"])
+            run["source_cycle_id"] = "cycle:source"
+            run["source_current_input"] = {
+                "sender_kind": "person",
+                "sender_ref": "person:test",
+                "source_kind": "user_message",
+                "response_target_refs": ["person:test"],
+                "interaction_context": {
+                    "interaction_ref": "interaction:test",
+                    "speaker_ref": "person:test",
+                    "participants": [{"person_ref": "person:test", "display_name": "テスト人物"}],
+                },
+                "text": "対応しておいて",
+            }
+            run["participant_refs"] = ["person:test"]
+            run["origin_interaction_ref"] = "interaction:test"
+            run["observed_persons"] = [
+                {
+                    "person_ref": "person:mcp:elyth:rin_ichinose",
+                    "display_name": "一ノ瀬 凜",
+                }
+            ]
+            run["observed_result_summaries"] = [
+                {
+                    "capability_id": "mcp.call_tool",
+                    "tool_name": "create_reply",
+                    "summary_text": "一ノ瀬 凜への返信を投稿した。",
+                    "created_at": "2026-08-13T20:52:59+09:00",
+                }
+            ]
+            run["result_events"] = []
+            service.store.upsert_autonomous_run(autonomous_run=run)
+
+            updated = service._finalize_autonomous_run_commitments(
+                state=state,
+                run=run,
+                terminal_status="completed",
+                current_time="2026-08-13T20:53:14+09:00",
+                evidence_events=[
+                    {
+                        "event_id": "event:speech",
+                        "cycle_id": "cycle:source",
+                        "memory_set_id": state["selected_memory_set_id"],
+                        "kind": "speech",
+                        "role": "assistant",
+                        "text": "一ノ瀬 凜さんへ返信しました。",
+                        "created_at": "2026-08-13T20:53:14+09:00",
+                    }
+                ],
+            )
+
+            consolidation = updated["terminal_consolidation"]
+            self.assertEqual(consolidation["result_status"], "succeeded")
+            self.assertTrue(str(consolidation["episode_id"] or "").startswith("episode:"))
 
     def _run_record(
         self,

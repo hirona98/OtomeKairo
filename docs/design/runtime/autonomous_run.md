@@ -137,6 +137,13 @@ pause 中ではない run は `active` に戻し、`next_run_at` を現在時刻
 pause 中の run は `paused` を維持し、再開時に `active` へ戻る状態にする。
 timeout 後に再試行、待機、完了、cancel のどれを選ぶかは `autonomous_step_generation` が判断する。
 
+run 内の capability result は、通常の会話 capability result と同じく `capability_result` event として残す。
+`mcp.call_tool` の結果は `mcp_result_summary`、対象 server / tool、観測した `observed_person_refs` を event に持つ。
+`last_result_context` は完了後も破棄しない。直近 result の要約と観測人物参照を terminal まで残す。
+`run_update.history_summary` は LLM が更新してよい。観測事実は `observed_result_summaries` として追記だけし、上書きしない。
+公開の働きかけに返すときは、通知や一覧の短い抜粋だけでなく、その会話の根と流れを見てから返す。未読の有無だけで返信要否を決めない。
+空の未読一覧や空の私信は、公開のやり取りが無いことの根拠にしない。自分の投稿や公開の会話履歴を見てから、やり取りの有無を確定する。
+
 ## 有限 MCP セッション
 
 有限 MCP セッションは、1 件の MCP server を対象に複数の tool call を連鎖させ、設定された回数内で終了する `autonomous_run` である。ELYTH 固有の機能ではなく、`autonomous_session.enabled=true` を持つ任意の MCP server で利用できる。tool の意味と入力 schema は通常どおり接続中の `tools/list` catalog を使い、skill と tool の固定対応表や更新系分類を持たない。通常の autonomous step と同様に Agent Skill instructions を選択できるが、有限 MCP セッション内の実行 capability は対象 server の `mcp.call_tool` に限定する。
@@ -189,6 +196,13 @@ step と終了境界は次のとおりとする。
 - pause、cancel、process 再起動、capability timeout の一般契約は通常の `autonomous_run` と共有する
 
 公開 API と prompt 用要約には `mcp_server_id / tool_call_count / max_tool_calls / background_enabled` だけを含める。policy 全体、接続 URL、header、env は公開しない。
+step 用要約には、追記済みの `observed_result_summaries` と `observed_persons` も含める。
+
+run が `completed / cancelled` へ遷移したとき、開始サイクルとは別に完了サイクルの `turn consolidation` を行う。
+完了サイクルは開始許可ではなく、誰とどの場で何をしたかを episode と memory に残す。
+根拠は terminal 発話、`history_summary`、`observed_result_summaries`、capability result event、`observed_persons` である。
+完了サイクルは `1判断サイクル = 1episode` を守る。開始サイクルの episode を書き換えない。続き物である場合だけ `episode_series_id` を引き継ぐ。
+記憶化の対象条件は [../memory/記憶更新と再整理.md](../memory/記憶更新と再整理.md#非会話サイクルの記憶化) を正とする。
 
 process startup 時点では capability request の内部照合表が空になる。
 このため、`waiting_result` の run と `waiting_request_id` を持つ `paused` run は、再起動前の result を照合できない orphan として扱う。
@@ -224,3 +238,8 @@ step 実行前と LLM 後の副作用直前に run 状態を再読込し、termi
 `/api/status` は run 件数を返す。
 `GET /api/inspection/current-state` は active、waiting、paused、terminal の run 要約を返す。
 操作 API は pause、resume、cancel を提供する。
+少なくとも次を追えるようにする。
+
+- run 内の capability result event
+- `observed_result_summaries` と `observed_persons`
+- 完了サイクルの `turn consolidation` 成否と episode 参照

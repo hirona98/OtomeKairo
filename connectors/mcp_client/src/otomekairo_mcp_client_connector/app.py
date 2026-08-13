@@ -9,6 +9,7 @@ from .config import AppConfig, McpServerConfig
 from .http import HttpError, JsonApiClient
 from .log import emit_log
 from .mcp_bridge import call_tool, list_tools
+from .observed_persons import observed_persons_from_mcp_result
 from .stream import EventStreamClient, StreamError
 from .trace import trace_writer_from_env
 
@@ -168,6 +169,13 @@ class McpClientConnector:
                 "error": error,
             },
         }
+        observed_persons = observed_persons_from_mcp_result(
+            mcp_server_id=mcp_server_id,
+            content=content,
+            structured_content=structured_content,
+        )
+        if observed_persons:
+            payload["result"]["client_context"]["observed_persons"] = observed_persons
         if self._trace is not None:
             self._trace.write(
                 boundary="otomekairo_event",

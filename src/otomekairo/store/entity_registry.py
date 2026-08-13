@@ -22,8 +22,16 @@ class StoreEntityRegistryMixin:
         participants: list[dict[str, Any]],
         observed_at: str,
         evidence_event_ids: list[str],
+        source_kinds: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        # APIから受けた person_ref は外部で確定済みの識別子としてそのまま登録する。
+        # 外部で確定済みの person_ref を観測として登録する。
+        normalized_source_kinds = [
+            value.strip()
+            for value in (source_kinds or ["interaction_api"])
+            if isinstance(value, str) and value.strip()
+        ]
+        if not normalized_source_kinds:
+            raise ValueError("entity registry source_kinds must contain a non-empty string.")
         updated_records: list[dict[str, Any]] = []
         with self._memory_db() as conn:
             for participant in participants:
@@ -43,7 +51,7 @@ class StoreEntityRegistryMixin:
                     "salience": 0.5,
                     "evidence_event_ids": evidence_event_ids,
                     "supporting_memory_unit_ids": [],
-                    "source_kinds": ["interaction_api"],
+                    "source_kinds": list(normalized_source_kinds),
                 }
                 updated_records.append(
                     self._upsert_entity_registry_observation(
