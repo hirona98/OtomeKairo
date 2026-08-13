@@ -29,7 +29,10 @@ DEFAULT_CONVERSATION_DISPLAY_NAME = "マスター"
 DEFAULT_ELYTH_MCP_SERVER_ID = "elyth"
 DEFAULT_ELYTH_STANDING_CONCERN_ID = "elyth"
 DEFAULT_STANDING_CONCERN_INTERVAL_SECONDS = 3600
-DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY = "ELYTH。届いている反応やリプライがあるかは気にかける。"
+DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY = (
+    "ELYTH。見て、反応し、言いたいことがあれば自分から書く。"
+    "届いている反応やリプライも気にかける。"
+)
 DEFAULT_ESTAT_MCP_SERVER_ID = "e-stat"
 DEFAULT_ELYTH_AGENT_SKILL_SOURCE_ID = "elyth-skills"
 # ELYTH skill repository を OtomeKairo 外へ checkout したときの root 例。

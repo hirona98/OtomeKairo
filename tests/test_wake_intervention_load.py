@@ -239,7 +239,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                     "concern_id": "elyth",
                     "enabled": True,
                     "min_interval_seconds": 600,
-                    "concern_summary": "ELYTH。届いている反応やリプライがあるかは気にかける。",
+                    "concern_summary": "ELYTH。見て、反応し、言いたいことがあれば自分から書く。届いている反応やリプライも気にかける。",
                 }
             ]
         }
@@ -327,7 +327,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                             "concern_id": "elyth",
                             "enabled": True,
                             "min_interval_seconds": 600,
-                            "concern_summary": "ELYTH。届いている反応やリプライがあるかは気にかける。",
+                            "concern_summary": "ELYTH。見て、反応し、言いたいことがあれば自分から書く。届いている反応やリプライも気にかける。",
                         }
                     ]
                 },
@@ -454,7 +454,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                 {
                     "factor_ref": "standing_concern:elyth",
                     "kind": "standing_concern",
-                    "summary_text": "ELYTH。届いている反応やリプライがあるかは気にかける。",
+                    "summary_text": "ELYTH。見て、反応し、言いたいことがあれば自分から書く。届いている反応やリプライも気にかける。",
                 },
                 {
                     "factor_ref": "initiative:autonomous",

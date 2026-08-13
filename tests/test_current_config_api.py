@@ -103,7 +103,7 @@ class CurrentConfigApiTests(unittest.TestCase):
                     "concern_id": "elyth",
                     "enabled": False,
                     "min_interval_seconds": 3600,
-                    "concern_summary": "ELYTH。届いている反応やリプライがあるかは気にかける。",
+                    "concern_summary": "ELYTH。見て、反応し、言いたいことがあれば自分から書く。届いている反応やリプライも気にかける。",
                 }
             ],
         )
