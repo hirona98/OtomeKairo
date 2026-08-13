@@ -220,7 +220,7 @@ class DecisionContractTests(unittest.TestCase):
                 {
                     "factor_ref": "standing_concern:elyth",
                     "kind": "standing_concern",
-                    "summary_text": "ELYTHの場。",
+                    "summary_text": "ELYTH。",
                 }
             ]
         }
@@ -251,7 +251,7 @@ class DecisionContractTests(unittest.TestCase):
         payload["target_stances"] = build_decision_target_stances_for_kind(
             "noop",
             required_targets=("outward_speech", "self_activity"),
-            reason_summary="今その場へ関わらない。",
+            reason_summary="今はその関心に関わらない。",
         )
         validate_decision_contract(payload, workspace_context=workspace)
 
@@ -279,7 +279,7 @@ class DecisionContractTests(unittest.TestCase):
                 {
                     "target": "self_activity",
                     "stance": "advance",
-                    "reason_summary": "同時に場へ行く。",
+                    "reason_summary": "同時に関わる。",
                 },
             ],
         }
@@ -316,12 +316,12 @@ class DecisionContractTests(unittest.TestCase):
         payload = {
             "kind": "autonomous_run",
             "reason_code": "mcp_session:start",
-            "reason_summary": "場を見に行く。",
+            "reason_summary": "その関心に関わる。",
             "requires_confirmation": False,
             "pending_intent": None,
             "capability_request": None,
             "autonomous_run": {
-                "objective_summary": "場を確認する。",
+                "objective_summary": "その関心を確認する。",
                 "initial_step_summary": "最初の tool を判断する。",
                 "mcp_server_id": "elyth",
                 "coordination": {
@@ -339,7 +339,7 @@ class DecisionContractTests(unittest.TestCase):
             "target_stances": build_decision_target_stances_for_kind(
                 "autonomous_run",
                 required_targets=("outward_speech", "self_activity"),
-                reason_summary="場を見に行く。",
+                reason_summary="その関心に関わる。",
             ),
         }
 
@@ -610,11 +610,11 @@ class DecisionPromptScopeTests(unittest.TestCase):
 
     def test_self_activity_prompt_asks_orientation_not_reply(self) -> None:
         system = self._system_prompt("self_activity")
-        self.assertIn("今、気にかけている場や継続中の自身の活動へ関わるか", system)
+        self.assertIn("今、気にかけていることや継続中の自身の活動へ関わるか", system)
         self.assertIn("capability_request / autonomous_run / pending_intent / noop", system)
         self.assertIn("向きと CapabilityDecisionView の catalog から autonomous_run を始めてよい", system)
-        self.assertIn("場へ届く手段が CapabilityDecisionView に available=true であるときだけ", system)
-        self.assertIn("手段が無いときは今はその場へ関わらない", system)
+        self.assertIn("その関心に関われる手段が CapabilityDecisionView に available=true であるときだけ", system)
+        self.assertIn("手段が無いときは今は関わらない", system)
         self.assertIn("target_stances は self_activity を 1 件だけ持ちます", system)
         self.assertNotIn("伝達、能力実行、保留、見送り、継続目的開始のどれが", system)
         self.assertNotIn("人物発話自体が未来実行", system)
@@ -651,7 +651,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
 
         initiative = InitiativeContext(
             trigger_kind="background_thinking",
-            opportunity_summary="気にかけている場がしばらく前景に出ていない。",
+            opportunity_summary="気にかけていることがしばらく前景に出ていない。",
             initiative_entry_summary=None,
             time_context_summary={},
             foreground_signal_summary={},

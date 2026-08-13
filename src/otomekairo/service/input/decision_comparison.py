@@ -93,7 +93,7 @@ class ServiceInputDecisionComparisonMixin:
             response_target_refs=(),
             interaction_context=None,
             text=(
-                "自己評価。しばらく関わっていない気にかけている場がある。今その場へ関わるかを見る。"
+                "自己評価。しばらく関わっていない気にかけていることがある。今それに関わるかを見る。"
                 if has_standing_concern
                 else "自己評価。今、自身の活動へ関わるかを見る。"
             ),
@@ -486,13 +486,13 @@ class ServiceInputDecisionComparisonMixin:
                     preferred_result_reason_summary=None,
                     preferred_capability_id=None,
                     preferred_capability_input=None,
-                    blocking_reason_summary="気にかけている場も前景の drive_state も無い。",
+                    blocking_reason_summary="気にかけていることも前景の drive_state も無い。",
                 )
             )
         return replace(
             initiative_context,
             opportunity_summary=(
-                "気にかけている場がしばらく前景に出ていない。"
+                "気にかけていることがしばらく前景に出ていない。"
                 if due_standing_concerns
                 else "今、自身の活動へ関わるかを見る。"
             ),

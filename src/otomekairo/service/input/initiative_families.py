@@ -429,7 +429,7 @@ class ServiceInputInitiativeFamiliesMixin:
     ) -> str | None:
         parts: list[str] = []
         if due_standing_concerns:
-            parts.append(f"気にかけている場 {len(due_standing_concerns)} 件")
+            parts.append(f"気にかけていること {len(due_standing_concerns)} 件")
         if isinstance(initiative_entry_summary, dict):
             reason_summary = self._client_context_text(initiative_entry_summary.get("reason_summary"), limit=180)
             entry_basis = self._client_context_text(initiative_entry_summary.get("entry_basis"), limit=48)

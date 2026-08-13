@@ -198,7 +198,7 @@ class StandingConcernWorkspaceTests(unittest.TestCase):
                     "concern_id": "elyth",
                     "enabled": True,
                     "min_interval_seconds": 3600,
-                    "concern_summary": "ELYTHの場。届いている反応やリプライがあるかは気にかける。",
+                    "concern_summary": "ELYTH。届いている反応やリプライがあるかは気にかける。",
                 }
             ],
             recall_pack={},

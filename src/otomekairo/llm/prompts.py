@@ -1047,7 +1047,7 @@ def _decision_role_section(comparison_scope: str) -> str:
     if comparison_scope == "self_activity":
         return (
             "自律 AI 本体の内部処理 role `decision_generation` として、自身の活動を判断します。\n"
-            "この比較は、今、気にかけている場や継続中の自身の活動へ関わるかを決めます。\n"
+            "この比較は、今、気にかけていることや継続中の自身の活動へ関わるかを決めます。\n"
             f"人格設定、記憶、向き、能力を踏まえて、{kinds} のいずれかを決め、JSON オブジェクト 1 個だけを返してください。\n"
             "人格本文と利用境界は internal context の persona_context に入ります。"
         )
@@ -1159,7 +1159,7 @@ def _decision_full_rules_section() -> str:
         _decision_recall_evidence_rules()
         + "RecallPack.visual_observations は過去画像の詳細な視覚説明、visual_daily_digests は日単位の整理です。特定物体の有無は visual_observations を優先します。\n"
         "自律判断時だけ InitiativeContext、capability_result 時だけ CapabilityResultContext が入ります。trigger 固有の差分は trigger_policy です。\n"
-        "WorkspaceContext は同じ盤面の前景候補です。standing_concern は気にかけている場であり、実行指示ではありません。"
+        "WorkspaceContext は同じ盤面の前景候補です。standing_concern は気にかけていることであり、実行指示ではありません。"
         "視覚観測は感覚、standing_concern は向きです。人物側の状況は outward_speech の hold にだけ使えます。"
         "今関わる自然さがあれば capability_request または autonomous_run を比べます。\n"
         + _decision_foreground_selection_rules()
@@ -1176,12 +1176,12 @@ def _decision_self_activity_rules_section() -> str:
     return (
         _decision_recall_evidence_rules()
         + "自律判断時だけ InitiativeContext が入ります。trigger 固有の差分は trigger_policy です。\n"
-        "WorkspaceContext は向き、継続行動、能力候補の前景です。standing_concern は気にかけている場であり、実行指示ではありません。\n"
+        "WorkspaceContext は向き、継続行動、能力候補の前景です。standing_concern は気にかけていることであり、実行指示ではありません。\n"
         "今関わる自然さがあれば capability_request または autonomous_run を選びます。"
         "向きと CapabilityDecisionView の catalog から autonomous_run を始めてよいです。人物発話による依頼はこの比較の前提ではありません。"
-        "場へ届く手段が CapabilityDecisionView に available=true であるときだけ、その手段で関わる。"
-        "手段が無いときは今はその場へ関わらない。\n"
-        "今その場へ関わらないときは pending_intent または noop を選び、控える理由は今その場へ関わらないこととして書きます。\n"
+        "その関心に関われる手段が CapabilityDecisionView に available=true であるときだけ、その手段で関わる。"
+        "手段が無いときは今は関わらない。\n"
+        "今関わらないときは pending_intent または noop を選び、控える理由は今その関心に関わらないこととして書きます。\n"
         + _decision_foreground_selection_rules()
         + "SelfStateContext は AI 本体側の感覚信頼度、働きかけやすさ、継続行動の安定です。気分は AffectContext.mood_state を参照します。\n"
         + _decision_capability_run_rules(include_person_start=False)
@@ -1257,7 +1257,7 @@ def _decision_output_contract_section(comparison_scope: str) -> str:
             + "target_stances は self_activity を 1 件だけ持ちます。\n"
             "kind=capability_request または autonomous_run では self_activity=advance です。\n"
             "kind=pending_intent または noop では self_activity=hold です。\n"
-            "控える理由は、今その場へ関わらないこととして書いてください。"
+            "控える理由は、今その関心に関わらないこととして書いてください。"
         )
     if comparison_scope == "outward_speech":
         return (

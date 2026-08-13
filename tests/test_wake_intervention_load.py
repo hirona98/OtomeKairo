@@ -13,7 +13,7 @@ from otomekairo.service.spontaneous.wake import ServiceSpontaneousWakeMixin
 def _initiative_context(**overrides) -> InitiativeContext:
     payload = {
         "trigger_kind": "background_thinking",
-        "opportunity_summary": "気にかけている場がしばらく前景に出ていない。",
+        "opportunity_summary": "気にかけていることがしばらく前景に出ていない。",
         "initiative_entry_summary": None,
         "time_context_summary": {},
         "foreground_signal_summary": {},
@@ -239,7 +239,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                     "concern_id": "elyth",
                     "enabled": True,
                     "min_interval_seconds": 600,
-                    "concern_summary": "ELYTHの場。届いている反応やリプライがあるかは気にかける。",
+                    "concern_summary": "ELYTH。届いている反応やリプライがあるかは気にかける。",
                 }
             ]
         }
@@ -327,7 +327,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                             "concern_id": "elyth",
                             "enabled": True,
                             "min_interval_seconds": 600,
-                            "concern_summary": "ELYTHの場。届いている反応やリプライがあるかは気にかける。",
+                            "concern_summary": "ELYTH。届いている反応やリプライがあるかは気にかける。",
                         }
                     ]
                 },
@@ -366,7 +366,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                 {
                     "factor_ref": "standing_concern:elyth",
                     "kind": "standing_concern",
-                    "summary_text": "ELYTHの場。",
+                    "summary_text": "ELYTH。",
                 }
             ]
         }
@@ -441,7 +441,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                     available=True,
                     selected=True,
                     priority_score=1.0,
-                    reason_summary="気にかけている場 1 件 / 現在観測候補 1 件 / available capability 2 件 が自律判断の材料にある。",
+                    reason_summary="気にかけていること 1 件 / 現在観測候補 1 件 / available capability 2 件 が自律判断の材料にある。",
                     preferred_capability_id="vision.capture",
                     preferred_capability_input={"vision_source_id": "vision_source:対面カメラ", "mode": "still"},
                     preferred_result_kind="capability_request",
@@ -454,12 +454,12 @@ class WakeInterventionLoadTests(unittest.TestCase):
                 {
                     "factor_ref": "standing_concern:elyth",
                     "kind": "standing_concern",
-                    "summary_text": "ELYTHの場。届いている反応やリプライがあるかは気にかける。",
+                    "summary_text": "ELYTH。届いている反応やリプライがあるかは気にかける。",
                 },
                 {
                     "factor_ref": "initiative:autonomous",
                     "kind": "initiative_candidate",
-                    "summary_text": "気にかけている場 1 件 / available capability 2 件 が自律判断の材料にある。",
+                    "summary_text": "気にかけていること 1 件 / available capability 2 件 が自律判断の材料にある。",
                     "metadata": {
                         "family": "autonomous",
                         "available": True,
@@ -500,7 +500,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertIn("mcp.call_tool", [item["id"] for item in isolated.capability_summary.get("unavailable_items", [])])
         self.assertIsNotNone(family)
         self.assertTrue(family.available)
-        self.assertIn("気にかけている場 1 件", family.reason_summary)
+        self.assertIn("気にかけていること 1 件", family.reason_summary)
         self.assertNotIn("現在観測候補", family.reason_summary)
         self.assertNotIn("available capability", family.reason_summary)
         self.assertIsNone(family.preferred_capability_id)
@@ -538,7 +538,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertFalse(family.available)
         self.assertFalse(family.selected)
         self.assertIsNone(isolated.selected_candidate_family)
-        self.assertEqual(family.blocking_reason_summary, "気にかけている場も前景の drive_state も無い。")
+        self.assertEqual(family.blocking_reason_summary, "気にかけていることも前景の drive_state も無い。")
 
     def test_outward_speech_workspace_drops_self_activity_means(self) -> None:
         service = DummyInputService()
@@ -602,7 +602,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         )
         initiative_context = InitiativeContext(
             trigger_kind="background_thinking",
-            opportunity_summary="気にかけている場がしばらく前景に出ていない。",
+            opportunity_summary="気にかけていることがしばらく前景に出ていない。",
             initiative_entry_summary=None,
             time_context_summary={},
             foreground_signal_summary={
@@ -624,7 +624,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                     available=True,
                     selected=True,
                     priority_score=1.0,
-                    reason_summary="場へ行く。",
+                    reason_summary="関わる。",
                 )
             ],
             selected_candidate_family="autonomous",
@@ -683,12 +683,12 @@ class WakeInterventionLoadTests(unittest.TestCase):
         composed = service._compose_separated_decisions(
             self_decision={
                 "kind": "noop",
-                "reason_summary": "今はその場へ関わらない。",
+                "reason_summary": "今はその関心に関わらない。",
                 "target_stances": [
                     {
                         "target": "self_activity",
                         "stance": "hold",
-                        "reason_summary": "今はその場へ関わらない。",
+                        "reason_summary": "今はその関心に関わらない。",
                     }
                 ],
             },
@@ -708,7 +708,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
 
         self.assertNotIn("kind", composed)
         self.assertIn("外向き伝達: 作業中なので話しかけない。", composed["reason_summary"])
-        self.assertIn("自身の活動: 今はその場へ関わらない。", composed["reason_summary"])
+        self.assertIn("自身の活動: 今はその関心に関わらない。", composed["reason_summary"])
         targets = {item["target"]: item["stance"] for item in composed["target_stances"]}
         self.assertEqual(targets, {"outward_speech": "hold", "self_activity": "hold"})
         self.assertEqual(composed["separated_comparisons"]["self_activity"]["kind"], "noop")
@@ -720,12 +720,12 @@ class WakeInterventionLoadTests(unittest.TestCase):
             self_decision={
                 "kind": "autonomous_run",
                 "reason_code": "visit_place",
-                "reason_summary": "気にかけている場へ行く。",
+                "reason_summary": "その関心に関わる。",
                 "requires_confirmation": False,
                 "pending_intent": None,
                 "capability_request": None,
                 "autonomous_run": {
-                    "objective_summary": "場を見る",
+                    "objective_summary": "その関心に関わる",
                     "initial_step_summary": "開く",
                     "mcp_server_id": "elyth",
                     "coordination": {
@@ -738,13 +738,13 @@ class WakeInterventionLoadTests(unittest.TestCase):
                     "primary_factor_ref": "standing_concern:elyth",
                     "supporting_factor_refs": [],
                     "suppressed_factors": [],
-                    "summary_text": "場へ行く。",
+                    "summary_text": "関わる。",
                 },
                 "target_stances": [
                     {
                         "target": "self_activity",
                         "stance": "advance",
-                        "reason_summary": "気にかけている場へ行く。",
+                        "reason_summary": "その関心に関わる。",
                     }
                 ],
             },
@@ -780,7 +780,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         )
         self.assertEqual(composed["separated_comparisons"]["outward_speech"]["kind"], "speech")
         self.assertIn("外向き伝達: 短い独り言を残す。", composed["reason_summary"])
-        self.assertIn("自身の活動: 気にかけている場へ行く。", composed["reason_summary"])
+        self.assertIn("自身の活動: その関心に関わる。", composed["reason_summary"])
         targets = {item["target"]: item["stance"] for item in composed["target_stances"]}
         self.assertEqual(targets, {"outward_speech": "advance", "self_activity": "advance"})
         self.assertEqual(
@@ -793,13 +793,13 @@ class WakeInterventionLoadTests(unittest.TestCase):
         composed = service._compose_separated_decisions(
             self_decision={
                 "kind": "capability_request",
-                "reason_summary": "場の様子を取る。",
+                "reason_summary": "その関心の様子を見る。",
                 "capability_request": {"capability_id": "mcp.call_tool", "input": {}},
                 "target_stances": [
                     {
                         "target": "self_activity",
                         "stance": "advance",
-                        "reason_summary": "場の様子を取る。",
+                        "reason_summary": "その関心の様子を見る。",
                     }
                 ],
             },
@@ -824,7 +824,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         targets = {item["target"]: item["stance"] for item in composed["target_stances"]}
         self.assertEqual(targets, {"outward_speech": "hold", "self_activity": "advance"})
         self.assertIn("外向き伝達: 作業中なので話しかけない。", composed["reason_summary"])
-        self.assertIn("自身の活動: 場の様子を取る。", composed["reason_summary"])
+        self.assertIn("自身の活動: その関心の様子を見る。", composed["reason_summary"])
 
     def test_separated_activity_decisions_always_call_both_comparisons(self) -> None:
         class DualCallLLM:
@@ -838,12 +838,12 @@ class WakeInterventionLoadTests(unittest.TestCase):
                     return {
                         "kind": "autonomous_run",
                         "reason_code": "visit",
-                        "reason_summary": "場へ行く。",
+                        "reason_summary": "関わる。",
                         "target_stances": [
                             {
                                 "target": "self_activity",
                                 "stance": "advance",
-                                "reason_summary": "場へ行く。",
+                                "reason_summary": "関わる。",
                             }
                         ],
                     }
@@ -933,7 +933,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                         "reason_summary": "あとで見る。",
                         "pending_intent": {
                             "intent_kind": "revisit",
-                            "intent_summary": "気にかけている場をあとで見る。",
+                            "intent_summary": "その関心をあとで見る。",
                             "dedupe_key": "pending:elyth",
                         },
                     },
@@ -946,7 +946,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         )
 
         self.assertEqual(summary["intent_kind"], "revisit")
-        self.assertEqual(summary["intent_summary"], "気にかけている場をあとで見る。")
+        self.assertEqual(summary["intent_summary"], "その関心をあとで見る。")
         self.assertEqual(summary["dedupe_key"], "pending:elyth")
         self.assertEqual(summary["reason_summary"], "あとで見る。")
 

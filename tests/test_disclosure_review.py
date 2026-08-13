@@ -142,16 +142,16 @@ class DisclosureReviewTests(unittest.TestCase):
         )
         service = DisclosureService(llm)
         decision = {
-            "reason_summary": "外向き伝達: 一言。 自身の活動: 場へ行く。",
+            "reason_summary": "外向き伝達: 一言。 自身の活動: 関わる。",
             "target_stances": [
                 {"target": "outward_speech", "stance": "advance", "reason_summary": "一言。"},
-                {"target": "self_activity", "stance": "advance", "reason_summary": "場へ行く。"},
+                {"target": "self_activity", "stance": "advance", "reason_summary": "関わる。"},
             ],
             "separated_comparisons": {
                 "self_activity": {
                     "kind": "autonomous_run",
-                    "reason_summary": "場へ行く。",
-                    "autonomous_run": {"objective_summary": "場を見る"},
+                    "reason_summary": "関わる。",
+                    "autonomous_run": {"objective_summary": "その関心に関わる"},
                 },
                 "outward_speech": {
                     "kind": "speech",
@@ -180,7 +180,7 @@ class DisclosureReviewTests(unittest.TestCase):
         self.assertNotIn("kind", decision)
         self.assertEqual(
             decision["separated_comparisons"]["self_activity"]["autonomous_run"]["objective_summary"],
-            "場を見る",
+            "その関心に関わる",
         )
         self.assertEqual(decision["separated_comparisons"]["outward_speech"]["kind"], "noop")
         self.assertEqual(
