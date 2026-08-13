@@ -27,7 +27,6 @@ from otomekairo.llm.contracts import (
     validate_disclosure_review_contract,
     validate_event_evidence_contract,
     validate_initiative_entry_check_contract,
-    validate_mcp_inbound_observation_contract,
     validate_memory_correction_reconciliation_contract,
     validate_memory_interpretation_contract,
     validate_memory_reflection_summary_contract,
@@ -57,8 +56,6 @@ from otomekairo.llm.prompts import (
     build_event_evidence_repair_prompt,
     build_initiative_entry_check_messages,
     build_initiative_entry_check_repair_prompt,
-    build_mcp_inbound_observation_messages,
-    build_mcp_inbound_observation_repair_prompt,
     build_input_interpretation_messages,
     build_input_interpretation_repair_prompt,
     build_memory_correction_reconciliation_messages,
@@ -410,10 +407,6 @@ class LLMClient:
             payload=payload,
             context=context,
         )
-        self._validate_decision_finite_mcp_session_start(
-            payload=payload,
-            context=context,
-        )
         if payload.get("kind") == "capability_request":
             self._validate_capability_request_for_context(
                 request_payload=payload.get("capability_request"),
@@ -514,79 +507,6 @@ class LLMClient:
                     "Decision autonomous_run.coordination.target_run_ids には "
                     "AutonomousRunSummaries に含まれる run_id だけを指定してください。"
                 )
-
-    def _validate_decision_finite_mcp_session_start(
-        self,
-        *,
-        payload: dict[str, Any],
-        context: DecisionContext,
-    ) -> None:
-        if payload.get("kind") != "autonomous_run":
-            return
-        autonomous_run = payload.get("autonomous_run")
-        if not isinstance(autonomous_run, dict):
-            return
-        mcp_server_id = autonomous_run.get("mcp_server_id")
-        if mcp_server_id is None:
-            return
-        normalized_server_id = str(mcp_server_id).strip()
-        if context.trigger_kind not in {"user_message", "background_thinking"}:
-            raise LLMError(
-                "有限 MCP セッションは user_message または background_thinking からだけ開始できます。"
-            )
-        mcp_capability = self._capability_decision_view_entry(
-            capability_decision_view=context.capability_decision_view,
-            capability_id="mcp.call_tool",
-        )
-        targets = (
-            mcp_capability.get("finite_session_targets")
-            if isinstance(mcp_capability, dict)
-            else None
-        )
-        target = next(
-            (
-                candidate
-                for candidate in targets or []
-                if isinstance(candidate, dict)
-                and candidate.get("mcp_server_id") == normalized_server_id
-            ),
-            None,
-        )
-        if not isinstance(target, dict):
-            available_ids = [
-                str(candidate.get("mcp_server_id") or "").strip()
-                for candidate in targets or []
-                if isinstance(candidate, dict)
-                and str(candidate.get("mcp_server_id") or "").strip()
-            ]
-            available_summary = ",".join(available_ids) if available_ids else "なし"
-            raise LLMError(
-                "Decision autonomous_run.mcp_server_id は "
-                "CapabilityDecisionView の finite_session_targets に含まれる server だけを指定してください。"
-                f"現在の開始候補={available_summary}。"
-                "対象が候補にない場合、同じ MCP 操作を通常の autonomous_run で代替せず、"
-                "pending_intent または noop を選んでください。"
-            )
-        active_run_ids = {
-            run_id
-            for run_id in target.get("active_run_ids", [])
-            if isinstance(run_id, str) and run_id
-        }
-        if not active_run_ids:
-            return
-        coordination = autonomous_run.get("coordination")
-        mode = coordination.get("mode") if isinstance(coordination, dict) else None
-        target_run_ids = {
-            run_id
-            for run_id in coordination.get("target_run_ids", [])
-            if isinstance(run_id, str) and run_id
-        } if isinstance(coordination, dict) else set()
-        if mode != "replace_existing" or not active_run_ids.issubset(target_run_ids):
-            raise LLMError(
-                "有限 MCP セッションの進行中 run があるため、"
-                "coordination.mode=replace_existing とし、finite_session_targets.active_run_ids を"
-                "すべて target_run_ids に含めてください。"
-            )
 
     def generate_autonomous_step(
         self,
@@ -1380,41 +1300,6 @@ class LLMClient:
             validator=lambda payload: validate_pending_intent_selection_contract(payload, source_pack=source_pack),
             repair_prompt_builder=build_pending_intent_selection_repair_prompt,
             failure_message="PendingIntentSelection の生成に失敗しました。解析可能な応答が得られませんでした。",
-            wrap_validation_error=True,
-            operation=operation,
-        )
-
-    def generate_mcp_inbound_observation(
-        self,
-        *,
-        model_config: dict,
-        persona_context: PersonaContext,
-        source_pack: dict[str, Any],
-    ) -> dict[str, Any]:
-        operation = "mcp_inbound_observation"
-        debug_log(
-            "LLM",
-            (
-                f"{operation} start mode={self._debug_mode(model_config)} "
-                f"model={self._debug_model(model_config)}"
-            ),
-            level="DEBUG",
-        )
-        source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
-        if self._is_mock_model_config(model_config):
-            payload = self.mock_client.generate_mcp_inbound_observation(model_config, source_pack)
-            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
-            return payload
-        messages = build_mcp_inbound_observation_messages(
-            persona_context=persona_context,
-            source_pack=source_pack,
-        )
-        return self._generate_structured_payload(
-            model_config=model_config,
-            messages=messages,
-            validator=validate_mcp_inbound_observation_contract,
-            repair_prompt_builder=build_mcp_inbound_observation_repair_prompt,
-            failure_message="McpInboundObservation の生成に失敗しました。解析可能な応答が得られませんでした。",
             wrap_validation_error=True,
             operation=operation,
         )

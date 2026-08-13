@@ -303,7 +303,6 @@ class LLMMockDecisionMixin:
             "autonomous_run": {
                 "objective_summary": normalized[:180],
                 "initial_step_summary": "目的に沿って最初の一手を決める。",
-                "mcp_server_id": None,
                 "coordination": self._mock_autonomous_run_coordination(
                     autonomous_run_summaries=autonomous_run_summaries,
                 ),

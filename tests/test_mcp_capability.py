@@ -61,12 +61,6 @@ class McpCapabilityTests(unittest.TestCase):
                 "transport": "streamable_http",
                 "url": "https://elythworld.com/api/mcp/remote",
                 "headers": {"Authorization": "Bearer test-token"},
-                "autonomous_session": {
-                    "enabled": True,
-                    "background_enabled": True,
-                    "min_interval_seconds": 3600,
-                    "max_tool_calls": 10,
-                },
             }
         }
 
@@ -342,120 +336,9 @@ class McpCapabilityTests(unittest.TestCase):
             [tool["name"] for tool in servers[0]["tools"]],
             ["create_post", "undeclared_tool"],
         )
-        self.assertTrue(servers[0]["autonomous_session"]["enabled"])
-        self.assertTrue(servers[0]["autonomous_session"]["background_eligible"])
+        self.assertNotIn("autonomous_session", servers[0])
         self.assertTrue(service._mcp_tool_is_enabled("elyth", "create_post"))
         self.assertTrue(service._mcp_tool_is_enabled("elyth", "undeclared_tool"))
-
-    def test_background_finite_session_targets_exclude_cooldown_server_without_hiding_tools(self) -> None:
-        service = DummyService()
-        self._configure_elyth(service)
-        self._register_elyth_catalog(service)
-        service.store.autonomous_runs = [
-            {
-                "run_id": "autonomous_run:recent",
-                "status": "completed",
-                "created_at": "2026-06-20T11:30:00+09:00",
-                "mcp_session": {"mcp_server_id": "elyth"},
-            }
-        ]
-
-        servers = service._inspection_mcp_servers(
-            service._event_stream_registry.list_capability_bindings()["mcp_servers"],
-            current_time="2026-06-20T12:00:00+09:00",
-        )
-
-        self.assertTrue(servers[0]["available"])
-        self.assertEqual([tool["name"] for tool in servers[0]["tools"]], ["get_notifications"])
-        self.assertEqual(
-            service._finite_mcp_session_targets(
-                mcp_servers=servers,
-                trigger_kind="background_thinking",
-            ),
-            [],
-        )
-        self.assertEqual(
-            service._finite_mcp_session_targets(
-                mcp_servers=servers,
-                trigger_kind="user_message",
-            ),
-            [{"mcp_server_id": "elyth", "active_run_ids": []}],
-        )
-
-    def test_user_finite_session_target_includes_active_session_replacement_ids(self) -> None:
-        service = DummyService()
-        self._configure_elyth(service)
-        self._register_elyth_catalog(service)
-        service.store.autonomous_runs = [
-            {
-                "run_id": "autonomous_run:active",
-                "status": "active",
-                "created_at": "2026-06-20T11:30:00+09:00",
-                "mcp_session": {"mcp_server_id": "elyth"},
-            }
-        ]
-
-        servers = service._inspection_mcp_servers(
-            service._event_stream_registry.list_capability_bindings()["mcp_servers"],
-            current_time="2026-06-20T12:00:00+09:00",
-        )
-
-        self.assertEqual(
-            service._finite_mcp_session_targets(
-                mcp_servers=servers,
-                trigger_kind="background_thinking",
-            ),
-            [],
-        )
-        self.assertEqual(
-            service._finite_mcp_session_targets(
-                mcp_servers=servers,
-                trigger_kind="user_message",
-            ),
-            [{"mcp_server_id": "elyth", "active_run_ids": ["autonomous_run:active"]}],
-        )
-
-    def test_background_finite_session_target_returns_only_after_cooldown(self) -> None:
-        service = DummyService()
-        self._configure_elyth(service)
-        self._register_elyth_catalog(service)
-        service.store.autonomous_runs = [
-            {
-                "run_id": "autonomous_run:completed",
-                "status": "completed",
-                "created_at": "2026-06-20T16:52:45+09:00",
-                "mcp_session": {"mcp_server_id": "elyth"},
-            }
-        ]
-        catalog = service._event_stream_registry.list_capability_bindings()["mcp_servers"]
-
-        for current_time in (
-            "2026-06-20T16:57:42+09:00",
-            "2026-06-20T17:07:42+09:00",
-            "2026-06-20T17:17:42+09:00",
-            "2026-06-20T17:52:44+09:00",
-        ):
-            with self.subTest(current_time=current_time):
-                servers = service._inspection_mcp_servers(catalog, current_time=current_time)
-                self.assertEqual(
-                    service._finite_mcp_session_targets(
-                        mcp_servers=servers,
-                        trigger_kind="background_thinking",
-                    ),
-                    [],
-                )
-
-        servers = service._inspection_mcp_servers(
-            catalog,
-            current_time="2026-06-20T17:52:45+09:00",
-        )
-        self.assertEqual(
-            service._finite_mcp_session_targets(
-                mcp_servers=servers,
-                trigger_kind="background_thinking",
-            ),
-            [{"mcp_server_id": "elyth", "active_run_ids": []}],
-        )
 
     def test_mcp_catalog_does_not_add_skill_metadata(self) -> None:
         service = DummyService()

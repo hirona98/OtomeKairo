@@ -872,6 +872,7 @@ class ServiceConfigStreamMixin:
         *,
         current_time: str | None = None,
     ) -> list[dict[str, Any]]:
+        _ = current_time
         # 接続後の設定変更も decision view と inspection へ即時反映する。
         registered_servers = self._mcp_servers_from_state(self.store.read_state())
         normalized: list[dict[str, Any]] = []
@@ -889,26 +890,6 @@ class ServiceConfigStreamMixin:
                 and registered_server.get("enabled") is True
                 and registered_server.get("client_id") == server.get("client_id")
             )
-            session_view = None
-            if isinstance(registered_server, dict):
-                session = registered_server.get("autonomous_session")
-                if isinstance(session, dict):
-                    matching_runs = self._mcp_session_runs(normalized_server_id)
-                    session_view = {
-                        **session,
-                        "background_eligible": self._mcp_background_session_eligible(
-                            mcp_server_id=normalized_server_id,
-                            policy=session,
-                            matching_runs=matching_runs,
-                            current_time=current_time,
-                        ),
-                        "active_run_ids": [
-                            str(run.get("run_id") or "")
-                            for run in matching_runs
-                            if run.get("status") in {"active", "waiting_timer", "waiting_result", "paused"}
-                            and str(run.get("run_id") or "")
-                        ],
-                    }
             # 設定上無効な server は catalog から外す。
             tools = self._inspection_mcp_tools(server.get("tools")) if server_is_active else []
             normalized.append(
@@ -918,7 +899,6 @@ class ServiceConfigStreamMixin:
                     "available": server.get("available") is True and bool(tools),
                     "unavailable_reason": "no_mcp_tool" if not tools else None,
                     "tools": tools,
-                    "autonomous_session": session_view,
                 }
             )
         return normalized
@@ -947,50 +927,6 @@ class ServiceConfigStreamMixin:
                 }
             )
         return tools
-
-    def _mcp_session_runs(self, mcp_server_id: str) -> list[dict[str, Any]]:
-        state = self.store.read_state()
-        memory_set_id = state.get("selected_memory_set_id")
-        if not isinstance(memory_set_id, str):
-            return []
-        runs = self.store.list_autonomous_runs(memory_set_id=memory_set_id, limit=50)
-        return [
-            run
-            for run in runs
-            if isinstance(run, dict)
-            and isinstance(run.get("mcp_session"), dict)
-            and run["mcp_session"].get("mcp_server_id") == mcp_server_id
-        ]
-
-    def _mcp_background_session_eligible(
-        self,
-        *,
-        mcp_server_id: str,
-        policy: dict[str, Any],
-        matching_runs: list[dict[str, Any]] | None = None,
-        current_time: str | None = None,
-        inbound_present: bool = False,
-    ) -> bool:
-        if policy.get("enabled") is not True or policy.get("background_enabled") is not True:
-            return False
-        matching = matching_runs if matching_runs is not None else self._mcp_session_runs(mcp_server_id)
-        if any(run.get("status") in {"active", "waiting_timer", "waiting_result", "paused"} for run in matching):
-            return False
-        if inbound_present is True:
-            return True
-        if not matching:
-            return True
-        created_at_values = [
-            self._parse_iso(str(run["created_at"]))
-            for run in matching
-            if isinstance(run.get("created_at"), str) and run["created_at"].strip()
-        ]
-        if not created_at_values:
-            return True
-        elapsed = (
-            self._parse_iso(current_time or self._now_iso()) - max(created_at_values)
-        ).total_seconds()
-        return elapsed >= int(policy.get("min_interval_seconds") or 0)
 
     def _inspection_vision_sources(self, vision_sources: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
         normalized: list[dict[str, Any]] = []
@@ -1157,8 +1093,8 @@ class ServiceConfigStreamMixin:
         state: dict[str, Any] | None = None,
         current_time: str | None = None,
         trigger_kind: str | None = None,
-        inbound_present_mcp_server_ids: list[str] | None = None,
     ) -> list[dict[str, Any]] | None:
+        _ = trigger_kind
         manifests = capability_manifests()
         bindings = self._event_stream_registry.list_capability_bindings()
         accepted_bindings = bindings["accepted"]
@@ -1209,65 +1145,11 @@ class ServiceConfigStreamMixin:
             if capability_id in {"vision.capture", "camera.ptz"}:
                 item["vision_sources"] = availability.get("vision_sources", [])
             if capability_id == "mcp.call_tool":
-                normalized_mcp_servers = availability.get("mcp_servers", [])
-                item["mcp_servers"] = normalized_mcp_servers
-                item["finite_session_targets"] = self._finite_mcp_session_targets(
-                    mcp_servers=normalized_mcp_servers,
-                    trigger_kind=trigger_kind,
-                    inbound_present_mcp_server_ids=inbound_present_mcp_server_ids,
-                )
+                item["mcp_servers"] = availability.get("mcp_servers", [])
             decision_view.append(item)
         if not decision_view:
             return None
         return decision_view
-
-    def _finite_mcp_session_targets(
-        self,
-        *,
-        mcp_servers: list[dict[str, Any]] | None,
-        trigger_kind: str | None,
-        inbound_present_mcp_server_ids: list[str] | None = None,
-    ) -> list[dict[str, Any]]:
-        if trigger_kind not in {"user_message", "background_thinking"}:
-            return []
-        inbound_ids = {
-            server_id.strip()
-            for server_id in (inbound_present_mcp_server_ids or [])
-            if isinstance(server_id, str) and server_id.strip()
-        }
-        targets: list[dict[str, Any]] = []
-        for server in mcp_servers or []:
-            if not isinstance(server, dict) or server.get("available") is not True:
-                continue
-            mcp_server_id = server.get("mcp_server_id")
-            session = server.get("autonomous_session")
-            if (
-                not isinstance(mcp_server_id, str)
-                or not mcp_server_id.strip()
-                or not isinstance(session, dict)
-                or session.get("enabled") is not True
-            ):
-                continue
-            active_run_ids = [
-                run_id
-                for run_id in session.get("active_run_ids", [])
-                if isinstance(run_id, str) and run_id
-            ]
-            inbound_present = mcp_server_id.strip() in inbound_ids
-            background_ready = session.get("background_eligible") is True or inbound_present
-            if trigger_kind == "background_thinking" and (
-                session.get("background_enabled") is not True
-                or background_ready is not True
-                or active_run_ids
-            ):
-                continue
-            targets.append(
-                {
-                    "mcp_server_id": mcp_server_id.strip(),
-                    "active_run_ids": active_run_ids,
-                }
-            )
-        return targets
 
     def _capability_required_input_summary(self, manifest: dict[str, Any]) -> str | None:
         input_schema = manifest.get("input_schema")

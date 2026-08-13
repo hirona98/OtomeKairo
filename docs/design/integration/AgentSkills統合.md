@@ -96,4 +96,4 @@ git clone https://github.com/Divedesign/elyth-remote-mcp-skills.git /opt/elyth-r
 checkout 後にブラウザ UI の「Agent Skills」で source を有効にする。
 path を変えた場合は `root_path` を合わせて更新する。
 
-ELYTH MCP server の URL、認証、有限 MCP セッションは従来どおり MCP 設定の責務である。Agent Skill source と MCP server を `elyth` という名前で暗黙結合しない。
+ELYTH MCP server の URL と認証は MCP 設定の責務である。Agent Skill source と MCP server を `elyth` という名前で暗黙結合しない。

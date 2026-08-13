@@ -537,32 +537,6 @@ def build_initiative_entry_check_messages(
     ]
 
 
-def build_mcp_inbound_observation_messages(
-    *,
-    persona_context: PersonaContext,
-    source_pack: dict[str, Any],
-) -> list[dict[str, str]]:
-    enriched_pack = _with_persona_context(source_pack, persona_context)
-    return [
-        {
-            "role": "system",
-            "content": _build_mcp_inbound_observation_system_prompt(),
-        },
-        {
-            "role": "user",
-            "content": _format_named_json_prompt_payload("SOURCE_PACK", enriched_pack),
-        },
-    ]
-
-
-def build_mcp_inbound_observation_repair_prompt(error_text: str) -> str:
-    return (
-        "前回の出力は McpInboundObservation 契約を満たしませんでした。"
-        f"理由: {error_text} "
-        "inbound_present, observation_summary, reason_summary だけの JSON オブジェクト 1 個を返してください。"
-    )
-
-
 def build_world_state_messages(
     *,
     persona_context: PersonaContext,
@@ -1050,8 +1024,7 @@ def _build_decision_system_prompt(
             "capability_request object のキーは capability_id, input の 2 個に固定してください。\n"
             "kind が capability_request のとき requires_confirmation は false にしてください。\n"
             "kind が autonomous_run のときだけ autonomous_run object を返してください。\n"
-            "autonomous_run object のキーは objective_summary, initial_step_summary, mcp_server_id, coordination の 4 個に固定してください。\n"
-            "通常の run は mcp_server_id=null、有限 MCP セッションは対象 server の mcp_server_id を指定してください。\n"
+            "autonomous_run object のキーは objective_summary, initial_step_summary, coordination の 3 個に固定してください。\n"
             "coordination object のキーは mode, target_run_ids, reason_summary の 3 個に固定してください。\n"
             "coordination.mode は create_new, replace_existing のいずれかです。\n"
             "create_new では target_run_ids を空配列にし、replace_existing では対象 run id を 1 件以上入れてください。\n"
@@ -1178,11 +1151,6 @@ def _decision_capability_run_rules(*, include_person_start: bool) -> str:
     body = (
         "capability_request は CapabilityDecisionView に available=true で載っている能力が必要なときに選びます。\n"
         "autonomous_run は、継続する行動や観測、未完了の向きを目的として保持するときに選びます。次の一手は autonomous_step_generation が決めます。\n"
-        "有限 MCP セッションは CapabilityDecisionView の mcp.call_tool.finite_session_targets に載る server だけ開始できます。"
-        "autonomous_run.mcp_server_id は finite_session_targets[].mcp_server_id から選びます。"
-        "active_run_ids が非空なら coordination.mode=replace_existing とし、その全 run id を target_run_ids に含めます。"
-        "対象 server が finite_session_targets に無い場合、同じ MCP 操作を mcp_server_id=null の通常 run で代替せず、pending_intent または noop を選びます。"
-        "通常の run は mcp_server_id=null です。\n"
         "capability_request.input は required_input に従う最小 object です。target_client_id や資格情報は入れません。\n"
         "OngoingActionSummary.status=waiting_result のときは新しい capability_request を出しません。\n"
         "既存 run と並行する追加目的なら coordination.mode=create_new、中核目的の置換なら replace_existing です。\n"
@@ -1279,8 +1247,7 @@ def _decision_output_contract_section(comparison_scope: str) -> str:
         "capability_request object のキーは capability_id, input の 2 個に固定してください。\n"
         "kind が capability_request のとき requires_confirmation は false にしてください。\n"
         "kind が autonomous_run のときだけ autonomous_run object を返してください。\n"
-        "autonomous_run object のキーは objective_summary, initial_step_summary, mcp_server_id, coordination の 4 個に固定してください。\n"
-        "通常の run は mcp_server_id=null、有限 MCP セッションは対象 server の mcp_server_id を指定してください。\n"
+        "autonomous_run object のキーは objective_summary, initial_step_summary, coordination の 3 個に固定してください。\n"
         "coordination object のキーは mode, target_run_ids, reason_summary の 3 個に固定してください。\n"
         "coordination.mode は create_new, replace_existing のいずれかです。\n"
         "create_new では target_run_ids を空配列にし、replace_existing では対象 run id を 1 件以上入れてください。\n"
@@ -1477,7 +1444,6 @@ def _build_autonomous_step_system_prompt() -> str:
             "current_input.sender_kind=person かつ response_target_refs が非空の text だけを人物発話として扱います。\n"
             "last_result_context は直前 capability result の要約です。ユーザー発話ではありません。\n"
             "CapabilityDecisionView に available=true で載っている能力だけを capability_request 候補にしてください。\n"
-            "run.mcp_session がある有限 MCP セッションでは、対象 mcp_server_id の mcp.call_tool だけを実行し、待機や自己延長を行わず、目的達成または上限到達で完了してください。\n"
             "公開の働きかけに返すときは、通知や一覧の短い抜粋だけでなく、その会話の根と流れを見てから返してください。未読の有無だけで返信要否を決めないでください。\n"
             "空の未読一覧や空の私信は、公開のやり取りが無いことの根拠にしないでください。自分の投稿や公開の会話履歴を見てから、やり取りの有無を確定してください。\n"
             "target_client_id、資格情報、内部 URL、配送先 client は出力に含めないでください。\n"
@@ -1489,7 +1455,7 @@ def _build_autonomous_step_system_prompt() -> str:
             "run.objective_summary に沿う次の一手だけを選んでください。\n"
             "発話してから観測する、カメラを動かしてから観測する、観測してから別 source を見る、時間を置いて再観測する流れを扱えます。\n"
             "capability result を受けた後も、目的に整合するなら別 capability を続けて選べます。\n"
-            "通常の run は固定回数上限ではなく、目的整合、capability availability、busy、timeout、cancel を境界にしてください。有限 MCP セッションは run.mcp_session の max_tool_calls を境界にしてください。\n"
+            "run は固定回数上限ではなく、目的整合、capability availability、busy、timeout、cancel を境界にしてください。\n"
             "speech action は外へ短く伝える必要がある場合だけ選んでください。発話本文は expression_generation が作ります。\n"
             "run 目的が待機、継続観測、条件成立待ち、曖昧な期間の見守りを求める場合は、目的と現在時刻に合う次の step を判断してください。\n"
             "ユーザー起点の開始直後で、依頼を受けたことを外へ返すのが自然な場合は、action.kind=speech と transition.kind=wait_until を同時に選んでください。\n"
@@ -1896,26 +1862,6 @@ def _build_initiative_entry_check_system_prompt() -> str:
         "活動遷移で enter を返す場合も、reason_summary は区切りや切り替えとして控えめに書きます。\n"
         "drive_state、ongoing_action、pending_intent が source pack にある場合でも、それらを数値化せず自然文として読んでください。\n"
         "reason_summary は簡潔に、改行なし、内部識別子なしで返してください。"
-    )
-
-
-def _build_mcp_inbound_observation_system_prompt() -> str:
-    return (
-        "自律 AI 本体の内部処理 role `mcp_inbound_observation` として、"
-        "MCP tool の結果に届いている働きかけがあるかを判定します。\n"
-        "source pack を読み、JSON オブジェクト 1 個だけを返してください。\n"
-        "Markdown、コードフェンス、説明文は禁止です。\n"
-        "返すトップレベルキーは inbound_present, observation_summary, reason_summary の 3 つだけです。\n"
-        "inbound_present は true または false のどちらかだけです。\n"
-        "inbound_present=true は、返信、言及、既存の私信、自分へ向けた接触のように、"
-        "今関われる働きかけがある場合に使います。\n"
-        "空の結果、自分から見に行く材料だけ、告知や関係の変化だけで接触が無い場合は false にします。\n"
-        "返す、見る、自分から書く、session を始めるかは決めません。有無だけを判断します。\n"
-        "persona_context は働きかけの有無を読む補助です。結果に無い接触を足してはいけません。\n"
-        "observation_summary と reason_summary は簡潔に、改行なし、内部識別子なしで返してください。\n"
-        + _person_reference_instruction()
-        + "\n"
-        + _semantic_layer_boundary_instruction("観測事実層から届いている働きかけの有無を読む層")
     )
 
 

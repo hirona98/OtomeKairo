@@ -38,12 +38,6 @@ class McpConfigApiTests(unittest.TestCase):
             "transport": "streamable_http",
             "url": "https://elythworld.com/api/mcp/remote",
             "headers": {"Authorization": "Bearer test-token"},
-            "autonomous_session": {
-                "enabled": True,
-                "background_enabled": True,
-                "min_interval_seconds": 3600,
-                "max_tool_calls": 10,
-            },
         }
 
     def test_default_state_contains_elyth_then_estat_templates(self) -> None:
@@ -61,14 +55,10 @@ class McpConfigApiTests(unittest.TestCase):
         self.assertEqual(elyth["transport"], "streamable_http")
         self.assertEqual(elyth["url"], "https://elythworld.com/api/mcp/remote")
         self.assertEqual(elyth["headers"]["Authorization"], "")
-        self.assertTrue(elyth["autonomous_session"]["background_enabled"])
-        self.assertEqual(elyth["autonomous_session"]["max_tool_calls"], 10)
-        self.assertTrue(elyth["inbound_observation"]["enabled"])
-        self.assertEqual(elyth["inbound_observation"]["interval_seconds"], 900)
-        self.assertEqual(elyth["inbound_observation"]["tool_name"], "get_notifications")
-        self.assertEqual(elyth["inbound_observation"]["arguments"], {})
-        self.assertFalse(estat["inbound_observation"]["enabled"])
-        self.assertEqual(estat["inbound_observation"]["tool_name"], "")
+        self.assertNotIn("autonomous_session", elyth)
+        self.assertNotIn("inbound_observation", elyth)
+        self.assertNotIn("autonomous_session", estat)
+        self.assertNotIn("inbound_observation", estat)
         self.assertFalse(estat["enabled"])
         self.assertFalse(estat["pre_send_check_enabled"])
         self.assertEqual(estat["command"], "uvx")
@@ -121,12 +111,6 @@ class McpConfigApiTests(unittest.TestCase):
                 "env": {
                     "E_STAT_APP_ID": "secret",
                 },
-                "autonomous_session": {
-                    "enabled": False,
-                    "background_enabled": False,
-                    "min_interval_seconds": 3600,
-                    "max_tool_calls": 10,
-                },
             },
         )
 
@@ -156,12 +140,6 @@ class McpConfigApiTests(unittest.TestCase):
                         "args": ["estat-mcp-server"],
                         "cwd": None,
                         "env": {"E_STAT_APP_ID": "secret"},
-                        "autonomous_session": {
-                            "enabled": False,
-                            "background_enabled": False,
-                            "min_interval_seconds": 3600,
-                            "max_tool_calls": 10,
-                        },
                     }
                 ]
             },
@@ -184,12 +162,6 @@ class McpConfigApiTests(unittest.TestCase):
                         "command": "uvx",
                         "args": ["estat-mcp-server"],
                         "env": {"E_STAT_APP_ID": "secret"},
-                        "autonomous_session": {
-                            "enabled": False,
-                            "background_enabled": False,
-                            "min_interval_seconds": 3600,
-                            "max_tool_calls": 10,
-                        },
                     },
                     {
                         "mcp_server_id": "disabled",
@@ -199,12 +171,6 @@ class McpConfigApiTests(unittest.TestCase):
                         "command": "uvx",
                         "args": ["disabled"],
                         "env": {},
-                        "autonomous_session": {
-                            "enabled": False,
-                            "background_enabled": False,
-                            "min_interval_seconds": 3600,
-                            "max_tool_calls": 10,
-                        },
                     },
                     {
                         "mcp_server_id": "other",
@@ -214,12 +180,6 @@ class McpConfigApiTests(unittest.TestCase):
                         "command": "uvx",
                         "args": ["other"],
                         "env": {},
-                        "autonomous_session": {
-                            "enabled": False,
-                            "background_enabled": False,
-                            "min_interval_seconds": 3600,
-                            "max_tool_calls": 10,
-                        },
                     },
                 ]
             },
@@ -303,46 +263,20 @@ class McpConfigApiTests(unittest.TestCase):
         response = service.replace_mcp_server("token", "elyth", definition)
         self.assertFalse(response["mcp_server"]["pre_send_check_enabled"])
 
-    def test_autonomous_session_rejects_background_without_session(self) -> None:
+    def test_mcp_server_rejects_session_and_inbound_fields(self) -> None:
         service = DummyService()
         definition = self._elyth_definition()
-        definition["autonomous_session"]["enabled"] = False
-
-        with self.assertRaises(ServiceError) as raised:
-            service.replace_mcp_server("token", "elyth", definition)
-
-        self.assertEqual(raised.exception.error_code, "invalid_mcp_server_field")
-
-    def test_inbound_observation_requires_background_session(self) -> None:
-        service = DummyService()
-        definition = self._elyth_definition()
-        definition["autonomous_session"]["background_enabled"] = False
-        definition["inbound_observation"] = {
+        definition["autonomous_session"] = {
             "enabled": True,
-            "interval_seconds": 900,
-            "tool_name": "get_notifications",
-            "arguments": {},
+            "background_enabled": True,
+            "min_interval_seconds": 3600,
+            "max_tool_calls": 10,
         }
 
         with self.assertRaises(ServiceError) as raised:
             service.replace_mcp_server("token", "elyth", definition)
 
-        self.assertEqual(raised.exception.error_code, "invalid_mcp_server_field")
-
-    def test_inbound_observation_requires_tool_name_when_enabled(self) -> None:
-        service = DummyService()
-        definition = self._elyth_definition()
-        definition["inbound_observation"] = {
-            "enabled": True,
-            "interval_seconds": 900,
-            "tool_name": "",
-            "arguments": {},
-        }
-
-        with self.assertRaises(ServiceError) as raised:
-            service.replace_mcp_server("token", "elyth", definition)
-
-        self.assertEqual(raised.exception.error_code, "invalid_mcp_server_field")
+        self.assertEqual(raised.exception.error_code, "unsupported_mcp_server_field")
 
 
 if __name__ == "__main__":

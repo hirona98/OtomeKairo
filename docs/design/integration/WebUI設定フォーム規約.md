@@ -92,7 +92,7 @@ APIキー入力は `type="password"` で伏せず、通常のテキスト入力 
 | --- | --- | --- |
 | 相互排他の接続方式（同一画面に両系統を並べる場合） | 非選択側を `disabled`（表示は残す） | MCP の `stdio` 専用（command / args / cwd / env）と `streamable_http` 専用（URL / headers） |
 | エンジン切替でパネルごと入れ替える場合 | 非選択側を `hidden` | TTS エンジンパネル |
-| 親チェックに依存する子項目 | 親が off のとき子を `disabled`（値は state に保持し、触れなくする） | 有限 MCP セッションの background / 間隔 / tool call 上限 |
+| 親チェックに依存する子項目 | 親が off のとき子を `disabled`（値は state に保持し、触れなくする） | 送信前チェック用モデルの詳細項目 |
 
 - コレクション 0 件時は選択・編集 fieldset・削除を disabled にし、追加だけ残す。編集対象 fieldset には `data-collection-editor` を付ける
 - 読込状態など閲覧専用の枠は `data-collection-editor` を付けず、0 件時も操作可能にする

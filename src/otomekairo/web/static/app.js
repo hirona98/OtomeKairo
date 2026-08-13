@@ -351,28 +351,6 @@ function formatEnv(value) {
     .join("\n");
 }
 
-function formatJsonObject(value) {
-  const payload = value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  return JSON.stringify(payload, null, 2);
-}
-
-function parseJsonObject(value, label) {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) {
-    return {};
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(trimmed);
-  } catch {
-    throw new Error(`${label} は JSON object で入力してください。`);
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error(`${label} は JSON object で入力してください。`);
-  }
-  return parsed;
-}
-
 async function loadIdentity() {
   try {
     await apiRequest("/ui/api/bootstrap/server-identity");
@@ -3943,11 +3921,6 @@ function renderMcp() {
   setSelectOptions(element("mcp-select"), servers, "mcp_server_id", state.selectedMcpId);
   setCollectionEditorEnabled("mcp-select", "fieldset.settings-group", "delete-mcp", hasMcp);
   const mcp = arrayById(servers, "mcp_server_id", state.selectedMcpId);
-  const session = mcp?.autonomous_session || {};
-  const inbound = mcp?.inbound_observation || {};
-  const sessionEnabled = session.enabled === true;
-  const backgroundEnabled = session.background_enabled === true;
-  const inboundEnabled = inbound.enabled === true;
   element("mcp-enabled").checked = mcp?.enabled === true;
   element("mcp-server-id").value = mcp?.mcp_server_id || "";
   // 接続クライアントは既定固定。編集は API 直接利用の範囲とする。
@@ -3959,27 +3932,10 @@ function renderMcp() {
   element("mcp-env").value = formatEnv(mcp?.env || {});
   element("mcp-url").value = mcp?.url || "";
   element("mcp-headers").value = formatEnv(mcp?.headers || {});
-  element("mcp-autonomous-enabled").checked = sessionEnabled;
-  element("mcp-autonomous-background-enabled").checked = backgroundEnabled;
-  element("mcp-session-interval").value = session.min_interval_seconds || 3600;
-  element("mcp-session-calls").value = session.max_tool_calls || 10;
-  element("mcp-inbound-enabled").checked = inboundEnabled;
-  element("mcp-inbound-interval").value = inbound.interval_seconds || 900;
-  element("mcp-inbound-tool").value = inbound.tool_name || "";
-  element("mcp-inbound-arguments").value = formatJsonObject(inbound.arguments);
   const remote = mcp?.transport === "streamable_http";
   // transport の非選択側は hidden せず disabled にする（stdio 専用 / http 専用）。
   setMcpRowInputsDisabled("[data-mcp-stdio-field]", remote);
   setMcpRowInputsDisabled("[data-mcp-http-field]", !remote);
-  // 有限セッション親が off なら子を disabled。最短間隔は background 開始時だけ触る。
-  document.querySelectorAll("[data-mcp-session-dependent]").forEach((row) => {
-    const needsBackground = row.hasAttribute("data-mcp-session-interval");
-    const needsInbound = row.hasAttribute("data-mcp-inbound-dependent");
-    const enabled = sessionEnabled && (!needsBackground || backgroundEnabled) && (!needsInbound || inboundEnabled);
-    setMcpRowInputsDisabled(row, !enabled);
-  });
-  const inboundEnabledControl = element("mcp-inbound-enabled");
-  inboundEnabledControl.disabled = !(sessionEnabled && backgroundEnabled);
 }
 
 function setMcpRowInputsDisabled(rowOrSelector, disabled) {
@@ -4004,7 +3960,6 @@ function syncMcp() {
   if (!mcp) {
     return;
   }
-  const previousSession = mcp.autonomous_session || {};
   mcp.mcp_server_id = textValue("mcp-server-id");
   // connector_kind は UI に出さず既存値を保持する。
   // client_id は表示専用。既存値または既定を維持する。
@@ -4033,50 +3988,8 @@ function syncMcp() {
     delete mcp.url;
     delete mcp.headers;
   }
-  const sessionEnabled = boolValue("mcp-autonomous-enabled");
-  // disabled 中の子入力は DOM を読まず state を保持する。enabled=false では
-  // background_enabled を false に正規化する（サーバ契約: background は enabled 必須）。
-  let backgroundEnabled = previousSession.background_enabled === true;
-  let minInterval = previousSession.min_interval_seconds || 3600;
-  let maxToolCalls = previousSession.max_tool_calls || 10;
-  if (sessionEnabled) {
-    backgroundEnabled = boolValue("mcp-autonomous-background-enabled");
-    maxToolCalls = boundedIntValue("mcp-session-calls", "1回の作業の上限", 1, 1000);
-    if (backgroundEnabled) {
-      minInterval = boundedIntValue("mcp-session-interval", "自動開始の間隔", 1, 31536000);
-    }
-  } else {
-    backgroundEnabled = false;
-  }
-  mcp.autonomous_session = {
-    enabled: sessionEnabled,
-    background_enabled: backgroundEnabled,
-    min_interval_seconds: minInterval,
-    max_tool_calls: maxToolCalls,
-  };
-  const previousInbound = mcp.inbound_observation || {};
-  let inboundEnabled = previousInbound.enabled === true;
-  let inboundInterval = previousInbound.interval_seconds || 900;
-  let inboundTool = typeof previousInbound.tool_name === "string" ? previousInbound.tool_name : "";
-  let inboundArguments = previousInbound.arguments && typeof previousInbound.arguments === "object"
-    ? previousInbound.arguments
-    : {};
-  if (sessionEnabled && backgroundEnabled) {
-    inboundEnabled = boolValue("mcp-inbound-enabled");
-    if (inboundEnabled) {
-      inboundInterval = boundedIntValue("mcp-inbound-interval", "確認の間隔", 1, 31536000);
-      inboundTool = textValue("mcp-inbound-tool").trim();
-      inboundArguments = parseJsonObject(textValue("mcp-inbound-arguments"), "引数");
-    }
-  } else {
-    inboundEnabled = false;
-  }
-  mcp.inbound_observation = {
-    enabled: inboundEnabled,
-    interval_seconds: inboundInterval,
-    tool_name: inboundEnabled ? inboundTool : (inboundTool || ""),
-    arguments: inboundArguments,
-  };
+  delete mcp.autonomous_session;
+  delete mcp.inbound_observation;
   // 旧下書きに enabled_tools が残っていれば捨てる（設定正本から廃止済み）。
   delete mcp.enabled_tools;
   state.selectedMcpId = mcp.mcp_server_id;
@@ -4597,18 +4510,6 @@ function addMcp() {
     args: [],
     cwd: null,
     env: {},
-    autonomous_session: {
-      enabled: false,
-      background_enabled: false,
-      min_interval_seconds: 3600,
-      max_tool_calls: 10,
-    },
-    inbound_observation: {
-      enabled: false,
-      interval_seconds: 900,
-      tool_name: "",
-      arguments: {},
-    },
   });
   state.selectedMcpId = id;
   renderCapabilities();
@@ -4874,18 +4775,6 @@ function bindEvents() {
     render: renderAgentSkills,
   });
   element("mcp-transport").addEventListener("change", () => {
-    syncMcp();
-    renderMcp();
-  });
-  element("mcp-autonomous-enabled").addEventListener("change", () => {
-    syncMcp();
-    renderMcp();
-  });
-  element("mcp-autonomous-background-enabled").addEventListener("change", () => {
-    syncMcp();
-    renderMcp();
-  });
-  element("mcp-inbound-enabled").addEventListener("change", () => {
     syncMcp();
     renderMcp();
   });

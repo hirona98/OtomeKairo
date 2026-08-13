@@ -29,8 +29,6 @@ DEFAULT_CONVERSATION_DISPLAY_NAME = "マスター"
 DEFAULT_ELYTH_MCP_SERVER_ID = "elyth"
 DEFAULT_ELYTH_STANDING_CONCERN_ID = "elyth"
 DEFAULT_STANDING_CONCERN_INTERVAL_SECONDS = 3600
-DEFAULT_MCP_INBOUND_OBSERVATION_INTERVAL_SECONDS = 900
-DEFAULT_MCP_INBOUND_OBSERVATION_TOOL_NAME = "get_notifications"
 DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY = (
     "ELYTH。見て、反応し、言いたいことがあれば自分から書く。"
     "届いている反応やリプライも気にかける。"
@@ -383,24 +381,6 @@ def build_default_pre_send_check_model_preset() -> dict:
     }
 
 
-def build_default_disabled_mcp_inbound_observation() -> dict:
-    return {
-        "enabled": False,
-        "interval_seconds": DEFAULT_MCP_INBOUND_OBSERVATION_INTERVAL_SECONDS,
-        "tool_name": "",
-        "arguments": {},
-    }
-
-
-def build_default_elyth_inbound_observation() -> dict:
-    return {
-        "enabled": True,
-        "interval_seconds": DEFAULT_MCP_INBOUND_OBSERVATION_INTERVAL_SECONDS,
-        "tool_name": DEFAULT_MCP_INBOUND_OBSERVATION_TOOL_NAME,
-        "arguments": {},
-    }
-
-
 def build_default_elyth_mcp_server() -> dict:
     # ELYTH Remote MCP の雛形。Bearer token は空で保持し、enabled にする前の明示入力を求める。
     return {
@@ -414,13 +394,6 @@ def build_default_elyth_mcp_server() -> dict:
         "headers": {
             "Authorization": "",
         },
-        "autonomous_session": {
-            "enabled": True,
-            "background_enabled": True,
-            "min_interval_seconds": 3600,
-            "max_tool_calls": 10,
-        },
-        "inbound_observation": build_default_elyth_inbound_observation(),
     }
 
 
@@ -440,13 +413,6 @@ def build_default_estat_mcp_server() -> dict:
         "env": {
             "E_STAT_APP_ID": "",
         },
-        "autonomous_session": {
-            "enabled": False,
-            "background_enabled": False,
-            "min_interval_seconds": 3600,
-            "max_tool_calls": 10,
-        },
-        "inbound_observation": build_default_disabled_mcp_inbound_observation(),
     }
 
 

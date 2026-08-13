@@ -29,7 +29,6 @@
 | `source_cycle_id` | run を開始した入力サイクル |
 | `source_commitment_memory_unit_ids` | run の根拠になった commitment memory |
 | `commitment_resolution` | terminal 時の commitment 更新結果 |
-| `mcp_session` | 有限 MCP セッションの場合だけ持つ対象 server、開始時方針 snapshot、消費済み call 数 |
 
 `autonomous_run` は capability request の wire payload に載せない。
 `request_id` と `run_id` の紐付けは server 内部記録に保持する。
@@ -56,7 +55,6 @@ terminal 時の発話と terminal 監査イベントは `events` に残し、com
 {
   "objective_summary": "発言してからカメラを見て確認する。",
   "initial_step_summary": "最初の一手を判断する。",
-  "mcp_server_id": null,
   "coordination": {
     "mode": "create_new",
     "target_run_ids": [],
@@ -65,9 +63,9 @@ terminal 時の発話と terminal 監査イベントは `events` に残し、com
 }
 ```
 
-`mcp_server_id` は必須で、通常の run では `null`、有限 MCP セッションでは対象 MCP server id を指定する。
-
 run の次の一手は `autonomous_step_generation` が決める。
+人物依頼でも定期思考でも、個が `autonomous_run` または `capability_request` を選んでよい。server は due な関心や MCP 定義から作業を作らない。
+MCP tool の連鎖も、他の capability や skill と同じく通常の run step で選ぶ。対象 server への固定や回数上限は置かない。
 
 ## run 調整
 
@@ -143,60 +141,6 @@ run 内の capability result は、通常の会話 capability result と同じ�
 `run_update.history_summary` は LLM が更新してよい。観測事実は `observed_result_summaries` として追記だけし、上書きしない。
 公開の働きかけに返すときは、通知や一覧の短い抜粋だけでなく、その会話の根と流れを見てから返す。未読の有無だけで返信要否を決めない。
 空の未読一覧や空の私信は、公開のやり取りが無いことの根拠にしない。自分の投稿や公開の会話履歴を見てから、やり取りの有無を確定する。
-
-## 有限 MCP セッション
-
-有限 MCP セッションは、1 件の MCP server を対象に複数の tool call を連鎖させ、設定された回数内で終了する `autonomous_run` である。ELYTH 固有の機能ではなく、`autonomous_session.enabled=true` を持つ任意の MCP server で利用できる。tool の意味と入力 schema は通常どおり接続中の `tools/list` catalog を使い、skill と tool の固定対応表や更新系分類を持たない。通常の autonomous step と同様に Agent Skill instructions を選択できるが、有限 MCP セッション内の実行 capability は対象 server の `mcp.call_tool` に限定する。
-
-開始時に server は `decision.autonomous_run.mcp_server_id` の設定を検証し、run へ次を保存する。
-
-```json
-{
-  "mcp_session": {
-    "mcp_server_id": "elyth",
-    "policy": {
-      "enabled": true,
-      "background_enabled": true,
-      "min_interval_seconds": 3600,
-      "max_tool_calls": 10
-    },
-    "tool_call_count": 0
-  }
-}
-```
-
-`policy` は開始時の設定 snapshot であり、開始後に上限や最短間隔を変更して既存 run の境界を変えない。ただし、対象 MCP server が削除または無効化された場合、あるいは現在設定の `autonomous_session.enabled` が `false` になった場合は、次 step の前に理由を記録して session を `cancelled` にする。
-
-開始境界は次のとおりとする。
-
-- 人物の明示依頼は `user_message` から開始できる。`min_interval_seconds` は人物起点を抑制しない
-- 自動開始は `background_thinking` だけから許可し、`background_enabled=true` を必要とする。`wake`、capability result、その他の入力起点から新規開始しない
-- `min_interval_seconds` は、自分から background session を始める最短間隔である。届いている働きかけへの応答間隔ではない
-- 自分から始める background 開始では、同じ MCP server の nonterminal session がなく、直近 session の `created_at` から `min_interval_seconds` 以上経過している必要がある
-- その cycle の inbound 観測が、対象 server に届いている働きかけありと判断した場合、`min_interval_seconds` は見ない。nonterminal session が無いことと `background_enabled=true` だけを見る
-- 同じ MCP server に active、waiting_timer、waiting_result、paused の session がある間は `create_new` を拒否する。人物が置き換える場合は `coordination.mode=replace_existing` とし、既存 session の全 run id を対象に含める
-- background 開始は既存 session の自動置換を行わない
-
-inbound 観測の設定、実行、意味判断は [../llm/mcp_inbound_observation.md](../llm/mcp_inbound_observation.md) を正とする。
-
-判断用の `CapabilityDecisionView.mcp.call_tool` は、単発 tool 実行用の `mcp_servers` と有限セッション開始用の `finite_session_targets` を分ける。`finite_session_targets[]` は `mcp_server_id / active_run_ids` を持つ。
-`user_message` では利用可能かつ `autonomous_session.enabled=true` の server を載せ、background の最短間隔は適用しない。`background_thinking` では `background_enabled=true`、nonterminal session なし、かつ次のいずれかである server だけを載せる。最短間隔経過済み、またはその cycle の inbound 観測が届いている働きかけありとした server。他の起点では空配列にする。
-
-`decision.autonomous_run.mcp_server_id` は `finite_session_targets[].mcp_server_id` からだけ選ぶ。候補外の server を選んだ出力は decision contract の contextual validation で拒否し、通常の契約不正と同じく 1 回だけ repair する。開始候補がない場合、同じ MCP 操作を `mcp_server_id=null` の通常 run へ切り替えず、`pending_intent` または `noop` を判断する。
-
-decision contract 通過後、開始直前に最新設定、起点、nonterminal session、最短間隔または inbound 観測の開始理由を再検証する。判断中の設定変更や並行開始で境界を満たさなくなった場合は session を作らず、明示的な `internal_failure` として記録する。
-
-step と終了境界は次のとおりとする。
-
-- session 内で実行できる capability は、run の `mcp_server_id` と一致する `mcp.call_tool` だけである。他の MCP server と他の capability は decision view から利用不可にし、出力されても拒否する
-- capability result 待ちの `waiting_result` は許可し、result を受けて次の tool call、発話、完了を判断できる
-- `wait_until` と `continue` による tool call を伴わない自己延長は許可しない。`none` または `speech` を選んだ step は完了へ遷移する
-- `max_tool_calls` は成功数ではなく dispatch 試行数の上限である。call を外部 dispatch より前に永続化して消費するため、dispatch 失敗、送信前チェックによる見送り、見送り後の再試行もそれぞれ 1 call と数える
-- 上限到達後は LLM を呼ばずに `completed` にする。上限値を超える dispatch は行わない
-- pause、cancel、process 再起動、capability timeout の一般契約は通常の `autonomous_run` と共有する
-
-公開 API と prompt 用要約には `mcp_server_id / tool_call_count / max_tool_calls / background_enabled` だけを含める。policy 全体、接続 URL、header、env は公開しない。
-step 用要約には、追記済みの `observed_result_summaries` と `observed_persons` も含める。
 
 run が `completed / cancelled` へ遷移したとき、開始サイクルとは別に完了サイクルの `turn consolidation` を行う。
 完了サイクルは開始許可ではなく、誰とどの場で何をしたかを episode と memory に残す。

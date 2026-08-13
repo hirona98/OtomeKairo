@@ -17,7 +17,6 @@ from otomekairo.defaults import (
     PRE_SEND_CHECK_MODEL_PRESET_ID,
     build_default_console_client_settings,
     build_default_desktop_capture,
-    build_default_disabled_mcp_inbound_observation,
     build_default_pre_send_check_model_preset,
 )
 from otomekairo.service.common import ServiceError
@@ -2007,16 +2006,14 @@ class ServiceConfigResourcesMixin:
 
     def _mcp_server_definition_for_read(self, definition: dict[str, Any]) -> dict[str, Any]:
         public_definition = deepcopy(definition)
-        if not isinstance(public_definition.get("inbound_observation"), dict):
-            public_definition["inbound_observation"] = build_default_disabled_mcp_inbound_observation()
+        public_definition.pop("autonomous_session", None)
+        public_definition.pop("inbound_observation", None)
         return public_definition
 
     def _mcp_server_definition_for_connector(self, definition: dict[str, Any]) -> dict[str, Any]:
         # 送信前チェック要否は server の dispatch 方針であり、実行 connector へ渡さない。
         connector_definition = self._mcp_server_definition_for_read(definition)
         connector_definition.pop("pre_send_check_enabled", None)
-        connector_definition.pop("autonomous_session", None)
-        connector_definition.pop("inbound_observation", None)
         return connector_definition
 
     def _normalize_mcp_server_definition(self, mcp_server_id: str, definition: dict[str, Any]) -> dict[str, Any]:
@@ -2057,16 +2054,6 @@ class ServiceConfigResourcesMixin:
                 key.strip() if isinstance(key, str) else key: value
                 for key, value in headers.items()
             }
-        if not isinstance(normalized.get("inbound_observation"), dict):
-            normalized["inbound_observation"] = build_default_disabled_mcp_inbound_observation()
-        else:
-            inbound = dict(normalized["inbound_observation"])
-            tool_name = inbound.get("tool_name")
-            if isinstance(tool_name, str):
-                inbound["tool_name"] = tool_name.strip()
-            if not isinstance(inbound.get("arguments"), dict):
-                inbound["arguments"] = {}
-            normalized["inbound_observation"] = inbound
         return normalized
 
     def _validate_mcp_server_definition(self, mcp_server_id: str, definition: dict[str, Any]) -> None:
@@ -2089,8 +2076,6 @@ class ServiceConfigResourcesMixin:
             "env",
             "url",
             "headers",
-            "autonomous_session",
-            "inbound_observation",
         }
         unsupported_fields = sorted(set(definition.keys()) - supported_fields)
         if unsupported_fields:
@@ -2119,8 +2104,6 @@ class ServiceConfigResourcesMixin:
             self._validate_stdio_mcp_server_definition(definition)
         else:
             self._validate_streamable_http_mcp_server_definition(definition)
-        self._validate_mcp_autonomous_session(definition)
-        self._validate_mcp_inbound_observation(definition)
 
     def _validate_stdio_mcp_server_definition(self, definition: dict[str, Any]) -> None:
         incompatible = sorted(set(definition) & {"url", "headers"})
@@ -2178,75 +2161,6 @@ class ServiceConfigResourcesMixin:
                 raise ServiceError(400, "invalid_mcp_server_field", f"mcp_server.headers.{key} must be a single-line string.")
             if definition.get("enabled") is True and not value.strip():
                 raise ServiceError(400, "invalid_mcp_server_field", f"mcp_server.headers.{key} must be non-empty when enabled.")
-
-    def _validate_mcp_autonomous_session(self, definition: dict[str, Any]) -> None:
-        session = definition.get("autonomous_session")
-        if not isinstance(session, dict) or set(session) != {
-            "enabled",
-            "background_enabled",
-            "min_interval_seconds",
-            "max_tool_calls",
-        }:
-            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.autonomous_session has invalid fields.")
-        if not isinstance(session.get("enabled"), bool):
-            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.autonomous_session.enabled must be a boolean.")
-        if not isinstance(session.get("background_enabled"), bool):
-            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.autonomous_session.background_enabled must be a boolean.")
-        if session["background_enabled"] and not session["enabled"]:
-            raise ServiceError(400, "invalid_mcp_server_field", "background_enabled requires autonomous_session.enabled=true.")
-        for key in ("min_interval_seconds", "max_tool_calls"):
-            value = session.get(key)
-            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-                raise ServiceError(400, "invalid_mcp_server_field", f"mcp_server.autonomous_session.{key} must be a positive integer.")
-
-    def _validate_mcp_inbound_observation(self, definition: dict[str, Any]) -> None:
-        observation = definition.get("inbound_observation")
-        if not isinstance(observation, dict) or set(observation) != {
-            "enabled",
-            "interval_seconds",
-            "tool_name",
-            "arguments",
-        }:
-            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.inbound_observation has invalid fields.")
-        if not isinstance(observation.get("enabled"), bool):
-            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.inbound_observation.enabled must be a boolean.")
-        interval_seconds = observation.get("interval_seconds")
-        if not isinstance(interval_seconds, int) or isinstance(interval_seconds, bool) or interval_seconds <= 0:
-            raise ServiceError(
-                400,
-                "invalid_mcp_server_field",
-                "mcp_server.inbound_observation.interval_seconds must be a positive integer.",
-            )
-        tool_name = observation.get("tool_name")
-        if not isinstance(tool_name, str):
-            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.inbound_observation.tool_name must be a string.")
-        if "\r" in tool_name or "\n" in tool_name:
-            raise ServiceError(
-                400,
-                "invalid_mcp_server_field",
-                "mcp_server.inbound_observation.tool_name must be a single-line string.",
-            )
-        arguments = observation.get("arguments")
-        if not isinstance(arguments, dict):
-            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.inbound_observation.arguments must be an object.")
-        session = definition.get("autonomous_session")
-        if observation["enabled"] is True:
-            if not tool_name.strip():
-                raise ServiceError(
-                    400,
-                    "invalid_mcp_server_field",
-                    "mcp_server.inbound_observation.tool_name must be a non-empty string when enabled.",
-                )
-            if (
-                not isinstance(session, dict)
-                or session.get("enabled") is not True
-                or session.get("background_enabled") is not True
-            ):
-                raise ServiceError(
-                    400,
-                    "invalid_mcp_server_field",
-                    "inbound_observation.enabled requires autonomous_session.enabled and background_enabled.",
-                )
 
     def _mcp_tool_is_enabled(self, mcp_server_id: str, tool_name: str) -> bool:
         # 実行可否の正本は MCP server の enabled。tool 実在は接続中 catalog で別途判定する。
