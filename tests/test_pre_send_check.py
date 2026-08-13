@@ -13,6 +13,7 @@ from otomekairo.service.capability import (
     PreSendCheckWithheldError,
     ServiceCapabilityMixin,
 )
+from otomekairo.service.input.decision_comparison import ServiceInputDecisionComparisonMixin
 from otomekairo.service.input.pipeline import (
     PRE_SEND_CHECK_RETRY_FEEDBACK,
     ServiceInputPipelineMixin,
@@ -54,7 +55,7 @@ class _Service(ServiceCapabilityMixin):
         self.llm = reviewer
 
 
-class _PipelineService(ServiceInputPipelineMixin):
+class _PipelineService(ServiceInputDecisionComparisonMixin, ServiceInputPipelineMixin):
     def __init__(self) -> None:
         self.store = _Store()
         self._debug_cycle_label = Mock(return_value="cycle:test")

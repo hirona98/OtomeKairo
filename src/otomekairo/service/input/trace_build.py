@@ -91,21 +91,16 @@ class ServiceInputTraceBuildMixin:
 
     def _external_result_kind(
         self,
-        internal_result_kind: str,
         *,
         speech_payload: dict[str, Any] | None = None,
         capability_request_summary: dict[str, Any] | None = None,
     ) -> str:
-        # 外向き結果は内部判断ではなく、HTTP response で返す主 payload に合わせる。
-        if internal_result_kind == "pending_intent":
-            return "noop"
-        if internal_result_kind == "autonomous_run":
-            if isinstance(speech_payload, dict):
-                return "speech"
-            if isinstance(capability_request_summary, dict):
-                return "capability_request"
-            return "noop"
-        return internal_result_kind
+        # HTTP / cycle の result_kind は response の主 payload。内部比較の kind を畳まない。
+        if isinstance(speech_payload, dict):
+            return "speech"
+        if isinstance(capability_request_summary, dict):
+            return "capability_request"
+        return "noop"
 
     def _build_cycle_events(
         self,
@@ -192,13 +187,15 @@ class ServiceInputTraceBuildMixin:
             "interaction_ref": interaction_ref,
             "speaker_ref": None,
             "participant_refs": participant_refs,
-            "result_kind": decision["kind"],
             "external_result_kind": result_kind,
-            "reason_code": decision["reason_code"],
             "reason_summary": decision["reason_summary"],
             "pending_intent_summary": pending_intent_summary,
             "created_at": finished_at,
         }
+        if isinstance(decision.get("kind"), str) and decision["kind"].strip():
+            decision_event["result_kind"] = decision["kind"]
+        if isinstance(decision.get("reason_code"), str) and decision["reason_code"].strip():
+            decision_event["reason_code"] = decision["reason_code"]
         pre_send_check = decision.get("pre_send_check")
         if isinstance(pre_send_check, dict):
             decision_event["pre_send_check"] = pre_send_check
@@ -412,11 +409,6 @@ class ServiceInputTraceBuildMixin:
                 value = capability_request_summary.get(key)
                 if isinstance(value, str) and value.strip():
                     return self._clamp(value.strip(), limit=160)
-        # noop などで外向き本文が無いときだけ、結果欄に理由を載せる。
-        if isinstance(decision, dict) and decision.get("kind") == "noop":
-            reason = decision.get("reason_summary")
-            if isinstance(reason, str) and reason.strip():
-                return self._clamp(reason.strip(), limit=160)
         return None
 
     def _build_cycle_reason_summary(
@@ -614,7 +606,6 @@ class ServiceInputTraceBuildMixin:
         pending_intent_summary: dict[str, Any] | None,
     ) -> dict[str, Any]:
         trace = {
-            "result_kind": decision["kind"],
             "reason_summary": decision["reason_summary"],
             "persona_summary": state["personas"][state["selected_persona_id"]]["display_name"],
             "memory_summary": state["memory_sets"][state["selected_memory_set_id"]]["display_name"],
@@ -642,11 +633,13 @@ class ServiceInputTraceBuildMixin:
                     recall_pack.get("memory_link_context")
                 ),
             },
-            "primary_candidate_kind": decision["kind"],
             "pending_intent_candidate_summary": pending_intent_summary,
             "capability_request_candidate_summary": self._decision_capability_request_summary(decision),
             "autonomous_run_candidate_summary": self._decision_autonomous_run_summary(decision),
         }
+        if isinstance(decision.get("kind"), str) and decision["kind"].strip():
+            trace["result_kind"] = decision["kind"]
+            trace["primary_candidate_kind"] = decision["kind"]
         input_context_addition_summary = self._input_context_addition_summary(
             input_text=input_text,
             augmented_query_text=augmented_query_text,
@@ -674,6 +667,12 @@ class ServiceInputTraceBuildMixin:
             trace["foreground_selection"] = decision["foreground_selection"]
         if isinstance(decision.get("target_stances"), list):
             trace["target_stances"] = decision["target_stances"]
+        separated_summary = self._summarize_separated_comparisons(decision)
+        if separated_summary is not None:
+            trace["separated_comparisons"] = separated_summary
+            internal_context = trace.get("internal_context_summary")
+            if isinstance(internal_context, dict):
+                internal_context["separated_comparisons"] = separated_summary
         return trace
 
     def _summarize_workspace_context(self, workspace_context: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -705,8 +704,42 @@ class ServiceInputTraceBuildMixin:
             "state_boundary": workspace_context.get("state_boundary"),
         }
 
+    def _summarize_separated_comparisons(self, decision: dict[str, Any]) -> dict[str, Any] | None:
+        separated = decision.get("separated_comparisons")
+        if not isinstance(separated, dict):
+            return None
+        compact: dict[str, Any] = {}
+        for key in ("self_activity", "outward_speech"):
+            item = separated.get(key)
+            if not isinstance(item, dict):
+                continue
+            compact_item: dict[str, Any] = {}
+            kind = item.get("kind")
+            reason_code = item.get("reason_code")
+            if isinstance(kind, str) and kind.strip():
+                compact_item["kind"] = kind.strip()
+            if isinstance(reason_code, str) and reason_code.strip():
+                compact_item["reason_code"] = reason_code.strip()
+            reason_summary = self._clamp(item.get("reason_summary"), limit=240)
+            if reason_summary is not None:
+                compact_item["reason_summary"] = reason_summary
+            if compact_item:
+                compact[key] = compact_item
+        return compact or None
+
+    def _decision_comparison_source(self, decision: dict[str, Any], target: str) -> dict[str, Any]:
+        separated = decision.get("separated_comparisons")
+        if isinstance(separated, dict):
+            payload = separated.get(target)
+            if isinstance(payload, dict):
+                return payload
+        return decision
+
     def _decision_capability_request_summary(self, decision: dict[str, Any]) -> dict[str, Any] | None:
-        capability_request = decision.get("capability_request")
+        source = self._decision_comparison_source(decision, "self_activity")
+        capability_request = source.get("capability_request")
+        if not isinstance(capability_request, dict):
+            capability_request = decision.get("capability_request")
         if not isinstance(capability_request, dict):
             return None
         capability_id = capability_request.get("capability_id")
@@ -728,7 +761,10 @@ class ServiceInputTraceBuildMixin:
 
     def _decision_autonomous_run_summary(self, decision: dict[str, Any]) -> dict[str, Any] | None:
         # run 調整判断を後から追えるよう decision_trace に残す。
-        autonomous_run = decision.get("autonomous_run")
+        source = self._decision_comparison_source(decision, "self_activity")
+        autonomous_run = source.get("autonomous_run")
+        if not isinstance(autonomous_run, dict):
+            autonomous_run = decision.get("autonomous_run")
         if not isinstance(autonomous_run, dict):
             return None
         coordination = autonomous_run.get("coordination")
@@ -816,7 +852,14 @@ class ServiceInputTraceBuildMixin:
         trace = {
             "result_kind": result_kind,
             "speech_summary": self._clamp(speech_payload["speech_text"]) if speech_payload else None,
-            "noop_reason_summary": decision["reason_summary"] if decision["kind"] == "noop" else None,
+            "noop_reason_summary": (
+                decision.get("reason_summary")
+                if speech_payload is None
+                and not isinstance(capability_request_summary, dict)
+                and not self._decision_has_outward_speech(decision)
+                and not self._decision_has_self_activity_result(decision)
+                else None
+            ),
             "pending_intent_summary": pending_intent_summary,
             "internal_failure_summary": None,
             "duration_ms": self._duration_ms(started_at, finished_at),

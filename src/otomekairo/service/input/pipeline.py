@@ -13,7 +13,6 @@ from otomekairo.llm.contexts import (
 from otomekairo.interaction import InteractionContext
 from otomekairo.service.capability import PreSendCheckWithheldError
 from otomekairo.service.common import debug_log
-from otomekairo.llm.contracts import build_decision_target_stances_for_kind
 from otomekairo.service.standing_concerns import standing_concern_factor_ref
 
 
@@ -205,6 +204,11 @@ class ServiceInputPipelineMixin:
         )
 
         # 最初の withhold だけは、候補や reviewer 理由を戻さず同一文脈で一度再判断する。
+        suppress_outward_speech = current_client_context.get("suppress_outward_speech") is True
+        suppress_outward_speech_reason = current_client_context.get("suppress_outward_speech_reason")
+        if not isinstance(suppress_outward_speech_reason, str) or not suppress_outward_speech_reason.strip():
+            suppress_outward_speech_reason = None
+
         def run_output(
             candidate_decision: dict[str, Any],
             *,
@@ -245,6 +249,8 @@ class ServiceInputPipelineMixin:
                 cycle_label=cycle_label,
                 pre_send_check_attempt=review_attempt,
                 pre_send_check_prior_attempts=prior_attempts,
+                suppress_outward_speech=suppress_outward_speech,
+                suppress_outward_speech_reason=suppress_outward_speech_reason,
             )
 
         system_notice: dict[str, Any] | None = None
@@ -283,7 +289,9 @@ class ServiceInputPipelineMixin:
                 cycle_label=f"{cycle_label} pre-send-check-retry",
                 pre_send_check_feedback=PRE_SEND_CHECK_RETRY_FEEDBACK,
             )
-            if decision["kind"] == "noop":
+            if not self._decision_has_outward_speech(decision) and not self._decision_has_self_activity_result(
+                decision
+            ):
                 decision = self._pre_send_check_terminal_noop(
                     attempts=[first_attempt],
                     reason_code="pre_send_check_retry_noop",
@@ -312,12 +320,25 @@ class ServiceInputPipelineMixin:
                         }
                     )
                 except PreSendCheckWithheldError as second_withhold:
-                    decision = self._pre_send_check_terminal_noop(
-                        attempts=[first_attempt, deepcopy(second_withhold.audit_summary)],
-                        reason_code="pre_send_check_withheld",
-                    )
-                    output_result = self._empty_pipeline_output_result()
-                    system_notice = self._pre_send_check_withheld_notice(current_input=current_input)
+                    second_attempt = deepcopy(second_withhold.audit_summary)
+                    if self._decision_has_outward_speech(decision):
+                        decision = self._drop_self_activity_after_pre_send_withhold(
+                            decision,
+                            attempts=[first_attempt, second_attempt],
+                        )
+                        output_result = run_output(
+                            decision,
+                            review_attempt=2,
+                            prior_attempts=[first_attempt, second_attempt],
+                        )
+                        system_notice = self._pre_send_check_withheld_notice(current_input=current_input)
+                    else:
+                        decision = self._pre_send_check_terminal_noop(
+                            attempts=[first_attempt, second_attempt],
+                            reason_code="pre_send_check_withheld",
+                        )
+                        output_result = self._empty_pipeline_output_result()
+                        system_notice = self._pre_send_check_withheld_notice(current_input=current_input)
 
         self._mark_standing_concerns_attended(
             decision=decision,
@@ -420,26 +441,6 @@ class ServiceInputPipelineMixin:
             "autonomous_run_summary": None,
             "autonomous_run_step_result": None,
         }
-
-    def _hold_decision_target_stances(
-        self,
-        decision: dict[str, Any],
-        *,
-        reason_summary: str,
-    ) -> list[dict[str, str]]:
-        existing_targets: list[str] = []
-        current_stances = decision.get("target_stances")
-        if isinstance(current_stances, list):
-            existing_targets = [
-                item.get("target")
-                for item in current_stances
-                if isinstance(item, dict) and item.get("target") in {"outward_speech", "self_activity"}
-            ]
-        return build_decision_target_stances_for_kind(
-            "noop",
-            required_targets=existing_targets or ("outward_speech",),
-            reason_summary=reason_summary,
-        )
 
     def _pre_send_check_terminal_noop(
         self,
@@ -2023,6 +2024,42 @@ class ServiceInputPipelineMixin:
     ) -> dict[str, Any]:
         # decision生成
         debug_log("Pipeline", f"{cycle_label} decision start", level="DEBUG")
+        if self._should_compare_self_activity_separately(
+            trigger_kind=trigger_kind,
+            workspace_context=workspace_context,
+            initiative_context=initiative_context,
+        ):
+            return self._run_separated_activity_decisions(
+                input_text=input_text,
+                current_input=current_input,
+                trigger_kind=trigger_kind,
+                recent_turns=recent_turns,
+                time_context=time_context,
+                affect_context=affect_context,
+                drive_state_summary=drive_state_summary,
+                foreground_world_state=foreground_world_state,
+                activity_context=activity_context,
+                ongoing_action_summary=ongoing_action_summary,
+                autonomous_run_summaries=autonomous_run_summaries,
+                capability_decision_view=capability_decision_view,
+                agent_skill_context=agent_skill_context,
+                initiative_context=initiative_context,
+                capability_result_context=capability_result_context,
+                visual_observation_context=visual_observation_context,
+                self_state_context=self_state_context,
+                people_context=people_context,
+                relationship_context=relationship_context,
+                prediction_error_context=prediction_error_context,
+                default_mode_context=default_mode_context,
+                workspace_context=workspace_context,
+                recall_hint=recall_hint,
+                recall_pack=recall_pack,
+                reference_context=reference_context,
+                model_config=model_config,
+                persona_context=persona_context,
+                cycle_label=cycle_label,
+                pre_send_check_feedback=pre_send_check_feedback,
+            )
         decision_context = self._build_decision_context(
             input_text=input_text,
             current_input=current_input,
@@ -2063,7 +2100,7 @@ class ServiceInputPipelineMixin:
         )
         debug_log(
             "Pipeline",
-            f"{cycle_label} decision done kind={decision['kind']} reason={self._clamp(decision['reason_summary'])}",
+            f"{cycle_label} decision done kinds={self._decision_kind_log(decision)} reason={self._clamp(decision['reason_summary'])}",
         )
         return decision
 
@@ -2099,8 +2136,11 @@ class ServiceInputPipelineMixin:
         cycle_label: str,
         pre_send_check_attempt: int = 1,
         pre_send_check_prior_attempts: list[dict[str, Any]] | None = None,
+        suppress_outward_speech: bool = False,
+        suppress_outward_speech_reason: str | None = None,
     ) -> dict[str, Any]:
-        # capability request
+        self_decision = self._execution_self_decision(decision)
+        outward_decision = self._execution_outward_decision(decision)
         dispatched_capability_request_summary: dict[str, Any] | None = None
         ongoing_action_transition_summary: dict[str, Any] | None = None
         autonomous_run_summary: dict[str, Any] | None = None
@@ -2109,13 +2149,13 @@ class ServiceInputPipelineMixin:
         agent_skill_activation = self._agent_skill_activation_summary(agent_skill_context)
         if agent_skill_activation is not None:
             source_current_input["agent_skill_activation"] = agent_skill_activation
-        if decision["kind"] == "capability_request":
+        if self_decision.get("kind") == "capability_request":
             dispatch_result = self._dispatch_decision_capability_request(
                 state=state,
                 current_time=self._now_iso(),
                 source_current_input=source_current_input,
                 assistant_message_target_client_id=assistant_message_target_client_id,
-                decision=decision,
+                decision=self_decision,
                 pre_send_check_attempt=pre_send_check_attempt,
                 pre_send_check_prior_attempts=pre_send_check_prior_attempts,
             )
@@ -2131,13 +2171,12 @@ class ServiceInputPipelineMixin:
                 ),
             )
 
-        # 発話
         speech_payload: dict[str, Any] | None = None
-        if decision["kind"] == "autonomous_run":
+        if self_decision.get("kind") == "autonomous_run":
             start_result = self._start_autonomous_run_from_decision(
                 state=state,
                 current_time=self._now_iso(),
-                decision=decision,
+                decision=self_decision,
                 source_current_input=source_current_input,
                 source_cycle_id=cycle_id,
                 assistant_message_target_client_id=assistant_message_target_client_id,
@@ -2152,7 +2191,7 @@ class ServiceInputPipelineMixin:
             if isinstance(step_result, dict):
                 autonomous_run_step_result = step_result
                 step_speech_payload = step_result.get("speech_payload")
-                if isinstance(step_speech_payload, dict):
+                if isinstance(step_speech_payload, dict) and outward_decision.get("kind") != "speech":
                     speech_payload = step_speech_payload
                 step_capability_request = step_result.get("capability_request_summary")
                 if isinstance(step_capability_request, dict):
@@ -2165,57 +2204,40 @@ class ServiceInputPipelineMixin:
                 ),
             )
         speech_suppressed = (
-            decision["kind"] == "speech"
+            outward_decision.get("kind") == "speech"
             and current_input.source_kind == "capability_result"
             and not current_input.response_target_refs
         )
         if speech_suppressed:
-            original_reason = str(decision.get("reason_summary") or "").strip()
-            reason_summary = "capability result の source_current_input.response_target_refs が空のため、内部観測結果として処理し assistant message を送信しない。"
-            if original_reason:
-                reason_summary = f"{reason_summary} 元判断: {original_reason}"
-            decision.update(
-                {
-                    "kind": "noop",
-                    "reason_code": "capability_result_response_targets_empty",
-                    "reason_summary": reason_summary,
-                    "requires_confirmation": False,
-                    "pending_intent": None,
-                    "capability_request": None,
-                    "autonomous_run": None,
-                    "target_stances": self._hold_decision_target_stances(
-                        decision,
-                        reason_summary=reason_summary,
-                    ),
-                }
+            self._apply_outward_speech_suppression(
+                decision,
+                reason_code="capability_result_response_targets_empty",
+                reason_summary=(
+                    "capability result の source_current_input.response_target_refs が空のため、"
+                    "内部観測結果として処理し assistant message を送信しない。"
+                ),
             )
             debug_log("Pipeline", f"{cycle_label} speech skipped capability_result_response_targets_empty")
-        elif (
-            decision["kind"] == "speech"
-            and current_input.source_kind == "background_thinking"
-            and self._user_response_cycle_active()
+        elif outward_decision.get("kind") == "speech" and current_input.source_kind == "background_thinking" and (
+            suppress_outward_speech or self._user_response_cycle_active()
         ):
-            original_reason = str(decision.get("reason_summary") or "").strip()
-            reason_summary = "ユーザー向け応答サイクルが進行中のため、定期思考の自発発話は行わない。"
-            if original_reason:
-                reason_summary = f"{reason_summary} 元判断: {original_reason}"
-            decision.update(
-                {
-                    "kind": "noop",
-                    "reason_code": "background_thinking_user_response_active",
-                    "reason_summary": reason_summary,
-                    "requires_confirmation": False,
-                    "pending_intent": None,
-                    "capability_request": None,
-                    "autonomous_run": None,
-                    "target_stances": self._hold_decision_target_stances(
-                        decision,
-                        reason_summary=reason_summary,
-                    ),
-                }
+            reason_summary = (
+                suppress_outward_speech_reason
+                if suppress_outward_speech and suppress_outward_speech_reason
+                else "ユーザー向け応答サイクルが進行中のため、定期思考の自発発話は行わない。"
             )
-            debug_log("Pipeline", f"{cycle_label} speech skipped background_thinking_user_response_active")
-        elif decision["kind"] == "speech":
+            reason_code = (
+                "background_thinking_user_response_changed"
+                if suppress_outward_speech
+                else "background_thinking_user_response_active"
+            )
+            self._apply_outward_speech_suppression(
+                decision,
+                reason_code=reason_code,
+                reason_summary=reason_summary,
+            )
+            debug_log("Pipeline", f"{cycle_label} speech skipped {reason_code}")
+        elif outward_decision.get("kind") == "speech":
             debug_log("Pipeline", f"{cycle_label} speech start", level="DEBUG")
             speech_context = self._build_speech_context(
                 input_text=input_text,
@@ -2238,7 +2260,7 @@ class ServiceInputPipelineMixin:
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
                 reference_context=reference_context,
-                decision=decision,
+                decision=outward_decision,
             )
             speech_payload = self.llm.generate_speech(
                 model_config=model_config,
@@ -2268,9 +2290,9 @@ class ServiceInputPipelineMixin:
                 message=f"{cycle_label} speech done speech={self._conversation_log_excerpt(speech_payload['speech_text'])}",
             )
         elif speech_payload is not None:
-            debug_log("Pipeline", f"{cycle_label} speech prepared decision_kind={decision['kind']}")
+            debug_log("Pipeline", f"{cycle_label} speech prepared kinds={self._decision_kind_log(decision)}")
         else:
-            debug_log("Pipeline", f"{cycle_label} speech skipped decision_kind={decision['kind']}")
+            debug_log("Pipeline", f"{cycle_label} speech skipped kinds={self._decision_kind_log(decision)}")
         return {
             "speech_payload": speech_payload,
             "capability_request_summary": dispatched_capability_request_summary,
@@ -2317,22 +2339,12 @@ class ServiceInputPipelineMixin:
         }
         if outcome == "withhold":
             withheld_reason = "他の人物に由来する記憶の開示判定で発話を見送った。"
-            decision.update(
-                {
-                    "kind": "noop",
-                    "reason_code": "disclosure_review_withheld",
-                    "reason_summary": withheld_reason,
-                    "requires_confirmation": False,
-                    "pending_intent": None,
-                    "capability_request": None,
-                    "autonomous_run": None,
-                    "disclosure_review": audit,
-                    "target_stances": self._hold_decision_target_stances(
-                        decision,
-                        reason_summary=withheld_reason,
-                    ),
-                }
+            self._apply_outward_speech_suppression(
+                decision,
+                reason_code="disclosure_review_withheld",
+                reason_summary=withheld_reason,
             )
+            decision["disclosure_review"] = audit
             return None
         return {
             **speech_payload,
@@ -2421,6 +2433,7 @@ class ServiceInputPipelineMixin:
         recall_pack: dict[str, Any],
         reference_context: dict[str, Any] | None = None,
         pre_send_check_feedback: str | None = None,
+        comparison_scope: str = "full",
     ) -> DecisionContext:
         return DecisionContext(
             input_text=input_text,
@@ -2449,6 +2462,7 @@ class ServiceInputPipelineMixin:
             recall_pack=recall_pack,
             reference_context=reference_context,
             pre_send_check_feedback=pre_send_check_feedback,
+            comparison_scope=comparison_scope,
         )
 
     def _validate_mcp_session_decision(

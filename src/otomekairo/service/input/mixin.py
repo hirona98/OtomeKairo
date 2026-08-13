@@ -25,6 +25,7 @@ from otomekairo.service.input.activity import ServiceInputActivityMixin
 from otomekairo.service.input.cycle import ServiceInputCycleMixin
 from otomekairo.service.input.initiative import ServiceInputInitiativeMixin
 from otomekairo.service.input.logging import ServiceInputLoggingMixin
+from otomekairo.service.input.decision_comparison import ServiceInputDecisionComparisonMixin
 from otomekairo.service.input.pipeline import ServiceInputPipelineMixin
 from otomekairo.service.input.standing_concern import ServiceInputStandingConcernMixin
 from otomekairo.service.input.trace import ServiceInputTraceMixin
@@ -40,6 +41,7 @@ class ServiceInputMixin(
     ServiceInputCycleMixin,
     ServiceInputActivityMixin,
     ServiceInputStandingConcernMixin,
+    ServiceInputDecisionComparisonMixin,
     ServiceInputPipelineMixin,
     ServiceInputVisualMixin,
     ServiceInputWakeReferenceMixin,
@@ -430,10 +432,11 @@ class ServiceInputMixin(
             return False
 
         decision = pipeline.get("decision")
-        if isinstance(decision, dict):
-            decision_kind = decision.get("kind")
-            if decision_kind in {"speech", "pending_intent", "capability_request"}:
-                return True
+        if isinstance(decision, dict) and self._decision_has_any_kind(
+            decision,
+            {"speech", "pending_intent", "capability_request"},
+        ):
+            return True
 
         if self._observation_capability_failed(observation_summary):
             return True

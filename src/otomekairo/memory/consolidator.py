@@ -612,14 +612,39 @@ class MemoryConsolidator:
         return {
             "input_text": input_text,
             "speech_text": speech_payload.get("speech_text") if isinstance(speech_payload, dict) else None,
-            "decision_summary": {
-                "kind": decision.get("kind"),
-                "reason_summary": decision.get("reason_summary"),
-            },
+            "decision_summary": self._memory_decision_summary(decision),
             "event_ids": event_ids,
             "cycle_ids": [cycle_id],
             "targets": targets,
         }
+
+    def _memory_decision_summary(self, decision: dict[str, Any]) -> dict[str, Any]:
+        summary: dict[str, Any] = {
+            "reason_summary": decision.get("reason_summary"),
+        }
+        separated = decision.get("separated_comparisons")
+        if isinstance(separated, dict):
+            compact: dict[str, Any] = {}
+            for key in ("self_activity", "outward_speech"):
+                item = separated.get(key)
+                if not isinstance(item, dict):
+                    continue
+                entry: dict[str, Any] = {}
+                kind = item.get("kind")
+                if isinstance(kind, str) and kind.strip():
+                    entry["kind"] = kind.strip()
+                reason = item.get("reason_summary")
+                if isinstance(reason, str) and reason.strip():
+                    entry["reason_summary"] = reason.strip()
+                if entry:
+                    compact[key] = entry
+            if compact:
+                summary["separated_comparisons"] = compact
+                return summary
+        kind = decision.get("kind")
+        if isinstance(kind, str) and kind.strip():
+            summary["kind"] = kind.strip()
+        return summary
 
     def _limit_memory_context_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if len(events) > MEMORY_CONTEXT_EVENT_LIMIT:

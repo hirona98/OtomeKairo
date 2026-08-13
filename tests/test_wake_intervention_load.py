@@ -6,6 +6,7 @@ from datetime import datetime
 
 from otomekairo.llm.contexts import CurrentInput, InitiativeCandidateFamily, InitiativeContext
 from otomekairo.service.input.mixin import ServiceInputMixin
+from otomekairo.service.spontaneous.pending_intent import ServiceSpontaneousPendingIntentMixin
 from otomekairo.service.spontaneous.wake import ServiceSpontaneousWakeMixin
 
 
@@ -316,6 +317,323 @@ class WakeInterventionLoadTests(unittest.TestCase):
 
         self.assertNotIn("speech / noop / pending_intent", text)
         self.assertIn("関わる、保留する、見送る、能力を使う", text)
+
+    def test_background_thinking_compares_self_activity_separately(self) -> None:
+        service = DummyInputService()
+        workspace = {
+            "workspace_candidates": [
+                {
+                    "factor_ref": "standing_concern:elyth",
+                    "kind": "standing_concern",
+                    "summary_text": "ELYTHの場。",
+                }
+            ]
+        }
+
+        self.assertTrue(
+            service._should_compare_self_activity_separately(
+                trigger_kind="background_thinking",
+                workspace_context=workspace,
+                initiative_context=None,
+            )
+        )
+        self.assertFalse(
+            service._should_compare_self_activity_separately(
+                trigger_kind="user_message",
+                workspace_context=workspace,
+                initiative_context=None,
+            )
+        )
+        isolated = service._self_activity_workspace(
+            {
+                "workspace_candidates": [
+                    {
+                        "factor_ref": "standing_concern:elyth",
+                        "kind": "standing_concern",
+                    },
+                    {
+                        "factor_ref": "visual_observation_signal:camera",
+                        "kind": "visual_observation",
+                    },
+                    {
+                        "factor_ref": "capability:vision.capture",
+                        "kind": "capability",
+                    },
+                    {
+                        "factor_ref": "capability:mcp.call_tool",
+                        "kind": "capability",
+                    },
+                ]
+            }
+        )
+        refs = {item["factor_ref"] for item in isolated["workspace_candidates"]}
+        self.assertEqual(refs, {"standing_concern:elyth", "capability:mcp.call_tool"})
+
+    def test_compose_separated_decisions_keeps_both_reasons(self) -> None:
+        service = DummyInputService()
+        composed = service._compose_separated_decisions(
+            self_decision={
+                "kind": "noop",
+                "reason_summary": "今はその場へ関わらない。",
+                "target_stances": [
+                    {
+                        "target": "self_activity",
+                        "stance": "hold",
+                        "reason_summary": "今はその場へ関わらない。",
+                    }
+                ],
+            },
+            outward_decision={
+                "kind": "noop",
+                "reason_code": "hold_speech",
+                "reason_summary": "作業中なので話しかけない。",
+                "target_stances": [
+                    {
+                        "target": "outward_speech",
+                        "stance": "hold",
+                        "reason_summary": "作業中なので話しかけない。",
+                    }
+                ],
+            },
+        )
+
+        self.assertNotIn("kind", composed)
+        self.assertIn("外向き伝達: 作業中なので話しかけない。", composed["reason_summary"])
+        self.assertIn("自身の活動: 今はその場へ関わらない。", composed["reason_summary"])
+        targets = {item["target"]: item["stance"] for item in composed["target_stances"]}
+        self.assertEqual(targets, {"outward_speech": "hold", "self_activity": "hold"})
+        self.assertEqual(composed["separated_comparisons"]["self_activity"]["kind"], "noop")
+        self.assertEqual(composed["separated_comparisons"]["outward_speech"]["kind"], "noop")
+
+    def test_compose_separated_decisions_advances_both(self) -> None:
+        service = DummyInputService()
+        composed = service._compose_separated_decisions(
+            self_decision={
+                "kind": "autonomous_run",
+                "reason_code": "visit_place",
+                "reason_summary": "気にかけている場へ行く。",
+                "requires_confirmation": False,
+                "pending_intent": None,
+                "capability_request": None,
+                "autonomous_run": {
+                    "objective_summary": "場を見る",
+                    "initial_step_summary": "開く",
+                    "mcp_server_id": "elyth",
+                    "coordination": {
+                        "mode": "create_new",
+                        "target_run_ids": [],
+                        "reason_summary": "新規",
+                    },
+                },
+                "foreground_selection": {
+                    "primary_factor_ref": "standing_concern:elyth",
+                    "supporting_factor_refs": [],
+                    "suppressed_factors": [],
+                    "summary_text": "場へ行く。",
+                },
+                "target_stances": [
+                    {
+                        "target": "self_activity",
+                        "stance": "advance",
+                        "reason_summary": "気にかけている場へ行く。",
+                    }
+                ],
+            },
+            outward_decision={
+                "kind": "speech",
+                "reason_code": "soft_aside",
+                "reason_summary": "短い独り言を残す。",
+                "requires_confirmation": False,
+                "pending_intent": None,
+                "capability_request": None,
+                "autonomous_run": None,
+                "foreground_selection": {
+                    "primary_factor_ref": "visual_observation_signal:desktop",
+                    "supporting_factor_refs": [],
+                    "suppressed_factors": [],
+                    "summary_text": "画面の区切り。",
+                },
+                "target_stances": [
+                    {
+                        "target": "outward_speech",
+                        "stance": "advance",
+                        "reason_summary": "短い独り言を残す。",
+                    }
+                ],
+            },
+        )
+
+        self.assertNotIn("kind", composed)
+        self.assertNotIn("autonomous_run", composed)
+        self.assertEqual(
+            composed["separated_comparisons"]["self_activity"]["kind"],
+            "autonomous_run",
+        )
+        self.assertEqual(composed["separated_comparisons"]["outward_speech"]["kind"], "speech")
+        self.assertIn("外向き伝達: 短い独り言を残す。", composed["reason_summary"])
+        self.assertIn("自身の活動: 気にかけている場へ行く。", composed["reason_summary"])
+        targets = {item["target"]: item["stance"] for item in composed["target_stances"]}
+        self.assertEqual(targets, {"outward_speech": "advance", "self_activity": "advance"})
+        self.assertEqual(
+            composed["separated_comparisons"]["self_activity"]["foreground_selection"]["primary_factor_ref"],
+            "standing_concern:elyth",
+        )
+
+    def test_compose_separated_decisions_keeps_self_activity_when_outward_holds(self) -> None:
+        service = DummyInputService()
+        composed = service._compose_separated_decisions(
+            self_decision={
+                "kind": "capability_request",
+                "reason_summary": "場の様子を取る。",
+                "capability_request": {"capability_id": "mcp.call_tool", "input": {}},
+                "target_stances": [
+                    {
+                        "target": "self_activity",
+                        "stance": "advance",
+                        "reason_summary": "場の様子を取る。",
+                    }
+                ],
+            },
+            outward_decision={
+                "kind": "noop",
+                "reason_summary": "作業中なので話しかけない。",
+                "target_stances": [
+                    {
+                        "target": "outward_speech",
+                        "stance": "hold",
+                        "reason_summary": "作業中なので話しかけない。",
+                    }
+                ],
+            },
+        )
+
+        self.assertNotIn("kind", composed)
+        self.assertEqual(
+            composed["separated_comparisons"]["self_activity"]["capability_request"]["capability_id"],
+            "mcp.call_tool",
+        )
+        targets = {item["target"]: item["stance"] for item in composed["target_stances"]}
+        self.assertEqual(targets, {"outward_speech": "hold", "self_activity": "advance"})
+        self.assertIn("外向き伝達: 作業中なので話しかけない。", composed["reason_summary"])
+        self.assertIn("自身の活動: 場の様子を取る。", composed["reason_summary"])
+
+    def test_separated_activity_decisions_always_call_both_comparisons(self) -> None:
+        class DualCallLLM:
+            def __init__(self) -> None:
+                self.scopes: list[str] = []
+
+            def generate_decision(self, *, model_config, persona_context, context):
+                _ = model_config, persona_context
+                self.scopes.append(context.comparison_scope)
+                if context.comparison_scope == "self_activity":
+                    return {
+                        "kind": "autonomous_run",
+                        "reason_code": "visit",
+                        "reason_summary": "場へ行く。",
+                        "target_stances": [
+                            {
+                                "target": "self_activity",
+                                "stance": "advance",
+                                "reason_summary": "場へ行く。",
+                            }
+                        ],
+                    }
+                return {
+                    "kind": "speech",
+                    "reason_code": "aside",
+                    "reason_summary": "一言残す。",
+                    "target_stances": [
+                        {
+                            "target": "outward_speech",
+                            "stance": "advance",
+                            "reason_summary": "一言残す。",
+                        }
+                    ],
+                }
+
+        class DualCallService(DummyInputService):
+            def __init__(self) -> None:
+                super().__init__()
+                self.llm = DualCallLLM()
+
+            def _validate_mcp_session_decision(self, **kwargs) -> None:
+                _ = kwargs
+
+            def _build_decision_context(self, **kwargs):
+                from types import SimpleNamespace
+
+                return SimpleNamespace(comparison_scope=kwargs.get("comparison_scope", "full"))
+
+            def _build_self_activity_decision_context(self, **kwargs):
+                from types import SimpleNamespace
+
+                _ = kwargs
+                return SimpleNamespace(comparison_scope="self_activity")
+
+        service = DualCallService()
+        composed = service._run_separated_activity_decisions(
+            model_config={},
+            persona_context=None,
+            cycle_label="cycle:test",
+            trigger_kind="background_thinking",
+            capability_decision_view=None,
+            input_text="定期思考。",
+            current_input=None,
+            recent_turns=[],
+            time_context={},
+            affect_context={},
+            drive_state_summary=None,
+            foreground_world_state=None,
+            activity_context=None,
+            ongoing_action_summary=None,
+            autonomous_run_summaries=None,
+            agent_skill_context=None,
+            initiative_context=None,
+            capability_result_context=None,
+            visual_observation_context=None,
+            self_state_context=None,
+            people_context=[],
+            relationship_context=None,
+            prediction_error_context=None,
+            default_mode_context=None,
+            workspace_context=None,
+            recall_hint={},
+            recall_pack={},
+        )
+
+        self.assertEqual(service.llm.scopes, ["self_activity", "outward_speech"])
+        self.assertNotIn("kind", composed)
+        self.assertEqual(composed["separated_comparisons"]["self_activity"]["kind"], "autonomous_run")
+        self.assertEqual(composed["separated_comparisons"]["outward_speech"]["kind"], "speech")
+
+    def test_pending_intent_persists_from_self_activity_when_outward_is_speech(self) -> None:
+        service = ServiceSpontaneousPendingIntentMixin()
+        summary = service._pending_intent_trace_summary(
+            cycle_id="cycle:test",
+            decision={
+                "reason_summary": "外向き伝達: 一言。 自身の活動: あとで見る。",
+                "separated_comparisons": {
+                    "self_activity": {
+                        "kind": "pending_intent",
+                        "reason_summary": "あとで見る。",
+                        "pending_intent": {
+                            "intent_kind": "revisit",
+                            "intent_summary": "気にかけている場をあとで見る。",
+                            "dedupe_key": "pending:elyth",
+                        },
+                    },
+                    "outward_speech": {
+                        "kind": "speech",
+                        "reason_summary": "一言。",
+                    },
+                },
+            },
+        )
+
+        self.assertEqual(summary["intent_kind"], "revisit")
+        self.assertEqual(summary["intent_summary"], "気にかけている場をあとで見る。")
+        self.assertEqual(summary["dedupe_key"], "pending:elyth")
+        self.assertEqual(summary["reason_summary"], "あとで見る。")
 
     def test_workspace_context_includes_visual_repetition_suppression_candidate(self) -> None:
         service = DummyInputService()

@@ -89,6 +89,31 @@ SELF_ACTIVITY_WORKSPACE_KINDS = {
     "ongoing_action",
     "autonomous_run",
 }
+DECISION_COMPARISON_SCOPE_VALUES = {
+    "full",
+    "self_activity",
+    "outward_speech",
+}
+DECISION_COMPARISON_SCOPE_KINDS = {
+    "full": {
+        "speech",
+        "noop",
+        "pending_intent",
+        "capability_request",
+        "autonomous_run",
+    },
+    "self_activity": {
+        "noop",
+        "pending_intent",
+        "capability_request",
+        "autonomous_run",
+    },
+    "outward_speech": {
+        "speech",
+        "noop",
+        "pending_intent",
+    },
+}
 ACTIVITY_TRANSITION_VALUES = {
     "start",
     "continue",
@@ -659,7 +684,12 @@ def required_decision_targets(
     kind: str,
     workspace_context: dict[str, Any] | None = None,
     initiative_context: Any = None,
+    comparison_scope: str = "full",
 ) -> tuple[str, ...]:
+    if comparison_scope == "self_activity":
+        return ("self_activity",)
+    if comparison_scope == "outward_speech":
+        return ("outward_speech",)
     targets = ["outward_speech"]
     if (
         kind in {"capability_request", "autonomous_run", "pending_intent"}
@@ -732,6 +762,7 @@ def validate_decision_contract(
     workspace_context: dict[str, Any] | None = None,
     initiative_context: Any = None,
     required_targets: tuple[str, ...] | list[str] | None = None,
+    comparison_scope: str = "full",
 ) -> None:
     # 必須キー群
     required_keys = {
@@ -748,8 +779,13 @@ def validate_decision_contract(
     _validate_exact_keys(payload, required_keys, "Decision")
 
     # 値Checks
-    if payload["kind"] not in {"speech", "noop", "pending_intent", "capability_request", "autonomous_run"}:
-        raise LLMError("Decision kind が不正です。")
+    if comparison_scope not in DECISION_COMPARISON_SCOPE_VALUES:
+        raise LLMError("Decision comparison_scope が不正です。")
+    allowed_kinds = DECISION_COMPARISON_SCOPE_KINDS[comparison_scope]
+    if payload["kind"] not in allowed_kinds:
+        raise LLMError(
+            f"Decision kind={payload['kind']} は comparison_scope={comparison_scope} では使えません。"
+        )
     if not isinstance(payload["reason_code"], str) or not payload["reason_code"].strip():
         raise LLMError("Decision reason_code は空でない文字列である必要があります。")
     if not isinstance(payload["reason_summary"], str) or not payload["reason_summary"].strip():
@@ -848,6 +884,7 @@ def validate_decision_contract(
             kind=str(payload.get("kind") or ""),
             workspace_context=workspace_context,
             initiative_context=initiative_context,
+            comparison_scope=comparison_scope,
         )
     _validate_decision_target_stances(
         payload["target_stances"],

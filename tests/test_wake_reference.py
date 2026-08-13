@@ -274,3 +274,34 @@ class WakeReferenceTests(unittest.TestCase):
         self.assertTrue(service.due_called)
         self.assertTrue(service.input_pipeline_called)
         self.assertEqual(service.last_wake_at, "2026-07-05T12:00:00+09:00")
+
+    def test_background_thinking_user_response_suppresses_speech_only(self) -> None:
+        class RecordingPipeline(DummyImmediateWakePipeline):
+            def __init__(self) -> None:
+                super().__init__()
+                self.pipeline_client_context: dict | None = None
+
+            def _user_response_cycle_active(self) -> bool:
+                return True
+
+            def _run_input_pipeline(self, **kwargs: object) -> dict:
+                self.pipeline_client_context = kwargs.get("client_context")  # type: ignore[assignment]
+                return super()._run_input_pipeline(**kwargs)
+
+        service = RecordingPipeline()
+        service.due_should_skip = False
+
+        pipeline, _, client_context = service._run_wake_pipeline(
+            state={"wake_policy": {"mode": "interval", "interval_seconds": 300}},
+            started_at="2026-07-05T12:00:00+09:00",
+            trigger_kind="background_thinking",
+            client_context={},
+            interaction_context=None,
+            recent_turns=[],
+            selected_candidate={"candidate_id": "candidate:test", "dedupe_key": "dedupe:test"},
+        )
+
+        self.assertTrue(service.input_pipeline_called)
+        self.assertTrue(client_context["suppress_outward_speech"])
+        self.assertTrue(service.pipeline_client_context["suppress_outward_speech"])
+        self.assertNotEqual(pipeline.get("decision", {}).get("kind"), "skipped")

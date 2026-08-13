@@ -265,6 +265,7 @@ class DecisionContext:
     people_context: list[dict[str, str]] | None = None
     pre_send_check_feedback: str | None = None
     agent_skill_context: dict[str, Any] | None = None
+    comparison_scope: str = "full"
 
 
 @dataclass(frozen=True, slots=True)

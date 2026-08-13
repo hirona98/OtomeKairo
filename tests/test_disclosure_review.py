@@ -4,6 +4,7 @@ import unittest
 
 from otomekairo.interaction import InteractionContext, ParticipantContext
 from otomekairo.llm.contexts import CurrentInput
+from otomekairo.service.input.decision_comparison import ServiceInputDecisionComparisonMixin
 from otomekairo.service.input.pipeline import ServiceInputPipelineMixin
 
 
@@ -22,7 +23,7 @@ class ReviewLLM:
         return dict(self.result)
 
 
-class DisclosureService(ServiceInputPipelineMixin):
+class DisclosureService(ServiceInputDecisionComparisonMixin, ServiceInputPipelineMixin):
     def __init__(self, llm: ReviewLLM) -> None:
         self.llm = llm
 
@@ -125,6 +126,64 @@ class DisclosureReviewTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(decision["kind"], "noop")
         self.assertEqual(decision["reason_code"], "disclosure_review_withheld")
+
+    def test_withhold_keeps_self_activity_when_comparisons_are_separated(self) -> None:
+        llm = ReviewLLM(
+            {
+                "outcome": "withhold",
+                "speech_text": None,
+                "reason_code": "private_other_person_detail",
+            }
+        )
+        service = DisclosureService(llm)
+        decision = {
+            "reason_summary": "外向き伝達: 一言。 自身の活動: 場へ行く。",
+            "target_stances": [
+                {"target": "outward_speech", "stance": "advance", "reason_summary": "一言。"},
+                {"target": "self_activity", "stance": "advance", "reason_summary": "場へ行く。"},
+            ],
+            "separated_comparisons": {
+                "self_activity": {
+                    "kind": "autonomous_run",
+                    "reason_summary": "場へ行く。",
+                    "autonomous_run": {"objective_summary": "場を見る"},
+                },
+                "outward_speech": {
+                    "kind": "speech",
+                    "reason_summary": "一言。",
+                },
+            },
+        }
+
+        result = service._apply_disclosure_review(
+            model_config={},
+            current_input=self._current_input("person:current"),
+            recall_pack={
+                "episodic_evidence": [
+                    {
+                        "episode_id": "episode:other",
+                        "source_participant_refs": ["person:other"],
+                    }
+                ]
+            },
+            speech_payload={"speech_text": "配送してはいけない候補"},
+            decision=decision,
+        )
+
+        self.assertIsNone(result)
+        self.assertNotIn("kind", decision)
+        self.assertEqual(
+            decision["separated_comparisons"]["self_activity"]["autonomous_run"]["objective_summary"],
+            "場を見る",
+        )
+        self.assertEqual(decision["separated_comparisons"]["outward_speech"]["kind"], "noop")
+        self.assertEqual(
+            decision["separated_comparisons"]["outward_speech"]["reason_code"],
+            "disclosure_review_withheld",
+        )
+        targets = {item["target"]: item["stance"] for item in decision["target_stances"]}
+        self.assertEqual(targets["outward_speech"], "hold")
+        self.assertEqual(targets["self_activity"], "advance")
 
     def _current_input(self, person_ref: str) -> CurrentInput:
         return CurrentInput(

@@ -181,6 +181,7 @@ def build_decision_messages(
                 recall_hint=context.recall_hint,
                 recall_pack=context.recall_pack,
                 pre_send_check_feedback=context.pre_send_check_feedback,
+                comparison_scope=context.comparison_scope,
             ),
         },
         {
@@ -1224,6 +1225,7 @@ def _build_decision_context_prompt(
     recall_hint: dict,
     recall_pack: dict[str, Any],
     pre_send_check_feedback: str | None,
+    comparison_scope: str = "full",
 ) -> str:
     payload = {
         "persona_context": persona_context.to_prompt_payload(),
@@ -1254,6 +1256,7 @@ def _build_decision_context_prompt(
     trigger_policy = _build_decision_trigger_policy(
         initiative_context=initiative_context,
         capability_result_context=capability_result_context,
+        comparison_scope=comparison_scope,
     )
     if trigger_policy:
         payload["trigger_policy"] = trigger_policy
@@ -1266,8 +1269,27 @@ def _build_decision_trigger_policy(
     *,
     initiative_context: InitiativeContext | None,
     capability_result_context: dict[str, Any] | None,
+    comparison_scope: str = "full",
 ) -> list[str]:
     policies: list[str] = []
+    if comparison_scope == "self_activity":
+        policies.extend(
+            [
+                "この比較は自身の活動だけです。人物への発話、問いかけ、作業の静観は扱いません。",
+                "kind は capability_request, autonomous_run, pending_intent, noop のいずれかです。speech は選べません。",
+                "人物の作業、集中、画面、対人状況は、この比較の控える理由に使いません。",
+                "standing_concern はしばらく関わっていない気にかけている場です。今関わる自然さがあれば capability_request または autonomous_run を比べます。",
+                "見ないことも許します。控える理由は、今その場へ関わらないこととして書いてください。",
+            ]
+        )
+        return policies
+    if comparison_scope == "outward_speech":
+        policies.extend(
+            [
+                "この比較は人物への外向き伝達だけです。気にかけている場へのアクセスは扱いません。",
+                "kind は speech, noop, pending_intent のいずれかです。capability_request と autonomous_run は選べません。",
+            ]
+        )
     if isinstance(capability_result_context, dict):
         policies.extend(
             [

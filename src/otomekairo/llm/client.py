@@ -480,6 +480,7 @@ class LLMClient:
             payload,
             workspace_context=context.workspace_context if isinstance(context.workspace_context, dict) else None,
             initiative_context=context.initiative_context,
+            comparison_scope=context.comparison_scope,
         )
         self._validate_decision_foreground_selection_refs(
             payload=payload,

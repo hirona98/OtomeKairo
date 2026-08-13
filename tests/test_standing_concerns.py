@@ -158,6 +158,27 @@ class StandingConcernLogicTests(unittest.TestCase):
             ),
             [],
         )
+        self.assertEqual(
+            selected_standing_concern_ids(
+                decision={
+                    "kind": "speech",
+                    "foreground_selection": {
+                        "primary_factor_ref": "visual_observation_signal:desktop",
+                    },
+                    "separated_comparisons": {
+                        "self_activity": {
+                            "kind": "capability_request",
+                            "foreground_selection": {
+                                "primary_factor_ref": "standing_concern:elyth",
+                                "supporting_factor_refs": [],
+                            },
+                        }
+                    },
+                },
+                workspace_context=workspace,
+            ),
+            ["elyth"],
+        )
 
 
 class StandingConcernWorkspaceTests(unittest.TestCase):

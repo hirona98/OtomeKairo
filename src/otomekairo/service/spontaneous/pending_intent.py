@@ -33,9 +33,20 @@ class ServiceSpontaneousPendingIntentMixin:
         decision: dict[str, Any],
     ) -> dict[str, Any] | None:
         # 確認
-        if decision.get("kind") != "pending_intent":
+        source = decision
+        separated = decision.get("separated_comparisons")
+        if isinstance(separated, dict):
+            self_decision = separated.get("self_activity")
+            outward_decision = separated.get("outward_speech")
+            if isinstance(self_decision, dict) and self_decision.get("kind") == "pending_intent":
+                source = self_decision
+            elif isinstance(outward_decision, dict) and outward_decision.get("kind") == "pending_intent":
+                source = outward_decision
+            else:
+                return None
+        if source.get("kind") != "pending_intent":
             return None
-        pending_intent = decision.get("pending_intent")
+        pending_intent = source.get("pending_intent")
         if not isinstance(pending_intent, dict):
             return None
 
@@ -44,7 +55,7 @@ class ServiceSpontaneousPendingIntentMixin:
             "source_cycle_id": cycle_id,
             "intent_kind": pending_intent.get("intent_kind"),
             "intent_summary": pending_intent.get("intent_summary"),
-            "reason_summary": decision.get("reason_summary"),
+            "reason_summary": source.get("reason_summary"),
             "dedupe_key": pending_intent.get("dedupe_key"),
         }
 

@@ -154,31 +154,6 @@ class ServiceSpontaneousWakeMixin:
                         client_context=client_context,
                         selected_candidate=None,
                     )
-                if trigger_kind == "background_thinking" and self._user_response_cycle_active():
-                    reason_summary = "ユーザー向け応答サイクルが進行中のため、定期思考の自発発話は行わない。"
-                    self._set_last_wake_at(started_at)
-                    debug_log("Wake", f"{self._short_cycle_id(cycle_id)} skip user_response_active")
-                    pipeline = self._noop_pipeline(
-                        state=state,
-                        started_at=started_at,
-                        reason_summary=reason_summary,
-                    )
-                    return self._complete_input_success(
-                        cycle_id=cycle_id,
-                        started_at=started_at,
-                        state=state,
-                        runtime_summary=runtime_summary,
-                        input_text=input_text,
-                        client_context=client_context,
-                        interaction_context=interaction_context,
-                        pipeline=pipeline,
-                        trigger_kind=trigger_kind,
-                        input_event_kind=input_event_kind,
-                        input_event_role="system",
-                        consolidate_memory=False,
-                        pending_intent_selection=pending_intent_selection,
-                        observation_summary=observation_summary,
-                    )
                 # due 判定
                 if trigger_kind == "background_thinking":
                     due = self._wake_is_due(state=state, current_time=started_at)
@@ -466,8 +441,7 @@ class ServiceSpontaneousWakeMixin:
         selected_candidate: dict[str, Any] | None,
         client_context: dict[str, Any] | None = None,
     ) -> None:
-        # 発話
-        if decision.get("kind") == "speech":
+        if self._decision_has_outward_speech(decision):
             with self._runtime_state_lock:
                 self._wake_runtime_state["last_spontaneous_at"] = current_time
                 if selected_candidate is not None:
@@ -482,8 +456,7 @@ class ServiceSpontaneousWakeMixin:
                 )
             return
 
-        # 将来行動
-        if decision.get("kind") == "pending_intent":
+        if self._decision_has_any_kind(decision, {"pending_intent"}):
             return
 
     def _record_visual_observation_prompted_locked(

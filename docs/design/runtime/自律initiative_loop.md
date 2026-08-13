@@ -124,7 +124,8 @@ direct entry は視覚新規性だけへ判断材料を縮約する仕組みで�
 due な気にかけていることは自発系の材料であり、偽の `drive_state` にはしない。意味境界は [気にかけていること.md](気にかけていること.md) を正とする。
 direct entry でも due な関心があるときは想起解釈を省略せず、盤面を視覚反応へ縮約しない。
 `background_thinking` は定期思考による自己評価である。定期思考の問いは、感覚への反応可否ではなく、感覚と向きを同じ盤面で見て今の個として何をするかである。
-外向き伝達を控えることと、自身の活動を控えることは別対象である。`kind=noop` は載っている対象をすべて控えたときだけ使う。対象の分け方は [判断と行動.md](判断と行動.md) を正とする。
+外向き伝達を控えることと、自身の活動を控えることは別比較である。同じ判断に畳まない。
+対象ごとに結果は 1 つであり、両方進めてよい。比較の分け方は [判断と行動.md](判断と行動.md) を正とする。
 `decision_generation` は観測、候補、抑制、能力提案を比較し、`speech / noop / pending_intent / capability_request` から 1 つ選ぶ。
 `visual_observations[].change_state=first_seen / changed` は前景候補、`stable` は現在状態の継続シグナル、`same_as_recent_speech` は直近重複の抑制候補である。
 `background_thinking` の `speech` は、観測差分の実況ではなく、現在の個の短い見方として一言にまとまる独り言である。
@@ -204,7 +205,7 @@ LLM は次を担う。
 - 観測変化、直近発話済み観測、重複発話事実の補助文脈化
 - 期限切れ候補の除外
 - capability availability と権限の検証
-- 1 サイクル 1 主結果の制約
+- 対象ごとの結果。分け方は [判断と行動.md](判断と行動.md) を正とする
 - 現在文脈が薄い `wake / background_thinking` で、低リスクの観測能力を先に当てる提案を組み立てる
 - `pending_intent`、`ongoing_action`、`world_state` の状態遷移
 - due `autonomous_run` の再開、timer 待機、pause / resume / cancel
@@ -229,7 +230,7 @@ in-flight capability result は受け取るが、ユーザー向け応答中は 
 ユーザー応答後、pause 理由が `paused_by_user_interaction` の run を再開する。
 特定 run は cancel API、会話からの全run停止は `autonomous_run_action.kind=cancel_all` で cancel する。
 server は会話本文から停止意図を推定しない。
-`background_thinking` の観測中に `conversation_input` または `speech` が新しく増えた場合、server は観測前の直近会話 snapshot を使って発話せず、`noop` にする。
+`background_thinking` の観測中に `conversation_input` または `speech` が新しく増えた場合、server は観測前の直近会話 snapshot を使って外向き発話だけを止める。自身の活動の比較と実行は続ける。ユーザー応答中の定期思考も同じである。
 visual capture の変化は `first_seen / changed / stable / same_as_recent_speech` の `change_state` に正規化し、正規化規則は [../capability/視覚機能.md](../capability/視覚機能.md) を正とする。
 `first_seen / changed` は新規性の前景シグナルとして扱う。
 `same_as_recent_speech` は直近発話との重複シグナル、`stable` は現在状態の継続シグナルとして扱う。

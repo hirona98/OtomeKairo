@@ -90,21 +90,14 @@ class ServiceInputWakePipelineMixin:
                 interaction_context=interaction_context,
             )
         ):
-            self._consume_background_thinking_interval(
-                trigger_kind=trigger_kind,
-                current_time=started_at,
-            )
-            reason_summary = "定期思考の観測中にユーザー向け会話が進んだため、自発発話は行わない。"
-            debug_log("Wake", f"{cycle_label} skipped user_response_changed")
-            return (
-                self._noop_pipeline(
-                    state=state,
-                    started_at=started_at,
-                    reason_summary=reason_summary,
+            client_context = {
+                **client_context,
+                "suppress_outward_speech": True,
+                "suppress_outward_speech_reason": (
+                    "定期思考の観測中にユーザー向け会話が進んだため、自発発話は行わない。"
                 ),
-                input_text,
-                client_context,
-            )
+            }
+            debug_log("Wake", f"{cycle_label} suppress outward speech user_response_changed")
 
         # 候補
         if selected_candidate is None:

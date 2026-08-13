@@ -280,6 +280,65 @@ class DecisionContractTests(unittest.TestCase):
         with self.assertRaises(LLMError):
             validate_decision_contract(payload)
 
+    def test_self_activity_scope_rejects_speech(self) -> None:
+        payload = {
+            "kind": "speech",
+            "reason_code": "reply",
+            "reason_summary": "話しかける。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+            "capability_request": None,
+            "autonomous_run": None,
+            "foreground_selection": {
+                "primary_factor_ref": "standing_concern:elyth",
+                "supporting_factor_refs": [],
+                "suppressed_factors": [],
+                "summary_text": "関心を主役にした。",
+            },
+            "target_stances": build_decision_target_stances_for_kind(
+                "speech",
+                required_targets=("self_activity",),
+                reason_summary="話しかける。",
+            ),
+        }
+
+        with self.assertRaises(LLMError):
+            validate_decision_contract(payload, comparison_scope="self_activity")
+
+    def test_outward_scope_rejects_autonomous_run(self) -> None:
+        payload = {
+            "kind": "autonomous_run",
+            "reason_code": "mcp_session:start",
+            "reason_summary": "場を見に行く。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+            "capability_request": None,
+            "autonomous_run": {
+                "objective_summary": "場を確認する。",
+                "initial_step_summary": "最初の tool を判断する。",
+                "mcp_server_id": "elyth",
+                "coordination": {
+                    "mode": "create_new",
+                    "target_run_ids": [],
+                    "reason_summary": "新しい有限セッションを始める。",
+                },
+            },
+            "foreground_selection": {
+                "primary_factor_ref": "standing_concern:elyth",
+                "supporting_factor_refs": [],
+                "suppressed_factors": [],
+                "summary_text": "関心を主役にした。",
+            },
+            "target_stances": build_decision_target_stances_for_kind(
+                "autonomous_run",
+                required_targets=("outward_speech", "self_activity"),
+                reason_summary="場を見に行く。",
+            ),
+        }
+
+        with self.assertRaises(LLMError):
+            validate_decision_contract(payload, comparison_scope="outward_speech")
+
     def test_decision_repairs_skill_id_used_as_capability_id(self) -> None:
         invalid = _capability_decision("elyth-check-notifications", {})
         valid = _capability_decision(

@@ -96,6 +96,19 @@ class LLMMockDecisionMixin:
         payload.setdefault("capability_request", None)
         payload.setdefault("autonomous_run", None)
         payload.setdefault("foreground_selection", self._mock_foreground_selection(context))
+        if context.comparison_scope == "self_activity" and payload.get("kind") == "speech":
+            payload["kind"] = "noop"
+            payload["pending_intent"] = None
+            payload["capability_request"] = None
+            payload["autonomous_run"] = None
+        if context.comparison_scope == "outward_speech" and payload.get("kind") in {
+            "capability_request",
+            "autonomous_run",
+        }:
+            payload["kind"] = "noop"
+            payload["pending_intent"] = None
+            payload["capability_request"] = None
+            payload["autonomous_run"] = None
         payload.setdefault(
             "target_stances",
             build_decision_target_stances_for_kind(
@@ -106,6 +119,7 @@ class LLMMockDecisionMixin:
                         context.workspace_context if isinstance(context.workspace_context, dict) else None
                     ),
                     initiative_context=context.initiative_context,
+                    comparison_scope=context.comparison_scope,
                 ),
                 reason_summary=str(payload.get("reason_summary") or "mock decision"),
             ),
@@ -114,6 +128,7 @@ class LLMMockDecisionMixin:
             payload,
             workspace_context=context.workspace_context if isinstance(context.workspace_context, dict) else None,
             initiative_context=context.initiative_context,
+            comparison_scope=context.comparison_scope,
         )
         return payload
 

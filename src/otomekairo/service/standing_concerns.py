@@ -104,9 +104,15 @@ def selected_standing_concern_ids(
 ) -> list[str]:
     if not isinstance(decision, dict):
         return []
-    if decision.get("kind") not in {"autonomous_run", "capability_request"}:
+    source = decision
+    separated = decision.get("separated_comparisons")
+    if isinstance(separated, dict):
+        self_decision = separated.get("self_activity")
+        if isinstance(self_decision, dict):
+            source = self_decision
+    if source.get("kind") not in {"autonomous_run", "capability_request"}:
         return []
-    selection = decision.get("foreground_selection")
+    selection = source.get("foreground_selection")
     if not isinstance(selection, dict):
         return []
     selected_refs: set[str] = set()

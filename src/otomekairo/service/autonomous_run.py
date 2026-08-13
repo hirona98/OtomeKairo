@@ -2157,7 +2157,10 @@ class ServiceAutonomousRunMixin:
         if not isinstance(memory_trace, dict) or memory_trace.get("turn_consolidation_status") != "succeeded":
             return
         decision = pipeline.get("decision")
-        if not isinstance(decision, dict) or decision.get("kind") != "autonomous_run":
+        if not isinstance(decision, dict):
+            return
+        self_decision = self._execution_self_decision(decision)
+        if self_decision.get("kind") != "autonomous_run":
             return
         run_summary = pipeline.get("autonomous_run_summary")
         run_id = run_summary.get("run_id") if isinstance(run_summary, dict) else None
