@@ -28,11 +28,10 @@ from connector_runtime_config_ready import (  # type: ignore[import-not-found]
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check whether an OtomeKairo watcher has runtime config.")
-    parser.add_argument("--default-watcher-id", required=True)
-    args = parser.parse_args()
+    parser.parse_args()
 
     try:
-        settings = load_settings(default_watcher_id=args.default_watcher_id)
+        settings = load_settings()
         runtime_config = fetch_runtime_config(settings)
         watcher = runtime_config.get("watcher")
         if not isinstance(watcher, dict):
@@ -53,7 +52,7 @@ def main() -> int:
         return FATAL
 
 
-def load_settings(*, default_watcher_id: str) -> dict[str, object]:
+def load_settings() -> dict[str, object]:
     base_url = _normalize_base_url(_env_value(os.environ, "OTOMEKAIRO_SERVER_URL", "https://127.0.0.1:55601"))
     tls_verify = _env_bool_value("OTOMEKAIRO_TLS_VERIFY", default=False)
     timeout_seconds = _env_positive_float("OTOMEKAIRO_WATCHER_PREFLIGHT_TIMEOUT_SECONDS", default=10.0)
@@ -70,9 +69,7 @@ def load_settings(*, default_watcher_id: str) -> dict[str, object]:
         "tls_verify": tls_verify,
         "timeout_seconds": timeout_seconds,
         "access_token": access_token,
-        "watcher_id": _configured_watcher_id(
-            default_watcher_id=default_watcher_id,
-        ),
+        "watcher_id": _configured_watcher_id(),
     }
 
 
@@ -118,12 +115,7 @@ def fetch_runtime_config(settings: dict[str, object]) -> dict:
     return data
 
 
-def _configured_watcher_id(
-    *,
-    default_watcher_id: str,
-) -> str:
-    # default_watcher_id は launcher 互換の引数として残すが、登録ゼロ時の誤フォールバックには使わない。
-    _ = default_watcher_id
+def _configured_watcher_id() -> str:
     configured = _env_value(os.environ, "OTOMEKAIRO_WATCHER_ID", "")
     if configured:
         return _watcher_id(configured)

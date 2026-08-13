@@ -274,7 +274,7 @@ class SQLiteMemoryStore(
             if cycle_id in cycle_by_id and cycle_id not in source_cycle_ids:
                 source_cycle_ids.append(cycle_id)
 
-        # 古い action 互換として memory_unit 側の cycle ids も見る。
+        # revision の event から cycle が取れないときは、unit に残した cycle ids を使う。
         if not source_cycle_ids:
             for cycle_id in unit.get("evidence_cycle_ids", []):
                 if isinstance(cycle_id, str) and cycle_id in cycle_by_id and cycle_id not in source_cycle_ids:

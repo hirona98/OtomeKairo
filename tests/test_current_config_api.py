@@ -129,6 +129,14 @@ class CurrentConfigApiTests(unittest.TestCase):
         response = service.patch_current("token", {"thinking_speech_level": 10})
         self.assertEqual(response["settings_snapshot"]["thinking_speech_level"], 10)
 
+    def test_editor_state_requires_dedicated_pre_send_check_preset(self) -> None:
+        service = DummyService()
+
+        with self.assertRaises(ServiceError) as raised:
+            service._require_pre_send_check_model_preset({})
+
+        self.assertEqual(raised.exception.error_code, "missing_pre_send_check_model_preset")
+
     def test_pre_send_check_uses_dedicated_model_preset(self) -> None:
         service = DummyService()
         state = service.store.read_state()

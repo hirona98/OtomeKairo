@@ -489,7 +489,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         memory_set_id: str,
         recall_hint: dict[str, Any],
     ) -> dict[str, Any]:
-        # 呼び出し側互換のため canonicalized hint だけを返す。
+        # entity resolution 済みの recall_hint だけを返す。
         return self._recall_hint_entity_resolution(
             memory_set_id=memory_set_id,
             recall_hint=recall_hint,

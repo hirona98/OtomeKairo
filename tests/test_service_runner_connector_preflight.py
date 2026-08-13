@@ -210,8 +210,8 @@ class WatcherRuntimeConfigPreflightTests(unittest.TestCase):
         original_load = watcher_preflight.load_settings
         original_argv = sys.argv[:]
         try:
-            sys.argv = ["watcher_runtime_config_ready.py", "--default-watcher-id", "watcher:camera"]
-            watcher_preflight.load_settings = lambda **_: {"watcher_id": "watcher:camera"}
+            sys.argv = ["watcher_runtime_config_ready.py"]
+            watcher_preflight.load_settings = lambda: {"watcher_id": "watcher:camera"}
             watcher_preflight.fetch_runtime_config = lambda _: {
                 "watcher": {"enabled": True},
                 "camera_source": {"enabled": False},
@@ -231,8 +231,8 @@ class WatcherRuntimeConfigPreflightTests(unittest.TestCase):
         original_load = watcher_preflight.load_settings
         original_argv = sys.argv[:]
         try:
-            sys.argv = ["watcher_runtime_config_ready.py", "--default-watcher-id", "watcher:camera"]
-            watcher_preflight.load_settings = lambda **_: {"watcher_id": "watcher:対面カメラ"}
+            sys.argv = ["watcher_runtime_config_ready.py"]
+            watcher_preflight.load_settings = lambda: {"watcher_id": "watcher:対面カメラ"}
             watcher_preflight.fetch_runtime_config = lambda _: {
                 "watcher": {"enabled": False, "watcher_id": "watcher:対面カメラ"},
                 "camera_source": {"display_name": "対面カメラ"},
@@ -250,7 +250,7 @@ class WatcherRuntimeConfigPreflightTests(unittest.TestCase):
         original_load = watcher_preflight.load_settings
         original_argv = sys.argv[:]
         try:
-            sys.argv = ["watcher_runtime_config_ready.py", "--default-watcher-id", "watcher:camera"]
+            sys.argv = ["watcher_runtime_config_ready.py"]
 
             def _raise_not_found(**_kwargs):
                 raise watcher_preflight.RuntimeConfigNotFound("no registered watcher in config.db.")
@@ -277,9 +277,7 @@ class WatcherRuntimeConfigPreflightTests(unittest.TestCase):
                 watcher_preflight.os.environ.clear()
                 watcher_preflight.os.environ["OTOMEKAIRO_DATA_DIR"] = str(data_dir)
                 watcher_preflight.os.environ["OTOMEKAIRO_SERVER_URL"] = "https://127.0.0.1:55601"
-                settings = watcher_preflight.load_settings(
-                    default_watcher_id="watcher:default",
-                )
+                settings = watcher_preflight.load_settings()
             finally:
                 watcher_preflight.os.environ.clear()
                 watcher_preflight.os.environ.update(original_environ)
@@ -301,9 +299,7 @@ class WatcherRuntimeConfigPreflightTests(unittest.TestCase):
                 watcher_preflight.os.environ.clear()
                 watcher_preflight.os.environ["OTOMEKAIRO_DATA_DIR"] = str(data_dir)
                 watcher_preflight.os.environ["OTOMEKAIRO_SERVER_URL"] = "https://127.0.0.1:55601"
-                settings = watcher_preflight.load_settings(
-                    default_watcher_id="watcher:camera",
-                )
+                settings = watcher_preflight.load_settings()
             finally:
                 watcher_preflight.os.environ.clear()
                 watcher_preflight.os.environ.update(original_environ)
@@ -349,7 +345,7 @@ class WatcherRuntimeConfigPreflightTests(unittest.TestCase):
                 watcher_preflight.os.environ["OTOMEKAIRO_DATA_DIR"] = str(data_dir)
                 watcher_preflight.os.environ["OTOMEKAIRO_SERVER_URL"] = "https://127.0.0.1:55601"
                 with self.assertRaises(watcher_preflight.RuntimeConfigNotFound):
-                    watcher_preflight.load_settings(default_watcher_id="watcher:camera")
+                    watcher_preflight.load_settings()
             finally:
                 watcher_preflight.os.environ.clear()
                 watcher_preflight.os.environ.update(original_environ)

@@ -2724,7 +2724,7 @@ function syncConsoleClientSettings() {
   const excludePatterns = parseLines(textValue("desktop-capture-exclude-patterns"));
   if (state.consoleClient) {
     const settings = state.consoleClient.settings;
-    // process は port 群だけを正本にする。旧 conversation_input_enabled を残さない。
+    // process は port 群だけを正本にする。
     settings.process = {
       console_api_port: settings.process.console_api_port,
       cocoro_shell_port: settings.process.cocoro_shell_port,
@@ -3354,35 +3354,13 @@ function generationModelPresets() {
 }
 
 function preSendCheckModelPreset() {
-  let preset = arrayById(
+  const preset = arrayById(
     state.editor?.model_presets || [],
     "model_preset_id",
     PRE_SEND_CHECK_MODEL_PRESET_ID,
   );
-  if (preset) {
-    return preset;
-  }
-  // editor-state に専用定義が無い旧下書き向けに、その場で確保する。
-  preset = {
-    model_preset_id: PRE_SEND_CHECK_MODEL_PRESET_ID,
-    display_name: "送信前チェック",
-    prompt_window: {
-      recent_turn_limit: 30,
-      recent_turn_minutes: 30,
-    },
-    model: "",
-    api_key: "",
-    max_output_tokens: 4000,
-    timeout_seconds: 90,
-    web_search_enabled: false,
-  };
-  if (state.editor) {
-    state.editor.model_presets = state.editor.model_presets || [];
-    state.editor.model_presets.push(preset);
-    if (state.editor.current) {
-      state.editor.current.pre_send_check_model_preset_id =
-        PRE_SEND_CHECK_MODEL_PRESET_ID;
-    }
+  if (!preset) {
+    throw new Error("送信前チェック用モデルがありません。");
   }
   return preset;
 }
@@ -3988,10 +3966,6 @@ function syncMcp() {
     delete mcp.url;
     delete mcp.headers;
   }
-  delete mcp.autonomous_session;
-  delete mcp.inbound_observation;
-  // 旧下書きに enabled_tools が残っていれば捨てる（設定正本から廃止済み）。
-  delete mcp.enabled_tools;
   state.selectedMcpId = mcp.mcp_server_id;
 }
 
@@ -4042,8 +4016,6 @@ function syncAgentSkills() {
   source.script_execution = {
     enabled: boolValue("agent-skill-script-enabled"),
   };
-  // 旧下書きの display_name / runtimes / limits を捨てる。
-  delete source.display_name;
   state.selectedAgentSkillSourceId = source.source_id;
 }
 
@@ -4053,7 +4025,6 @@ function normalizeAgentSkillSourcesForSave(bundle) {
     source.script_execution = {
       enabled: source.script_execution?.enabled === true,
     };
-    delete source.display_name;
   }
   return bundle;
 }

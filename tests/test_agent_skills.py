@@ -404,7 +404,7 @@ class AgentSkillRegistryTests(unittest.TestCase):
         self.assertIn("候補にない resource", repair_prompt)
         self.assertIn("allowed_resource_reads にある値だけ", repair_prompt)
 
-    def test_material_selection_repairs_legacy_done_field(self) -> None:
+    def test_material_selection_repairs_unsupported_done_field(self) -> None:
         responses = iter(
             [
                 json.dumps(
@@ -412,7 +412,7 @@ class AgentSkillRegistryTests(unittest.TestCase):
                         "additional_skill_ids": [],
                         "resource_reads": [],
                         "done": True,
-                        "reason_summary": "旧契約で完了する",
+                        "reason_summary": "完了する",
                     },
                     ensure_ascii=False,
                 ),

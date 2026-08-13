@@ -121,11 +121,9 @@ connector_runtime_config_ready() {
 
 watcher_runtime_config_ready() {
   local label="$1"
-  local default_watcher_id="$2"
 
   set +e
-  "${SERVER_VENV_DIR}/bin/python" "${SCRIPT_DIR}/watcher_runtime_config_ready.py" \
-    --default-watcher-id "${default_watcher_id}"
+  "${SERVER_VENV_DIR}/bin/python" "${SCRIPT_DIR}/watcher_runtime_config_ready.py"
   local status="$?"
   set -e
 
@@ -203,7 +201,7 @@ if connector_runtime_config_ready "Tapo C220" "tapo_c220" "tapo-c220-connector-m
 fi
 
 # 登録済み watcher があれば enabled=false でも idle 常駐する。未登録のときだけ skip する。
-if watcher_runtime_config_ready "Tapo C220" "watcher:camera"; then
+if watcher_runtime_config_ready "Tapo C220"; then
   echo "starting Tapo C220 watcher (idle when disabled)" >&2
   "${TAPO_WATCHER_VENV_DIR}/bin/python" -m otomekairo_tapo_c220_watcher &
   TAPO_WATCHER_PID="$!"

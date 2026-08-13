@@ -13,11 +13,9 @@ from otomekairo.agent_skills import (
 )
 from otomekairo.defaults import (
     API_VERSION,
-    DEFAULT_MODEL_PRESET_ID,
     PRE_SEND_CHECK_MODEL_PRESET_ID,
     build_default_console_client_settings,
     build_default_desktop_capture,
-    build_default_pre_send_check_model_preset,
 )
 from otomekairo.service.common import ServiceError
 from otomekairo.service.config.constants import (
@@ -223,8 +221,6 @@ class ServiceConfigResourcesMixin:
     def get_editor_state(self, token: str | None) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
-        if self._ensure_pre_send_check_model_preset(state):
-            self.store.write_state(state)
         self._append_editor_state_audit_event(state=state, operation="read")
         return self._build_editor_state(state)
 
@@ -661,7 +657,7 @@ class ServiceConfigResourcesMixin:
                     "invalid_pre_send_check_model_preset_id",
                     "pre_send_check_model_preset_id must be the dedicated review model preset.",
                 )
-            self._ensure_pre_send_check_model_preset(state)
+            self._require_pre_send_check_model_preset(state["model_presets"])
             self._validate_model_preset_definition(
                 PRE_SEND_CHECK_MODEL_PRESET_ID,
                 state["model_presets"][PRE_SEND_CHECK_MODEL_PRESET_ID],
@@ -1246,31 +1242,9 @@ class ServiceConfigResourcesMixin:
                 "invalid_selected_model_preset_id",
                 "The dedicated pre-send check model preset cannot be selected for generation.",
             )
-        # 専用プリセットが bundle に無い場合は、旧 review 指し先から値を引き継いで確保する。
-        previous_review_id = current.get("pre_send_check_model_preset_id")
-        if PRE_SEND_CHECK_MODEL_PRESET_ID not in model_presets:
-            source = model_presets.get(previous_review_id) if isinstance(previous_review_id, str) else None
-            if isinstance(source, dict):
-                dedicated = deepcopy(source)
-                dedicated["model_preset_id"] = PRE_SEND_CHECK_MODEL_PRESET_ID
-                dedicated["display_name"] = "送信前チェック"
-                dedicated["web_search_enabled"] = False
-                model_presets[PRE_SEND_CHECK_MODEL_PRESET_ID] = (
-                    self._normalize_model_preset_definition(dedicated)
-                )
-            else:
-                model_presets[PRE_SEND_CHECK_MODEL_PRESET_ID] = (
-                    self._normalize_model_preset_definition(
-                        build_default_pre_send_check_model_preset()
-                    )
-                )
-            self._validate_model_preset_definition(
-                PRE_SEND_CHECK_MODEL_PRESET_ID,
-                model_presets[PRE_SEND_CHECK_MODEL_PRESET_ID],
-            )
-        else:
-            # 専用プリセットは Web 検索を使わない。
-            model_presets[PRE_SEND_CHECK_MODEL_PRESET_ID]["web_search_enabled"] = False
+        self._require_pre_send_check_model_preset(model_presets)
+        # 専用プリセットは Web 検索を使わない。
+        model_presets[PRE_SEND_CHECK_MODEL_PRESET_ID]["web_search_enabled"] = False
 
         # 動作設定検証
         self._validate_thinking_speech_level(thinking_speech_level)
@@ -1347,43 +1321,13 @@ class ServiceConfigResourcesMixin:
             "standing_concerns": deepcopy(state.get("standing_concerns") or []),
         }
 
-    def _ensure_pre_send_check_model_preset(self, state: dict[str, Any]) -> bool:
-        # 既存 state に専用プリセットが無い場合、接続設定を引き継いで確保する。
-        model_presets = state.get("model_presets")
-        if not isinstance(model_presets, dict):
-            return False
-        changed = False
-        previous_id = state.get("pre_send_check_model_preset_id")
-        if PRE_SEND_CHECK_MODEL_PRESET_ID not in model_presets:
-            source = model_presets.get(previous_id) if isinstance(previous_id, str) else None
-            if isinstance(source, dict):
-                dedicated = deepcopy(source)
-                dedicated["model_preset_id"] = PRE_SEND_CHECK_MODEL_PRESET_ID
-                dedicated["display_name"] = "送信前チェック"
-                dedicated["web_search_enabled"] = False
-            else:
-                dedicated = build_default_pre_send_check_model_preset()
-            model_presets[PRE_SEND_CHECK_MODEL_PRESET_ID] = dedicated
-            changed = True
-        if state.get("pre_send_check_model_preset_id") != PRE_SEND_CHECK_MODEL_PRESET_ID:
-            state["pre_send_check_model_preset_id"] = PRE_SEND_CHECK_MODEL_PRESET_ID
-            changed = True
-        if state.get("selected_model_preset_id") == PRE_SEND_CHECK_MODEL_PRESET_ID:
-            if DEFAULT_MODEL_PRESET_ID in model_presets:
-                state["selected_model_preset_id"] = DEFAULT_MODEL_PRESET_ID
-            else:
-                fallback_id = next(
-                    (
-                        preset_id
-                        for preset_id in model_presets
-                        if preset_id != PRE_SEND_CHECK_MODEL_PRESET_ID
-                    ),
-                    None,
-                )
-                if fallback_id is not None:
-                    state["selected_model_preset_id"] = fallback_id
-            changed = True
-        return changed
+    def _require_pre_send_check_model_preset(self, model_presets: Any) -> None:
+        if not isinstance(model_presets, dict) or PRE_SEND_CHECK_MODEL_PRESET_ID not in model_presets:
+            raise ServiceError(
+                400,
+                "missing_pre_send_check_model_preset",
+                "editor-state requires the dedicated pre-send check model preset.",
+            )
 
     def _build_editor_state(self, state: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -2005,15 +1949,26 @@ class ServiceConfigResourcesMixin:
         )
 
     def _mcp_server_definition_for_read(self, definition: dict[str, Any]) -> dict[str, Any]:
-        public_definition = deepcopy(definition)
-        public_definition.pop("autonomous_session", None)
-        public_definition.pop("inbound_observation", None)
-        return public_definition
+        return deepcopy(definition)
 
     def _mcp_server_definition_for_connector(self, definition: dict[str, Any]) -> dict[str, Any]:
-        # 送信前チェック要否は server の dispatch 方針であり、実行 connector へ渡さない。
-        connector_definition = self._mcp_server_definition_for_read(definition)
-        connector_definition.pop("pre_send_check_enabled", None)
+        # connector は接続定義だけを受け取る。送信前チェック要否は渡さない。
+        transport = definition.get("transport")
+        connector_definition = {
+            "mcp_server_id": definition.get("mcp_server_id"),
+            "connector_kind": definition.get("connector_kind"),
+            "client_id": definition.get("client_id"),
+            "enabled": definition.get("enabled"),
+            "transport": transport,
+        }
+        if transport == "stdio":
+            connector_definition["command"] = definition.get("command")
+            connector_definition["args"] = deepcopy(definition.get("args"))
+            connector_definition["cwd"] = definition.get("cwd")
+            connector_definition["env"] = deepcopy(definition.get("env"))
+        elif transport == "streamable_http":
+            connector_definition["url"] = definition.get("url")
+            connector_definition["headers"] = deepcopy(definition.get("headers"))
         return connector_definition
 
     def _normalize_mcp_server_definition(self, mcp_server_id: str, definition: dict[str, Any]) -> dict[str, Any]:

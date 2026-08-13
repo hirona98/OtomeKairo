@@ -41,7 +41,7 @@ def _wait_for_server() -> None:
 
 def _runtime_config_ready() -> int:
     try:
-        settings = load_settings(default_watcher_id="watcher:camera")
+        settings = load_settings()
         runtime_config = fetch_runtime_config(settings)
     except RuntimeConfigNotFound as exc:
         print(f"Tapo C220 watcher debug をスキップします: {exc}", file=sys.stderr)
