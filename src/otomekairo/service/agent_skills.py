@@ -13,6 +13,79 @@ from otomekairo.llm.contracts import LLMError
 from otomekairo.service.common import debug_log
 
 
+SELF_INITIATED_SOURCE_KINDS = frozenset({"wake", "background_thinking"})
+PERSON_ORIGIN_SOURCE_KINDS = frozenset({"user_message"})
+
+
+def origin_source_kind_from_capability_request(
+    capability_request_summary: dict[str, Any] | None,
+) -> str | None:
+    if not isinstance(capability_request_summary, dict):
+        return None
+    source = capability_request_summary.get("source_current_input")
+    if not isinstance(source, dict):
+        return None
+    value = source.get("source_kind")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def resolve_origin_source_kind(
+    *,
+    current_input: CurrentInput,
+    trigger_kind: str,
+    run: dict[str, Any] | None = None,
+    origin_source_kind: str | None = None,
+) -> str | None:
+    if isinstance(origin_source_kind, str) and origin_source_kind.strip():
+        return origin_source_kind.strip()
+    if isinstance(run, dict):
+        value = run.get("origin_kind")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    source_kind = current_input.source_kind
+    if source_kind in SELF_INITIATED_SOURCE_KINDS or source_kind in PERSON_ORIGIN_SOURCE_KINDS:
+        return source_kind
+    if trigger_kind in SELF_INITIATED_SOURCE_KINDS or trigger_kind in PERSON_ORIGIN_SOURCE_KINDS:
+        return trigger_kind
+    return None
+
+
+def resolve_agent_skill_host_authorization(
+    *,
+    current_input: CurrentInput,
+    trigger_kind: str,
+    run: dict[str, Any] | None = None,
+    origin_source_kind: str | None = None,
+) -> dict[str, str]:
+    origin = resolve_origin_source_kind(
+        current_input=current_input,
+        trigger_kind=trigger_kind,
+        run=run,
+        origin_source_kind=origin_source_kind,
+    )
+    if trigger_kind in SELF_INITIATED_SOURCE_KINDS or origin in SELF_INITIATED_SOURCE_KINDS:
+        return {
+            "kind": "current_individual_decision",
+            "summary_text": "いまの個がこの判断で働きかける許可である。",
+        }
+    if current_input.sender_kind == "person" and current_input.response_target_refs:
+        return {
+            "kind": "person_request",
+            "summary_text": "人物の明示依頼がある。",
+        }
+    if origin in PERSON_ORIGIN_SOURCE_KINDS or current_input.response_target_refs:
+        return {
+            "kind": "person_request",
+            "summary_text": "人物の依頼から続く作業である。",
+        }
+    return {
+        "kind": "none",
+        "summary_text": "ホストの公開許可はこの入力からは立っていない。",
+    }
+
+
 class ServiceAgentSkillsMixin:
     _AGENT_SKILL_RUNNER_CLIENT_ID = "local:agent-skill-runner"
 
@@ -34,6 +107,7 @@ class ServiceAgentSkillsMixin:
         capability_decision_view: list[dict[str, Any]] | None,
         run: dict[str, Any] | None = None,
         prior_activation: dict[str, Any] | None = None,
+        origin_source_kind: str | None = None,
     ) -> dict[str, Any] | None:
         with self._runtime_state_lock:
             registry = self._agent_skill_registry
@@ -41,6 +115,12 @@ class ServiceAgentSkillsMixin:
         if not catalog:
             return None
 
+        host_authorization = resolve_agent_skill_host_authorization(
+            current_input=current_input,
+            trigger_kind=trigger_kind,
+            run=run,
+            origin_source_kind=origin_source_kind,
+        )
         selection = self.llm.generate_agent_skill_selection(
             model_config=model_config,
             selection_context={
@@ -48,6 +128,7 @@ class ServiceAgentSkillsMixin:
                 "trigger_kind": trigger_kind,
                 "run": run,
                 "prior_activation": prior_activation,
+                "host_authorization": host_authorization,
                 "capability_decision_view": capability_decision_view or [],
                 "allowed_skill_ids": [entry["skill_id"] for entry in catalog],
                 "skill_catalog": catalog,
@@ -108,6 +189,7 @@ class ServiceAgentSkillsMixin:
                     "trigger_kind": trigger_kind,
                     "run": run,
                     "prior_activation": prior_activation,
+                    "host_authorization": host_authorization,
                     "active_skills": active_skills,
                     "allowed_additional_skill_ids": linked_candidates,
                     "allowed_resource_reads": [
@@ -175,6 +257,7 @@ class ServiceAgentSkillsMixin:
             "selected_skill_ids": active_ids,
             "selection_reason_summary": selection["reason_summary"].strip(),
             "material_reason_summaries": material_reasons,
+            "host_authorization": host_authorization,
             "skills": skills_payload,
         }
 

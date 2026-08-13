@@ -43,6 +43,22 @@ material 選択の出力は `additional_skill_ids / resource_reads / reason_summ
 
 Agent Skill context は host の役割、出力契約、capability availability、安全境界、観測事実を上書きしない。skill に書かれた tool 名は capability との固定対応表ではなく、実行時 catalog と manifest に基づいて通常どおり LLM が capability request を組み立てる。
 
+## ホスト許可
+
+skill が Human の明示依頼、trusted host policy、trusted workflow を求めるとき、ホストはその許可を `host_authorization` として選択と適用の両方へ渡す。
+
+`host_authorization.kind` は次のいずれかである。
+
+| kind | 意味 |
+| --- | --- |
+| `current_individual_decision` | いまの個がこの判断で働きかける許可。`wake` / `background_thinking` 起点、またはそこから始まった run / capability result |
+| `person_request` | 人物の明示依頼、またはそこから続く作業 |
+| `none` | 上記の許可がこの入力から立っていない |
+
+判定は `sender_kind`、`response_target_refs`、`trigger_kind`、`source_kind`、`run.origin_kind` の閉じた値だけで行う。自然文や skill 名では判定しない。
+
+`current_individual_decision` は、skill が求める trusted host policy / trusted workflow である。Human の明示依頼が無いことだけを理由に公開や送信を見送らない。送信前チェック、catalog、host の出力契約、秘密情報の境界は上書きしない。公開は今この判断の範囲で一度だけ行う。
+
 ## script 実行と信頼境界
 
 source ごとの `script_execution.enabled=true` は、その root 全体を code execution まで信頼する明示設定である。個別 script の都度承認は設けない。

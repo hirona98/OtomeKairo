@@ -12,6 +12,7 @@ from otomekairo.llm.contexts import (
     build_persona_context_summary,
 )
 from otomekairo.interaction import InteractionContext
+from otomekairo.service.agent_skills import origin_source_kind_from_capability_request
 from otomekairo.service.capability import PreSendCheckWithheldError
 from otomekairo.service.common import debug_log
 from otomekairo.service.standing_concerns import standing_concern_factor_ref
@@ -799,6 +800,9 @@ class ServiceInputPipelineMixin:
                 if isinstance(capability_request_summary, dict)
                 and isinstance(capability_request_summary.get("source_current_input"), dict)
                 else None
+            ),
+            origin_source_kind=origin_source_kind_from_capability_request(
+                capability_request_summary
             ),
         )
         activity_context, activity_trace = self._refresh_activity_context(

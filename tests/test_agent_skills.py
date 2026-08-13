@@ -19,7 +19,15 @@ from otomekairo.defaults import (
 from otomekairo.llm.contexts import CurrentInput
 from otomekairo.llm.contracts import LLMError
 from otomekairo.llm.client import LLMClient
-from otomekairo.service.agent_skills import ServiceAgentSkillsMixin
+from otomekairo.llm.prompts import (
+    _build_agent_skill_messages,
+    build_agent_skill_selection_messages,
+)
+from otomekairo.service.agent_skills import (
+    ServiceAgentSkillsMixin,
+    origin_source_kind_from_capability_request,
+    resolve_agent_skill_host_authorization,
+)
 from otomekairo.service.app import OtomeKairoService
 
 
@@ -538,6 +546,138 @@ class AgentSkillRegistryTests(unittest.TestCase):
             )
             self.assertEqual(result["status"], "completed")
             self.assertIn('"args": ["capability"]', result["stdout"])
+
+
+class AgentSkillHostAuthorizationTests(unittest.TestCase):
+    def test_background_thinking_is_current_individual_decision(self) -> None:
+        authorization = resolve_agent_skill_host_authorization(
+            current_input=CurrentInput(
+                sender_kind="system",
+                sender_ref=None,
+                source_kind="background_thinking",
+                response_target_refs=("person:test",),
+                interaction_context=None,
+                text="自己評価。",
+            ),
+            trigger_kind="background_thinking",
+        )
+        self.assertEqual(authorization["kind"], "current_individual_decision")
+
+    def test_person_message_is_person_request(self) -> None:
+        authorization = resolve_agent_skill_host_authorization(
+            current_input=CurrentInput(
+                sender_kind="person",
+                sender_ref="person:test",
+                source_kind="user_message",
+                response_target_refs=("person:test",),
+                interaction_context=None,
+                text="投稿して。",
+            ),
+            trigger_kind="user_message",
+        )
+        self.assertEqual(authorization["kind"], "person_request")
+
+    def test_run_origin_background_thinking_is_current_individual_decision(self) -> None:
+        authorization = resolve_agent_skill_host_authorization(
+            current_input=CurrentInput(
+                sender_kind="capability",
+                sender_ref=None,
+                source_kind="autonomous_run",
+                response_target_refs=(),
+                interaction_context=None,
+                text="次の一手。",
+            ),
+            trigger_kind="autonomous_run",
+            run={"origin_kind": "background_thinking"},
+        )
+        self.assertEqual(authorization["kind"], "current_individual_decision")
+
+    def test_capability_result_inherits_background_origin(self) -> None:
+        origin = origin_source_kind_from_capability_request(
+            {
+                "source_current_input": {
+                    "source_kind": "background_thinking",
+                    "response_target_refs": [],
+                }
+            }
+        )
+        authorization = resolve_agent_skill_host_authorization(
+            current_input=CurrentInput(
+                sender_kind="capability",
+                sender_ref=None,
+                source_kind="capability_result",
+                response_target_refs=(),
+                interaction_context=None,
+                text="結果。",
+            ),
+            trigger_kind="capability_result",
+            origin_source_kind=origin,
+        )
+        self.assertEqual(origin, "background_thinking")
+        self.assertEqual(authorization["kind"], "current_individual_decision")
+
+    def test_context_passes_host_authorization_to_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory) / "skills"
+            root.mkdir()
+            _write_skill(root)
+            definition = _source_definition(root, execution_enabled=False)
+            selection_contexts: list[dict] = []
+
+            class FakeLlm:
+                def generate_agent_skill_selection(self, **kwargs):
+                    selection_contexts.append(kwargs["selection_context"])
+                    return {"selected_skill_ids": ["echo-skill"], "reason_summary": "needed"}
+
+                def generate_agent_skill_material_selection(self, **_kwargs):
+                    return {
+                        "additional_skill_ids": [],
+                        "resource_reads": [],
+                        "reason_summary": "no additional material needed",
+                    }
+
+            class Subject(ServiceAgentSkillsMixin):
+                def __init__(self):
+                    self._runtime_state_lock = threading.RLock()
+                    self._agent_skill_registry = AgentSkillRegistry.load({"test-source": definition})
+                    self.llm = FakeLlm()
+
+            context = Subject()._build_agent_skill_context(
+                model_config={"model": "real-model"},
+                current_input=CurrentInput(
+                    sender_kind="system",
+                    sender_ref=None,
+                    source_kind="background_thinking",
+                    response_target_refs=(),
+                    interaction_context=None,
+                    text="自己評価。",
+                ),
+                trigger_kind="background_thinking",
+                capability_decision_view=[],
+            )
+
+            self.assertEqual(
+                selection_contexts[0]["host_authorization"]["kind"],
+                "current_individual_decision",
+            )
+            self.assertEqual(
+                context["host_authorization"]["kind"],
+                "current_individual_decision",
+            )
+
+    def test_skill_prompts_describe_host_authorization(self) -> None:
+        selection = build_agent_skill_selection_messages(
+            selection_context={"host_authorization": {"kind": "current_individual_decision"}}
+        )
+        applied = _build_agent_skill_messages(
+            {
+                "host_authorization": {"kind": "current_individual_decision"},
+                "skills": [],
+            }
+        )
+        self.assertIn("trusted host", selection[0]["content"])
+        self.assertIn("current_individual_decision", applied[0]["content"])
+        self.assertIn("trusted host policy", applied[0]["content"])
 
 
 if __name__ == "__main__":
