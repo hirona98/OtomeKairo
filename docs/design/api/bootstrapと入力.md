@@ -257,7 +257,7 @@ TTS の配送先が接続されていない場合と queue が満杯の場合も
       "request_id": "vision_capture_request:...",
       "capability_id": "vision.capture",
       "status": "dispatched",
-      "timeout_ms": 5000,
+      "timeout_ms": 45000,
       "readiness_digest": {
         "family": "visual_observation",
         "world_state_type": "visual_context",

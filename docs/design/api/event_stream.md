@@ -164,7 +164,7 @@ server -> client の代表例（capability request 1 件と通知系）:
     "source_kind": "desktop",
     "source_label": "メイン画面",
     "mode": "still",
-    "timeout_ms": 5000
+    "timeout_ms": 45000
   }
 }
 ```

@@ -140,7 +140,7 @@ server は MCP raw `content` と `structured_content` を永続化せず、件�
     "stores_raw_payload": false
   },
   "risk_level": "low",
-  "timeout_ms": 5000,
+  "timeout_ms": 45000,
   "memory_policy": {
     "record_result_event": true,
     "allow_memory_update": true
@@ -258,7 +258,7 @@ camera source 制御では、event stream 接続主体に `control_camera_ptz` �
     "stores_raw_payload": false
   },
   "risk_level": "medium",
-  "timeout_ms": 5000,
+  "timeout_ms": 15000,
   "memory_policy": {
     "record_result_event": true,
     "allow_memory_update": true

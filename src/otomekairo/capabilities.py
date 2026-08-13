@@ -53,7 +53,7 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "user_visible": False,
             "stores_raw_payload": False,
         },
-        "timeout_ms": 5000,
+        "timeout_ms": 45000,
         "risk_level": "low",
         "memory_policy": {
             "record_result_event": True,
@@ -65,7 +65,7 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "result_context_hook": "vision_capture",
             "followup_hint_hook": "vision_capture",
             "unavailable_seconds_on_dispatch_failure": 15,
-            "unavailable_seconds_on_timeout": 15,
+            "unavailable_seconds_on_timeout": 30,
         },
         "decision_readiness": {
             "family": "visual_observation",
@@ -162,7 +162,7 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "user_visible": False,
             "stores_raw_payload": False,
         },
-        "timeout_ms": 5000,
+        "timeout_ms": 15000,
         "risk_level": "medium",
         "memory_policy": {
             "record_result_event": True,
