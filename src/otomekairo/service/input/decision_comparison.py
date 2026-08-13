@@ -14,6 +14,11 @@ from otomekairo.service.common import debug_log
 SELF_ACTIVITY_ADVANCE_KINDS = frozenset({"capability_request", "autonomous_run", "pending_intent"})
 SELF_ACTIVITY_EXECUTE_KINDS = frozenset({"capability_request", "autonomous_run"})
 SELF_ACTIVITY_EXCLUDED_CAPABILITY_IDS = frozenset({"vision.capture", "camera.ptz"})
+SELF_ACTIVITY_INPUT_TEXT = "自己評価。今、自身の活動へ関わるかを見る。"
+SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT = (
+    "自己評価。しばらく関わっていない気にかけていることがある。"
+    "今それに関わるか、関わるなら見る、返す、自分から書くのどれが今の向きとして自然かを見る。"
+)
 
 
 class ServiceInputDecisionComparisonMixin:
@@ -93,9 +98,9 @@ class ServiceInputDecisionComparisonMixin:
             response_target_refs=(),
             interaction_context=None,
             text=(
-                "自己評価。しばらく関わっていない気にかけていることがある。今それに関わるかを見る。"
+                SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT
                 if has_standing_concern
-                else "自己評価。今、自身の活動へ関わるかを見る。"
+                else SELF_ACTIVITY_INPUT_TEXT
             ),
         )
         initiative_context = self._self_activity_initiative_context(

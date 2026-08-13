@@ -1178,6 +1178,8 @@ def _decision_self_activity_rules_section() -> str:
         + "自律判断時だけ InitiativeContext が入ります。trigger 固有の差分は trigger_policy です。\n"
         "WorkspaceContext は向き、継続行動、能力候補の前景です。standing_concern は気にかけていることであり、実行指示ではありません。\n"
         "今関わる自然さがあれば capability_request または autonomous_run を選びます。"
+        "関わり方は、見る、返す、自分から書くを同じ盤面で比べます。"
+        "今その向きに立つ言葉があれば自分から書いてよいです。"
         "向きと CapabilityDecisionView の catalog から autonomous_run を始めてよいです。人物発話による依頼はこの比較の前提ではありません。"
         "その関心に関われる手段が CapabilityDecisionView に available=true であるときだけ、その手段で関わる。"
         "手段が無いときは今は関わらない。\n"

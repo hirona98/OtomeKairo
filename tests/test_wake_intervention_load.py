@@ -5,6 +5,10 @@ import unittest
 from datetime import datetime
 
 from otomekairo.llm.contexts import CurrentInput, InitiativeCandidateFamily, InitiativeContext
+from otomekairo.service.input.decision_comparison import (
+    SELF_ACTIVITY_INPUT_TEXT,
+    SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT,
+)
 from otomekairo.service.input.mixin import ServiceInputMixin
 from otomekairo.service.spontaneous.pending_intent import ServiceSpontaneousPendingIntentMixin
 from otomekairo.service.spontaneous.wake import ServiceSpontaneousWakeMixin
@@ -409,6 +413,83 @@ class WakeInterventionLoadTests(unittest.TestCase):
         )
         refs = {item["factor_ref"] for item in isolated["workspace_candidates"]}
         self.assertEqual(refs, {"standing_concern:elyth", "capability:mcp.call_tool"})
+
+    def test_self_activity_input_asks_how_to_engage(self) -> None:
+        service = DummyInputService()
+        current_input = CurrentInput(
+            sender_kind="system",
+            sender_ref=None,
+            source_kind="background_thinking",
+            response_target_refs=(),
+            interaction_context=None,
+            text="定期思考。",
+        )
+        with_concern = service._build_self_activity_decision_context(
+            current_input=current_input,
+            trigger_kind="background_thinking",
+            recent_turns=[],
+            time_context={},
+            affect_context={},
+            drive_state_summary=None,
+            foreground_world_state=None,
+            activity_context=None,
+            ongoing_action_summary=None,
+            autonomous_run_summaries=None,
+            capability_decision_view=None,
+            agent_skill_context=None,
+            initiative_context=None,
+            visual_observation_context=None,
+            self_state_context=None,
+            people_context=[],
+            relationship_context=None,
+            prediction_error_context=None,
+            default_mode_context=None,
+            workspace_context={
+                "workspace_candidates": [
+                    {
+                        "factor_ref": "standing_concern:elyth",
+                        "kind": "standing_concern",
+                    }
+                ]
+            },
+            recall_hint={},
+            recall_pack={},
+            reference_context=None,
+            pre_send_check_feedback=None,
+        )
+        without_concern = service._build_self_activity_decision_context(
+            current_input=current_input,
+            trigger_kind="background_thinking",
+            recent_turns=[],
+            time_context={},
+            affect_context={},
+            drive_state_summary=None,
+            foreground_world_state=None,
+            activity_context=None,
+            ongoing_action_summary=None,
+            autonomous_run_summaries=None,
+            capability_decision_view=None,
+            agent_skill_context=None,
+            initiative_context=None,
+            visual_observation_context=None,
+            self_state_context=None,
+            people_context=[],
+            relationship_context=None,
+            prediction_error_context=None,
+            default_mode_context=None,
+            workspace_context={"workspace_candidates": []},
+            recall_hint={},
+            recall_pack={},
+            reference_context=None,
+            pre_send_check_feedback=None,
+        )
+
+        self.assertEqual(
+            with_concern.current_input.text,
+            SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT,
+        )
+        self.assertIn("自分から書く", with_concern.current_input.text)
+        self.assertEqual(without_concern.current_input.text, SELF_ACTIVITY_INPUT_TEXT)
 
     def test_self_activity_initiative_drops_visual_pressure(self) -> None:
         service = DummyInputService()
