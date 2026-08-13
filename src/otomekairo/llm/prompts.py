@@ -1375,40 +1375,34 @@ def _build_decision_context_prompt(
     return _format_named_json_prompt_payload("INTERNAL_CONTEXT", payload)
 
 
+def _initiative_field_guide() -> list[str]:
+    return [
+        "InitiativeContext は今回の自律判断機会の材料です。opportunity_summary と candidate_families は前景化した理由と候補系統です。",
+        "entry_basis=activity_mode_transition は活動モード遷移、strong_interest は強い関心、same_activity_detail_change は同じ活動モード内の詳細変化、observation_only は観測のみです。",
+        "foreground_signal_summary.foreground_thinness の grounded は具体的な前景、thin は薄い前景、mixed は複数系統の混在です。",
+        "candidate_families の reason_summary と blocking_reason_summary は、進む理由と控える理由の比較材料です。",
+    ]
+
+
+def _speech_frequency_policy(level: int) -> str:
+    return (
+        f"speech_frequency_level は {level} です。"
+        "短い独話として前へ出る軽さの補助に使い、JSON や reason_summary には出さないでください。"
+        "5 は標準、3 以下は控えめ基準です。"
+    )
+
+
 def _self_activity_trigger_policies(
     initiative_context: InitiativeContext | None,
 ) -> list[str]:
     policies = [
-        "この比較は、今、気にかけている場や継続中の自身の活動へ関わるかです。",
-        f"kind は {_decision_kind_text('self_activity')} のいずれかです。",
-        "standing_concern はしばらく関わっていない気にかけている場です。今関わる自然さがあれば capability_request または autonomous_run を比べます。",
-        "向きと catalog から autonomous_run を始めてよいです。",
-        "見ないことも許します。控える理由は、今その場へ関わらないこととして書いてください。",
+        "standing_concern は実行指示ではありません。向きと catalog から autonomous_run を始めてよいです。",
     ]
     if initiative_context is None:
         return policies
-    policies.extend(
-        [
-            "InitiativeContext は、定期思考や API 起床で向きへ関わるか、保留するか、見送るかを評価する材料です。",
-            "opportunity_summary と candidate_families は、評価対象が前景化した理由と候補系統を表します。",
-            "candidate_families の reason_summary と blocking_reason_summary は、関わる理由と控える理由を比較するための意味説明です。",
-            (
-                "InitiativeContext.drive_summaries は中期の向きの比較材料です。"
-                "drive_kind, support_count, freshness_hint, support_strength, scope_alignment, "
-                "signal_strength, persona_alignment, stability_hint を合わせて重みづけしてください。"
-            ),
-            (
-                "InitiativeContext.candidate_families に preferred_capability_id と "
-                "preferred_capability_input があるときは capability_request の提案です。"
-                "現在文脈で追加観測が必要な場合に、その capability と最小 input を選んでください。"
-            ),
-            "selected_candidate_family が autonomous のときは、今その場へ関わる自然さを capability_request または autonomous_run と比べてください。",
-            (
-                "有限 MCP セッションは CapabilityDecisionView の対象 server が available=true "
-                "かつ autonomous_session.enabled=true の場合だけ開始できます。"
-                "background_thinking ではさらに background_enabled=true と background_eligible=true が必要です。"
-            ),
-        ]
+    policies.extend(_initiative_field_guide())
+    policies.append(
+        "preferred_capability_id がある candidate_family は capability_request の提案です。"
     )
     return policies
 
@@ -1416,142 +1410,13 @@ def _self_activity_trigger_policies(
 def _outward_speech_trigger_policies(
     initiative_context: InitiativeContext | None,
 ) -> list[str]:
-    policies = [
-        "この比較は、今、外へ短い見方を出すかです。",
-        f"kind は {_decision_kind_text('outward_speech')} のいずれかです。",
-    ]
     if initiative_context is None:
-        return policies
-    speech_frequency_level = initiative_context.speech_frequency_level
-    policies.extend(
-        [
-            "InitiativeContext は、定期思考や API 起床で短い見方を外へ出すか、保留するか、見送るかを評価する材料です。",
-            "opportunity_summary, initiative_entry_summary, candidate_families は、評価対象が前景化した理由と候補系統を表します。",
-            (
-                "entry_basis=activity_mode_transition は活動モード遷移、strong_interest は強い関心、"
-                "same_activity_detail_change は同じ活動モード内の詳細変化、"
-                "observation_only は観測のみを表します。"
-            ),
-            "candidate_families の reason_summary と blocking_reason_summary は、出る理由と控える理由を比較するための意味説明です。",
-            (
-                "foreground_signal_summary は現在の外界シグナルの濃さを表します。"
-                "grounded は具体的な前景、thin は薄い前景、mixed は複数系統の混在として扱ってください。"
-            ),
-            (
-                "recent_turn_summary は直近文脈の補助材料です。"
-                "visual_observations[].change_state と same_as_recent_speech は反復性や新規性の比較材料です。"
-            ),
-            (
-                "background_thinking: 定期思考による自己評価です。"
-                "ここでの speech は、観測差分の実況ではなく、現在の個の短い見方として一言にまとまる独り言です。"
-            ),
-            (
-                "校正: background_thinking では、短い独話として前へ出る自然さを 10 段階で内的に見積もり、"
-                f"発話頻度レベル {speech_frequency_level} を前へ出る軽さの補助として使ってください。"
-                "5 は標準です。3 以下は控えめ基準です。"
-                "観測差分、thin、stable、changed、同一活動継続は speech を義務づけません。"
-                "ただし、観測と人格、記憶、現在文脈が噛み合い、短い一言として自然にまとまる場合は speech と比較してください。"
-                "評価値は JSON や reason_summary に出力しないでください。"
-            ),
-            (
-                "材料: visual_observations は desktop / camera / virtual などの視覚観測です。"
-                "change_state=first_seen / changed は前景候補、"
-                "stable は現在状態の継続シグナル、same_as_recent_speech は直近重複の抑制候補です。"
-            ),
-            (
-                "材料: first_seen / changed / stable は、外界を理解するための観測事実です。"
-                "同一活動内の画面・表示対象・操作単位の変化は、具体名や表示内容を主題化せず、"
-                "speech / pending_intent / noop を比較する材料として扱ってください。"
-                "活動名、作業名、閲覧中、検討中、入力中、操作中などの活動事実は、"
-                "何が前景にあるかの材料です。活動事実だけを speech の主理由にしないでください。"
-                "foreground_signal_summary.foreground_thinness=thin の同じ活動モード内の"
-                "対象差し替え、表示単位の移動、閲覧先変更、詳細画面への移動は、"
-                "実況にはせず、現在の個の短い見方や区切りとしてまとまる場合だけ speech と比較してください。"
-                "操作媒体、対象種別、身体動作の組み合わせが、同じ活動モード内の対象差し替えでは"
-                "説明できないほど変わる場合は、活動モードや状態の上位変化としても比較してください。"
-                "複数 source の first_seen / changed / stable が同じ活動や状態を指す場合も、"
-                "反復実況を避けつつ、軽い節目として一言にまとまるかを比較してください。"
-            ),
-            (
-                "選択: speech は、現在の観測、活動の継続、変化、安定、切り替わり、予定、未完了、"
-                "継続中コミットメントを材料にして、現在の個の短い見方として一言にまとまるときに選びます。"
-                "speech は会話開始ではなく、反応要求を含まない短い独り言として比較してください。"
-            ),
-            "選択: pending_intent は、あとで再評価する材料だけを残す場合に選んでください。",
-            (
-                "選択: noop は、反復、直近で同じ内容に触れた事実、明示された距離希望、"
-                "進行中応答、結果待ち、プライバシー境界、観測失敗、観測不足、"
-                "構造化済み抑制根拠がある場合に選んでください。"
-                "人物側の視覚に発話しないこと、独話として画面がまとまらないことは speech を選ばない理由です。"
-                "foreground_signal_summary.foreground_thinness=thin は自動 speech にしないでください。ただし、軽い節目としてまとまる場合は speech と比較してください。"
-                "stable や同一活動継続は自動 speech にしないでください。ただし、継続そのものに現在の個の短い見方が立つ場合は speech と比較してください。"
-                "noop の reason_summary は、該当する具体根拠名で説明し、"
-                "活動事実、距離感の補助、画面やカメラに触れないことだけを主理由にしないでください。"
-            ),
-            (
-                "同一活動内の扱い: 同一活動内の画面・表示対象・操作単位の変化、"
-                "作業や閲覧の継続、安定状態は現在状態の材料です。"
-                "具体名や表示内容を主題化せず、軽い区切りや短い見方としてまとまる場合は speech と比較してください。"
-            ),
-            (
-                "発話境界: speech は助言、依頼、支援提案、反応要求ではなく、"
-                "観測事実に基づく一文の独話的な状況認識として作ってください。"
-                "background_thinking の speech は独り言として扱い、相手の反応や会話継続を前提にしないでください。"
-            ),
-            (
-                "抑制境界: noop を選ぶ場合は、明示された距離希望、直近重複、進行中応答、"
-                "結果待ち、プライバシー境界、観測失敗、観測不足、構造化済み抑制根拠のいずれかを"
-                "主理由にしてください。作業中、閲覧中、検討中、入力中などの活動事実、"
-                "foreground_signal_summary.foreground_thinness=thin、内的注意状態、距離感の補助、"
-                "画面やカメラに触れないことは前景説明または補助材料として扱い、"
-                "補助だけを reason_summary の主理由にしないでください。"
-            ),
-            (
-                "PersonaContext は距離感と表現補助です。人格として自然という理由だけで、"
-                "観測にない内容を speech に押し上げないでください。"
-            ),
-            (
-                "drive_state は speech の補助材料です。"
-                "freshness_hint=stale、stability_hint=weak、signal_strength=0.0 の drive_state は背景材料として扱い、"
-                "薄い視覚前景と合わせる場合も補助材料として扱ってください。"
-            ),
-            (
-                "source_owner=user_environment の視覚観測や ActivityContext.actor=person は人物側の状況です。"
-                "判断理由に使う場合も、対応する person_ref の人物側文脈として表現してください。"
-            ),
-            (
-                "source_owner=self の camera 視覚観測は、"
-                "AI人格自身の視覚根拠として扱ってください。"
-            ),
-            (
-                "InitiativeContext.activity_context は自律判断時のタイミング補助材料です。"
-                "previous_activity から current_activity への意味ある活動モード遷移は、"
-                "initiative_entry_summary.entry_basis=activity_mode_transition との整合を見て扱ってください。"
-                "WorkspaceContext の kind=activity_transition は、活動推定層が作った previous/current の構造化遷移です。"
-                "単なる current_activity だけでなく、前活動の duration_label や source_owner の食い違いも合わせて speech / noop / pending_intent を比較してください。"
-                "activity_transition だけで speech を選ばず、他候補と比較してください。"
-            ),
-            (
-                "活動遷移に触れる speech は、終わった・サボった・遊び始めたなどを断定せず、"
-                "区切りや切り替えとして短く表現してください。desktop と camera などの source が食い違う場合は、"
-                "確定した帰着や在席ではなく、観測根拠に沿った控えめな認識として扱ってください。"
-            ),
-            (
-                "suppression_summary.same_as_recent_speech_present や WorkspaceContext の kind=suppression は、"
-                "出る理由と並べて比較する控える理由の材料です。"
-            ),
-            (
-                "反復に近い詳細更新、同一活動内の画面・表示対象・操作単位の小さな変化、"
-                "観測対象の表層的な変化、姿勢や操作の細かな変化、"
-                "同じ活動モード内の対象名や表示内容だけの差し替え、"
-                "一般的な注意や助言に留まる内容は、自動 speech にせず、軽い節目としてまとまる場合だけ speech と比較してください。"
-                "操作媒体、対象種別、身体動作の組み合わせが、同じ活動モード内の対象差し替えでは"
-                "説明できないほど変わる場合は、この抑制理由に含めないでください。"
-                "活動が継続中であることだけで speech を選ばず、継続への短い見方が立つ場合は speech と比較してください。"
-                "直近発話との重複や独話としてまとまらないことが問題なら noop、後で扱う材料だけを残すなら pending_intent を選んでください。"
-            ),
-        ]
-    )
+        return []
+    policies = [
+        "この trigger では speech は短い独り言です。反応を求めません。",
+        _speech_frequency_policy(initiative_context.speech_frequency_level),
+    ]
+    policies.extend(_initiative_field_guide())
     return policies
 
 
@@ -1574,176 +1439,13 @@ def _build_decision_trigger_policy(
             ]
         )
     if initiative_context is not None:
-        speech_frequency_level = initiative_context.speech_frequency_level
-        policies.extend(
-            [
-                (
-                    "InitiativeContext は、定期思考や API 起床で現在の個が関わる、保留する、"
-                    "見送る、能力を使うのどれを選ぶか評価する材料です。"
-                ),
-                (
-                    "opportunity_summary, initiative_entry_summary, candidate_families は、"
-                    "評価対象が前景化した理由と候補系統を表します。"
-                ),
-                (
-                    "entry_basis=activity_mode_transition は活動モード遷移、strong_interest は強い関心、"
-                    "same_activity_detail_change は同じ活動モード内の詳細変化、"
-                    "observation_only は観測のみを表します。"
-                ),
-                (
-                    "selected_candidate_family は今回もっとも前景にある family の名前です。"
-                    "final decision.kind は selected_candidate_family と全体文脈を合わせて選んでください。"
-                ),
-                (
-                    "candidate_families の reason_summary と blocking_reason_summary は、"
-                    "関わる理由と控える理由を比較するための意味説明です。"
-                ),
-                (
-                    "InitiativeContext.drive_summaries は中期の向きの比較材料です。"
-                    "drive_kind, support_count, freshness_hint, support_strength, scope_alignment, "
-                    "signal_strength, persona_alignment, stability_hint を合わせて重みづけしてください。"
-                ),
-                (
-                    "InitiativeContext.candidate_families に preferred_capability_id と "
-                    "preferred_capability_input があるときは capability_request の提案です。"
-                    "現在文脈で追加観測が必要な場合に、その capability と最小 input を選んでください。"
-                ),
-                (
-                    "foreground_signal_summary は現在の外界シグナルの濃さを表します。"
-                    "grounded は具体的な前景、thin は薄い前景、mixed は複数系統の混在として扱ってください。"
-                ),
-                (
-                    "recent_turn_summary は直近文脈の補助材料です。"
-                    "visual_observations[].change_state と same_as_recent_speech は反復性や新規性の比較材料です。"
-                ),
-                (
-                    "background_thinking: 定期思考による自己評価です。観測、候補、抑制、能力提案を比較し、"
-                    "speech / noop / pending_intent / capability_request / autonomous_run から 1 つ選んでください。"
-                    "ここでの問いは、感覚への反応可否ではなく、感覚と向きを同じ盤面で見て今の個として何をするかです。"
-                    "ここでの speech は、観測差分の実況ではなく、現在の個の短い見方として一言にまとまる独り言です。"
-                    "standing_concern は気にかけている場であり、定時作業の指示ではありません。"
-                    "カメラや画面の視覚観測は感覚、standing_concern は向きです。"
-                    "視覚へ発話しないあとも、向きへ今関わる自然さがあれば capability_request または autonomous_run を比べてください。"
-                    "人物側の作業や集中は outward_speech の hold 理由であり、self_activity まで閉じる理由ではありません。"
-                    "向きまで見送る noop の reason_summary と self_activity の hold 理由は、今その場へ関わらない理由で書いてください。"
-                ),
-                (
-                    "校正: background_thinking では、短い独話として前へ出る自然さを 10 段階で内的に見積もり、"
-                    f"発話頻度レベル {speech_frequency_level} を前へ出る軽さの補助として使ってください。"
-                    "5 は標準です。3 以下は控えめ基準です。"
-                    "観測差分、thin、stable、changed、同一活動継続は speech を義務づけません。"
-                    "ただし、観測と人格、記憶、関心、現在文脈が噛み合い、短い一言として自然にまとまる場合は speech と比較してください。"
-                    "評価値は JSON や reason_summary に出力しないでください。"
-                ),
-                (
-                    "材料: visual_observations は desktop / camera / virtual などの視覚観測です。"
-                    "change_state=first_seen / changed は前景候補、"
-                    "stable は現在状態の継続シグナル、same_as_recent_speech は直近重複の抑制候補です。"
-                ),
-                (
-                    "材料: first_seen / changed / stable は、外界を理解するための観測事実です。"
-                    "同一活動内の画面・表示対象・操作単位の変化は、具体名や表示内容を主題化せず、"
-                    "speech / pending_intent / noop を比較する材料として扱ってください。"
-                    "活動名、作業名、閲覧中、検討中、入力中、操作中などの活動事実は、"
-                    "何が前景にあるかの材料です。活動事実だけを speech の主理由にしないでください。"
-                    "foreground_signal_summary.foreground_thinness=thin の同じ活動モード内の"
-                    "対象差し替え、表示単位の移動、閲覧先変更、詳細画面への移動は、"
-                    "実況にはせず、現在の個の短い見方や区切りとしてまとまる場合だけ speech と比較してください。"
-                    "操作媒体、対象種別、身体動作の組み合わせが、同じ活動モード内の対象差し替えでは"
-                    "説明できないほど変わる場合は、活動モードや状態の上位変化としても比較してください。"
-                    "複数 source の first_seen / changed / stable が同じ活動や状態を指す場合も、"
-                    "反復実況を避けつつ、軽い節目として一言にまとまるかを比較してください。"
-                ),
-                (
-                    "選択: speech は、現在の観測、活動の継続、変化、安定、切り替わり、予定、未完了、"
-                    "継続中コミットメントを材料にして、現在の個の短い見方として一言にまとまるときに選びます。"
-                    "speech は会話開始ではなく、反応要求を含まない短い独り言として比較してください。"
-                ),
-                (
-                    "選択: pending_intent は、あとで再評価する材料だけを残す場合に選んでください。"
-                ),
-                (
-                    "選択: noop は、反復、直近で同じ内容に触れた事実、明示された距離希望、"
-                    "進行中応答、結果待ち、プライバシー境界、観測失敗、観測不足、"
-                    "構造化済み抑制根拠、今その向きへ関わらないことがある場合に選んでください。"
-                    "人物側の視覚に発話しないこと、独話として画面がまとまらないことは speech を選ばない理由であり、"
-                    "standing_concern が残っているときのサイクル終了理由ではありません。"
-                    "foreground_signal_summary.foreground_thinness=thin は自動 speech にしないでください。ただし、軽い節目としてまとまる場合は speech と比較してください。"
-                    "stable や同一活動継続は自動 speech にしないでください。ただし、継続そのものに現在の個の短い見方が立つ場合は speech と比較してください。"
-                    "noop の reason_summary は、該当する具体根拠名で説明し、"
-                    "活動事実、距離感の補助、画面やカメラに触れないことだけを主理由にしないでください。"
-                ),
-                (
-                    "選択: capability_request は、candidate_families に capability 提案があり、"
-                    "現在判断に追加観測が必要な場合に選んでください。"
-                ),
-                (
-                    "同一活動内の扱い: 同一活動内の画面・表示対象・操作単位の変化、"
-                    "作業や閲覧の継続、安定状態は現在状態の材料です。"
-                    "具体名や表示内容を主題化せず、軽い区切りや短い見方としてまとまる場合は speech と比較してください。"
-                ),
-                (
-                    "発話境界: speech は助言、依頼、支援提案、反応要求ではなく、"
-                    "観測事実に基づく一文の独話的な状況認識として作ってください。"
-                    "background_thinking の speech は独り言として扱い、相手の反応や会話継続を前提にしないでください。"
-                ),
-                (
-                    "抑制境界: noop を選ぶ場合は、明示された距離希望、直近重複、進行中応答、"
-                    "結果待ち、プライバシー境界、観測失敗、観測不足、構造化済み抑制根拠、今その向きへ関わらないことのいずれかを"
-                    "主理由にしてください。作業中、閲覧中、検討中、入力中などの活動事実、"
-                    "foreground_signal_summary.foreground_thinness=thin、内的注意状態、距離感の補助、"
-                    "画面やカメラに触れないことは前景説明または補助材料として扱い、"
-                    "補助だけを reason_summary の主理由にしないでください。"
-                ),
-                (
-                    "PersonaContext は距離感と表現補助です。人格として自然という理由だけで、"
-                    "観測にない内容を speech に押し上げないでください。"
-                ),
-                (
-                    "drive_state は speech の補助材料です。"
-                    "freshness_hint=stale、stability_hint=weak、signal_strength=0.0 の drive_state は背景材料として扱い、"
-                    "薄い視覚前景と合わせる場合も補助材料として扱ってください。"
-                ),
-                (
-                    "source_owner=user_environment の視覚観測や ActivityContext.actor=person は人物側の状況です。"
-                    "判断理由に使う場合も、対応する person_ref の人物側文脈として表現してください。"
-                ),
-                (
-                    "source_owner=self の camera 視覚観測は、"
-                    "AI人格自身の視覚根拠として扱ってください。"
-                ),
-                (
-                    "InitiativeContext.activity_context は自律判断時のタイミング補助材料です。"
-                    "previous_activity から current_activity への意味ある活動モード遷移は、"
-                    "initiative_entry_summary.entry_basis=activity_mode_transition との整合を見て扱ってください。"
-                    "WorkspaceContext の kind=activity_transition は、活動推定層が作った previous/current の構造化遷移です。"
-                    "単なる current_activity だけでなく、前活動の duration_label や source_owner の食い違いも合わせて speech / noop / pending_intent を比較してください。"
-                    "activity_transition だけで speech を選ばず、他候補と比較してください。"
-                ),
-                (
-                    "活動遷移に触れる speech は、終わった・サボった・遊び始めたなどを断定せず、"
-                    "区切りや切り替えとして短く表現してください。desktop と camera などの source が食い違う場合は、"
-                    "確定した帰着や在席ではなく、観測根拠に沿った控えめな認識として扱ってください。"
-                ),
-                (
-                    "suppression_summary.same_as_recent_speech_present や WorkspaceContext の kind=suppression は、"
-                    "関わる理由と並べて比較する控える理由の材料です。"
-                ),
-                (
-                    "selected_candidate_family が ongoing_action で follow-up capability が available なときは、"
-                    "現在の流れを進める capability_request を検討してください。"
-                ),
-                (
-                    "反復に近い詳細更新、同一活動内の画面・表示対象・操作単位の小さな変化、"
-                    "観測対象の表層的な変化、姿勢や操作の細かな変化、"
-                    "同じ活動モード内の対象名や表示内容だけの差し替え、"
-                    "一般的な注意や助言に留まる内容は、自動 speech にせず、軽い節目としてまとまる場合だけ speech と比較してください。"
-                    "操作媒体、対象種別、身体動作の組み合わせが、同じ活動モード内の対象差し替えでは"
-                    "説明できないほど変わる場合は、この抑制理由に含めないでください。"
-                    "活動が継続中であることだけで speech を選ばず、継続への短い見方が立つ場合は speech と比較してください。"
-                    "直近発話との重複や独話としてまとまらないことが問題なら noop、後で扱う材料だけを残すなら pending_intent を選んでください。"
-                ),
-            ]
+        policies.append(
+            "この trigger は自己評価です。感覚と向きを同じ盤面で比べます。standing_concern は実行指示ではありません。"
+        )
+        policies.append(_speech_frequency_policy(initiative_context.speech_frequency_level))
+        policies.extend(_initiative_field_guide())
+        policies.append(
+            "selected_candidate_family は前景の名前です。kind は全体文脈と合わせて選んでください。"
         )
     return policies
 

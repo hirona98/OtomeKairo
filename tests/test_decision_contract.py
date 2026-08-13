@@ -679,13 +679,13 @@ class DecisionPromptScopeTests(unittest.TestCase):
         )
         self_text = "\n".join(self_policies)
         outward_text = "\n".join(outward_policies)
-        self.assertIn("向きへ関わるか", self_text)
+        self.assertIn("standing_concern は実行指示ではありません", self_text)
         self.assertIn("向きと catalog から autonomous_run を始めてよい", self_text)
-        self.assertNotIn("短い見方として一言にまとまる独り言", self_text)
-        self.assertIn("短い見方を外へ出すか", outward_text)
-        self.assertIn("短い見方として一言にまとまる独り言", outward_text)
+        self.assertNotIn("短い独り言", self_text)
+        self.assertIn("speech は短い独り言", outward_text)
+        self.assertIn("speech_frequency_level は 5", outward_text)
+        self.assertNotIn("向きと catalog から autonomous_run", outward_text)
         self.assertNotIn("speech / noop / pending_intent / capability_request / autonomous_run から 1 つ", outward_text)
-        self.assertNotIn("向きへ今関わる自然さがあれば", outward_text)
 
 
 if __name__ == "__main__":
