@@ -13,7 +13,9 @@ from otomekairo.service.inbound_observation import (
     list_due_inbound_observation_servers,
 )
 
-INBOUND_OBSERVATION_CONTENT_LIMIT = 8
+INBOUND_OBSERVATION_CONTENT_LIMIT = 24
+INBOUND_OBSERVATION_STRUCTURED_KEY_LIMIT = 32
+INBOUND_OBSERVATION_NESTED_KEY_LIMIT = 16
 
 
 class ServiceInputInboundObservationMixin:
@@ -221,7 +223,7 @@ class ServiceInputInboundObservationMixin:
 
     def _clamp_inbound_structured_content(self, value: dict[str, Any]) -> dict[str, Any]:
         compact: dict[str, Any] = {}
-        for key, item in list(value.items())[:16]:
+        for key, item in list(value.items())[:INBOUND_OBSERVATION_STRUCTURED_KEY_LIMIT]:
             if not isinstance(key, str) or not key.strip():
                 continue
             if isinstance(item, str):
@@ -233,7 +235,7 @@ class ServiceInputInboundObservationMixin:
             elif isinstance(item, dict):
                 compact[key.strip()] = {
                     nested_key: nested_value
-                    for nested_key, nested_value in list(item.items())[:8]
+                    for nested_key, nested_value in list(item.items())[:INBOUND_OBSERVATION_NESTED_KEY_LIMIT]
                     if isinstance(nested_key, str)
                 }
         return compact

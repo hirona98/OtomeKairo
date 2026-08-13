@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.capabilities import capability_manifests
+from otomekairo.service.input.constants import VISUAL_SOURCE_LIMIT
 from otomekairo.world_state.models import WorldStateTrace
 
 
@@ -148,7 +149,7 @@ class ServiceInputCapabilityContextMixin:
                 if value is not None:
                     payload[target_key] = value
             sources.append(payload)
-        return sources[:6]
+        return sources[:VISUAL_SOURCE_LIMIT]
 
     def _merge_fresh_visual_sources(
         self,
@@ -172,7 +173,7 @@ class ServiceInputCapabilityContextMixin:
                         if field in existing and field not in item
                     },
                 }
-        return list(merged_by_source_id.values())[:6]
+        return list(merged_by_source_id.values())[:VISUAL_SOURCE_LIMIT]
 
     def _fresh_foreground_world_state_summaries(
         self,
@@ -237,7 +238,7 @@ class ServiceInputCapabilityContextMixin:
             if label is not None:
                 payload["source_label"] = label
             matches.append(payload)
-        return matches[:6]
+        return matches[:VISUAL_SOURCE_LIMIT]
 
     def _foreground_world_state_is_fresh(self, summary: dict[str, Any]) -> bool:
         age_label = summary.get("age_label")

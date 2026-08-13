@@ -441,7 +441,7 @@ class ServiceInputDecisionComparisonMixin:
             if state_type != "visual_context"
         ]
         if state_types:
-            payload["state_types"] = state_types[:4]
+            payload["state_types"] = state_types[:12]
         else:
             payload.pop("state_types", None)
         payload["world_state_count"] = len(world_state_summary)

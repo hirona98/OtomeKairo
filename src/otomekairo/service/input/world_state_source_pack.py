@@ -5,6 +5,7 @@ from typing import Any
 from otomekairo.llm.client import LLMError
 from otomekairo.memory.utils import llm_local_time_text
 from otomekairo.service.input.constants import (
+    SCHEDULE_SLOT_LIMIT,
     WORLD_STATE_CONTEXT_KEYS_BY_TYPE,
     WORLD_STATE_FOREGROUND_LIMIT,
     WORLD_STATE_MAX_ACTIVE,
@@ -756,7 +757,7 @@ class ServiceInputWorldStateSourcePackMixin:
                     expires_at=expires_at.strip() if isinstance(expires_at, str) and expires_at.strip() else None,
                 )
             )
-        return tuple(normalized_slots[:4])
+        return tuple(normalized_slots[:SCHEDULE_SLOT_LIMIT])
 
     def _build_world_state_pending_intent_context(
         self,
@@ -939,7 +940,7 @@ class ServiceInputWorldStateSourcePackMixin:
                     payload["pending_intent_slot_key"] = context.pending_intent.slot_key
             if context.schedule_slots:
                 payload["real_schedule_slot_count"] = len(context.schedule_slots)
-                payload["schedule_slot_keys"] = [slot.slot_key for slot in context.schedule_slots][:4]
+                payload["schedule_slot_keys"] = [slot.slot_key for slot in context.schedule_slots][:SCHEDULE_SLOT_LIMIT]
         return payload
 
     def _world_state_hook_summary_source(self, *, state_type: str, context: WorldStateContext) -> str:

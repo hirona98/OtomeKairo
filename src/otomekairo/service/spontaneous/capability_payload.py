@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from otomekairo.service.common import ServiceError
+from otomekairo.service.input.constants import SCHEDULE_SLOT_LIMIT
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,7 +241,7 @@ class ServiceSpontaneousCapabilityPayloadMixin:
                 if isinstance(value, str) and value.strip():
                     slot_payload[key] = value.strip()
             normalized_slots.append(slot_payload)
-        return normalized_slots[:4]
+        return normalized_slots[:SCHEDULE_SLOT_LIMIT]
 
     def _capability_result_log_channel(self, capability_id: str) -> str:
         return "CapabilityResult"

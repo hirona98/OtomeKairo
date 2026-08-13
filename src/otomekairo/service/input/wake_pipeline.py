@@ -487,7 +487,7 @@ class ServiceInputWakePipelineMixin:
                 compact_item["salience"] = round(max(0.0, min(float(salience), 1.0)), 2)
             if compact_item:
                 compact_items.append(compact_item)
-        return compact_items[:6]
+        return compact_items[:WORLD_STATE_FOREGROUND_LIMIT]
 
     def _client_context_has_initiative_entry(
         self,

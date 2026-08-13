@@ -22,7 +22,7 @@ from otomekairo.service.inbound_observation import (
 from otomekairo.service.standing_concerns import standing_concern_factor_ref
 
 
-WORKSPACE_CANDIDATE_LIMIT = 24
+WORKSPACE_CANDIDATE_LIMIT = 56
 WORKSPACE_SUPPORTING_SELECTION_LIMIT = 3
 WORKSPACE_SUPPRESSED_SELECTION_LIMIT = 5
 WORKSPACE_LIMIT_RETAINED_KINDS = frozenset(
@@ -43,8 +43,10 @@ WORKSPACE_MEMORY_SECTIONS = (
     "event_evidence",
     "visual_observations",
 )
-WORKSPACE_MEMORY_ITEMS_PER_SECTION = 2
-DEFAULT_MODE_CANDIDATE_LIMIT = 8
+WORKSPACE_MEMORY_ITEMS_PER_SECTION = 6
+DEFAULT_MODE_CANDIDATE_LIMIT = 16
+WORKSPACE_DERIVED_ITEMS_PER_SECTION = 6
+PREDICTION_ERROR_SUMMARY_LIMIT = 8
 PERSON_REFERENCE_FIELDS = {
     "person_ref",
     "sender_ref",
@@ -1155,7 +1157,7 @@ class ServiceInputPipelineMixin:
             section_items = recall_pack.get(section)
             if not isinstance(section_items, list):
                 continue
-            for index, item in enumerate(section_items[:2]):
+            for index, item in enumerate(section_items[:WORKSPACE_DERIVED_ITEMS_PER_SECTION]):
                 if not isinstance(item, dict):
                     continue
                 summary_text = self._workspace_item_summary(
@@ -1210,8 +1212,8 @@ class ServiceInputPipelineMixin:
                     "changed": changed,
                     "previous_count": len(previous),
                     "current_count": len(current),
-                    "previous_summaries": previous[:3],
-                    "current_summaries": current[:3],
+                    "previous_summaries": previous[:PREDICTION_ERROR_SUMMARY_LIMIT],
+                    "current_summaries": current[:PREDICTION_ERROR_SUMMARY_LIMIT],
                 }
             )
         if isinstance(capability_result_context, dict):
@@ -1245,7 +1247,7 @@ class ServiceInputPipelineMixin:
             items = recall_pack.get(section)
             if not isinstance(items, list):
                 continue
-            for index, item in enumerate(items[:2]):
+            for index, item in enumerate(items[:WORKSPACE_DERIVED_ITEMS_PER_SECTION]):
                 if not isinstance(item, dict):
                     continue
                 summary_text = self._workspace_item_summary(
@@ -1262,7 +1264,7 @@ class ServiceInputPipelineMixin:
                         "resurfacing_policy": "即発話せず、workspace の前景化候補として扱う。",
                     }
                 )
-        for index, item in enumerate(affect_context.get("recent_episode_affects", [])[:2]):
+        for index, item in enumerate(affect_context.get("recent_episode_affects", [])[:WORKSPACE_DERIVED_ITEMS_PER_SECTION]):
             if not isinstance(item, dict):
                 continue
             summary_text = self._workspace_item_summary(
@@ -1680,7 +1682,7 @@ class ServiceInputPipelineMixin:
         visual_observations = foreground_signal_summary.get("visual_observations")
         if not isinstance(visual_observations, list):
             return
-        for index, observation in enumerate(visual_observations[:6]):
+        for index, observation in enumerate(visual_observations):
             if not isinstance(observation, dict):
                 continue
             if observation.get("change_state") not in {"first_seen", "changed"}:

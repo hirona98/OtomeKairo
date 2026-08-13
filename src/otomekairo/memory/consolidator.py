@@ -15,7 +15,7 @@ from otomekairo.store.file_store import FileStore
 
 
 # memory_interpretation に渡す events は補助文脈に留める。
-MEMORY_CONTEXT_EVENT_LIMIT = 12
+MEMORY_CONTEXT_EVENT_LIMIT = 24
 ACTIVE_COMMITMENT_STATES = {"open", "waiting_confirmation", "on_hold"}
 
 

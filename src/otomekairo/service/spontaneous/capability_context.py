@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.capabilities import capability_manifests, capability_readiness_result_digest
+from otomekairo.service.input.constants import SCHEDULE_SLOT_LIMIT
 
 
 class ServiceSpontaneousCapabilityContextMixin:
@@ -68,7 +69,7 @@ class ServiceSpontaneousCapabilityContextMixin:
             normalized_slots.append(slot_payload)
         if not normalized_slots:
             return None
-        return normalized_slots[:4]
+        return normalized_slots[:SCHEDULE_SLOT_LIMIT]
 
     def _capability_result_observation_summary(self, capability_response: dict[str, Any]) -> dict[str, Any]:
         request_record = capability_response.get("request_record")

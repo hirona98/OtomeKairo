@@ -5,6 +5,7 @@ from typing import Any
 from otomekairo.llm.contexts import InitiativeContext
 from otomekairo.llm.contracts import INITIATIVE_ENTRY_ENTER_BASIS_VALUES
 from otomekairo.service.common import debug_log
+from otomekairo.service.input.constants import VISUAL_SOURCE_LIMIT
 
 
 class ServiceInputInitiativeContextMixin:
@@ -245,7 +246,7 @@ class ServiceInputInitiativeContextMixin:
             "world_state_count": len(world_state_summary),
         }
         if state_types:
-            payload["state_types"] = state_types[:4]
+            payload["state_types"] = state_types[:12]
         if visual_signals:
             payload["visual_observations"] = visual_signals
         return payload
@@ -468,7 +469,7 @@ class ServiceInputInitiativeContextMixin:
             if default_for:
                 payload["default_for"] = default_for
             sources.append(payload)
-        return sources[:6]
+        return sources[:VISUAL_SOURCE_LIMIT]
 
     def _initiative_visual_observation_signals(
         self,

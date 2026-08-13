@@ -157,13 +157,13 @@ class TextTruncationTests(unittest.TestCase):
                 "reason_summary": f"理由{i}-" + ("c" * 220),
                 "text": f"本文{i}-" + ("d" * 260) + "末尾",
             }
-            for i in range(13)
+            for i in range(25)
         ]
 
         compact_events = [consolidator._compact_event_for_memory_context(event) for event in events]
         limited_events = consolidator._limit_memory_context_events(compact_events)
 
-        self.assertEqual(len(limited_events), 12)
+        self.assertEqual(len(limited_events), 24)
         self.assertEqual(limited_events[0]["text_summary"], events[0]["text"])
         self.assertTrue(limited_events[-1]["text_summary"].endswith("末尾"))
 
