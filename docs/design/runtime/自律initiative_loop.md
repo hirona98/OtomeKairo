@@ -122,8 +122,6 @@ initiative loop は、候補を次の 3 系統に分ける。
 視覚観測の `first_seen / changed` で通常判断へ direct entry する場合も、判断前観測で更新された `activity_context` は `initiative_context` と `workspace_context` に残す。
 direct entry は視覚新規性だけへ判断材料を縮約する仕組みではなく、活動遷移、継続時間、source の整合、抑制候補を同じ盤面で比較する入口である。
 due な気にかけていることは自発系の材料であり、偽の `drive_state` にはしない。その関心に関われる手段が無いときの扱いも含め、意味境界は [気にかけていること.md](気にかけていること.md) を正とする。
-MCP inbound 観測で届いている働きかけありと判断された事実も自発系の材料である。関心の間隔と混ぜず、偽の `drive_state` にもしない。意味境界は [../llm/mcp_inbound_observation.md](../llm/mcp_inbound_observation.md) を正とする。
-inbound 観測だけが due のとき、通常の定期思考と判断前視覚観測は起こさない。届いている働きかけが無い inbound 観測だけでは `background_thinking` を開かない。
 direct entry でも due な関心があるときは想起解釈を省略せず、盤面を視覚反応へ縮約しない。
 `background_thinking` は定期思考による自己評価である。感覚への反応と向きへの関与は別比較である。
 外向き伝達を控えることと、自身の活動を控えることは別比較である。同じ判断に畳まない。
@@ -265,7 +263,7 @@ initiative loop は、前へ出る理由と見送る理由を判断入力に含�
 - `persona_context_summary.initiative_baseline.level=low` であること
 
 visual observation の `change_state=first_seen / changed` は自律判断の前景材料にする。
-autonomous family の availability は、強い `initiative_entry_summary`、構造値が強い `drive_state`、視覚観測の `first_seen / changed`、due な気にかけていること、または届いている働きかけありの inbound 観測で組み立てる。
+autonomous family の availability は、強い `initiative_entry_summary`、構造値が強い `drive_state`、視覚観測の `first_seen / changed`、または due な気にかけていることで組み立てる。
 autonomous family の priority は、`drive_state`、現在文脈、前景世界状態、候補理由の強さで決める。
 `foreground_thinness=thin`、`trigger_kind=background_thinking`、`suppression_level=high` は、LLM が結果を判断するための文脈事実として渡す。視覚発話抑制は向きまで閉じない。
 同じ `dedupe_key` の直近発話は server の重複発話境界として扱う。

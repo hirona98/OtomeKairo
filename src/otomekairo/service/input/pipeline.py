@@ -15,10 +15,6 @@ from otomekairo.interaction import InteractionContext
 from otomekairo.service.agent_skills import origin_source_kind_from_capability_request
 from otomekairo.service.capability import PreSendCheckWithheldError
 from otomekairo.service.common import debug_log
-from otomekairo.service.inbound_observation import (
-    inbound_observation_factor_ref,
-    inbound_present_mcp_server_ids_from_workspace,
-)
 from otomekairo.service.standing_concerns import standing_concern_factor_ref
 
 
@@ -798,7 +794,6 @@ class ServiceInputPipelineMixin:
             state=state,
             current_time=started_at,
             trigger_kind=trigger_kind,
-            inbound_present_mcp_server_ids=self._inbound_present_mcp_server_ids(client_context),
         )
         capability_decision_view = self._annotate_capability_decision_view_with_fresh_visual_context(
             capability_decision_view=capability_decision_view,
@@ -899,7 +894,6 @@ class ServiceInputPipelineMixin:
                 state=state,
                 current_time=started_at,
             ),
-            inbound_observations=self._client_context_inbound_observations(client_context),
             recall_pack=recall_pack,
             drive_state_summary=drive_state_summary,
             foreground_world_state=foreground_world_state,
@@ -1331,7 +1325,6 @@ class ServiceInputPipelineMixin:
         *,
         current_input: CurrentInput,
         due_standing_concerns: list[dict[str, Any]] | None = None,
-        inbound_observations: list[dict[str, Any]] | None = None,
         recall_pack: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
         foreground_world_state: list[dict[str, Any]] | None,
@@ -1395,25 +1388,6 @@ class ServiceInputPipelineMixin:
                 source="standing_concerns",
                 summary_text=str(concern.get("concern_summary") or "").strip() or None,
                 metadata={"concern_id": concern_id},
-            )
-        for observation in inbound_observations or []:
-            if not isinstance(observation, dict) or observation.get("inbound_present") is not True:
-                continue
-            mcp_server_id = str(observation.get("mcp_server_id") or "").strip()
-            if not mcp_server_id:
-                continue
-            self._append_workspace_candidate(
-                candidates=candidates,
-                used_refs=used_refs,
-                source_counts=source_counts,
-                factor_ref=inbound_observation_factor_ref(mcp_server_id),
-                kind="inbound_observation",
-                source="inbound_observation",
-                summary_text=str(observation.get("observation_summary") or "").strip() or None,
-                metadata={
-                    "mcp_server_id": mcp_server_id,
-                    "tool_name": observation.get("tool_name"),
-                },
             )
         self._append_workspace_initiative_candidates(
             candidates=candidates,
@@ -2244,9 +2218,6 @@ class ServiceInputPipelineMixin:
         autonomous_run_summary: dict[str, Any] | None = None
         autonomous_run_step_result: dict[str, Any] | None = None
         source_current_input = current_input.to_prompt_payload()
-        inbound_present_ids = inbound_present_mcp_server_ids_from_workspace(workspace_context)
-        if inbound_present_ids:
-            source_current_input["inbound_present_mcp_server_ids"] = inbound_present_ids
         agent_skill_activation = self._agent_skill_activation_summary(agent_skill_context)
         if agent_skill_activation is not None:
             source_current_input["agent_skill_activation"] = agent_skill_activation

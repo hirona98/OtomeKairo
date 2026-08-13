@@ -56,8 +56,7 @@ class ServiceInputWakePipelineMixin:
                 )
 
         # 定期観測
-        inbound_only = isinstance(client_context, dict) and client_context.get("inbound_only") is True
-        if trigger_kind == "background_thinking" and inbound_only is not True:
+        if trigger_kind == "background_thinking":
             actor_ref = (
                 interaction_context.participant_refs[0]
                 if interaction_context is not None and interaction_context.participant_refs
@@ -220,9 +219,6 @@ class ServiceInputWakePipelineMixin:
         current_time: str,
         client_context: dict[str, Any] | None,
     ) -> bool:
-        inbound_ids = getattr(self, "_inbound_present_mcp_server_ids", None)
-        if callable(inbound_ids) and inbound_ids(client_context):
-            return True
         due_concerns = getattr(self, "_due_standing_concerns", None)
         if callable(due_concerns) and due_concerns(state=state, current_time=current_time):
             return True
@@ -237,8 +233,6 @@ class ServiceInputWakePipelineMixin:
     ) -> None:
         if trigger_kind != "background_thinking":
             return
-        if isinstance(client_context, dict) and client_context.get("inbound_only") is True:
-            return
         self._set_last_wake_at(current_time)
 
     def _has_autonomous_initiative_context(
@@ -249,8 +243,6 @@ class ServiceInputWakePipelineMixin:
         client_context: dict[str, Any] | None = None,
     ) -> bool:
         if self._client_context_has_initiative_entry(client_context):
-            return True
-        if self._inbound_present_mcp_server_ids(client_context):
             return True
         if self._client_context_has_judgable_visual_observation(client_context):
             return True

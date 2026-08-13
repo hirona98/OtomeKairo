@@ -19,10 +19,6 @@ SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT = (
     "自己評価。しばらく関わっていない気にかけていることがある。"
     "今それに関わるか、関わるなら見る、返す、自分から書くのどれが今の向きとして自然かを見る。"
 )
-SELF_ACTIVITY_INBOUND_INPUT_TEXT = (
-    "自己評価。向こうから届いている働きかけがある。"
-    "今それに関わるか、関わるなら見る、返すのどれが今の向きとして自然かを見る。"
-)
 
 
 class ServiceInputDecisionComparisonMixin:
@@ -89,7 +85,6 @@ class ServiceInputDecisionComparisonMixin:
     def _build_self_activity_decision_context(self, **kwargs: Any) -> DecisionContext:
         current_input = kwargs["current_input"]
         source_workspace = kwargs.get("workspace_context")
-        has_inbound = bool(self._workspace_inbound_observations(source_workspace))
         has_standing_concern = bool(self._workspace_standing_concerns(source_workspace))
         isolated_input = CurrentInput(
             sender_kind="system",
@@ -98,9 +93,7 @@ class ServiceInputDecisionComparisonMixin:
             response_target_refs=(),
             interaction_context=None,
             text=(
-                SELF_ACTIVITY_INBOUND_INPUT_TEXT
-                if has_inbound
-                else SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT
+                SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT
                 if has_standing_concern
                 else SELF_ACTIVITY_INPUT_TEXT
             ),
@@ -196,7 +189,6 @@ class ServiceInputDecisionComparisonMixin:
                 continue
             if kind in {
                 "standing_concern",
-                "inbound_observation",
                 "ongoing_action",
                 "autonomous_run",
                 "drive_state",
@@ -277,7 +269,6 @@ class ServiceInputDecisionComparisonMixin:
             return workspace_context
         dropped_kinds = {
             "standing_concern",
-            "inbound_observation",
             "ongoing_action",
             "autonomous_run",
             "capability",
@@ -360,21 +351,6 @@ class ServiceInputDecisionComparisonMixin:
         metadata["preferred_capability_id"] = family.preferred_capability_id
         rewritten["metadata"] = metadata
         return rewritten
-
-    def _workspace_inbound_observations(
-        self,
-        workspace_context: dict[str, Any] | None,
-    ) -> list[dict[str, Any]]:
-        if not isinstance(workspace_context, dict):
-            return []
-        candidates = workspace_context.get("workspace_candidates")
-        if not isinstance(candidates, list):
-            return []
-        return [
-            candidate
-            for candidate in candidates
-            if isinstance(candidate, dict) and candidate.get("kind") == "inbound_observation"
-        ]
 
     def _workspace_standing_concerns(
         self,
@@ -461,13 +437,12 @@ class ServiceInputDecisionComparisonMixin:
             if isinstance(item, dict) and item.get("state_type") != "visual_context"
         ]
         due_standing_concerns = self._workspace_standing_concerns(workspace_context)
-        inbound_observations = self._workspace_inbound_observations(workspace_context)
         capability_summary = self._self_activity_capability_summary(
             initiative_context.capability_summary
         )
         drive_summaries = initiative_context.drive_summaries
         foreground_drives = self._initiative_foreground_drive_summaries(drive_summaries)
-        orientation_available = bool(due_standing_concerns or inbound_observations or foreground_drives)
+        orientation_available = bool(due_standing_concerns or foreground_drives)
         families = []
         selected_family = None
         for family in initiative_context.candidate_families:
@@ -497,7 +472,6 @@ class ServiceInputDecisionComparisonMixin:
                             suppression_summary={},
                             capability_summary=capability_summary,
                             due_standing_concerns=due_standing_concerns,
-                            inbound_observations=inbound_observations,
                         ),
                         preferred_result_kind=None,
                         preferred_result_reason_summary=None,
@@ -523,9 +497,7 @@ class ServiceInputDecisionComparisonMixin:
         return replace(
             initiative_context,
             opportunity_summary=(
-                "向こうから届いている働きかけがある。"
-                if inbound_observations
-                else "気にかけていることがしばらく前景に出ていない。"
+                "気にかけていることがしばらく前景に出ていない。"
                 if due_standing_concerns
                 else "今、自身の活動へ関わるかを見る。"
             ),

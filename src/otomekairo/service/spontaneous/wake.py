@@ -8,7 +8,6 @@ from otomekairo.llm.client import LLMError
 from otomekairo.interaction import InteractionContext
 from otomekairo.recall.builder import RecallPackSelectionError
 from otomekairo.service.capability import PreSendCheckFailureError
-from otomekairo.service.inbound_observation import inbound_present_mcp_server_ids
 from otomekairo.service.common import (
     BACKGROUND_THINKING_POLL_SECONDS,
     INITIAL_VISUAL_CAPTURE_DELAY_SECONDS,
@@ -381,24 +380,12 @@ class ServiceSpontaneousWakeMixin:
 
     def _execute_scheduled_background_thinking(self, *, state: dict[str, Any]) -> None:
         current_time = self._now_iso()
-        inbound_due = bool(self._due_inbound_observation_servers(state=state, current_time=current_time))
-        observations: list[dict[str, Any]] = []
-        if inbound_due:
-            observations = self._run_due_inbound_observations(state=state, current_time=current_time)
-        present_ids = inbound_present_mcp_server_ids(observations)
         regular_due = self._wake_is_due(state=state, current_time=current_time)["should_skip"] is not True
         standing_due = bool(self._due_standing_concerns(state=state, current_time=current_time))
-        if not (regular_due or standing_due or present_ids):
-            debug_log("Wake", "background thinking skipped inbound_absent", level="DEBUG")
+        if not (regular_due or standing_due):
+            debug_log("Wake", "background thinking skipped not_due", level="DEBUG")
             return
-        inbound_only = bool(present_ids) and not regular_due and not standing_due
         client_context: dict[str, Any] = {"source": "background_thinking_scheduler"}
-        if observations:
-            client_context = self._attach_inbound_observations(
-                client_context=client_context,
-                observations=observations,
-                inbound_only=inbound_only,
-            )
         self._execute_wake_cycle(
             state=state,
             client_context=client_context,
@@ -426,16 +413,10 @@ class ServiceSpontaneousWakeMixin:
             state=state,
             current_time=current_time,
         )
-        inbound_delay_seconds = self._inbound_observation_delay_seconds(
-            state=state,
-            current_time=current_time,
-        )
         if wake_policy.get("mode") != "interval":
             delay_seconds = BACKGROUND_THINKING_POLL_SECONDS
             if extra_delay_seconds is not None:
                 delay_seconds = min(extra_delay_seconds, delay_seconds)
-            if inbound_delay_seconds is not None:
-                delay_seconds = min(inbound_delay_seconds, delay_seconds)
             return delay_seconds
 
         # 初回観測待ち
@@ -463,8 +444,6 @@ class ServiceSpontaneousWakeMixin:
             return 0.0
         if extra_delay_seconds is not None:
             remaining_seconds = min(remaining_seconds, extra_delay_seconds)
-        if inbound_delay_seconds is not None:
-            remaining_seconds = min(remaining_seconds, inbound_delay_seconds)
 
         # ポーリング上限
         return min(remaining_seconds, BACKGROUND_THINKING_POLL_SECONDS)
@@ -751,18 +730,6 @@ class ServiceSpontaneousWakeMixin:
         )
         if isinstance(wake_observation_summary, str):
             parts.append(f"定期観測では、{wake_observation_summary}")
-        inbound_summaries = []
-        inbound_observations = client_context.get("inbound_observations")
-        if isinstance(inbound_observations, list):
-            for observation in inbound_observations:
-                if not isinstance(observation, dict) or observation.get("inbound_present") is not True:
-                    continue
-                summary = self._client_context_text(observation.get("observation_summary"), limit=180)
-                if summary is not None:
-                    inbound_summaries.append(summary)
-        if inbound_summaries:
-            parts.append("届いている働きかけがある。")
-            parts.extend(inbound_summaries)
         wake_reference = client_context.get("wake_reference")
         if isinstance(wake_reference, dict):
             label = self._client_context_text(wake_reference.get("label"), limit=120)

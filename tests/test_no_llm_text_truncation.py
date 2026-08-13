@@ -6,7 +6,6 @@ from otomekairo.llm.prompts import _compact_speech_initiative_context
 from otomekairo.memory.consolidator import MemoryConsolidator
 from otomekairo.recall.builder import RecallBuilder
 from otomekairo.recall.event_evidence import RecallEventEvidenceMixin
-from otomekairo.service.input.inbound_observation import ServiceInputInboundObservationMixin
 from otomekairo.service.input.pipeline import ServiceInputPipelineMixin
 from otomekairo.service.spontaneous.wake import ServiceSpontaneousWakeMixin
 
@@ -243,24 +242,6 @@ class TextTruncationTests(unittest.TestCase):
         )
 
         self.assertEqual(payload["text"], text)
-
-    def test_inbound_observation_source_text_is_not_truncated(self) -> None:
-        service = ServiceInputInboundObservationMixin()
-        text = "k" * 800 + "末尾"
-        structured_text = "l" * 1500 + "構造末尾"
-
-        payload = service._inbound_observation_source_pack(
-            mcp_server_id="elyth",
-            tool_name="get_notifications",
-            capability_response={
-                "is_error": False,
-                "content": [{"type": "text", "text": text}],
-                "structured_content": {"body": structured_text},
-            },
-        )
-
-        self.assertEqual(payload["content"][0]["text"], text)
-        self.assertEqual(payload["structured_content"]["body"], structured_text)
 
 
 if __name__ == "__main__":
