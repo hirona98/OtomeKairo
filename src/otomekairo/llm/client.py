@@ -38,10 +38,8 @@ from otomekairo.llm.contracts import (
     validate_world_state_contract,
 )
 from otomekairo.llm.mock import MockLLMClient
-from otomekairo.llm.parsing import parse_json_object, parse_recall_hint_payload
+from otomekairo.llm.parsing import parse_json_object
 from otomekairo.llm.prompts import (
-    build_answer_contract_messages,
-    build_answer_contract_repair_prompt,
     build_agent_skill_material_selection_messages,
     build_agent_skill_material_selection_repair_prompt,
     build_agent_skill_selection_messages,
@@ -72,7 +70,6 @@ from otomekairo.llm.prompts import (
     build_pending_intent_selection_repair_prompt,
     build_recall_pack_selection_messages,
     build_recall_pack_selection_repair_prompt,
-    build_recall_hint_messages,
     build_speech_messages,
     build_visual_observation_messages,
     build_visual_observation_repair_prompt,
@@ -336,89 +333,6 @@ class LLMClient:
             raise LLMError("InputInterpretation.answer_contract は object である必要があります。")
         validate_recall_hint_contract(normalize_recall_hint_payload(recall_hint))
         validate_answer_contract_contract(payload["answer_contract"])
-
-    def generate_recall_hint(
-        self,
-        *,
-        model_config: dict,
-        persona_context: PersonaContext,
-        input_text: str,
-        current_input: CurrentInput,
-        recent_turns: list[dict],
-        current_time: str,
-    ) -> dict[str, Any]:
-        operation = "recall_hint"
-        debug_log(
-            "LLM",
-            (
-                f"{operation} start mode={self._debug_mode(model_config)} "
-                f"model={self._debug_model(model_config)} input_chars={len(input_text)} "
-                f"recent_turns={len(recent_turns)}"
-            ),
-            level="DEBUG",
-        )
-        try:
-            # モック経路
-            if self._is_mock_model_config(model_config):
-                payload = self.mock_client.generate_recall_hint(
-                    model_config,
-                    input_text,
-                    recent_turns,
-                    current_time,
-                    persona_context=persona_context,
-                    current_input=current_input,
-                )
-                debug_log(
-                    "LLM",
-                    (
-                        f"{operation} done mode=mock focus={payload.get('primary_recall_focus')} "
-                        f"confidence={payload.get('confidence')}"
-                    ),
-                    level="DEBUG",
-                )
-                return payload
-
-            # プロンプト構築
-            messages = build_recall_hint_messages(
-                persona_context=persona_context,
-                current_input=current_input,
-                recent_turns=recent_turns,
-                current_time=current_time,
-            )
-
-            # 再試行
-            last_contract_error: LLMError | None = None
-            for attempt in range(2):
-                debug_log("LLM", f"{operation} attempt={attempt + 1} request messages={len(messages)}", level="DEBUG")
-                content = complete_text(model_config=model_config, messages=messages)
-                try:
-                    payload = parse_recall_hint_payload(content)
-                    debug_log(
-                        "LLM",
-                        (
-                            f"{operation} done attempt={attempt + 1} response_chars={len(content)} "
-                            f"focus={payload.get('primary_recall_focus')} confidence={payload.get('confidence')}"
-                        ),
-                        level="DEBUG",
-                    )
-                    return payload
-                except LLMError as exc:
-                    last_contract_error = exc
-                    debug_log(
-                        "LLM",
-                        f"{operation} parse_failed attempt={attempt + 1} error={self._debug_error(exc)}",
-                        level="WARNING",
-                    )
-                    if attempt >= 1:
-                        raise
-
-            # 失敗
-            if last_contract_error is not None:
-                raise last_contract_error
-            raise LLMError("RecallHint の生成に失敗しました。解析可能な応答が得られませんでした。")
-        except Exception as exc:
-            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
-            raise
 
     def generate_decision(
         self,
@@ -1140,54 +1054,6 @@ class LLMClient:
             failure_message="PreSendCheck の生成に失敗しました。",
             operation=operation,
         )
-
-    def generate_answer_contract(
-        self,
-        *,
-        model_config: dict,
-        persona_context: PersonaContext,
-        input_text: str,
-        recall_hint: dict[str, Any],
-        current_time: str,
-    ) -> dict[str, Any]:
-        operation = "answer_contract"
-        debug_log(
-            "LLM",
-            (
-                f"{operation} start mode={self._debug_mode(model_config)} "
-                f"model={self._debug_model(model_config)} input_chars={len(input_text)}"
-            ),
-            level="DEBUG",
-        )
-        if self._is_mock_model_config(model_config):
-            payload = self.mock_client.generate_answer_contract(
-                model_config,
-                input_text,
-                recall_hint,
-                current_time,
-                persona_context=persona_context,
-            )
-            normalized = normalize_answer_contract_payload(payload)
-            debug_log("LLM", f"{operation} done mode=mock contract={normalized.get('contract')}", level="DEBUG")
-            return normalized
-
-        messages = build_answer_contract_messages(
-            persona_context=persona_context,
-            input_text=input_text,
-            recall_hint=recall_hint,
-            current_time=current_time,
-        )
-        payload = self._generate_structured_payload(
-            model_config=model_config,
-            messages=messages,
-            validator=validate_answer_contract_contract,
-            repair_prompt_builder=build_answer_contract_repair_prompt,
-            failure_message="AnswerContract の生成に失敗しました。解析可能な応答が得られませんでした。",
-            operation=operation,
-        )
-        normalized = normalize_answer_contract_payload(payload)
-        debug_log("LLM", f"{operation} done contract={normalized.get('contract')}", level="DEBUG")
-        return normalized
 
     def generate_memory_interpretation(
         self,

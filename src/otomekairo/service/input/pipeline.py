@@ -7,6 +7,7 @@ from otomekairo.llm.contexts import (
     CurrentInput,
     DecisionContext,
     InitiativeContext,
+    PersonaContext,
     SpeechContext,
     build_persona_context_summary,
 )
@@ -2269,6 +2270,10 @@ class ServiceInputPipelineMixin:
             )
             speech_payload = self._apply_disclosure_review(
                 model_config=model_config,
+                persona_context=self._build_selected_persona_context(
+                    state=state,
+                    role="disclosure_review",
+                ),
                 current_input=current_input,
                 recall_pack=recall_pack,
                 speech_payload=speech_payload,
@@ -2305,6 +2310,7 @@ class ServiceInputPipelineMixin:
         self,
         *,
         model_config: dict[str, Any],
+        persona_context: PersonaContext,
         current_input: CurrentInput,
         recall_pack: dict[str, Any],
         speech_payload: dict[str, Any],
@@ -2319,6 +2325,7 @@ class ServiceInputPipelineMixin:
         review = self.llm.generate_disclosure_review(
             model_config=model_config,
             review_context={
+                "persona_context": persona_context.to_prompt_payload(),
                 "current_input": current_input.to_prompt_payload(),
                 "candidate_speech": speech_payload["speech_text"],
                 "requires_response": current_input.sender_kind == "person",

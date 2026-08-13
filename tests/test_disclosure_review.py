@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from otomekairo.interaction import InteractionContext, ParticipantContext
-from otomekairo.llm.contexts import CurrentInput
+from otomekairo.llm.contexts import CurrentInput, PersonaContext
 from otomekairo.service.input.decision_comparison import ServiceInputDecisionComparisonMixin
 from otomekairo.service.input.pipeline import ServiceInputPipelineMixin
 
@@ -42,6 +42,7 @@ class DisclosureReviewTests(unittest.TestCase):
 
         result = service._apply_disclosure_review(
             model_config={"model": "test"},
+            persona_context=self._persona_context(),
             current_input=self._current_input("person:current"),
             recall_pack={
                 "person_model": [
@@ -67,6 +68,8 @@ class DisclosureReviewTests(unittest.TestCase):
         )
         self.assertNotIn("監査結果へ複写しない本文", str(result["disclosure_review"]))
         self.assertEqual(len(llm.calls), 1)
+        self.assertIn("persona_context", llm.calls[0]["review_context"])
+        self.assertNotIn("expression_addon", llm.calls[0]["review_context"]["persona_context"])
 
     def test_current_person_provenance_does_not_add_review_call(self) -> None:
         llm = ReviewLLM(
@@ -81,6 +84,7 @@ class DisclosureReviewTests(unittest.TestCase):
 
         result = service._apply_disclosure_review(
             model_config={},
+            persona_context=self._persona_context(),
             current_input=self._current_input("person:current"),
             recall_pack={
                 "person_model": [
@@ -110,6 +114,7 @@ class DisclosureReviewTests(unittest.TestCase):
 
         result = service._apply_disclosure_review(
             model_config={},
+            persona_context=self._persona_context(),
             current_input=self._current_input("person:current"),
             recall_pack={
                 "episodic_evidence": [
@@ -157,6 +162,7 @@ class DisclosureReviewTests(unittest.TestCase):
 
         result = service._apply_disclosure_review(
             model_config={},
+            persona_context=self._persona_context(),
             current_input=self._current_input("person:current"),
             recall_pack={
                 "episodic_evidence": [
@@ -184,6 +190,15 @@ class DisclosureReviewTests(unittest.TestCase):
         targets = {item["target"]: item["stance"] for item in decision["target_stances"]}
         self.assertEqual(targets["outward_speech"], "hold")
         self.assertEqual(targets["self_activity"], "advance")
+
+    def _persona_context(self) -> PersonaContext:
+        return PersonaContext(
+            display_name="test",
+            initiative_baseline={"level": "medium", "summary_text": "中庸"},
+            persona_prompt_text="テスト人格。",
+            expression_addon=None,
+            use_policy="書き換えの距離感と言い回しの補助に使う。開示可否と候補集合を変えない。",
+        )
 
     def _current_input(self, person_ref: str) -> CurrentInput:
         return CurrentInput(
