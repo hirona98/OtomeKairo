@@ -16,8 +16,6 @@ PERSONA_CONTEXT_USE_POLICIES = {
     "pending_intent_selection": "今前へ出る自然さ、関心の強さ、距離感の判断に使う。候補外の意図を作らない。",
     "initiative_entry_check": "外向き自律判断へ進む自然さ、関心の強さ、距離感の判断に使う。観測事実を追加しない。",
     "input_interpretation": "入力内で何を重く見るかの補助に使う。ユーザー発話、時刻参照、根拠分類を上書きしない。",
-    "recall_hint": "想起焦点の重みづけの補助に使う。ユーザー発話や明示された参照を人格で補完しない。",
-    "answer_contract": "回答に必要な根拠種別の重みづけ補助に使う。正確性要求や境界指定を人格で変えない。",
     "recall_pack_selection": "想起候補の優先順位の補助に使う。候補集合、候補本文、conflict を上書きしない。",
     "event_evidence_generation": "証拠要約の注目点の補助に使う。source pack 外の出来事や言い換えを足さない。",
     "memory_interpretation": "self / relationship の反応や関係温度の解釈補助に使う。ユーザー事実を人格で補完しない。",
