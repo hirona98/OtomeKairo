@@ -613,6 +613,8 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("今、気にかけている場や継続中の自身の活動へ関わるか", system)
         self.assertIn("capability_request / autonomous_run / pending_intent / noop", system)
         self.assertIn("向きと CapabilityDecisionView の catalog から autonomous_run を始めてよい", system)
+        self.assertIn("場へ届く手段が CapabilityDecisionView に available=true であるときだけ", system)
+        self.assertIn("手段が無いときは今はその場へ関わらない", system)
         self.assertIn("target_stances は self_activity を 1 件だけ持ちます", system)
         self.assertNotIn("伝達、能力実行、保留、見送り、継続目的開始のどれが", system)
         self.assertNotIn("人物発話自体が未来実行", system)

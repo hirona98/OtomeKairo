@@ -1179,6 +1179,8 @@ def _decision_self_activity_rules_section() -> str:
         "WorkspaceContext は向き、継続行動、能力候補の前景です。standing_concern は気にかけている場であり、実行指示ではありません。\n"
         "今関わる自然さがあれば capability_request または autonomous_run を選びます。"
         "向きと CapabilityDecisionView の catalog から autonomous_run を始めてよいです。人物発話による依頼はこの比較の前提ではありません。"
+        "場へ届く手段が CapabilityDecisionView に available=true であるときだけ、その手段で関わる。"
+        "手段が無いときは今はその場へ関わらない。\n"
         "今その場へ関わらないときは pending_intent または noop を選び、控える理由は今その場へ関わらないこととして書きます。\n"
         + _decision_foreground_selection_rules()
         + "SelfStateContext は AI 本体側の感覚信頼度、働きかけやすさ、継続行動の安定です。気分は AffectContext.mood_state を参照します。\n"

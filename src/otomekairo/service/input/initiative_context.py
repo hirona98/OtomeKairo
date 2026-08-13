@@ -212,7 +212,7 @@ class ServiceInputInitiativeContextMixin:
         if not world_state_summary:
             payload = {
                 "foreground_thinness": "thin",
-                "reason_summary": "前景 world_state がまだ薄く、視覚や周辺状況の追加観測が欲しい。",
+                "reason_summary": "前景 world_state はまだ薄い。",
                 "world_state_count": 0,
             }
             if visual_signals:

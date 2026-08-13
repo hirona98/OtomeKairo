@@ -10,6 +10,34 @@ from otomekairo.service.spontaneous.pending_intent import ServiceSpontaneousPend
 from otomekairo.service.spontaneous.wake import ServiceSpontaneousWakeMixin
 
 
+def _initiative_context(**overrides) -> InitiativeContext:
+    payload = {
+        "trigger_kind": "background_thinking",
+        "opportunity_summary": "気にかけている場がしばらく前景に出ていない。",
+        "initiative_entry_summary": None,
+        "time_context_summary": {},
+        "foreground_signal_summary": {},
+        "activity_context": None,
+        "initiative_baseline": {},
+        "persona_context_summary": {},
+        "runtime_state_summary": {},
+        "recent_turn_summary": [],
+        "drive_summaries": [],
+        "pending_intent_summaries": [],
+        "world_state_summary": [],
+        "ongoing_action_summary": None,
+        "capability_summary": {},
+        "candidate_families": [],
+        "selected_candidate_family": None,
+        "speech_timing_state": {},
+        "suppression_summary": {},
+        "speech_timing_summary": "",
+        "speech_frequency_level": 5,
+    }
+    payload.update(overrides)
+    return InitiativeContext(**payload)
+
+
 class DummyWakeService(ServiceSpontaneousWakeMixin):
     def __init__(self) -> None:
         self._runtime_state_lock = threading.RLock()
@@ -127,6 +155,19 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertTrue(family.available)
         self.assertIn("現在観測候補 1 件", family.reason_summary)
         self.assertIn("visual change_state=changed", family.reason_summary)
+        self.assertNotIn("available capability", family.reason_summary or "")
+
+    def test_thin_foreground_reason_is_fact_only(self) -> None:
+        service = DummyInputService()
+        summary = service._initiative_foreground_signal_summary(
+            trigger_kind="background_thinking",
+            client_context={},
+            world_state_summary=[],
+        )
+
+        self.assertEqual(summary["foreground_thinness"], "thin")
+        self.assertEqual(summary["reason_summary"], "前景 world_state はまだ薄い。")
+        self.assertNotIn("追加観測", summary["reason_summary"])
 
     def test_stable_visual_observation_makes_autonomous_family_available(self) -> None:
         service = DummyInputService()
@@ -368,6 +409,136 @@ class WakeInterventionLoadTests(unittest.TestCase):
         )
         refs = {item["factor_ref"] for item in isolated["workspace_candidates"]}
         self.assertEqual(refs, {"standing_concern:elyth", "capability:mcp.call_tool"})
+
+    def test_self_activity_initiative_drops_visual_pressure(self) -> None:
+        service = DummyInputService()
+        initiative = _initiative_context(
+            foreground_signal_summary={
+                "foreground_thinness": "thin",
+                "reason_summary": "前景 world_state はまだ薄い。",
+                "world_state_count": 0,
+                "visual_observations": [
+                    {
+                        "change_state": "changed",
+                        "reason_summary": "室内の様子が変わった。",
+                    }
+                ],
+            },
+            capability_summary={
+                "available_count": 2,
+                "available_ids": ["vision.capture", "camera.ptz"],
+                "available_items": [
+                    {"id": "vision.capture"},
+                    {"id": "camera.ptz"},
+                ],
+                "unavailable_count": 1,
+                "unavailable_items": [{"id": "mcp.call_tool", "reason": "no_binding"}],
+                "vision_sources": [{"vision_source_id": "vision_source:対面カメラ"}],
+            },
+            candidate_families=[
+                InitiativeCandidateFamily(
+                    family="autonomous",
+                    available=True,
+                    selected=True,
+                    priority_score=1.0,
+                    reason_summary="気にかけている場 1 件 / 現在観測候補 1 件 / available capability 2 件 が自律判断の材料にある。",
+                    preferred_capability_id="vision.capture",
+                    preferred_capability_input={"vision_source_id": "vision_source:対面カメラ", "mode": "still"},
+                    preferred_result_kind="capability_request",
+                )
+            ],
+            selected_candidate_family="autonomous",
+        )
+        workspace = {
+            "workspace_candidates": [
+                {
+                    "factor_ref": "standing_concern:elyth",
+                    "kind": "standing_concern",
+                    "summary_text": "ELYTHの場。届いている反応やリプライがあるかは気にかける。",
+                },
+                {
+                    "factor_ref": "initiative:autonomous",
+                    "kind": "initiative_candidate",
+                    "summary_text": "気にかけている場 1 件 / available capability 2 件 が自律判断の材料にある。",
+                    "metadata": {
+                        "family": "autonomous",
+                        "available": True,
+                        "selected": True,
+                        "preferred_capability_id": "vision.capture",
+                    },
+                },
+                {
+                    "factor_ref": "capability:vision.capture",
+                    "kind": "capability",
+                },
+                {
+                    "factor_ref": "capability:mcp.call_tool",
+                    "kind": "capability",
+                },
+            ]
+        }
+
+        isolated = service._self_activity_initiative_context(
+            initiative,
+            workspace_context=workspace,
+        )
+        family = isolated.selected_family_entry()
+        isolated_workspace = service._self_activity_workspace(
+            workspace,
+            initiative_context=isolated,
+        )
+        initiative_candidate = next(
+            item
+            for item in isolated_workspace["workspace_candidates"]
+            if item["factor_ref"] == "initiative:autonomous"
+        )
+
+        self.assertIsNone(isolated.foreground_signal_summary.get("visual_observations"))
+        self.assertEqual(isolated.foreground_signal_summary["reason_summary"], "前景 world_state はまだ薄い。")
+        self.assertNotIn("vision.capture", isolated.capability_summary.get("available_ids", []))
+        self.assertEqual(isolated.capability_summary.get("vision_sources"), [])
+        self.assertIn("mcp.call_tool", [item["id"] for item in isolated.capability_summary.get("unavailable_items", [])])
+        self.assertIsNotNone(family)
+        self.assertTrue(family.available)
+        self.assertIn("気にかけている場 1 件", family.reason_summary)
+        self.assertNotIn("現在観測候補", family.reason_summary)
+        self.assertNotIn("available capability", family.reason_summary)
+        self.assertIsNone(family.preferred_capability_id)
+        self.assertNotIn("available capability", initiative_candidate["summary_text"])
+        self.assertNotIn("現在観測候補", initiative_candidate["summary_text"])
+        self.assertIsNone(initiative_candidate["metadata"]["preferred_capability_id"])
+
+    def test_self_activity_initiative_does_not_keep_visual_only_autonomous(self) -> None:
+        service = DummyInputService()
+        initiative = _initiative_context(
+            foreground_signal_summary={
+                "foreground_thinness": "thin",
+                "reason_summary": "前景 world_state はまだ薄い。",
+                "visual_observations": [{"change_state": "changed"}],
+            },
+            candidate_families=[
+                InitiativeCandidateFamily(
+                    family="autonomous",
+                    available=True,
+                    selected=True,
+                    priority_score=1.0,
+                    reason_summary="現在観測候補 1 件 が自律判断の材料にある。",
+                )
+            ],
+            selected_candidate_family="autonomous",
+        )
+
+        isolated = service._self_activity_initiative_context(
+            initiative,
+            workspace_context={"workspace_candidates": []},
+        )
+        family = next(item for item in isolated.candidate_families if item.family == "autonomous")
+
+        self.assertEqual(isolated.opportunity_summary, "今、自身の活動へ関わるかを見る。")
+        self.assertFalse(family.available)
+        self.assertFalse(family.selected)
+        self.assertIsNone(isolated.selected_candidate_family)
+        self.assertEqual(family.blocking_reason_summary, "気にかけている場も前景の drive_state も無い。")
 
     def test_outward_speech_workspace_drops_self_activity_means(self) -> None:
         service = DummyInputService()

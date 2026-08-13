@@ -473,9 +473,7 @@ class ServiceInputInitiativeFamiliesMixin:
         suppression_level = self._initiative_suppression_level(suppression_summary)
         if suppression_level == "high":
             parts.append(f"suppression={suppression_level}")
-        available_count = int(capability_summary.get("available_count", 0))
-        if available_count > 0:
-            parts.append(f"available capability {available_count} 件")
+        _ = capability_summary
         if not parts:
             return None
         return " / ".join(parts) + " が自律判断の材料にある。"

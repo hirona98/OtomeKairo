@@ -13,6 +13,7 @@ from otomekairo.service.common import debug_log
 
 SELF_ACTIVITY_ADVANCE_KINDS = frozenset({"capability_request", "autonomous_run", "pending_intent"})
 SELF_ACTIVITY_EXECUTE_KINDS = frozenset({"capability_request", "autonomous_run"})
+SELF_ACTIVITY_EXCLUDED_CAPABILITY_IDS = frozenset({"vision.capture", "camera.ptz"})
 
 
 class ServiceInputDecisionComparisonMixin:
@@ -83,13 +84,23 @@ class ServiceInputDecisionComparisonMixin:
 
     def _build_self_activity_decision_context(self, **kwargs: Any) -> DecisionContext:
         current_input = kwargs["current_input"]
+        source_workspace = kwargs.get("workspace_context")
+        has_standing_concern = bool(self._workspace_standing_concerns(source_workspace))
         isolated_input = CurrentInput(
             sender_kind="system",
             sender_ref=None,
             source_kind=current_input.source_kind,
             response_target_refs=(),
             interaction_context=None,
-            text="自己評価。しばらく関わっていない気にかけている場がある。今その場へ関わるかを見る。",
+            text=(
+                "自己評価。しばらく関わっていない気にかけている場がある。今その場へ関わるかを見る。"
+                if has_standing_concern
+                else "自己評価。今、自身の活動へ関わるかを見る。"
+            ),
+        )
+        initiative_context = self._self_activity_initiative_context(
+            kwargs.get("initiative_context"),
+            workspace_context=source_workspace,
         )
         return self._build_decision_context(
             input_text=isolated_input.text,
@@ -107,7 +118,7 @@ class ServiceInputDecisionComparisonMixin:
                 kwargs.get("capability_decision_view")
             ),
             agent_skill_context=kwargs.get("agent_skill_context"),
-            initiative_context=self._self_activity_initiative_context(kwargs.get("initiative_context")),
+            initiative_context=initiative_context,
             capability_result_context=None,
             visual_observation_context=None,
             self_state_context=kwargs.get("self_state_context"),
@@ -116,8 +127,9 @@ class ServiceInputDecisionComparisonMixin:
             prediction_error_context=None,
             default_mode_context=None,
             workspace_context=self._self_activity_workspace(
-                kwargs.get("workspace_context"),
+                source_workspace,
                 current_input_text=isolated_input.text,
+                initiative_context=initiative_context,
             ),
             recall_hint=kwargs.get("recall_hint") or {},
             recall_pack=kwargs.get("recall_pack") or {},
@@ -148,7 +160,7 @@ class ServiceInputDecisionComparisonMixin:
         return [
             item
             for item in capability_decision_view
-            if isinstance(item, dict) and item.get("id") not in {"vision.capture", "camera.ptz"}
+            if isinstance(item, dict) and item.get("id") not in SELF_ACTIVITY_EXCLUDED_CAPABILITY_IDS
         ]
 
     def _self_activity_workspace(
@@ -156,6 +168,7 @@ class ServiceInputDecisionComparisonMixin:
         workspace_context: dict[str, Any] | None,
         *,
         current_input_text: str | None = None,
+        initiative_context: InitiativeContext | None = None,
     ) -> dict[str, Any] | None:
         if not isinstance(workspace_context, dict):
             return None
@@ -178,13 +191,18 @@ class ServiceInputDecisionComparisonMixin:
                 kept.append(candidate)
                 continue
             if kind == "capability" and factor_ref not in {
-                "capability:vision.capture",
-                "capability:camera.ptz",
+                f"capability:{capability_id}"
+                for capability_id in SELF_ACTIVITY_EXCLUDED_CAPABILITY_IDS
             }:
                 kept.append(candidate)
                 continue
             if kind == "initiative_candidate" and factor_ref == "initiative:autonomous":
-                kept.append(candidate)
+                kept.append(
+                    self._self_activity_initiative_workspace_candidate(
+                        candidate,
+                        initiative_context=initiative_context,
+                    )
+                )
         return {
             **workspace_context,
             "workspace_candidates": kept,
@@ -301,35 +319,192 @@ class ServiceInputDecisionComparisonMixin:
             selected_candidate_family=selected_family,
         )
 
+    def _self_activity_initiative_workspace_candidate(
+        self,
+        candidate: dict[str, Any],
+        *,
+        initiative_context: InitiativeContext | None,
+    ) -> dict[str, Any]:
+        rewritten = dict(candidate)
+        family = None
+        if initiative_context is not None:
+            for item in initiative_context.candidate_families:
+                if item.family == "autonomous":
+                    family = item
+                    break
+        if family is None:
+            return rewritten
+        rewritten["summary_text"] = (
+            family.reason_summary
+            if family.available is True and family.reason_summary
+            else family.blocking_reason_summary or rewritten.get("summary_text")
+        )
+        metadata = dict(rewritten.get("metadata") or {})
+        metadata["available"] = family.available
+        metadata["selected"] = family.selected
+        metadata["preferred_result_kind"] = family.preferred_result_kind
+        metadata["preferred_capability_id"] = family.preferred_capability_id
+        rewritten["metadata"] = metadata
+        return rewritten
+
+    def _workspace_standing_concerns(
+        self,
+        workspace_context: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        if not isinstance(workspace_context, dict):
+            return []
+        candidates = workspace_context.get("workspace_candidates")
+        if not isinstance(candidates, list):
+            return []
+        return [
+            candidate
+            for candidate in candidates
+            if isinstance(candidate, dict) and candidate.get("kind") == "standing_concern"
+        ]
+
+    def _self_activity_capability_summary(
+        self,
+        capability_summary: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not isinstance(capability_summary, dict) or not capability_summary:
+            return {}
+        available_ids = [
+            capability_id
+            for capability_id in capability_summary.get("available_ids") or []
+            if capability_id not in SELF_ACTIVITY_EXCLUDED_CAPABILITY_IDS
+        ]
+        available_items = [
+            item
+            for item in capability_summary.get("available_items") or []
+            if isinstance(item, dict) and item.get("id") not in SELF_ACTIVITY_EXCLUDED_CAPABILITY_IDS
+        ]
+        unavailable_items = [
+            item
+            for item in capability_summary.get("unavailable_items") or []
+            if isinstance(item, dict) and item.get("id") not in SELF_ACTIVITY_EXCLUDED_CAPABILITY_IDS
+        ]
+        return {
+            "available_count": len(available_ids),
+            "available_ids": available_ids,
+            "available_items": available_items,
+            "unavailable_count": len(unavailable_items),
+            "unavailable_items": unavailable_items,
+            "vision_sources": [],
+        }
+
+    def _self_activity_foreground_signal_summary(
+        self,
+        foreground_signal_summary: dict[str, Any] | None,
+        *,
+        world_state_summary: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        payload = dict(foreground_signal_summary or {})
+        payload.pop("visual_observations", None)
+        if not world_state_summary:
+            payload["foreground_thinness"] = "thin"
+            payload["reason_summary"] = "前景 world_state はまだ薄い。"
+            payload["world_state_count"] = 0
+            payload.pop("state_types", None)
+            return payload
+        state_types = [
+            state_type
+            for state_type in payload.get("state_types") or []
+            if state_type != "visual_context"
+        ]
+        if state_types:
+            payload["state_types"] = state_types[:4]
+        else:
+            payload.pop("state_types", None)
+        payload["world_state_count"] = len(world_state_summary)
+        return payload
+
     def _self_activity_initiative_context(
         self,
         initiative_context: InitiativeContext | None,
+        *,
+        workspace_context: dict[str, Any] | None = None,
     ) -> InitiativeContext | None:
         if initiative_context is None:
             return None
-        foreground = dict(initiative_context.foreground_signal_summary or {})
-        foreground.pop("visual_observations", None)
-        families = []
-        selected_family = None
-        for family in initiative_context.candidate_families:
-            if family.family == "autonomous" and family.available is True:
-                families.append(replace(family, selected=True))
-                selected_family = "autonomous"
-            else:
-                families.append(replace(family, selected=False))
         world_state_summary = [
             item
             for item in initiative_context.world_state_summary
             if isinstance(item, dict) and item.get("state_type") != "visual_context"
         ]
+        due_standing_concerns = self._workspace_standing_concerns(workspace_context)
+        capability_summary = self._self_activity_capability_summary(
+            initiative_context.capability_summary
+        )
+        drive_summaries = initiative_context.drive_summaries
+        foreground_drives = self._initiative_foreground_drive_summaries(drive_summaries)
+        orientation_available = bool(due_standing_concerns or foreground_drives)
+        families = []
+        selected_family = None
+        for family in initiative_context.candidate_families:
+            if family.family != "autonomous":
+                families.append(replace(family, selected=False))
+                continue
+            available = family.available is True and orientation_available
+            if available:
+                strongest_drive = (
+                    foreground_drives[0]
+                    if foreground_drives
+                    else drive_summaries[0] if drive_summaries else None
+                )
+                families.append(
+                    replace(
+                        family,
+                        available=True,
+                        selected=True,
+                        reason_summary=self._initiative_autonomous_family_reason(
+                            drive_summaries=drive_summaries,
+                            foreground_drive_summaries=foreground_drives,
+                            strongest_drive=strongest_drive,
+                            world_state_summary=world_state_summary,
+                            recent_turn_summary=[],
+                            initiative_entry_summary=None,
+                            visual_signals=[],
+                            suppression_summary={},
+                            capability_summary=capability_summary,
+                            due_standing_concerns=due_standing_concerns,
+                        ),
+                        preferred_result_kind=None,
+                        preferred_result_reason_summary=None,
+                        preferred_capability_id=None,
+                        preferred_capability_input=None,
+                        blocking_reason_summary=None,
+                    )
+                )
+                selected_family = "autonomous"
+                continue
+            families.append(
+                replace(
+                    family,
+                    available=False,
+                    selected=False,
+                    preferred_result_kind=None,
+                    preferred_result_reason_summary=None,
+                    preferred_capability_id=None,
+                    preferred_capability_input=None,
+                    blocking_reason_summary="気にかけている場も前景の drive_state も無い。",
+                )
+            )
         return replace(
             initiative_context,
-            opportunity_summary="気にかけている場がしばらく前景に出ていない。",
+            opportunity_summary=(
+                "気にかけている場がしばらく前景に出ていない。"
+                if due_standing_concerns
+                else "今、自身の活動へ関わるかを見る。"
+            ),
             initiative_entry_summary=None,
-            foreground_signal_summary=foreground,
+            foreground_signal_summary=self._self_activity_foreground_signal_summary(
+                initiative_context.foreground_signal_summary,
+                world_state_summary=world_state_summary,
+            ),
             activity_context=None,
             recent_turn_summary=[],
             world_state_summary=world_state_summary,
+            capability_summary=capability_summary,
             candidate_families=families,
             selected_candidate_family=selected_family,
             suppression_summary={},

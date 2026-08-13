@@ -121,7 +121,7 @@ initiative loop は、候補を次の 3 系統に分ける。
 視覚観測の `first_seen / changed` は `workspace_context` の `visual_observation` 候補として扱う。
 視覚観測の `first_seen / changed` で通常判断へ direct entry する場合も、判断前観測で更新された `activity_context` は `initiative_context` と `workspace_context` に残す。
 direct entry は視覚新規性だけへ判断材料を縮約する仕組みではなく、活動遷移、継続時間、source の整合、抑制候補を同じ盤面で比較する入口である。
-due な気にかけていることは自発系の材料であり、偽の `drive_state` にはしない。意味境界は [気にかけていること.md](気にかけていること.md) を正とする。
+due な気にかけていることは自発系の材料であり、偽の `drive_state` にはしない。場へ届く手段が無いときの扱いも含め、意味境界は [気にかけていること.md](気にかけていること.md) を正とする。
 direct entry でも due な関心があるときは想起解釈を省略せず、盤面を視覚反応へ縮約しない。
 `background_thinking` は定期思考による自己評価である。感覚への反応と向きへの関与は別比較である。
 外向き伝達を控えることと、自身の活動を控えることは別比較である。同じ判断に畳まない。
