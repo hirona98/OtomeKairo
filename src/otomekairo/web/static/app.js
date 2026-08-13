@@ -29,6 +29,7 @@ const state = {
   selectedWatcherSourceId: "",
   selectedMcpId: "",
   selectedAgentSkillSourceId: "",
+  selectedStandingConcernId: "",
   attachment: null,
   settingsOpen: false,
   sending: false,
@@ -2381,6 +2382,13 @@ async function saveSettings({ closeAfterSave = false } = {}) {
       showNotice(`MCP の名前「${duplicateMcpName}」が重複しています。`, true);
       return;
     }
+    const duplicateStandingConcernId = findDuplicateName(
+      standingConcerns().map((item) => item.concern_id),
+    );
+    if (duplicateStandingConcernId) {
+      showNotice(`関心の名前「${duplicateStandingConcernId}」が重複しています。`, true);
+      return;
+    }
     const duplicateAgentSkillSourceId = findDuplicateName(
       (state.agentSkills?.agent_skill_sources || []).map((source) => source.source_id),
     );
@@ -2489,6 +2497,7 @@ function renderSettings() {
   renderMicrophoneSettings();
   renderConsoleClientSettings();
   renderCurrent();
+  renderStandingConcerns();
   renderPersona();
   renderModel();
   renderMemory();
@@ -3237,6 +3246,86 @@ async function pasteApiKey(inputId, label) {
   } catch (error) {
     showNotice(`クリップボードから読み込めません: ${error.message}`, true);
   }
+}
+
+function standingConcerns() {
+  if (!Array.isArray(state.editor?.current?.standing_concerns)) {
+    if (state.editor?.current) {
+      state.editor.current.standing_concerns = [];
+    }
+    return [];
+  }
+  return state.editor.current.standing_concerns;
+}
+
+function renderStandingConcerns() {
+  const concerns = standingConcerns();
+  const hasConcerns = concerns.length > 0;
+  state.selectedStandingConcernId = selectedOrFirst(
+    concerns,
+    "concern_id",
+    state.selectedStandingConcernId,
+  );
+  setSelectOptions(
+    element("standing-concern-select"),
+    concerns,
+    "concern_id",
+    state.selectedStandingConcernId,
+  );
+  setCollectionEditorEnabled(
+    "standing-concern-select",
+    "fieldset.capability-group",
+    "delete-standing-concern",
+    hasConcerns,
+  );
+  const concern = arrayById(concerns, "concern_id", state.selectedStandingConcernId);
+  element("standing-concern-enabled").checked = concern?.enabled === true;
+  element("standing-concern-id").value = concern?.concern_id || "";
+  element("standing-concern-interval").value = concern?.min_interval_seconds || 3600;
+  element("standing-concern-summary").value = concern?.concern_summary || "";
+}
+
+function syncStandingConcerns() {
+  const concern = arrayById(
+    standingConcerns(),
+    "concern_id",
+    state.selectedStandingConcernId,
+  );
+  if (!concern) {
+    return;
+  }
+  concern.enabled = boolValue("standing-concern-enabled");
+  concern.concern_id = textValue("standing-concern-id");
+  concern.min_interval_seconds = boundedIntValue(
+    "standing-concern-interval",
+    "思い出す間隔",
+    1,
+    31536000,
+  );
+  concern.concern_summary = textValue("standing-concern-summary");
+  state.selectedStandingConcernId = concern.concern_id;
+}
+
+function addStandingConcern() {
+  syncAllForms();
+  const id = uniqueDisplayName(
+    standingConcerns().map((item) => item.concern_id),
+    "concern",
+  );
+  standingConcerns().push({
+    concern_id: id,
+    enabled: false,
+    min_interval_seconds: 3600,
+    concern_summary: "",
+  });
+  state.selectedStandingConcernId = id;
+  renderStandingConcerns();
+}
+
+function deleteStandingConcern() {
+  removeById(standingConcerns(), "concern_id", state.selectedStandingConcernId);
+  state.selectedStandingConcernId = standingConcerns()[0]?.concern_id || "";
+  renderStandingConcerns();
 }
 
 function renderCurrent() {
@@ -4007,6 +4096,7 @@ function syncAllForms() {
   syncMicrophoneSettings();
   syncConsoleClientSettings();
   syncCurrent();
+  syncStandingConcerns();
   syncPersona();
   syncModel();
   syncMemory();
@@ -4709,6 +4799,13 @@ function bindEvents() {
     },
     render: renderMcp,
   });
+  bindCollectionSelect("standing-concern-select", {
+    sync: syncStandingConcerns,
+    setSelected: (id) => {
+      state.selectedStandingConcernId = id;
+    },
+    render: renderStandingConcerns,
+  });
   bindCollectionSelect("agent-skill-source-select", {
     sync: syncAgentSkills,
     setSelected: (id) => {
@@ -4746,6 +4843,8 @@ function bindEvents() {
     "delete-camera": deleteCamera,
     "add-mcp": addMcp,
     "delete-mcp": deleteMcp,
+    "add-standing-concern": addStandingConcern,
+    "delete-standing-concern": deleteStandingConcern,
     "add-agent-skill-source": addAgentSkillSource,
     "delete-agent-skill-source": deleteAgentSkillSource,
     "reload-agent-skills": reloadAgentSkills,

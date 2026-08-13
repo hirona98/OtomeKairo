@@ -191,6 +191,10 @@ class ServiceConfigInspectionMixin:
         return {
             "audio_runtime_state": self._audio_runtime.snapshot(),
             "wake_runtime_state": self._snapshot_wake_runtime_state(current_time=current_time),
+            "standing_concerns": self._standing_concern_runtime_snapshot(
+                state=state,
+                current_time=current_time,
+            ),
             "wake_policy_observations": self._snapshot_wake_policy_observations(state=state),
             "memory_postprocess_runtime_state": self._snapshot_memory_postprocess_runtime_state(),
             "visual_daily_runtime_state": self._snapshot_visual_daily_runtime_state(),

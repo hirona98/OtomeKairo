@@ -27,6 +27,9 @@ DEFAULT_PERSONA_INITIATIVE_BASELINE = "medium"
 DEFAULT_CONVERSATION_DISPLAY_NAME_ID = "conversation_display_name:default"
 DEFAULT_CONVERSATION_DISPLAY_NAME = "マスター"
 DEFAULT_ELYTH_MCP_SERVER_ID = "elyth"
+DEFAULT_ELYTH_STANDING_CONCERN_ID = "elyth"
+DEFAULT_STANDING_CONCERN_INTERVAL_SECONDS = 3600
+DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY = "ELYTHの場。届いている反応やリプライがあるかは気にかける。"
 DEFAULT_ESTAT_MCP_SERVER_ID = "e-stat"
 DEFAULT_ELYTH_AGENT_SKILL_SOURCE_ID = "elyth-skills"
 # ELYTH skill repository を OtomeKairo 外へ checkout したときの root 例。
@@ -170,6 +173,19 @@ def build_default_console_client_settings(
 
 
 # 構築
+def build_default_elyth_standing_concern() -> dict:
+    return {
+        "concern_id": DEFAULT_ELYTH_STANDING_CONCERN_ID,
+        "enabled": False,
+        "min_interval_seconds": DEFAULT_STANDING_CONCERN_INTERVAL_SECONDS,
+        "concern_summary": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+    }
+
+
+def build_default_standing_concerns() -> list[dict]:
+    return [build_default_elyth_standing_concern()]
+
+
 def build_default_state() -> dict:
     server_id = f"server:{uuid.uuid4().hex}"
     return {
@@ -202,6 +218,7 @@ def build_default_state() -> dict:
             "mode": "disabled",
             "interval_seconds": DEFAULT_WAKE_INTERVAL_SECONDS,
         },
+        "standing_concerns": build_default_standing_concerns(),
         "personas": {
             DEFAULT_PERSONA_ID: {
                 "persona_id": DEFAULT_PERSONA_ID,

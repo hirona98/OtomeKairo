@@ -196,6 +196,7 @@
         </optgroup>
         <optgroup label="自律動作">
           <option value="system">定期思考</option>
+          <option value="standing-concerns">気にかけていること</option>
           <option value="watcher">Watcher</option>
         </optgroup>
         <optgroup label="情報">
@@ -222,6 +223,7 @@
         <button type="button" class="settings-nav-button" data-tab="agent-skills">Agent Skills</button>
         <div class="settings-navigation-category">自律動作</div>
         <button type="button" class="settings-nav-button" data-tab="system">定期思考</button>
+        <button type="button" class="settings-nav-button" data-tab="standing-concerns">気にかけていること</button>
         <button type="button" class="settings-nav-button" data-tab="watcher">Watcher</button>
         <div class="settings-navigation-category">情報</div>
         <button type="button" class="settings-nav-button" data-tab="api">API説明</button>
@@ -896,6 +898,44 @@
               <div class="settings-list">
                 <p class="field-hint">定期思考の前に観測するカメラを選びます。接続情報の登録は「接続 → カメラ」で行います。</p>
                 <div id="wake-camera-observations" class="wake-camera-observations"></div>
+              </div>
+            </fieldset>
+          </section>
+
+          <section class="tab-page" data-page="standing-concerns">
+            <div class="selector-row">
+              <select id="standing-concern-select"></select>
+              <button type="button" data-action="add-standing-concern">追加</button>
+              <button type="button" class="danger-button" data-action="delete-standing-concern">削除</button>
+            </div>
+            <fieldset class="settings-group capability-group" data-collection-editor>
+              <legend>気にかけていること</legend>
+              <div class="settings-list">
+                <p class="field-hint">しばらく見ていない関心を、定期思考のときに思い出します。作業を自動では始めません。見に行くかどうかは、そのときの判断です。</p>
+                <label class="checkbox-field">有効
+                  <input id="standing-concern-enabled" type="checkbox">
+                </label>
+                <div class="setting-row">
+                  <label for="standing-concern-id">名前:</label>
+                  <input id="standing-concern-id" class="field-width-medium">
+                </div>
+                <div class="setting-row setting-row-top">
+                  <label for="standing-concern-interval">思い出す間隔:</label>
+                  <div class="console-control-with-hint">
+                    <div class="inline-suffix-control">
+                      <input id="standing-concern-interval" class="field-width-short" type="number" min="1">
+                      <span>秒</span>
+                    </div>
+                    <span class="field-hint">これより頻繁には前景に出しません。到来しても実行はしません。</span>
+                  </div>
+                </div>
+                <div class="setting-row setting-row-top">
+                  <label for="standing-concern-summary">関心:</label>
+                  <div class="console-control-with-hint">
+                    <textarea id="standing-concern-summary" rows="4" spellcheck="true"></textarea>
+                    <span class="field-hint">気にかける場や向きを書きます。実行手順や tool 名は書きません。</span>
+                  </div>
+                </div>
               </div>
             </fieldset>
           </section>

@@ -420,8 +420,14 @@ class ServiceSpontaneousWakeMixin:
     def _background_thinking_delay_seconds(self, *, state: dict[str, Any], current_time: str) -> float:
         # 無効時
         wake_policy = state.get("wake_policy", {})
+        extra_delay_seconds = self._extra_standing_concern_thinking_delay_seconds(
+            state=state,
+            current_time=current_time,
+        )
         if wake_policy.get("mode") != "interval":
-            return BACKGROUND_THINKING_POLL_SECONDS
+            if extra_delay_seconds is None:
+                return BACKGROUND_THINKING_POLL_SECONDS
+            return min(extra_delay_seconds, BACKGROUND_THINKING_POLL_SECONDS)
 
         # 初回観測待ち
         initial_delay_seconds = self._wake_initial_delay_remaining_seconds(current_time=current_time)
@@ -446,6 +452,8 @@ class ServiceSpontaneousWakeMixin:
         remaining_seconds = (due_at - current_dt).total_seconds()
         if remaining_seconds <= 0:
             return 0.0
+        if extra_delay_seconds is not None:
+            remaining_seconds = min(remaining_seconds, extra_delay_seconds)
 
         # ポーリング上限
         return min(remaining_seconds, BACKGROUND_THINKING_POLL_SECONDS)

@@ -115,12 +115,13 @@ initiative loop は、候補を次の 3 系統に分ける。
 - 再評価系
   - due になった `pending_intent`
 - 自発系
-  - 強く前景化した `drive_state`、強い `entry_basis` を持つ `initiative_entry_summary.entry_kind=enter`、または視覚観測の `first_seen / changed` と現在文脈が噛み合うもの
+  - 強く前景化した `drive_state`、強い `entry_basis` を持つ `initiative_entry_summary.entry_kind=enter`、視覚観測の `first_seen / changed` と現在文脈が噛み合うもの、または due な気にかけていること
 
 自発系は、強く前景化した `drive_state`、`ongoing_action`、`pending_intent`、強い `entry_basis` を持つ `initiative_entry_summary`、または視覚観測の `first_seen / changed` と現在文脈の噛み合いを材料にする。
 視覚観測の `first_seen / changed` は `workspace_context` の `visual_observation` 候補として扱う。
 視覚観測の `first_seen / changed` で通常判断へ direct entry する場合も、判断前観測で更新された `activity_context` は `initiative_context` と `workspace_context` に残す。
 direct entry は視覚新規性だけへ判断材料を縮約する仕組みではなく、活動遷移、継続時間、source の整合、抑制候補を同じ盤面で比較する入口である。
+due な気にかけていることは自発系の材料であり、偽の `drive_state` にはしない。意味境界は [気にかけていること.md](気にかけていること.md) を正とする。
 `background_thinking` は定期思考による自己評価である。
 `decision_generation` は観測、候補、抑制、能力提案を比較し、`speech / noop / pending_intent / capability_request` から 1 つ選ぶ。
 `visual_observations[].change_state=first_seen / changed` は前景候補、`stable` は現在状態の継続シグナル、`same_as_recent_speech` は直近重複の抑制候補である。

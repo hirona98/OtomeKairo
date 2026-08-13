@@ -13,6 +13,7 @@ from otomekairo.llm.contexts import (
 from otomekairo.interaction import InteractionContext
 from otomekairo.service.capability import PreSendCheckWithheldError
 from otomekairo.service.common import debug_log
+from otomekairo.service.standing_concerns import standing_concern_factor_ref
 
 
 WORKSPACE_CANDIDATE_LIMIT = 24
@@ -61,6 +62,9 @@ PRE_SEND_CHECK_WITHHELD_NOTICE = (
 
 
 class ServiceInputPipelineMixin:
+    def _mark_standing_concerns_attended(self, **_kwargs) -> list[str]:
+        return []
+
     def _run_input_pipeline(
         self,
         *,
@@ -314,6 +318,11 @@ class ServiceInputPipelineMixin:
                     output_result = self._empty_pipeline_output_result()
                     system_notice = self._pre_send_check_withheld_notice(current_input=current_input)
 
+        self._mark_standing_concerns_attended(
+            decision=decision,
+            workspace_context=pipeline_contexts.get("workspace_context"),
+            current_time=started_at,
+        )
         # 結果
         debug_log("Pipeline", f"{cycle_label} done", level="DEBUG")
         return {
@@ -836,6 +845,10 @@ class ServiceInputPipelineMixin:
         )
         workspace_context = self._build_workspace_context(
             current_input=current_input,
+            due_standing_concerns=self._due_standing_concerns(
+                state=state,
+                current_time=started_at,
+            ),
             recall_pack=recall_pack,
             drive_state_summary=drive_state_summary,
             foreground_world_state=foreground_world_state,
@@ -1230,6 +1243,7 @@ class ServiceInputPipelineMixin:
         self,
         *,
         current_input: CurrentInput,
+        due_standing_concerns: list[dict[str, Any]] | None = None,
         recall_pack: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
         foreground_world_state: list[dict[str, Any]] | None,
@@ -1280,6 +1294,20 @@ class ServiceInputPipelineMixin:
             summary_keys=("status_text", "result_summary_text", "summary_text", "error"),
             metadata_keys=("capability_id", "request_id", "result_status", "response_target_refs"),
         )
+        for concern in due_standing_concerns or []:
+            concern_id = str(concern.get("concern_id") or "").strip()
+            if not concern_id:
+                continue
+            self._append_workspace_candidate(
+                candidates=candidates,
+                used_refs=used_refs,
+                source_counts=source_counts,
+                factor_ref=standing_concern_factor_ref(concern_id),
+                kind="standing_concern",
+                source="standing_concerns",
+                summary_text=str(concern.get("concern_summary") or "").strip() or None,
+                metadata={"concern_id": concern_id},
+            )
         self._append_workspace_initiative_candidates(
             candidates=candidates,
             used_refs=used_refs,

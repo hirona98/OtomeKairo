@@ -96,6 +96,17 @@ class CurrentConfigApiTests(unittest.TestCase):
             response["settings_snapshot"]["wake_policy"],
             {"mode": "disabled", "interval_seconds": 300},
         )
+        self.assertEqual(
+            response["settings_snapshot"]["standing_concerns"],
+            [
+                {
+                    "concern_id": "elyth",
+                    "enabled": False,
+                    "min_interval_seconds": 3600,
+                    "concern_summary": "ELYTHの場。届いている反応やリプライがあるかは気にかける。",
+                }
+            ],
+        )
 
     def test_wake_policy_requires_interval_in_all_modes(self) -> None:
         service = DummyService()
@@ -160,6 +171,45 @@ class CurrentConfigApiTests(unittest.TestCase):
                 with self.assertRaises(ServiceError) as raised:
                     service.patch_current("token", {"thinking_speech_level": value})
                 self.assertEqual(raised.exception.error_code, "invalid_thinking_speech_level")
+
+    def test_patch_current_accepts_standing_concerns(self) -> None:
+        service = DummyService()
+        concerns = [
+            {
+                "concern_id": "elyth",
+                "enabled": True,
+                "min_interval_seconds": 1800,
+                "concern_summary": "ELYTHの場を気にかける。",
+            }
+        ]
+
+        response = service.patch_current("token", {"standing_concerns": concerns})
+
+        self.assertEqual(response["settings_snapshot"]["standing_concerns"], concerns)
+
+    def test_patch_current_rejects_invalid_standing_concerns(self) -> None:
+        service = DummyService()
+
+        with self.assertRaises(ServiceError) as raised:
+            service.patch_current("token", {"standing_concerns": {"concern_id": "elyth"}})
+        self.assertEqual(raised.exception.error_code, "invalid_standing_concerns")
+
+        with self.assertRaises(ServiceError) as raised:
+            service.patch_current(
+                "token",
+                {
+                    "standing_concerns": [
+                        {
+                            "concern_id": "elyth",
+                            "enabled": True,
+                            "min_interval_seconds": 3600,
+                            "concern_summary": "ELYTH",
+                            "mcp_server_id": "elyth",
+                        }
+                    ]
+                },
+            )
+        self.assertEqual(raised.exception.error_code, "unsupported_standing_concern_fields")
 
 
 if __name__ == "__main__":

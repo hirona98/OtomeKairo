@@ -101,6 +101,14 @@ response:
     "runtime_summary": {},
     "runtime_detail": {
       "wake_runtime_state": {},
+      "standing_concerns": [
+        {
+          "concern_id": "elyth",
+          "enabled": true,
+          "due": true,
+          "last_attended_at": null
+        }
+      ],
       "wake_policy_observations": [
         {
           "observation_id": "observation:main_desktop",
@@ -224,6 +232,7 @@ response:
 話者識別不成立では `speaker_candidates` に top1 / top2 の `person_ref / similarity` を含める。
 過去の発話結果一覧は返さない。
 `runtime_detail.autonomous_runs` と `current_state.autonomous_runs` は `run_id / status / objective_summary / current_step_summary / history_summary / next_run_at / waiting_request_id / pause_reason / created_at / updated_at / completed_at` の要約を返す。
+`runtime_detail.standing_concerns` は due 判定と最後に関わった時刻の process-local snapshot である。意味境界は [../runtime/気にかけていること.md](../runtime/気にかけていること.md) を正とする。
 `runtime_detail.wake_policy_observations` は現在設定されている `wake_policy.observations` と process-local の直近実行結果を照合した snapshot である。
 `runtime_detail.wake_runtime_state.initial_delay_until` は、visual capture を有効化した直後の初回 5 秒待機が残っている間だけ入る。
 有効化時 server は interval 起点（`last_wake_at`）もリセットし、5 秒経過後に初回観測が interval 残りで遅れないようにする。

@@ -609,6 +609,7 @@ class ServiceConfigResourcesMixin:
             "thinking_speech_level",
             "wake_policy",
             "selected_conversation_display_name_id",
+            "standing_concerns",
         }
         unsupported_fields = sorted(set(payload.keys()) - supported_fields)
         if unsupported_fields:
@@ -679,6 +680,10 @@ class ServiceConfigResourcesMixin:
         if "wake_policy" in payload:
             self._validate_wake_policy(payload["wake_policy"])
             state["wake_policy"] = payload["wake_policy"]
+
+        if "standing_concerns" in payload:
+            self._validate_standing_concerns(payload["standing_concerns"])
+            state["standing_concerns"] = payload["standing_concerns"]
 
         if "selected_conversation_display_name_id" in payload:
             selected_display_name_id = payload["selected_conversation_display_name_id"]
@@ -1214,6 +1219,7 @@ class ServiceConfigResourcesMixin:
             "thinking_speech_level",
             "wake_policy",
             "selected_conversation_display_name_id",
+            "standing_concerns",
         }
         unsupported_current_fields = sorted(set(current.keys()) - supported_current_fields)
         if unsupported_current_fields:
@@ -1269,6 +1275,8 @@ class ServiceConfigResourcesMixin:
         # 動作設定検証
         self._validate_thinking_speech_level(thinking_speech_level)
         self._validate_wake_policy(current.get("wake_policy"))
+        if "standing_concerns" in current:
+            self._validate_standing_concerns(current.get("standing_concerns"))
         selected_display_name_id = current.get("selected_conversation_display_name_id")
         if (
             not isinstance(selected_display_name_id, str)
@@ -1293,6 +1301,8 @@ class ServiceConfigResourcesMixin:
         state["pre_send_check_model_preset_id"] = pre_send_check_model_preset_id
         state["thinking_speech_level"] = thinking_speech_level
         state["wake_policy"] = current["wake_policy"]
+        if "standing_concerns" in current:
+            state["standing_concerns"] = current["standing_concerns"]
         state["selected_conversation_display_name_id"] = selected_display_name_id
         state["personas"] = personas
         state["memory_sets"] = memory_sets
@@ -1334,6 +1344,7 @@ class ServiceConfigResourcesMixin:
             "selected_conversation_display_name_id": state[
                 "selected_conversation_display_name_id"
             ],
+            "standing_concerns": deepcopy(state.get("standing_concerns") or []),
         }
 
     def _ensure_pre_send_check_model_preset(self, state: dict[str, Any]) -> bool:

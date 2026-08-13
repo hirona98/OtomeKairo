@@ -1099,6 +1099,8 @@ def _build_decision_system_prompt(persona_context: PersonaContext) -> str:
             "自律判断トリガー時だけ InitiativeContext、capability_result トリガー時だけ CapabilityResultContext が入ります。\n"
             "トリガー固有の判断制約がある場合は internal context message の trigger_policy に入ります。\n"
             "WorkspaceContext.workspace_candidates は、記憶、外界状態、志向状態、継続行動、能力候補を同じ盤面に並べた前景化候補です。\n"
+            "kind=standing_concern は、しばらく関わっていない気にかけている場です。実行指示ではありません。"
+            "今見に行く自然さがあれば capability_request または autonomous_run を比較し、今でなければ noop や pending_intent と比較してよいです。\n"
             "decision.kind と同じ判断の中で、今もっとも意識へ上げる primary factor、補助する supporting factors、控える suppressed factors を foreground_selection に記録してください。\n"
             "noop を選ぶ場合も、控える理由を表す WorkspaceContext の suppression 候補を primary factor にできます。\n"
             "foreground_selection は判断理由の inspection 用です。WorkspaceContext にない factor_ref を作ってはいけません。\n"
@@ -1303,8 +1305,9 @@ def _build_decision_trigger_policy(
                 ),
                 (
                     "background_thinking: 定期思考による自己評価です。観測、候補、抑制、能力提案を比較し、"
-                    "speech / noop / pending_intent / capability_request から 1 つ選んでください。"
+                    "speech / noop / pending_intent / capability_request / autonomous_run から 1 つ選んでください。"
                     "ここでの speech は、観測差分の実況ではなく、現在の個の短い見方として一言にまとまる独り言です。"
+                    "standing_concern は気にかけている場であり、定時作業の指示ではありません。"
                 ),
                 (
                     "校正: background_thinking では、短い独話として前へ出る自然さを 10 段階で内的に見積もり、"

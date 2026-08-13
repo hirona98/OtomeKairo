@@ -7,13 +7,17 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from otomekairo.defaults import build_default_desktop_capture, build_default_state
+from otomekairo.defaults import (
+    build_default_desktop_capture,
+    build_default_standing_concerns,
+    build_default_state,
+)
 from otomekairo.memory.utils import now_iso
 from otomekairo.service.common import debug_log
 
 
 CONFIG_DB_FILE_NAME = "config.db"
-CURRENT_CONFIG_DB_VERSION = 18
+CURRENT_CONFIG_DB_VERSION = 19
 
 
 class ConfigStore:
@@ -47,6 +51,7 @@ class ConfigStore:
                     thinking_speech_level,
                     selected_conversation_display_name_id,
                     wake_policy_json,
+                    standing_concerns_json,
                     audio_output_settings_json,
                     microphone_settings_json
                 FROM current_config
@@ -75,6 +80,7 @@ class ConfigStore:
                 ],
                 "conversation_display_names": self._read_conversation_display_names(conn),
                 "wake_policy": json.loads(current["wake_policy_json"]),
+                "standing_concerns": json.loads(current["standing_concerns_json"]),
                 "audio_output_settings": json.loads(
                     current["audio_output_settings_json"]
                 ),
@@ -365,7 +371,7 @@ class ConfigStore:
                 f"config_db open path={self.config_db_path} user_version={version} expected={CURRENT_CONFIG_DB_VERSION}",
                 level="DEBUG",
             )
-            if version not in {0, CURRENT_CONFIG_DB_VERSION}:
+            if version not in {0, 18, CURRENT_CONFIG_DB_VERSION}:
                 debug_log("Store", f"config_db unsupported_schema user_version={version}", level="ERROR")
                 raise RuntimeError(
                     f"Unsupported config.db schema version: {version}. "
@@ -373,6 +379,9 @@ class ConfigStore:
                 )
 
             self._apply_current_schema(conn)
+            if version == 18:
+                self._migrate_config_db_from_18(conn)
+                version = CURRENT_CONFIG_DB_VERSION
             if version == 0:
                 # selected_conversation_display_name_id の FK を満たすため、
                 # 呼ばれ方定義を current_config より先に書き込む。
@@ -430,6 +439,7 @@ class ConfigStore:
                 thinking_speech_level INTEGER NOT NULL DEFAULT 5,
                 selected_conversation_display_name_id TEXT,
                 wake_policy_json TEXT NOT NULL,
+                standing_concerns_json TEXT NOT NULL,
                 audio_output_settings_json TEXT NOT NULL,
                 microphone_settings_json TEXT NOT NULL,
                 FOREIGN KEY (selected_conversation_display_name_id)
@@ -521,6 +531,27 @@ class ConfigStore:
             );
             """
         )
+
+    def _migrate_config_db_from_18(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(current_config)").fetchall()
+        }
+        if "standing_concerns_json" not in columns:
+            conn.execute(
+                "ALTER TABLE current_config ADD COLUMN standing_concerns_json TEXT NOT NULL DEFAULT '[]'"
+            )
+        conn.execute(
+            """
+            UPDATE current_config
+            SET standing_concerns_json = ?
+            WHERE id = 1
+            """,
+            (self._to_json(build_default_standing_concerns()),),
+        )
+        conn.execute(f"PRAGMA user_version = {CURRENT_CONFIG_DB_VERSION}")
+        debug_log("Store", f"config_db migrated user_version=18->{CURRENT_CONFIG_DB_VERSION}")
+
     def _write_state(self, conn: sqlite3.Connection, state: dict[str, Any]) -> None:
         conn.execute("DELETE FROM server_identity")
         conn.execute("DELETE FROM current_config")
@@ -562,10 +593,11 @@ class ConfigStore:
                 thinking_speech_level,
                 selected_conversation_display_name_id,
                 wake_policy_json,
+                standing_concerns_json,
                 audio_output_settings_json,
                 microphone_settings_json
             )
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 state["selected_persona_id"],
@@ -576,6 +608,7 @@ class ConfigStore:
                 state["thinking_speech_level"],
                 state["selected_conversation_display_name_id"],
                 self._to_json(state["wake_policy"]),
+                self._to_json(state.get("standing_concerns") or build_default_standing_concerns()),
                 self._to_json(state["audio_output_settings"]),
                 self._to_json(state["microphone_settings"]),
             ),
