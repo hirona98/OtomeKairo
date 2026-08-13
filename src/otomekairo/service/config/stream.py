@@ -969,12 +969,15 @@ class ServiceConfigStreamMixin:
         policy: dict[str, Any],
         matching_runs: list[dict[str, Any]] | None = None,
         current_time: str | None = None,
+        inbound_present: bool = False,
     ) -> bool:
         if policy.get("enabled") is not True or policy.get("background_enabled") is not True:
             return False
         matching = matching_runs if matching_runs is not None else self._mcp_session_runs(mcp_server_id)
         if any(run.get("status") in {"active", "waiting_timer", "waiting_result", "paused"} for run in matching):
             return False
+        if inbound_present is True:
+            return True
         if not matching:
             return True
         created_at_values = [
@@ -1154,6 +1157,7 @@ class ServiceConfigStreamMixin:
         state: dict[str, Any] | None = None,
         current_time: str | None = None,
         trigger_kind: str | None = None,
+        inbound_present_mcp_server_ids: list[str] | None = None,
     ) -> list[dict[str, Any]] | None:
         manifests = capability_manifests()
         bindings = self._event_stream_registry.list_capability_bindings()
@@ -1210,6 +1214,7 @@ class ServiceConfigStreamMixin:
                 item["finite_session_targets"] = self._finite_mcp_session_targets(
                     mcp_servers=normalized_mcp_servers,
                     trigger_kind=trigger_kind,
+                    inbound_present_mcp_server_ids=inbound_present_mcp_server_ids,
                 )
             decision_view.append(item)
         if not decision_view:
@@ -1221,9 +1226,15 @@ class ServiceConfigStreamMixin:
         *,
         mcp_servers: list[dict[str, Any]] | None,
         trigger_kind: str | None,
+        inbound_present_mcp_server_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         if trigger_kind not in {"user_message", "background_thinking"}:
             return []
+        inbound_ids = {
+            server_id.strip()
+            for server_id in (inbound_present_mcp_server_ids or [])
+            if isinstance(server_id, str) and server_id.strip()
+        }
         targets: list[dict[str, Any]] = []
         for server in mcp_servers or []:
             if not isinstance(server, dict) or server.get("available") is not True:
@@ -1242,9 +1253,11 @@ class ServiceConfigStreamMixin:
                 for run_id in session.get("active_run_ids", [])
                 if isinstance(run_id, str) and run_id
             ]
+            inbound_present = mcp_server_id.strip() in inbound_ids
+            background_ready = session.get("background_eligible") is True or inbound_present
             if trigger_kind == "background_thinking" and (
                 session.get("background_enabled") is not True
-                or session.get("background_eligible") is not True
+                or background_ready is not True
                 or active_run_ids
             ):
                 continue

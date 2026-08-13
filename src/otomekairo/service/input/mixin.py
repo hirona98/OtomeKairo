@@ -27,6 +27,7 @@ from otomekairo.service.input.initiative import ServiceInputInitiativeMixin
 from otomekairo.service.input.logging import ServiceInputLoggingMixin
 from otomekairo.service.input.decision_comparison import ServiceInputDecisionComparisonMixin
 from otomekairo.service.input.pipeline import ServiceInputPipelineMixin
+from otomekairo.service.input.inbound_observation import ServiceInputInboundObservationMixin
 from otomekairo.service.input.standing_concern import ServiceInputStandingConcernMixin
 from otomekairo.service.input.trace import ServiceInputTraceMixin
 from otomekairo.service.input.visual import ServiceInputVisualMixin
@@ -41,6 +42,7 @@ class ServiceInputMixin(
     ServiceInputCycleMixin,
     ServiceInputActivityMixin,
     ServiceInputStandingConcernMixin,
+    ServiceInputInboundObservationMixin,
     ServiceInputDecisionComparisonMixin,
     ServiceInputPipelineMixin,
     ServiceInputVisualMixin,

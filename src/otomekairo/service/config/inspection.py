@@ -412,6 +412,11 @@ class ServiceConfigInspectionMixin:
                 "initial_delay_until": self._wake_runtime_state.get("initial_delay_until"),
                 "retry_after": self._wake_runtime_state.get("retry_after"),
                 "speech_history_count": len(speech_history) if isinstance(speech_history, dict) else 0,
+                "inbound_observation_last_attempt_at": dict(
+                    self._wake_runtime_state.get("inbound_observation_last_attempt_at") or {}
+                )
+                if isinstance(self._wake_runtime_state.get("inbound_observation_last_attempt_at"), dict)
+                else {},
             }
 
     def _snapshot_memory_postprocess_runtime_state(self) -> dict[str, Any]:

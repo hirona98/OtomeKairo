@@ -27,6 +27,7 @@ from otomekairo.llm.contracts import (
     validate_disclosure_review_contract,
     validate_event_evidence_contract,
     validate_initiative_entry_check_contract,
+    validate_mcp_inbound_observation_contract,
     validate_memory_correction_reconciliation_contract,
     validate_memory_interpretation_contract,
     validate_memory_reflection_summary_contract,
@@ -56,6 +57,8 @@ from otomekairo.llm.prompts import (
     build_event_evidence_repair_prompt,
     build_initiative_entry_check_messages,
     build_initiative_entry_check_repair_prompt,
+    build_mcp_inbound_observation_messages,
+    build_mcp_inbound_observation_repair_prompt,
     build_input_interpretation_messages,
     build_input_interpretation_repair_prompt,
     build_memory_correction_reconciliation_messages,
@@ -1377,6 +1380,41 @@ class LLMClient:
             validator=lambda payload: validate_pending_intent_selection_contract(payload, source_pack=source_pack),
             repair_prompt_builder=build_pending_intent_selection_repair_prompt,
             failure_message="PendingIntentSelection の生成に失敗しました。解析可能な応答が得られませんでした。",
+            wrap_validation_error=True,
+            operation=operation,
+        )
+
+    def generate_mcp_inbound_observation(
+        self,
+        *,
+        model_config: dict,
+        persona_context: PersonaContext,
+        source_pack: dict[str, Any],
+    ) -> dict[str, Any]:
+        operation = "mcp_inbound_observation"
+        debug_log(
+            "LLM",
+            (
+                f"{operation} start mode={self._debug_mode(model_config)} "
+                f"model={self._debug_model(model_config)}"
+            ),
+            level="DEBUG",
+        )
+        source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
+        if self._is_mock_model_config(model_config):
+            payload = self.mock_client.generate_mcp_inbound_observation(model_config, source_pack)
+            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
+            return payload
+        messages = build_mcp_inbound_observation_messages(
+            persona_context=persona_context,
+            source_pack=source_pack,
+        )
+        return self._generate_structured_payload(
+            model_config=model_config,
+            messages=messages,
+            validator=validate_mcp_inbound_observation_contract,
+            repair_prompt_builder=build_mcp_inbound_observation_repair_prompt,
+            failure_message="McpInboundObservation の生成に失敗しました。解析可能な応答が得られませんでした。",
             wrap_validation_error=True,
             operation=operation,
         )

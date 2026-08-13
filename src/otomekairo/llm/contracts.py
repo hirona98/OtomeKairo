@@ -88,6 +88,7 @@ SELF_ACTIVITY_WORKSPACE_KINDS = {
     "standing_concern",
     "ongoing_action",
     "autonomous_run",
+    "inbound_observation",
 }
 DECISION_COMPARISON_SCOPE_VALUES = {
     "full",
@@ -1636,3 +1637,25 @@ def validate_initiative_entry_check_contract(payload: dict[str, Any]) -> None:
         raise LLMError("InitiativeEntryCheck reason_summary に改行を含めてはいけません。")
     if INTERNAL_IDENTIFIER_PATTERN.search(normalized_reason) is not None:
         raise LLMError("InitiativeEntryCheck reason_summary に内部識別子を含めてはいけません。")
+
+
+def validate_mcp_inbound_observation_contract(payload: dict[str, Any]) -> None:
+    _validate_exact_keys(
+        payload,
+        {"inbound_present", "observation_summary", "reason_summary"},
+        "McpInboundObservation",
+    )
+    if not isinstance(payload["inbound_present"], bool):
+        raise LLMError("McpInboundObservation inbound_present は boolean である必要があります。")
+    for key in ("observation_summary", "reason_summary"):
+        value = payload[key]
+        if not isinstance(value, str):
+            raise LLMError(f"McpInboundObservation {key} は文字列である必要があります。")
+        normalized = value.strip()
+        if not normalized:
+            raise LLMError(f"McpInboundObservation {key} は空にできません。")
+        if "\n" in normalized or "\r" in normalized:
+            raise LLMError(f"McpInboundObservation {key} に改行を含めてはいけません。")
+        if INTERNAL_IDENTIFIER_PATTERN.search(normalized) is not None:
+            raise LLMError(f"McpInboundObservation {key} に内部識別子を含めてはいけません。")
+        payload[key] = normalized

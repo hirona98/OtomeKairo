@@ -537,6 +537,32 @@ def build_initiative_entry_check_messages(
     ]
 
 
+def build_mcp_inbound_observation_messages(
+    *,
+    persona_context: PersonaContext,
+    source_pack: dict[str, Any],
+) -> list[dict[str, str]]:
+    enriched_pack = _with_persona_context(source_pack, persona_context)
+    return [
+        {
+            "role": "system",
+            "content": _build_mcp_inbound_observation_system_prompt(),
+        },
+        {
+            "role": "user",
+            "content": _format_named_json_prompt_payload("SOURCE_PACK", enriched_pack),
+        },
+    ]
+
+
+def build_mcp_inbound_observation_repair_prompt(error_text: str) -> str:
+    return (
+        "前回の出力は McpInboundObservation 契約を満たしませんでした。"
+        f"理由: {error_text} "
+        "inbound_present, observation_summary, reason_summary だけの JSON オブジェクト 1 個を返してください。"
+    )
+
+
 def build_world_state_messages(
     *,
     persona_context: PersonaContext,
@@ -1865,6 +1891,26 @@ def _build_initiative_entry_check_system_prompt() -> str:
         "活動遷移で enter を返す場合も、reason_summary は区切りや切り替えとして控えめに書きます。\n"
         "drive_state、ongoing_action、pending_intent が source pack にある場合でも、それらを数値化せず自然文として読んでください。\n"
         "reason_summary は簡潔に、改行なし、内部識別子なしで返してください。"
+    )
+
+
+def _build_mcp_inbound_observation_system_prompt() -> str:
+    return (
+        "自律 AI 本体の内部処理 role `mcp_inbound_observation` として、"
+        "MCP tool の結果に届いている働きかけがあるかを判定します。\n"
+        "source pack を読み、JSON オブジェクト 1 個だけを返してください。\n"
+        "Markdown、コードフェンス、説明文は禁止です。\n"
+        "返すトップレベルキーは inbound_present, observation_summary, reason_summary の 3 つだけです。\n"
+        "inbound_present は true または false のどちらかだけです。\n"
+        "inbound_present=true は、返信、言及、既存の私信、自分へ向けた接触のように、"
+        "今関われる働きかけがある場合に使います。\n"
+        "空の結果、自分から見に行く材料だけ、告知や関係の変化だけで接触が無い場合は false にします。\n"
+        "返す、見る、自分から書く、session を始めるかは決めません。有無だけを判断します。\n"
+        "persona_context は働きかけの有無を読む補助です。結果に無い接触を足してはいけません。\n"
+        "observation_summary と reason_summary は簡潔に、改行なし、内部識別子なしで返してください。\n"
+        + _person_reference_instruction()
+        + "\n"
+        + _semantic_layer_boundary_instruction("観測事実層から届いている働きかけの有無を読む層")
     )
 
 

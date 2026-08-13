@@ -21,6 +21,7 @@
 
 チェックは server 本体で、manifest、権限、binding、接続中 catalog、tool `inputSchema` を検証した後、request record、`ongoing_action`、stream event を作る前に行う。
 通常判断、capability result follow-up、`autonomous_run` のいずれから発生した request も同じ境界を通す。
+MCP inbound 観測の tool call は operator が設定した読み取りであり、個が選んだ外向き送信ではない。`pre_send_check` の対象にしない。境界は [mcp_inbound_observation.md](mcp_inbound_observation.md) を正とする。
 
 ## ローカル秘密値検査
 

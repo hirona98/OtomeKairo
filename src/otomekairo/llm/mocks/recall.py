@@ -9,6 +9,7 @@ from otomekairo.llm.contracts import (
     validate_answer_contract_contract,
     validate_event_evidence_contract,
     validate_initiative_entry_check_contract,
+    validate_mcp_inbound_observation_contract,
     validate_pending_intent_selection_contract,
     validate_recall_hint_contract,
     validate_recall_pack_selection_contract,
@@ -402,6 +403,38 @@ class LLMMockRecallMixin:
 
         # 検証
         validate_pending_intent_selection_contract(payload, source_pack=source_pack)
+        return payload
+
+    def generate_mcp_inbound_observation(
+        self,
+        model_config: dict,
+        source_pack: dict[str, Any],
+    ) -> dict[str, Any]:
+        self._assert_mock_model(model_config)
+        content = source_pack.get("content")
+        structured = source_pack.get("structured_content")
+        has_content = isinstance(content, list) and any(
+            isinstance(item, dict) and any(str(value).strip() for value in item.values() if value is not None)
+            for item in content
+        )
+        has_structured = isinstance(structured, dict) and any(
+            value not in {None, "", [], {}} for value in structured.values()
+        )
+        inbound_present = has_content or has_structured
+        payload = {
+            "inbound_present": inbound_present,
+            "observation_summary": (
+                "届いている働きかけがある。"
+                if inbound_present
+                else "届いている働きかけは見当たらない。"
+            ),
+            "reason_summary": (
+                "tool 結果に未処理の接触がある。"
+                if inbound_present
+                else "tool 結果は空か、働きかけとしては読めない。"
+            ),
+        }
+        validate_mcp_inbound_observation_contract(payload)
         return payload
 
     def generate_initiative_entry_check(

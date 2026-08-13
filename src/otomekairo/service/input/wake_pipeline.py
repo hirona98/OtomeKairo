@@ -42,8 +42,12 @@ class ServiceInputWakePipelineMixin:
 
         # 判断機会ポリシー
         if trigger_kind == "background_thinking":
-            due = self._wake_is_due(state=state, current_time=started_at)
-            if due["should_skip"]:
+            if not self._background_thinking_should_proceed(
+                state=state,
+                current_time=started_at,
+                client_context=client_context,
+            ):
+                due = self._wake_is_due(state=state, current_time=started_at)
                 debug_log("Wake", f"{cycle_label} skipped reason={self._clamp(due['reason_summary'])}")
                 return (
                     self._noop_pipeline(state=state, started_at=started_at, reason_summary=due["reason_summary"]),
@@ -52,7 +56,8 @@ class ServiceInputWakePipelineMixin:
                 )
 
         # 定期観測
-        if trigger_kind == "background_thinking":
+        inbound_only = isinstance(client_context, dict) and client_context.get("inbound_only") is True
+        if trigger_kind == "background_thinking" and inbound_only is not True:
             actor_ref = (
                 interaction_context.participant_refs[0]
                 if interaction_context is not None and interaction_context.participant_refs
@@ -128,6 +133,7 @@ class ServiceInputWakePipelineMixin:
                     self._consume_background_thinking_interval(
                         trigger_kind=trigger_kind,
                         current_time=started_at,
+                        client_context=client_context,
                     )
                 if retryable_observation_failure:
                     reason_summary = "思考前観測 の vision source が未接続だったため、interval を消費せず短く再試行する。"
@@ -155,6 +161,7 @@ class ServiceInputWakePipelineMixin:
             self._consume_background_thinking_interval(
                 trigger_kind=trigger_kind,
                 current_time=started_at,
+                client_context=client_context,
             )
             debug_log("Wake", f"{cycle_label} autonomous path no_selected_candidate")
 
@@ -167,6 +174,7 @@ class ServiceInputWakePipelineMixin:
                 self._consume_background_thinking_interval(
                     trigger_kind=trigger_kind,
                     current_time=started_at,
+                    client_context=client_context,
                 )
                 debug_log(
                     "Wake",
@@ -185,6 +193,7 @@ class ServiceInputWakePipelineMixin:
             self._consume_background_thinking_interval(
                 trigger_kind=trigger_kind,
                 current_time=started_at,
+                client_context=client_context,
             )
 
         # 起床入力
@@ -204,8 +213,31 @@ class ServiceInputWakePipelineMixin:
         )
         return pipeline, input_text, client_context
 
-    def _consume_background_thinking_interval(self, *, trigger_kind: str, current_time: str) -> None:
+    def _background_thinking_should_proceed(
+        self,
+        *,
+        state: dict[str, Any],
+        current_time: str,
+        client_context: dict[str, Any] | None,
+    ) -> bool:
+        inbound_ids = getattr(self, "_inbound_present_mcp_server_ids", None)
+        if callable(inbound_ids) and inbound_ids(client_context):
+            return True
+        due_concerns = getattr(self, "_due_standing_concerns", None)
+        if callable(due_concerns) and due_concerns(state=state, current_time=current_time):
+            return True
+        return self._wake_is_due(state=state, current_time=current_time)["should_skip"] is not True
+
+    def _consume_background_thinking_interval(
+        self,
+        *,
+        trigger_kind: str,
+        current_time: str,
+        client_context: dict[str, Any] | None = None,
+    ) -> None:
         if trigger_kind != "background_thinking":
+            return
+        if isinstance(client_context, dict) and client_context.get("inbound_only") is True:
             return
         self._set_last_wake_at(current_time)
 
@@ -217,6 +249,8 @@ class ServiceInputWakePipelineMixin:
         client_context: dict[str, Any] | None = None,
     ) -> bool:
         if self._client_context_has_initiative_entry(client_context):
+            return True
+        if self._inbound_present_mcp_server_ids(client_context):
             return True
         if self._client_context_has_judgable_visual_observation(client_context):
             return True

@@ -483,6 +483,22 @@ class ServiceInputTraceBuildMixin:
         )
         if compact_wake_observations:
             input_trace["wake_observations"] = compact_wake_observations
+        inbound_observations = client_context.get("inbound_observations")
+        if isinstance(inbound_observations, list) and inbound_observations:
+            input_trace["inbound_observations"] = [
+                {
+                    "mcp_server_id": observation.get("mcp_server_id"),
+                    "tool_name": observation.get("tool_name"),
+                    "status": observation.get("status"),
+                    "inbound_present": observation.get("inbound_present") is True,
+                    "observation_summary": self._clamp(observation.get("observation_summary"), limit=180)
+                    if isinstance(observation.get("observation_summary"), str)
+                    else None,
+                }
+                for observation in inbound_observations
+                if isinstance(observation, dict)
+            ]
+            input_trace["inbound_only"] = client_context.get("inbound_only") is True
         if isinstance(observation_summary, dict):
             input_trace["observation_summary"] = observation_summary
         if isinstance(ongoing_action_summary, dict):

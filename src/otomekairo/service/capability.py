@@ -170,6 +170,7 @@ class ServiceCapabilityMixin:
         autonomous_run_id: str | None = None,
         pre_send_check_attempt: int = 1,
         pre_send_check_prior_attempts: list[dict[str, Any]] | None = None,
+        skip_pre_send_check: bool = False,
     ) -> dict[str, Any] | None:
         # manifest と input schema を先に確定する。
         manifests = capability_manifests()
@@ -227,7 +228,7 @@ class ServiceCapabilityMixin:
             raise ValueError(f"Capability timeout_ms is invalid: {capability_id}")
 
         pre_send_check = None
-        if capability_id == "mcp.call_tool":
+        if capability_id == "mcp.call_tool" and skip_pre_send_check is not True:
             review_audit = self._review_mcp_pre_send_check(
                 input_payload=input_payload,
                 mcp_tool=mcp_tool,

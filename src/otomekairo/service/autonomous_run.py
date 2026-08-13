@@ -608,11 +608,17 @@ class ServiceAutonomousRunMixin:
                 for candidate in matching_runs
                 if str(candidate.get("run_id") or "")
             }
+            inbound_present_ids = source_current_input.get("inbound_present_mcp_server_ids")
+            inbound_present = (
+                isinstance(inbound_present_ids, list)
+                and normalized_mcp_server_id in inbound_present_ids
+            )
             if origin_kind == "background_thinking" and not self._mcp_background_session_eligible(
                 mcp_server_id=normalized_mcp_server_id,
                 policy=session,
                 matching_runs=self._mcp_session_runs(normalized_mcp_server_id),
                 current_time=current_time,
+                inbound_present=inbound_present,
             ):
                 raise ValueError("Background finite MCP session is not eligible.")
             if matching_run_ids and (

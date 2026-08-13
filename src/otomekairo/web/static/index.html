@@ -1094,6 +1094,34 @@
                     <span class="field-hint">一連の作業のあいだに、この MCP の tool を呼べる回数の上限です。</span>
                   </div>
                 </div>
+                <label class="checkbox-field" data-mcp-session-dependent data-mcp-inbound-field>
+                  届いた働きかけを見る
+                  <input id="mcp-inbound-enabled" type="checkbox">
+                </label>
+                <div class="setting-row setting-row-top" data-mcp-session-dependent data-mcp-inbound-field data-mcp-inbound-dependent>
+                  <label for="mcp-inbound-interval">確認の間隔:</label>
+                  <div class="console-control-with-hint">
+                    <div class="inline-suffix-control">
+                      <input id="mcp-inbound-interval" class="field-width-short" type="number" min="1">
+                      <span>秒</span>
+                    </div>
+                    <span class="field-hint">向こうから届いた働きかけがあるかだけを見ます。無いときは連続利用を始めません。あるときは自動開始の間隔を待ちません。</span>
+                  </div>
+                </div>
+                <div class="setting-row setting-row-top" data-mcp-session-dependent data-mcp-inbound-field data-mcp-inbound-dependent>
+                  <label for="mcp-inbound-tool">確認に使う tool:</label>
+                  <div class="console-control-with-hint">
+                    <input id="mcp-inbound-tool" class="field-width-medium">
+                    <span class="field-hint">接続中 catalog にある tool 名です。未読の確認など、読み取り用の tool を指定します。</span>
+                  </div>
+                </div>
+                <div class="setting-row setting-row-top" data-mcp-session-dependent data-mcp-inbound-field data-mcp-inbound-dependent>
+                  <label for="mcp-inbound-arguments">引数:</label>
+                  <div class="console-control-with-hint">
+                    <textarea id="mcp-inbound-arguments" rows="4" spellcheck="false"></textarea>
+                    <span class="field-hint">tool へ渡す JSON object。空なら {} です。</span>
+                  </div>
+                </div>
               </div>
             </fieldset>
           </section>

@@ -24,6 +24,7 @@
 - `world_state` 候補抽出
 - `activity_state` 候補抽出
 - `visual_observation` 要約
+- `mcp_inbound_observation`
 
 ## 共通境界
 

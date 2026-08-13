@@ -30,6 +30,7 @@ class ServiceInputInitiativeFamiliesMixin:
         speech_timing_state: dict[str, Any],
         capability_summary: dict[str, Any],
         due_standing_concerns: list[dict[str, Any]] | None = None,
+        inbound_observations: list[dict[str, Any]] | None = None,
     ) -> list[InitiativeCandidateFamily]:
         pending_pool_count = 0
         pending_eligible_count = 0
@@ -56,6 +57,7 @@ class ServiceInputInitiativeFamiliesMixin:
                 trigger_kind=trigger_kind,
                 drive_summaries=drive_summaries,
                 due_standing_concerns=due_standing_concerns,
+                inbound_observations=inbound_observations,
                 world_state_summary=world_state_summary,
                 recent_turn_summary=recent_turn_summary,
                 foreground_signal_summary=foreground_signal_summary,
@@ -189,6 +191,7 @@ class ServiceInputInitiativeFamiliesMixin:
         speech_timing_state: dict[str, Any],
         capability_summary: dict[str, Any],
         due_standing_concerns: list[dict[str, Any]] | None = None,
+        inbound_observations: list[dict[str, Any]] | None = None,
     ) -> InitiativeCandidateFamily:
         _ = initiative_baseline, speech_timing_state
         entry_kind = (
@@ -207,7 +210,13 @@ class ServiceInputInitiativeFamiliesMixin:
         visual_signals = self._initiative_speech_visual_observation_signals(
             foreground_signal_summary
         )
-        available = bool(foreground_drives or entry_is_strong or visual_signals or due_standing_concerns)
+        available = bool(
+            foreground_drives
+            or entry_is_strong
+            or visual_signals
+            or due_standing_concerns
+            or inbound_observations
+        )
         if not available:
             blocking_reason = "drive_state、強い自律判断入口、現在観測候補がまだ無い。"
             if drive_summaries:
@@ -233,6 +242,7 @@ class ServiceInputInitiativeFamiliesMixin:
                     suppression_summary=suppression_summary,
                     capability_summary=capability_summary,
                     due_standing_concerns=due_standing_concerns,
+                    inbound_observations=inbound_observations,
                 ),
                 blocking_reason_summary=blocking_reason,
             )
@@ -262,6 +272,7 @@ class ServiceInputInitiativeFamiliesMixin:
                 suppression_summary=suppression_summary,
                 capability_summary=capability_summary,
                 due_standing_concerns=due_standing_concerns,
+                inbound_observations=inbound_observations,
             ),
             preferred_result_kind=preferred_result_kind,
             preferred_result_reason_summary=preferred_result_reason,
@@ -426,8 +437,11 @@ class ServiceInputInitiativeFamiliesMixin:
         suppression_summary: dict[str, Any],
         capability_summary: dict[str, Any],
         due_standing_concerns: list[dict[str, Any]] | None = None,
+        inbound_observations: list[dict[str, Any]] | None = None,
     ) -> str | None:
         parts: list[str] = []
+        if inbound_observations:
+            parts.append(f"届いている働きかけ {len(inbound_observations)} 件")
         if due_standing_concerns:
             parts.append(f"気にかけていること {len(due_standing_concerns)} 件")
         if isinstance(initiative_entry_summary, dict):

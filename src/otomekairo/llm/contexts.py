@@ -25,6 +25,7 @@ PERSONA_CONTEXT_USE_POLICIES = {
     "world_state": "観測事実の優先順位と要約粒度の補助に使う。見えていない短期状態を足さない。",
     "activity_state": "活動推定の注目点と要約粒度の補助に使う。観測外の活動を足さない。",
     "visual_observation": "画像内で判断に効く部分の優先順位と要約粒度の補助に使う。見えていないものを足さない。",
+    "mcp_inbound_observation": "届いている働きかけの有無を読む補助に使う。結果に無い接触を足さない。",
     "drive_state": "drive の種類、根拠記憶、scope support と合わせた整合度評価に使う。人格本文を状態へ複写しない。",
 }
 

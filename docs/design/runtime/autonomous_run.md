@@ -164,16 +164,20 @@ timeout 後に再試行、待機、完了、cancel のどれを選ぶかは `aut
 
 - 人物の明示依頼は `user_message` から開始できる。`min_interval_seconds` は人物起点を抑制しない
 - 自動開始は `background_thinking` だけから許可し、`background_enabled=true` を必要とする。`wake`、capability result、その他の入力起点から新規開始しない
-- background 開始では、同じ MCP server の nonterminal session がなく、直近 session の `created_at` から `min_interval_seconds` 以上経過している必要がある
+- `min_interval_seconds` は、自分から background session を始める最短間隔である。届いている働きかけへの応答間隔ではない
+- 自分から始める background 開始では、同じ MCP server の nonterminal session がなく、直近 session の `created_at` から `min_interval_seconds` 以上経過している必要がある
+- その cycle の inbound 観測が、対象 server に届いている働きかけありと判断した場合、`min_interval_seconds` は見ない。nonterminal session が無いことと `background_enabled=true` だけを見る
 - 同じ MCP server に active、waiting_timer、waiting_result、paused の session がある間は `create_new` を拒否する。人物が置き換える場合は `coordination.mode=replace_existing` とし、既存 session の全 run id を対象に含める
 - background 開始は既存 session の自動置換を行わない
 
+inbound 観測の設定、実行、意味判断は [../llm/mcp_inbound_observation.md](../llm/mcp_inbound_observation.md) を正とする。
+
 判断用の `CapabilityDecisionView.mcp.call_tool` は、単発 tool 実行用の `mcp_servers` と有限セッション開始用の `finite_session_targets` を分ける。`finite_session_targets[]` は `mcp_server_id / active_run_ids` を持つ。
-`user_message` では利用可能かつ `autonomous_session.enabled=true` の server を載せ、background の最短間隔は適用しない。`background_thinking` ではさらに `background_enabled=true`、nonterminal session なし、最短間隔経過済みの server だけを載せる。他の起点では空配列にする。
+`user_message` では利用可能かつ `autonomous_session.enabled=true` の server を載せ、background の最短間隔は適用しない。`background_thinking` では `background_enabled=true`、nonterminal session なし、かつ次のいずれかである server だけを載せる。最短間隔経過済み、またはその cycle の inbound 観測が届いている働きかけありとした server。他の起点では空配列にする。
 
 `decision.autonomous_run.mcp_server_id` は `finite_session_targets[].mcp_server_id` からだけ選ぶ。候補外の server を選んだ出力は decision contract の contextual validation で拒否し、通常の契約不正と同じく 1 回だけ repair する。開始候補がない場合、同じ MCP 操作を `mcp_server_id=null` の通常 run へ切り替えず、`pending_intent` または `noop` を判断する。
 
-decision contract 通過後、開始直前に最新設定、起点、nonterminal session、最短間隔を再検証する。判断中の設定変更や並行開始で境界を満たさなくなった場合は session を作らず、明示的な `internal_failure` として記録する。
+decision contract 通過後、開始直前に最新設定、起点、nonterminal session、最短間隔または inbound 観測の開始理由を再検証する。判断中の設定変更や並行開始で境界を満たさなくなった場合は session を作らず、明示的な `internal_failure` として記録する。
 
 step と終了境界は次のとおりとする。
 

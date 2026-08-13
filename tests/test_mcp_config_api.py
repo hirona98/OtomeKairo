@@ -63,6 +63,12 @@ class McpConfigApiTests(unittest.TestCase):
         self.assertEqual(elyth["headers"]["Authorization"], "")
         self.assertTrue(elyth["autonomous_session"]["background_enabled"])
         self.assertEqual(elyth["autonomous_session"]["max_tool_calls"], 10)
+        self.assertTrue(elyth["inbound_observation"]["enabled"])
+        self.assertEqual(elyth["inbound_observation"]["interval_seconds"], 900)
+        self.assertEqual(elyth["inbound_observation"]["tool_name"], "get_notifications")
+        self.assertEqual(elyth["inbound_observation"]["arguments"], {})
+        self.assertFalse(estat["inbound_observation"]["enabled"])
+        self.assertEqual(estat["inbound_observation"]["tool_name"], "")
         self.assertFalse(estat["enabled"])
         self.assertFalse(estat["pre_send_check_enabled"])
         self.assertEqual(estat["command"], "uvx")
@@ -259,6 +265,7 @@ class McpConfigApiTests(unittest.TestCase):
         self.assertEqual(runtime["headers"]["Authorization"], "Bearer test-token")
         self.assertNotIn("pre_send_check_enabled", runtime)
         self.assertNotIn("autonomous_session", runtime)
+        self.assertNotIn("inbound_observation", runtime)
 
     def test_streamable_http_rejects_stdio_fields(self) -> None:
         service = DummyService()
@@ -300,6 +307,37 @@ class McpConfigApiTests(unittest.TestCase):
         service = DummyService()
         definition = self._elyth_definition()
         definition["autonomous_session"]["enabled"] = False
+
+        with self.assertRaises(ServiceError) as raised:
+            service.replace_mcp_server("token", "elyth", definition)
+
+        self.assertEqual(raised.exception.error_code, "invalid_mcp_server_field")
+
+    def test_inbound_observation_requires_background_session(self) -> None:
+        service = DummyService()
+        definition = self._elyth_definition()
+        definition["autonomous_session"]["background_enabled"] = False
+        definition["inbound_observation"] = {
+            "enabled": True,
+            "interval_seconds": 900,
+            "tool_name": "get_notifications",
+            "arguments": {},
+        }
+
+        with self.assertRaises(ServiceError) as raised:
+            service.replace_mcp_server("token", "elyth", definition)
+
+        self.assertEqual(raised.exception.error_code, "invalid_mcp_server_field")
+
+    def test_inbound_observation_requires_tool_name_when_enabled(self) -> None:
+        service = DummyService()
+        definition = self._elyth_definition()
+        definition["inbound_observation"] = {
+            "enabled": True,
+            "interval_seconds": 900,
+            "tool_name": "",
+            "arguments": {},
+        }
 
         with self.assertRaises(ServiceError) as raised:
             service.replace_mcp_server("token", "elyth", definition)
