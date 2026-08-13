@@ -200,6 +200,7 @@ LLM は次を担う。
 - wake の due 判定
 - 思考前観測の取得、視覚記録、`world_state`、`activity_context` への反映
 - `drive_state / ongoing_action / pending_intent / initiative_entry_summary` による自律評価対象の前景化制御
+- due な気にかけていることがあるとき、`initiative_entry_check` の skip だけで定期思考を打ち切らないこと。意味境界は [気にかけていること.md](気にかけていること.md) を正とする
 - 観測変化、直近発話済み観測、重複発話事実の補助文脈化
 - 期限切れ候補の除外
 - capability availability と権限の検証

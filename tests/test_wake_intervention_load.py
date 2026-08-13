@@ -25,6 +25,13 @@ class DummyWakeService(ServiceSpontaneousWakeMixin):
 
 
 class DummyInputService(ServiceInputMixin, ServiceSpontaneousWakeMixin):
+    def __init__(self) -> None:
+        self._runtime_state_lock = threading.RLock()
+        self._wake_runtime_state = {
+            "last_wake_at": None,
+            "standing_concern_last_attended_at": {},
+        }
+
     def _list_current_drive_states(self, *, state: dict, current_time: str) -> list[dict]:
         _ = state, current_time
         return []
@@ -179,6 +186,52 @@ class WakeInterventionLoadTests(unittest.TestCase):
                 state={},
                 current_time="2026-06-22T22:30:00+09:00",
                 client_context=checked_context,
+            )
+        )
+
+    def test_due_standing_concern_keeps_initiative_context_after_entry_skip(self) -> None:
+        service = DummyInputService()
+        state = {
+            "standing_concerns": [
+                {
+                    "concern_id": "elyth",
+                    "enabled": True,
+                    "min_interval_seconds": 600,
+                    "concern_summary": "ELYTHの場。届いている反応やリプライがあるかは気にかける。",
+                }
+            ]
+        }
+        client_context = {
+            "initiative_entry_check": {
+                "entry_kind": "skip",
+                "entry_basis": "observation_only",
+                "reason_summary": "作業が続いており変化はない。",
+            }
+        }
+
+        self.assertTrue(
+            service._has_autonomous_initiative_context(
+                state=state,
+                current_time="2026-08-13T12:20:00+09:00",
+                client_context=client_context,
+            )
+        )
+
+    def test_entry_skip_without_due_standing_concern_has_no_initiative_context(self) -> None:
+        service = DummyInputService()
+        client_context = {
+            "initiative_entry_check": {
+                "entry_kind": "skip",
+                "entry_basis": "observation_only",
+                "reason_summary": "作業が続いており変化はない。",
+            }
+        }
+
+        self.assertFalse(
+            service._has_autonomous_initiative_context(
+                state={"standing_concerns": []},
+                current_time="2026-08-13T12:20:00+09:00",
+                client_context=client_context,
             )
         )
 
