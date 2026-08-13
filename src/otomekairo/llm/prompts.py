@@ -2200,7 +2200,7 @@ def _build_speech_internal_context_payload(
     if people_context:
         payload["people_context"] = people_context
     if relationship_context:
-        payload["relationship_context"] = relationship_context
+        payload["relationship_context"] = _compact_relationship_context(relationship_context)
     if prediction_error_context:
         payload["prediction_error_context"] = prediction_error_context
     if workspace_context:
@@ -2428,16 +2428,66 @@ def _build_internal_context_payload(
     if people_context:
         payload["people_context"] = people_context
     if relationship_context:
-        payload["relationship_context"] = relationship_context
+        payload["relationship_context"] = _compact_relationship_context(relationship_context)
     if prediction_error_context:
         payload["prediction_error_context"] = prediction_error_context
     if default_mode_context:
-        payload["default_mode_context"] = default_mode_context
+        payload["default_mode_context"] = _compact_default_mode_context(default_mode_context)
     if workspace_context:
         payload["workspace_context"] = workspace_context
     if reference_context:
         payload["reference_context"] = reference_context
     return payload
+
+
+def _compact_relationship_context(relationship_context: dict[str, Any]) -> dict[str, Any]:
+    compact = {
+        key: value
+        for key, value in relationship_context.items()
+        if key != "relationship_items"
+    }
+    items = relationship_context.get("relationship_items")
+    if not isinstance(items, list):
+        return compact
+    compact_items: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        compact_item = {
+            key: item[key]
+            for key in ("source", "summary_text", "metadata")
+            if key in item
+        }
+        if compact_item:
+            compact_items.append(compact_item)
+    if compact_items:
+        compact["relationship_items"] = compact_items
+    return compact
+
+
+def _compact_default_mode_context(default_mode_context: dict[str, Any]) -> dict[str, Any]:
+    compact = {
+        key: value
+        for key, value in default_mode_context.items()
+        if key != "resurfacing_candidates"
+    }
+    items = default_mode_context.get("resurfacing_candidates")
+    if not isinstance(items, list):
+        return compact
+    compact_items: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        compact_item = {
+            key: item[key]
+            for key in ("source", "summary_text", "resurfacing_policy")
+            if key in item
+        }
+        if compact_item:
+            compact_items.append(compact_item)
+    if compact_items:
+        compact["resurfacing_candidates"] = compact_items
+    return compact
 
 
 def _compact_recall_pack(recall_pack: dict[str, Any]) -> dict[str, Any]:

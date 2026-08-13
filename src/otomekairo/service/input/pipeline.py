@@ -25,6 +25,14 @@ from otomekairo.service.standing_concerns import standing_concern_factor_ref
 WORKSPACE_CANDIDATE_LIMIT = 24
 WORKSPACE_SUPPORTING_SELECTION_LIMIT = 3
 WORKSPACE_SUPPRESSED_SELECTION_LIMIT = 5
+WORKSPACE_LIMIT_RETAINED_KINDS = frozenset(
+    {
+        "self_state",
+        "relationship",
+        "prediction_error",
+        "default_mode",
+    }
+)
 WORKSPACE_MEMORY_SECTIONS = (
     "active_commitments",
     "active_topics",
@@ -1489,7 +1497,7 @@ class ServiceInputPipelineMixin:
             source_counts=source_counts,
             recall_pack=recall_pack,
         )
-        limited_candidates = candidates[:WORKSPACE_CANDIDATE_LIMIT]
+        limited_candidates = self._limit_workspace_candidates(candidates)
         return {
             "workspace_candidates": limited_candidates,
             "selection_policy": {
@@ -1521,7 +1529,7 @@ class ServiceInputPipelineMixin:
                 entries = self_state_context.get(source_key)
                 if not isinstance(entries, list):
                     continue
-                for index, entry in enumerate(entries[:3]):
+                for index, entry in enumerate(entries):
                     if not isinstance(entry, dict):
                         continue
                     self._append_workspace_context_item(
@@ -1550,7 +1558,7 @@ class ServiceInputPipelineMixin:
         if isinstance(relationship_context, dict):
             relationship_items = relationship_context.get("relationship_items")
             if isinstance(relationship_items, list):
-                for index, item in enumerate(relationship_items[:4]):
+                for index, item in enumerate(relationship_items):
                     if not isinstance(item, dict):
                         continue
                     item_ref = self._workspace_item_ref(item, ("item_ref",), fallback=str(index))
@@ -1567,7 +1575,7 @@ class ServiceInputPipelineMixin:
                     )
             affect_items = relationship_context.get("affect_items")
             if isinstance(affect_items, list):
-                for index, item in enumerate(affect_items[:2]):
+                for index, item in enumerate(affect_items):
                     if not isinstance(item, dict):
                         continue
                     self._append_workspace_context_item(
@@ -1584,7 +1592,7 @@ class ServiceInputPipelineMixin:
         if isinstance(prediction_error_context, dict):
             signals = prediction_error_context.get("signals")
             if isinstance(signals, list):
-                for index, signal in enumerate(signals[:4]):
+                for index, signal in enumerate(signals):
                     if not isinstance(signal, dict):
                         continue
                     self._append_workspace_context_item(
@@ -1601,7 +1609,7 @@ class ServiceInputPipelineMixin:
         if isinstance(default_mode_context, dict):
             resurfacing_candidates = default_mode_context.get("resurfacing_candidates")
             if isinstance(resurfacing_candidates, list):
-                for item in resurfacing_candidates[:DEFAULT_MODE_CANDIDATE_LIMIT]:
+                for item in resurfacing_candidates:
                     if not isinstance(item, dict):
                         continue
                     item_ref = self._workspace_item_ref(item, ("candidate_ref",), fallback="candidate")
@@ -1910,6 +1918,30 @@ class ServiceInputPipelineMixin:
                     ),
                     metadata_keys=("memory_type", "scope_type", "scope_key", "primary_scope_type", "primary_scope_key", "retrieval_lane"),
                 )
+
+    def _limit_workspace_candidates(
+        self,
+        candidates: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        limited = candidates[:WORKSPACE_CANDIDATE_LIMIT]
+        if len(candidates) <= WORKSPACE_CANDIDATE_LIMIT:
+            return limited
+        kept_refs = {
+            candidate["factor_ref"]
+            for candidate in limited
+            if isinstance(candidate, dict) and isinstance(candidate.get("factor_ref"), str)
+        }
+        for candidate in candidates[WORKSPACE_CANDIDATE_LIMIT:]:
+            if not isinstance(candidate, dict):
+                continue
+            if candidate.get("kind") not in WORKSPACE_LIMIT_RETAINED_KINDS:
+                continue
+            factor_ref = candidate.get("factor_ref")
+            if not isinstance(factor_ref, str) or factor_ref in kept_refs:
+                continue
+            limited.append(candidate)
+            kept_refs.add(factor_ref)
+        return limited
 
     def _append_workspace_context_item(
         self,
