@@ -1439,13 +1439,11 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         # 要約
         source_unit = link.get("source_memory_unit")
         target_unit = link.get("target_memory_unit")
-        source_summary = self._short_relation_text(
+        source_summary = self._relation_text(
             source_unit.get("summary_text") if isinstance(source_unit, dict) else None,
-            limit=80,
         )
-        target_summary = self._short_relation_text(
+        target_summary = self._relation_text(
             target_unit.get("summary_text") if isinstance(target_unit, dict) else None,
-            limit=80,
         )
         if source_summary is None and target_summary is None:
             return None
@@ -1515,17 +1513,6 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             if count > 0:
                 ordered[label] = count
         return ordered
-
-    def _short_relation_text(self, value: Any, *, limit: int) -> str | None:
-        # 短縮
-        if not isinstance(value, str):
-            return None
-        normalized = " ".join(value.strip().split())
-        if not normalized:
-            return None
-        if len(normalized) <= limit:
-            return normalized
-        return normalized[: limit - 1].rstrip() + "…"
 
     def _relation_text(self, value: Any) -> str | None:
         # RecallPack 選別に渡す関連記憶は、長さでは切らない。

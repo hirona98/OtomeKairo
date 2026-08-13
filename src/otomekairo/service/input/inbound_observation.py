@@ -14,8 +14,6 @@ from otomekairo.service.inbound_observation import (
 )
 
 INBOUND_OBSERVATION_CONTENT_LIMIT = 8
-INBOUND_OBSERVATION_TEXT_LIMIT = 400
-INBOUND_OBSERVATION_STRUCTURED_LIMIT = 1200
 
 
 class ServiceInputInboundObservationMixin:
@@ -206,7 +204,7 @@ class ServiceInputInboundObservationMixin:
                     compact_item["type"] = item_type.strip()
                 text = item.get("text")
                 if isinstance(text, str) and text.strip():
-                    compact_item["text"] = self._clamp(text.strip(), limit=INBOUND_OBSERVATION_TEXT_LIMIT)
+                    compact_item["text"] = text.strip()
                 if compact_item:
                     compact_content.append(compact_item)
         structured = capability_response.get("structured_content")
@@ -227,7 +225,7 @@ class ServiceInputInboundObservationMixin:
             if not isinstance(key, str) or not key.strip():
                 continue
             if isinstance(item, str):
-                compact[key.strip()] = self._clamp(item.strip(), limit=INBOUND_OBSERVATION_TEXT_LIMIT)
+                compact[key.strip()] = item.strip()
             elif isinstance(item, (int, float, bool)) or item is None:
                 compact[key.strip()] = item
             elif isinstance(item, list):
@@ -238,9 +236,6 @@ class ServiceInputInboundObservationMixin:
                     for nested_key, nested_value in list(item.items())[:8]
                     if isinstance(nested_key, str)
                 }
-        rendered = str(compact)
-        if len(rendered) > INBOUND_OBSERVATION_STRUCTURED_LIMIT:
-            return {"summary_text": self._clamp(rendered, limit=INBOUND_OBSERVATION_TEXT_LIMIT)}
         return compact
 
     def _attach_inbound_observations(

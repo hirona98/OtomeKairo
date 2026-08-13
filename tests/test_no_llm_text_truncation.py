@@ -1,10 +1,12 @@
 import unittest
 
+from otomekairo.evidence import EvidenceResolver
 from otomekairo.llm.contexts import CurrentInput, InitiativeContext
 from otomekairo.llm.prompts import _compact_speech_initiative_context
 from otomekairo.memory.consolidator import MemoryConsolidator
 from otomekairo.recall.builder import RecallBuilder
 from otomekairo.recall.event_evidence import RecallEventEvidenceMixin
+from otomekairo.service.input.inbound_observation import ServiceInputInboundObservationMixin
 from otomekairo.service.input.pipeline import ServiceInputPipelineMixin
 from otomekairo.service.spontaneous.wake import ServiceSpontaneousWakeMixin
 
@@ -201,6 +203,64 @@ class TextTruncationTests(unittest.TestCase):
         representative = summaries["memory:1"]["representative_links"][0]
         self.assertEqual(representative["related_summary_text"], related_summary)
         self.assertTrue(representative["summary_text"].endswith("末尾"))
+
+    def test_memory_link_context_text_is_not_truncated(self) -> None:
+        builder = RecallBuilder.__new__(RecallBuilder)
+        source_summary = "h" * 220 + "元末尾"
+        target_summary = "i" * 220 + "先末尾"
+
+        payload = builder._memory_link_trace_item(
+            link={
+                "memory_link_id": "link:1",
+                "label": "supports",
+                "source_memory_unit_id": "memory:1",
+                "target_memory_unit_id": "memory:2",
+                "source_memory_unit": {"summary_text": source_summary, "status": "confirmed"},
+                "target_memory_unit": {"summary_text": target_summary, "status": "confirmed"},
+            },
+            label="supports",
+            selected_ids={"memory:1"},
+        )
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(payload["source_summary_text"], source_summary)
+        self.assertEqual(payload["target_summary_text"], target_summary)
+        self.assertTrue(payload["summary_text"].endswith("先末尾"))
+
+    def test_evidence_pack_event_text_is_not_truncated(self) -> None:
+        resolver = EvidenceResolver.__new__(EvidenceResolver)
+        text = "j" * 400 + "末尾"
+
+        payload = resolver._event_evidence_item(
+            {
+                "event_id": "event:1",
+                "kind": "speech",
+                "role": "person",
+                "created_at": "2026-06-20T12:00:00+09:00",
+                "text": text,
+            }
+        )
+
+        self.assertEqual(payload["text"], text)
+
+    def test_inbound_observation_source_text_is_not_truncated(self) -> None:
+        service = ServiceInputInboundObservationMixin()
+        text = "k" * 800 + "末尾"
+        structured_text = "l" * 1500 + "構造末尾"
+
+        payload = service._inbound_observation_source_pack(
+            mcp_server_id="elyth",
+            tool_name="get_notifications",
+            capability_response={
+                "is_error": False,
+                "content": [{"type": "text", "text": text}],
+                "structured_content": {"body": structured_text},
+            },
+        )
+
+        self.assertEqual(payload["content"][0]["text"], text)
+        self.assertEqual(payload["structured_content"]["body"], structured_text)
 
 
 if __name__ == "__main__":

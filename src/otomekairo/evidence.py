@@ -9,7 +9,6 @@ from otomekairo.memory.utils import localize_timestamp_fields
 
 # 定数
 EVIDENCE_ITEM_LIMIT = 5
-EVENT_TEXT_LIMIT = 240
 TRACE_SECTION_ITEM_LIMIT = 3
 DATE_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 JAPANESE_DATE_PATTERN = re.compile(r"\b\d{4}年\d{1,2}月\d{1,2}日\b")
@@ -466,7 +465,7 @@ class EvidenceResolver:
             "result_status": evidence_pack.get("status", "summary"),
             "resolver_path": resolver_path,
             "query": {
-                "augmented_query_text": self._clamp_text(input_text),
+                "augmented_query_text": self._event_text(input_text),
                 "current_time": current_time,
                 "contract": answer_contract.get("contract"),
                 "boundary": answer_contract.get("boundary"),
@@ -677,7 +676,7 @@ class EvidenceResolver:
             "role": record.get("role") or payload.get("role"),
             "created_at": created_at,
             "recorded_date": self._recorded_date(created_at),
-            "text": self._clamp_text(text),
+            "text": self._event_text(text),
         }
 
     def _recall_evidence_item(self, item: dict[str, Any], *, item_type: str) -> dict[str, Any]:
@@ -690,7 +689,7 @@ class EvidenceResolver:
         return {
             "type": item_type,
             "source_id": item.get("event_id") or item.get("episode_id") or item.get("memory_id") or item.get("id"),
-            "text": self._clamp_text(text),
+            "text": self._event_text(text),
             "payload": localize_timestamp_fields(item),
         }
 
@@ -718,13 +717,11 @@ class EvidenceResolver:
             return payload
         return {}
 
-    def _clamp_text(self, value: Any) -> str | None:
+    def _event_text(self, value: Any) -> str | None:
         if not isinstance(value, str):
             return None
         normalized = value.strip()
-        if len(normalized) <= EVENT_TEXT_LIMIT:
-            return normalized
-        return normalized[: EVENT_TEXT_LIMIT - 1].rstrip() + "…"
+        return normalized or None
 
     def _first_text(self, *values: Any) -> str | None:
         for value in values:
