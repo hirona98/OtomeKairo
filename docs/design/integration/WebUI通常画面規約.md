@@ -50,7 +50,7 @@ API wire、認可、内部状態の表示内容の意味は [../api/README.md](.
 | 失敗 | `--danger` / `--error-border` / `--error-bg` |
 | 待機・処理中 | `--waiting` / `--waiting-border` / `--waiting-bg` |
 
-chip、badge、`.status.processing` / `.status.error` は上記を共有する。
+badge、`.status.processing` / `.status.error` は上記を共有する。
 
 内部状態パネル背景は `--dashboard-bg`、項目区切りは `--item-line` を使う。
 

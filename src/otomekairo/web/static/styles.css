@@ -16,7 +16,7 @@
   --danger-hover: #f44336;
   --danger-pressed: #c62828;
   --ok: #137333;
-  /* セマンティック面。chip / badge / status / info 枠で共有する。 */
+  /* セマンティック面。badge / status / info 枠で共有する。 */
   --ok-border: #b7dfc2;
   --ok-bg: #eefaf1;
   --error-border: #f0c2c2;
@@ -363,45 +363,6 @@ p {
   margin: 0;
   padding: var(--space-2) var(--space-3);
   font-size: var(--font-body);
-}
-
-.dashboard-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-  flex: 0 0 auto;
-  margin: 0;
-}
-
-.dashboard-chip {
-  display: inline-flex;
-  align-items: center;
-  min-height: 20px;
-  padding: 1px 6px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: #ffffff;
-  color: var(--muted);
-  font-size: var(--font-micro);
-  line-height: 1.15;
-}
-
-.dashboard-chip.ok {
-  border-color: var(--ok-border);
-  background: var(--ok-bg);
-  color: var(--ok);
-}
-
-.dashboard-chip.error {
-  border-color: var(--error-border);
-  background: var(--error-bg);
-  color: var(--danger);
-}
-
-.dashboard-chip.waiting {
-  border-color: var(--waiting-border);
-  background: var(--waiting-bg);
-  color: var(--waiting);
 }
 
 /* セクションを横並びにし、幅の空きを埋める。 */

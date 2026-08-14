@@ -501,13 +501,6 @@ function createDashboardItem({
   return item;
 }
 
-function createDashboardChip(text, kind = "") {
-  const chip = document.createElement("span");
-  chip.className = `dashboard-chip ${kind}`.trim();
-  chip.textContent = text;
-  return chip;
-}
-
 function runBadgeKind(status) {
   if (status === "completed") {
     return "ok";
@@ -590,16 +583,6 @@ function primaryWorldStateLabel(current) {
   return "";
 }
 
-function nonTerminalRuns(current, runtime) {
-  const runs = current.autonomous_runs || [];
-  const live = runs.filter((run) => !["completed", "cancelled"].includes(run.status));
-  if (live.length) {
-    return live;
-  }
-  const count = (runtime.active_autonomous_run_count || 0) + (runtime.paused_autonomous_run_count || 0);
-  return count > 0 ? runs.slice(0, count) : [];
-}
-
 function buildDashboardHeadline({ runtime, detail, current }) {
   const runtimeReady = runtime.connection_state === "ready";
   const parts = [];
@@ -661,35 +644,8 @@ function buildDashboardHeadline({ runtime, detail, current }) {
 }
 
 function renderDashboardHeader() {
-  const { snapshot, runtime, detail, current, capabilities } = dashboardSnapshotParts();
+  const { snapshot, runtime, detail, current } = dashboardSnapshotParts();
   element("dashboard-headline").textContent = buildDashboardHeadline({ runtime, detail, current });
-
-  const chips = element("dashboard-chips");
-  const runtimeReady = runtime.connection_state === "ready";
-  const liveRuns = nonTerminalRuns(current, runtime);
-  const pendingCount = (detail.pending_capability_requests || []).length;
-  const availableCount = capabilities.filter((capability) => capability.available === true).length;
-  const failedRecent = (state.dashboard.cycleSummaries || []).some((cycle) => cycle.failed === true);
-
-  const nodes = [
-    createDashboardChip(runtimeReady ? "稼働" : displayValue(runtime.connection_state, "未接続"), runtimeReady ? "ok" : "error"),
-  ];
-  if (current.ongoing_action) {
-    nodes.push(createDashboardChip("継続行動", current.ongoing_action.status === "failed" ? "error" : "waiting"));
-  } else if (pendingCount) {
-    nodes.push(createDashboardChip(`結果待ち ${pendingCount}`, "waiting"));
-  } else {
-    nodes.push(createDashboardChip("静か"));
-  }
-  nodes.push(createDashboardChip(`自律 ${liveRuns.length || runtime.active_autonomous_run_count || 0}`));
-  if (capabilities.length) {
-    nodes.push(createDashboardChip(`能力 ${availableCount}/${capabilities.length}`));
-  }
-  if (failedRecent) {
-    nodes.push(createDashboardChip("直近に失敗あり", "error"));
-  }
-  chips.replaceChildren(...nodes);
-
   element("dashboard-generated-at").textContent = `更新 ${formatDateTime(snapshot.generated_at)}`;
 }
 
