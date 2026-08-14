@@ -37,6 +37,27 @@ connector を起動する。
 
 OtomeKairo access token は、`OTOMEKAIRO_ACCESS_TOKEN`、ローカル `config.db`、bootstrap の順に解決する。MCP server 設定は `GET /api/config/connectors/{client_id}/runtime-config` から取得する。
 
+## VSCode F5 debug
+
+workspace root の VSCode F5 は OtomeKairo server と MCP client connector を compound debug で同時起動する。
+停止ボタンは server と connector の両方を停止する。
+
+F5 debug でも通常起動と同じ token 解決を使う。
+token は launch 設定、コード、通常ログへ保存しない。
+
+F5 debug でローカル上書きが必要な場合だけ、`connectors/mcp_client/.env` に token を設定する。
+`.env` は repository に含めない。
+
+```bash
+OTOMEKAIRO_ACCESS_TOKEN=...
+```
+
+F5 debug の connector は `https://127.0.0.1:55601` の server 起動を待ってから runtime config を取得する。
+有効な `mcp_client` server が無い場合は起動せず終了する。ELYTH などは OtomeKairo WebUI の MCP 設定で登録し、`enabled=true`、`connector_kind=mcp_client`、`client_id=mcp-client-connector-main` にする。
+
+server のローカル開発 TLS 証明書を使う場合、`server.tls_verify=false` のまま使う。
+実運用の信頼済み証明書を使う場合、`server.tls_verify=true` にする。
+
 ## ELYTH Remote MCP
 
 ELYTH は他の MCP server と同じ connector と `tools/list` catalog で扱う。Streamable HTTP の設定例は [状態と設定](../../docs/design/api/状態と設定.md#put-apiconfigmcp-serversmcp_server_id) を参照する。

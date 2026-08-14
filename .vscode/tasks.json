@@ -52,6 +52,22 @@
       }
     },
     {
+      // MCP client connector 用 venv を準備する。
+      "label": "mcp_client: prepare debug env",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/prepare_mcp_client_connector_debug_env.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared",
+        "showReuseMessage": false,
+        "close": true
+      }
+    },
+    {
       // watcher 用 venv を準備する。
       "label": "tapo_c220_watcher: prepare debug env",
       "type": "shell",
@@ -75,6 +91,7 @@
         "otomekairo: prepare debug env",
         "microphone: prepare debug env",
         "tapo_c220: prepare debug env",
+        "mcp_client: prepare debug env",
         "tapo_c220_watcher: prepare debug env"
       ],
       "dependsOrder": "parallel",

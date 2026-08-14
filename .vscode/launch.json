@@ -61,6 +61,24 @@
       }
     },
     {
+      // connector venv で MCP client connector を起動する。
+      "name": "OtomeKairo: MCP Client Connector",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/debug_mcp_client_connector.py",
+      "cwd": "${workspaceFolder}/connectors/mcp_client",
+      "python": "${workspaceFolder}/connectors/mcp_client/.venv/bin/python",
+      "justMyCode": true,
+      "console": "integratedTerminal",
+      "env": {
+        "OTOMEKAIRO_SERVER_URL": "https://127.0.0.1:55601",
+        "OTOMEKAIRO_DATA_DIR": "${workspaceFolder}/var/otomekairo"
+      },
+      "presentation": {
+        "hidden": true
+      }
+    },
+    {
       // watcher venv で Tapo C220 watcher を起動する。
       "name": "OtomeKairo: Tapo C220 Watcher",
       "type": "debugpy",
@@ -87,6 +105,7 @@
         "OtomeKairo: Server",
         "OtomeKairo: Microphone Connector",
         "OtomeKairo: Tapo C220 Connector",
+        "OtomeKairo: MCP Client Connector",
         "OtomeKairo: Tapo C220 Watcher"
       ],
       "preLaunchTask": "otomekairo: prepare full debug env",
