@@ -197,6 +197,8 @@ class EventStreamRegistry:
         # 項目
         self._lock = threading.RLock()
         self._sessions: dict[str, dict[str, Any]] = {}
+        self._seen_vision_source_ids: set[str] = set()
+        self._seen_vision_source_kinds: set[str] = set()
 
     def add_connection(self, websocket: ServerWebSocket, permissions: list[str] | None = None) -> str:
         # セッション
@@ -324,6 +326,7 @@ class EventStreamRegistry:
             session["event_subscriptions"] = normalized_event_subscriptions
             session["vision_sources"] = normalized_vision_sources
             session["mcp_servers"] = normalized_mcp_servers
+            self._remember_vision_sources_locked(normalized_vision_sources)
 
         # 置換済み接続のクローズ
         for replaced_session in replaced_sessions:
@@ -331,6 +334,31 @@ class EventStreamRegistry:
                 replaced_session["websocket"].close()
             except OSError:
                 continue
+
+    def _remember_vision_sources_locked(self, vision_sources: list[dict[str, Any]]) -> None:
+        for source in vision_sources:
+            if not isinstance(source, dict):
+                continue
+            source_id = source.get("vision_source_id")
+            if isinstance(source_id, str) and source_id.strip():
+                self._seen_vision_source_ids.add(source_id.strip())
+            kind = source.get("kind")
+            if isinstance(kind, str) and kind.strip():
+                self._seen_vision_source_kinds.add(kind.strip())
+
+    def has_seen_vision_source(self, vision_source_id: str) -> bool:
+        normalized_source_id = vision_source_id.strip()
+        if not normalized_source_id:
+            return False
+        with self._lock:
+            return normalized_source_id in self._seen_vision_source_ids
+
+    def has_seen_vision_source_kind(self, kind: str) -> bool:
+        normalized_kind = kind.strip()
+        if not normalized_kind:
+            return False
+        with self._lock:
+            return normalized_kind in self._seen_vision_source_kinds
 
     def remove_connection(self, session_id: str) -> str | None:
         # 削除

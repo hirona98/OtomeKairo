@@ -56,6 +56,10 @@ class DummyWakeService(ServiceSpontaneousWakeMixin):
     def _parse_iso(self, value: str) -> datetime:
         return datetime.fromisoformat(value)
 
+    def _unseen_wake_observation_sources(self, state: dict) -> list[str]:
+        _ = state
+        return []
+
 
 class DummyInputService(ServiceInputMixin, ServiceSpontaneousWakeMixin):
     def __init__(self) -> None:

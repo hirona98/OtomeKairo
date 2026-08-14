@@ -73,6 +73,7 @@ class OtomeKairoService(
         self._autonomous_run_execution_locks: dict[str, threading.RLock] = {}
         self._background_thinking_stop_event: threading.Event | None = None
         self._background_thinking_thread: threading.Thread | None = None
+        self._background_thinking_nudge = threading.Event()
         self._background_autonomous_run_stop_event: threading.Event | None = None
         self._background_autonomous_run_thread: threading.Thread | None = None
         self._background_memory_postprocess_stop_event: threading.Event | None = None
@@ -117,6 +118,7 @@ class OtomeKairoService(
             )
             self._background_thinking_stop_event = stop_event
             self._background_thinking_thread = thread
+            self._background_thinking_nudge.clear()
 
         # 開始
         thread.start()
@@ -133,6 +135,7 @@ class OtomeKairoService(
         # 停止
         if stop_event is not None:
             stop_event.set()
+        self._background_thinking_nudge.set()
         if thread is not None and thread.is_alive():
             thread.join(timeout=5.0)
         debug_log("Wake", "background thinking scheduler stopped")

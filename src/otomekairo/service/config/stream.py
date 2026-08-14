@@ -167,6 +167,8 @@ class ServiceConfigStreamMixin:
                 f"mcp_servers={len(mcp_servers)}"
             ),
         )
+        if vision_sources:
+            self._nudge_background_thinking_scheduler()
         audio_runtime = getattr(self, "_audio_runtime", None)
         if audio_runtime is not None:
             audio_runtime.on_event_client_connected(client_id.strip())

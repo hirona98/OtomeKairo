@@ -204,6 +204,37 @@ class ServiceInputWakeObservationMixin:
             previous_observation_runtime=previous_observation_runtime,
         )
 
+    def _unseen_wake_observation_sources(self, state: dict[str, Any]) -> list[str]:
+        unseen: list[str] = []
+        seen_ids: set[str] = set()
+        for observation in self._enabled_wake_policy_observations(state):
+            if observation.get("capability_id") != "vision.capture":
+                continue
+            input_payload = observation.get("input")
+            if not isinstance(input_payload, dict):
+                continue
+            vision_source_id = input_payload.get("vision_source_id")
+            if not isinstance(vision_source_id, str) or not vision_source_id.strip():
+                continue
+            normalized_source_id = vision_source_id.strip()
+            if normalized_source_id in seen_ids:
+                continue
+            if self._wake_observation_source_has_been_seen(normalized_source_id):
+                continue
+            seen_ids.add(normalized_source_id)
+            unseen.append(normalized_source_id)
+        return unseen
+
+    def _wake_observation_source_has_been_seen(self, vision_source_id: str) -> bool:
+        if self._event_stream_registry.has_seen_vision_source(vision_source_id):
+            return True
+        if isinstance(self._event_stream_registry.get_vision_source(vision_source_id), dict):
+            return True
+        stale_kind = vision_source_id.rsplit(":", 1)[-1].strip()
+        if stale_kind in {"desktop", "camera", "virtual"}:
+            return self._event_stream_registry.has_seen_vision_source_kind(stale_kind)
+        return False
+
     def _resolve_wake_policy_observation_input(
         self,
         *,

@@ -42,6 +42,10 @@ class DummyImmediateWakePipeline(ServiceInputWakePipelineMixin):
         self.due_called = True
         return {"should_skip": self.due_should_skip, "reason_summary": "not due"}
 
+    def _unseen_wake_observation_sources(self, state: dict) -> list[str]:
+        _ = state
+        return []
+
     def _clamp(self, value: object, limit: int = 200) -> str:
         _ = limit
         return str(value)

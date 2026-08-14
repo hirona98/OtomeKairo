@@ -219,6 +219,8 @@ class ServiceInputWakePipelineMixin:
         current_time: str,
         client_context: dict[str, Any] | None,
     ) -> bool:
+        if self._unseen_wake_observation_sources(state):
+            return False
         due_concerns = getattr(self, "_due_standing_concerns", None)
         if callable(due_concerns) and due_concerns(state=state, current_time=current_time):
             return True

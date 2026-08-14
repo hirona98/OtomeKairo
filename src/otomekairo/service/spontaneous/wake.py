@@ -380,6 +380,15 @@ class ServiceSpontaneousWakeMixin:
 
     def _execute_scheduled_background_thinking(self, *, state: dict[str, Any]) -> None:
         current_time = self._now_iso()
+        unseen_sources = self._unseen_wake_observation_sources(state)
+        if unseen_sources:
+            debug_log(
+                "Wake",
+                "background thinking skipped waiting_for_vision_sources "
+                f"count={len(unseen_sources)}",
+                level="DEBUG",
+            )
+            return
         regular_due = self._wake_is_due(state=state, current_time=current_time)["should_skip"] is not True
         standing_due = bool(self._due_standing_concerns(state=state, current_time=current_time))
         if not (regular_due or standing_due):
@@ -399,12 +408,21 @@ class ServiceSpontaneousWakeMixin:
                 state = self.store.read_state()
                 delay_seconds = self._background_thinking_delay_seconds(state=state, current_time=self._now_iso())
                 if delay_seconds > 0:
-                    stop_event.wait(timeout=delay_seconds)
+                    self._wait_background_thinking_delay(timeout=delay_seconds)
                     continue
                 self._execute_scheduled_background_thinking(state=state)
             except Exception as exc:  # noqa: BLE001
                 debug_log("Wake", f"background thinking loop error={type(exc).__name__}: {self._clamp(str(exc))}", level="ERROR")
-                stop_event.wait(timeout=BACKGROUND_THINKING_POLL_SECONDS)
+                self._wait_background_thinking_delay(timeout=BACKGROUND_THINKING_POLL_SECONDS)
+
+    def _wait_background_thinking_delay(self, *, timeout: float) -> None:
+        nudge = self._background_thinking_nudge
+        if not nudge.is_set():
+            nudge.wait(timeout=timeout)
+        nudge.clear()
+
+    def _nudge_background_thinking_scheduler(self) -> None:
+        self._background_thinking_nudge.set()
 
     def _background_thinking_delay_seconds(self, *, state: dict[str, Any], current_time: str) -> float:
         # 無効時
@@ -428,6 +446,10 @@ class ServiceSpontaneousWakeMixin:
         retry_delay_seconds = self._wake_retry_delay_remaining_seconds(current_time=current_time)
         if retry_delay_seconds is not None:
             return min(retry_delay_seconds, BACKGROUND_THINKING_POLL_SECONDS)
+
+        # 対象 vision source がこの process で未登録
+        if self._unseen_wake_observation_sources(state):
+            return BACKGROUND_THINKING_POLL_SECONDS
 
         # 初回定期思考
         with self._runtime_state_lock:
@@ -632,6 +654,13 @@ class ServiceSpontaneousWakeMixin:
             return {
                 "should_skip": True,
                 "reason_summary": "思考前観測 の一時失敗後の再試行待機中。",
+            }
+
+        # 対象 vision source がこの process で未登録
+        if self._unseen_wake_observation_sources(state):
+            return {
+                "should_skip": True,
+                "reason_summary": "思考前観測の対象 vision source が、この process でまだ一度も登録されていない。",
             }
 
         # 初回定期思考
