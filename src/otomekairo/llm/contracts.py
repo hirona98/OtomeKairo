@@ -914,7 +914,9 @@ def _validate_decision_foreground_selection(value: Any) -> None:
         if not isinstance(factor_ref, str) or not factor_ref.strip():
             raise LLMError("Decision foreground_selection.supporting_factor_refs の各要素は空でない文字列です。")
         if factor_ref in seen_refs:
-            raise LLMError("Decision foreground_selection の factor_ref に重複があります。")
+            raise LLMError(
+                f"Decision foreground_selection の factor_ref に重複があります。重複={factor_ref}"
+            )
         seen_refs.add(factor_ref)
     suppressed_factors = value.get("suppressed_factors")
     if not isinstance(suppressed_factors, list):
@@ -929,7 +931,9 @@ def _validate_decision_foreground_selection(value: Any) -> None:
         if not isinstance(factor_ref, str) or not factor_ref.strip():
             raise LLMError("Decision foreground_selection.suppressed_factors[].factor_ref は空でない文字列です。")
         if factor_ref in seen_refs:
-            raise LLMError("Decision foreground_selection の factor_ref に重複があります。")
+            raise LLMError(
+                f"Decision foreground_selection の factor_ref に重複があります。重複={factor_ref}"
+            )
         seen_refs.add(factor_ref)
         if not isinstance(reason_summary, str) or not reason_summary.strip():
             raise LLMError("Decision foreground_selection.suppressed_factors[].reason_summary は空でない文字列です。")

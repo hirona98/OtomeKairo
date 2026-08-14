@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -83,6 +84,38 @@ from otomekairo.service.common import debug_log
 ROUTINE_SUPPRESSED_LLM_OPERATIONS = {
     "visual_observation",
 }
+DEBUG_REJECTED_TEXT_LIMIT = 2000
+DEBUG_REJECTED_STRING_LIMIT = 200
+DEBUG_REJECTED_LIST_LIMIT = 12
+DEBUG_REDACTED_PAYLOAD_KEYS = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "token",
+        "access_token",
+        "refresh_token",
+        "password",
+        "secret",
+        "authorization",
+        "credential",
+        "credentials",
+        "private_key",
+        "arguments",
+    }
+)
+DEBUG_REJECTED_PAYLOAD_KEY_ORDER = (
+    "kind",
+    "reason_code",
+    "foreground_selection",
+    "target_stances",
+    "capability_request",
+    "autonomous_run",
+    "pending_intent",
+    "action",
+    "outcome",
+    "section_selection",
+    "selected_skill_ids",
+)
 
 # LiteLLM連携
 @dataclass(slots=True)
@@ -341,7 +374,7 @@ class LLMClient:
         persona_context: PersonaContext,
         context: DecisionContext,
     ) -> dict[str, Any]:
-        operation = "decision"
+        operation = self._decision_operation_name(context)
         debug_log(
             "LLM",
             (
@@ -1522,14 +1555,60 @@ class LLMClient:
     def _debug_error(self, exc: BaseException) -> str:
         # 長い応答本文をログへ出しすぎない。
         message = str(exc).replace("\n", " ").strip()
-        if len(message) <= 240:
-            return message
-        return message[:239] + "…"
+        return self._debug_clip(message, 240)
 
     def _debug_payload_keys(self, payload: dict[str, Any]) -> str:
         # payload の中身ではなくキーだけを出す。
         keys = sorted(str(key) for key in payload.keys())[:8]
         return ",".join(keys) if keys else "-"
+
+    def _decision_operation_name(self, context: DecisionContext) -> str:
+        scope = context.comparison_scope
+        if scope in {"self_activity", "outward_speech"}:
+            return f"decision:{scope}"
+        return "decision"
+
+    def _debug_clip(self, text: str, limit: int) -> str:
+        if len(text) <= limit:
+            return text
+        return text[: limit - 1] + "…"
+
+    def _debug_rejected_content(self, content: str) -> str:
+        flattened = content.replace("\r", " ").replace("\n", " ").strip()
+        return self._debug_clip(flattened, DEBUG_REJECTED_TEXT_LIMIT)
+
+    def _debug_rejected_payload(self, payload: dict[str, Any]) -> str:
+        compact = self._compact_debug_value(payload)
+        if isinstance(compact, dict):
+            ordered: dict[str, Any] = {}
+            for key in DEBUG_REJECTED_PAYLOAD_KEY_ORDER:
+                if key in compact:
+                    ordered[key] = compact[key]
+            for key, value in compact.items():
+                if key not in ordered:
+                    ordered[key] = value
+            compact = ordered
+        encoded = json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
+        return self._debug_clip(encoded, DEBUG_REJECTED_TEXT_LIMIT)
+
+    def _compact_debug_value(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            compact: dict[str, Any] = {}
+            for key, item in value.items():
+                name = str(key)
+                if name.lower() in DEBUG_REDACTED_PAYLOAD_KEYS:
+                    compact[name] = "[redacted]"
+                    continue
+                compact[name] = self._compact_debug_value(item)
+            return compact
+        if isinstance(value, list):
+            return [self._compact_debug_value(item) for item in value[:DEBUG_REJECTED_LIST_LIMIT]]
+        if isinstance(value, str):
+            flattened = value.replace("\r", " ").replace("\n", " ").strip()
+            return self._debug_clip(flattened, DEBUG_REJECTED_STRING_LIMIT)
+        if isinstance(value, (int, float, bool)) or value is None:
+            return value
+        return self._debug_clip(str(value), DEBUG_REJECTED_STRING_LIMIT)
 
     def _should_log_routine_llm_operation(self, operation: str) -> bool:
         return operation not in ROUTINE_SUPPRESSED_LLM_OPERATIONS
@@ -1581,14 +1660,22 @@ class LLMClient:
                     last_error = LLMContractError(str(exc)) if wrap_validation_error else exc
                     debug_log(
                         "LLM",
-                        f"{operation} validation_failed attempt={attempt + 1} error={self._debug_error(last_error)}",
+                        (
+                            f"{operation} validation_failed attempt={attempt + 1} "
+                            f"error={self._debug_error(last_error)} "
+                            f"payload={self._debug_rejected_payload(payload)}"
+                        ),
                         level="WARNING",
                     )
             except LLMError as exc:
                 last_error = exc
                 debug_log(
                     "LLM",
-                    f"{operation} parse_failed attempt={attempt + 1} error={self._debug_error(exc)}",
+                    (
+                        f"{operation} parse_failed attempt={attempt + 1} "
+                        f"error={self._debug_error(exc)} "
+                        f"content={self._debug_rejected_content(content)}"
+                    ),
                     level="WARNING",
                 )
 

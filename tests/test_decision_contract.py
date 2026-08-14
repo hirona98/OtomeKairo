@@ -157,6 +157,45 @@ class DecisionContractTests(unittest.TestCase):
 
         validate_decision_contract(payload)
 
+    def test_decision_contract_names_duplicate_foreground_factor_ref(self) -> None:
+        payload = {
+            "kind": "noop",
+            "reason_code": "hold_speech",
+            "reason_summary": "作業中なので問いかけない。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+            "capability_request": None,
+            "autonomous_run": None,
+            "foreground_selection": {
+                "primary_factor_ref": "visual_observation:current",
+                "supporting_factor_refs": ["visual_observation:current"],
+                "suppressed_factors": [],
+                "summary_text": "同じ観測を主役と補助に置いた。",
+            },
+            "target_stances": build_decision_target_stances_for_kind(
+                "noop",
+                required_targets=("outward_speech",),
+                reason_summary="作業中なので問いかけない。",
+            ),
+        }
+
+        with self.assertRaisesRegex(LLMError, r"重複=visual_observation:current"):
+            validate_decision_contract(payload)
+
+        payload["foreground_selection"] = {
+            "primary_factor_ref": "visual_observation:current",
+            "supporting_factor_refs": [],
+            "suppressed_factors": [
+                {
+                    "factor_ref": "visual_observation:current",
+                    "reason_summary": "身体注意は主題化しない。",
+                }
+            ],
+            "summary_text": "同じ観測を主役と控えに置いた。",
+        }
+        with self.assertRaisesRegex(LLMError, r"重複=visual_observation:current"):
+            validate_decision_contract(payload)
+
     def test_decision_contract_accepts_autonomous_run(self) -> None:
         payload = {
             "kind": "autonomous_run",
@@ -595,6 +634,103 @@ class DecisionContractTests(unittest.TestCase):
                 )
 
         self.assertEqual(complete.call_count, 2)
+
+    def test_decision_validation_failed_log_includes_rejected_payload(self) -> None:
+        invalid = {
+            "kind": "noop",
+            "reason_code": "hold_speech",
+            "reason_summary": "作業中なので問いかけない。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+            "capability_request": None,
+            "autonomous_run": None,
+            "foreground_selection": {
+                "primary_factor_ref": "visual_observation:current",
+                "supporting_factor_refs": ["visual_observation:current"],
+                "suppressed_factors": [],
+                "summary_text": "同じ観測を主役と補助に置いた。",
+            },
+            "target_stances": build_decision_target_stances_for_kind(
+                "noop",
+                required_targets=("outward_speech",),
+                reason_summary="作業中なので問いかけない。",
+            ),
+        }
+        logs: list[tuple[str, str, str]] = []
+
+        def capture(component: str, message: str, *, level: str = "INFO") -> None:
+            logs.append((level, component, message))
+
+        context = replace(_decision_context([]), comparison_scope="outward_speech")
+        with (
+            patch("otomekairo.llm.client.debug_log", side_effect=capture),
+            patch(
+                "otomekairo.llm.client.complete_text",
+                return_value=json.dumps(invalid),
+            ),
+        ):
+            with self.assertRaisesRegex(LLMError, r"重複=visual_observation:current"):
+                LLMClient().generate_decision(
+                    model_config={"model": "real-model"},
+                    persona_context=_persona_context(),
+                    context=context,
+                )
+
+        warnings = [message for level, component, message in logs if level == "WARNING" and component == "LLM"]
+        self.assertEqual(len(warnings), 2)
+        for message in warnings:
+            self.assertIn("decision:outward_speech validation_failed", message)
+            self.assertIn("重複=visual_observation:current", message)
+            self.assertIn("payload=", message)
+            self.assertIn('"primary_factor_ref":"visual_observation:current"', message)
+            self.assertIn('"supporting_factor_refs":["visual_observation:current"]', message)
+
+    def test_decision_parse_failed_log_includes_rejected_content(self) -> None:
+        logs: list[tuple[str, str, str]] = []
+
+        def capture(component: str, message: str, *, level: str = "INFO") -> None:
+            logs.append((level, component, message))
+
+        with (
+            patch("otomekairo.llm.client.debug_log", side_effect=capture),
+            patch(
+                "otomekairo.llm.client.complete_text",
+                return_value="これは JSON ではありません。",
+            ),
+        ):
+            with self.assertRaises(LLMError):
+                LLMClient().generate_decision(
+                    model_config={"model": "real-model"},
+                    persona_context=_persona_context(),
+                    context=_decision_context([]),
+                )
+
+        warnings = [message for level, component, message in logs if level == "WARNING" and component == "LLM"]
+        self.assertEqual(len(warnings), 2)
+        for message in warnings:
+            self.assertIn("decision parse_failed", message)
+            self.assertIn("content=これは JSON ではありません。", message)
+
+    def test_rejected_payload_redacts_secret_fields(self) -> None:
+        compact = LLMClient()._debug_rejected_payload(
+            {
+                "kind": "capability_request",
+                "capability_request": {
+                    "capability_id": "mcp.call_tool",
+                    "input": {
+                        "mcp_server_id": "elyth",
+                        "tool_name": "get_notifications",
+                        "arguments": {"token": "secret-value"},
+                    },
+                },
+                "api_key": "should-not-appear",
+            }
+        )
+
+        self.assertIn('"kind":"capability_request"', compact)
+        self.assertIn("[redacted]", compact)
+        self.assertNotIn("secret-value", compact)
+        self.assertNotIn("should-not-appear", compact)
 
 
 class DecisionPromptScopeTests(unittest.TestCase):
