@@ -57,9 +57,8 @@ def execute_runner_request(request: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(source_definition, dict):
         raise RunnerError("source_definition must be an object")
     normalized_source = validate_agent_skill_source_definition(source_id, source_definition)
-    execution = normalized_source["script_execution"]
-    if execution["enabled"] is not True:
-        raise RunnerError("script execution is disabled for the source")
+    if normalized_source["enabled"] is not True:
+        raise RunnerError("source is not enabled")
 
     registry = AgentSkillRegistry.load({source_id: normalized_source})
     skill = registry.require_skill(skill_id)

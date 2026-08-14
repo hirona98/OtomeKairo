@@ -748,7 +748,7 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
         "decision_description": "選択中の trusted Agent Skill に同梱された script を専用 runner process で実行する",
         "when_to_use": [
             "選択中の Agent Skill が目的達成に必要な script 実行を明示している",
-            "対象 source の script_execution が available である",
+            "対象 script が enabled な Agent Skill source の package にある",
         ],
         "do_not_use_when": [
             "Agent Skill の instructions と resource catalog に対象 script がない",

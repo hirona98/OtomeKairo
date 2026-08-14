@@ -1076,8 +1076,8 @@
             <fieldset class="settings-group capability-group" data-collection-editor>
               <legend>Agent Skill source</legend>
               <div class="settings-list">
-                <p class="field-hint">有効な source の root_path 直下から SKILL.md を読み込みます。script 実行を許可すると、その root 内の script
-                  をホスト Python で実行できます（root 全体を信頼する明示設定）。</p>
+                <p class="field-hint">有効な source の root_path 直下から SKILL.md を読み込みます。有効化はその root
+                  内の script をホスト Python で実行できることまで含みます。</p>
                 <label class="checkbox-field">有効
                   <input id="agent-skill-source-enabled" type="checkbox">
                 </label>
@@ -1092,9 +1092,6 @@
                     <span class="field-hint">skillsの置いてある絶対path。直下の各ディレクトリの SKILL.md を入口として読み込みます。</span>
                   </div>
                 </div>
-                <label class="checkbox-field">script 実行を許可
-                  <input id="agent-skill-script-enabled" type="checkbox">
-                </label>
               </div>
             </fieldset>
             <fieldset class="settings-group">

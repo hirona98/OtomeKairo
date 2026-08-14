@@ -187,11 +187,11 @@ def validate_agent_skill_source_definition(source_id: str, definition: dict[str,
         raise AgentSkillError("invalid_agent_skill_source_id", "source_id must be a non-empty string.")
     if not isinstance(definition, dict):
         raise AgentSkillError("invalid_agent_skill_source", "agent_skill_source must be an object.")
-    required = {"source_id", "enabled", "root_path", "script_execution"}
+    required = {"source_id", "enabled", "root_path"}
     if set(definition) != required:
         raise AgentSkillError(
             "invalid_agent_skill_source_fields",
-            "agent_skill_source requires exactly source_id, enabled, root_path, script_execution.",
+            "agent_skill_source requires exactly source_id, enabled, root_path.",
         )
     normalized = {
         **definition,
@@ -207,21 +207,7 @@ def validate_agent_skill_source_definition(source_id: str, definition: dict[str,
     root_path = Path(normalized["root_path"])
     if not root_path.is_absolute():
         raise AgentSkillError("invalid_agent_skill_source_field", "root_path must be absolute.")
-    normalized["script_execution"] = _validate_script_execution(definition.get("script_execution"))
     return normalized
-
-
-def _validate_script_execution(value: Any) -> dict[str, Any]:
-    # runtimes / limits は設定に持たない。実行はホスト Python、暴走防護は runner 固定上限。
-    if not isinstance(value, dict) or set(value) != {"enabled"}:
-        raise AgentSkillError(
-            "invalid_agent_skill_script_execution",
-            "script_execution requires exactly enabled.",
-        )
-    enabled = value.get("enabled")
-    if not isinstance(enabled, bool):
-        raise AgentSkillError("invalid_agent_skill_script_execution", "enabled must be a boolean.")
-    return {"enabled": enabled}
 
 
 def _load_source(source_id: str, definition: dict[str, Any]) -> AgentSkillSourceSnapshot:

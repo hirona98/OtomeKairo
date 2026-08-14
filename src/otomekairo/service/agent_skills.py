@@ -93,8 +93,7 @@ class ServiceAgentSkillsMixin:
         with self._runtime_state_lock:
             registry = self._agent_skill_registry
         return any(
-            source.definition["script_execution"]["enabled"] is True
-            and any(resource.kind == "script" for skill in source.skills.values() for resource in skill.resources.values())
+            any(resource.kind == "script" for skill in source.skills.values() for resource in skill.resources.values())
             for source in registry.sources.values()
         )
 
@@ -250,8 +249,6 @@ class ServiceAgentSkillsMixin:
             payload["selected_resources"] = list(
                 selected_resources.get(skill_id, {}).values()
             )
-            source = registry.sources[skill.source_id]
-            payload["script_execution"] = source.definition["script_execution"]
             skills_payload.append(payload)
         return {
             "selected_skill_ids": active_ids,
@@ -311,9 +308,8 @@ class ServiceAgentSkillsMixin:
         script = skill.resources.get(script_path) if isinstance(script_path, str) else None
         if script is None or script.kind != "script":
             raise ValueError("Agent Skill script_path is not available.")
-        execution = source.definition["script_execution"]
-        if execution["enabled"] is not True:
-            raise ValueError("Agent Skill script execution is disabled.")
+        if source.definition["enabled"] is not True:
+            raise ValueError("Agent Skill source is not enabled.")
 
         timeout_ms = min(
             int(manifest["timeout_ms"]),

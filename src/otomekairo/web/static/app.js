@@ -2394,7 +2394,7 @@ async function saveSettings({ closeAfterSave = false } = {}) {
     });
     const agentSkills = await apiRequest("/ui/api/config/agent-skill-sources/editor-state", {
       method: "PUT",
-      body: JSON.stringify(normalizeAgentSkillSourcesForSave(clone(state.agentSkills))),
+      body: JSON.stringify(clone(state.agentSkills)),
     });
     let consoleClient = state.consoleClient;
     if (consoleClient) {
@@ -3957,7 +3957,6 @@ function renderAgentSkills() {
   element("agent-skill-source-enabled").checked = source?.enabled === true;
   element("agent-skill-source-id").value = source?.source_id || "";
   element("agent-skill-root-path").value = source?.root_path || "";
-  element("agent-skill-script-enabled").checked = source?.script_execution?.enabled === true;
   element("agent-skill-inspection").textContent = JSON.stringify(
     state.agentSkillInspection || { skill_count: 0, sources: [] },
     null,
@@ -3977,20 +3976,7 @@ function syncAgentSkills() {
   source.source_id = textValue("agent-skill-source-id").trim();
   source.enabled = boolValue("agent-skill-source-enabled");
   source.root_path = textValue("agent-skill-root-path").trim();
-  source.script_execution = {
-    enabled: boolValue("agent-skill-script-enabled"),
-  };
   state.selectedAgentSkillSourceId = source.source_id;
-}
-
-function normalizeAgentSkillSourcesForSave(bundle) {
-  const sources = bundle?.agent_skill_sources || [];
-  for (const source of sources) {
-    source.script_execution = {
-      enabled: source.script_execution?.enabled === true,
-    };
-  }
-  return bundle;
 }
 
 function syncAllForms() {
@@ -4468,9 +4454,6 @@ function addAgentSkillSource() {
     source_id: sourceId,
     enabled: false,
     root_path: "",
-    script_execution: {
-      enabled: false,
-    },
   });
   state.selectedAgentSkillSourceId = sourceId;
   renderAgentSkills();

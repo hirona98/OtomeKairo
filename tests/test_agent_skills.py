@@ -31,14 +31,11 @@ from otomekairo.service.agent_skills import (
 from otomekairo.service.app import OtomeKairoService
 
 
-def _source_definition(root: Path, *, execution_enabled: bool) -> dict:
+def _source_definition(root: Path, *, enabled: bool = True) -> dict:
     return {
         "source_id": "test-source",
-        "enabled": True,
+        "enabled": enabled,
         "root_path": str(root),
-        "script_execution": {
-            "enabled": execution_enabled,
-        },
     }
 
 
@@ -71,19 +68,32 @@ class AgentSkillRegistryTests(unittest.TestCase):
         self.assertFalse(elyth["enabled"])
         self.assertEqual(elyth["root_path"], DEFAULT_ELYTH_AGENT_SKILL_ROOT_PATH)
         self.assertEqual(elyth["root_path"], "/opt/elyth-remote-mcp-skills/skills")
-        self.assertFalse(elyth["script_execution"]["enabled"])
+        self.assertEqual(set(elyth), {"source_id", "enabled", "root_path"})
 
         # disabled source は path 未配置でも registry を空のまま起動できる
         registry = AgentSkillRegistry.load(sources)
         self.assertEqual(registry.catalog(), [])
         self.assertEqual(registry.inspection_payload()["skill_count"], 0)
 
+    def test_rejects_leftover_script_execution_field(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory) / "skills"
+            root.mkdir()
+            _write_skill(root)
+            definition = _source_definition(root)
+            definition["script_execution"] = {"enabled": False}
+
+            with self.assertRaises(AgentSkillError) as raised:
+                AgentSkillRegistry.load({"test-source": definition})
+
+            self.assertEqual(raised.exception.code, "invalid_agent_skill_source_fields")
+
     def test_loads_metadata_body_and_resources(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory) / "skills"
             root.mkdir()
             _write_skill(root)
-            definition = _source_definition(root, execution_enabled=False)
+            definition = _source_definition(root, enabled=True)
 
             registry = AgentSkillRegistry.load({"test-source": definition})
 
@@ -100,7 +110,7 @@ class AgentSkillRegistryTests(unittest.TestCase):
             _write_skill(root)
             linked_root = base / "linked-skills"
             linked_root.symlink_to(root, target_is_directory=True)
-            definition = _source_definition(linked_root, execution_enabled=False)
+            definition = _source_definition(linked_root, enabled=True)
 
             with self.assertRaises(AgentSkillError) as raised:
                 AgentSkillRegistry.load({"test-source": definition})
@@ -113,7 +123,7 @@ class AgentSkillRegistryTests(unittest.TestCase):
             root = base / "skills"
             root.mkdir()
             _write_skill(root)
-            definition = _source_definition(root, execution_enabled=True)
+            definition = _source_definition(root, enabled=True)
             registry = AgentSkillRegistry.load({"test-source": definition})
             skill = registry.require_skill("echo-skill")
             request = {
@@ -148,6 +158,42 @@ class AgentSkillRegistryTests(unittest.TestCase):
             self.assertIn('"args": ["one", "two"]', result["stdout"])
             self.assertIn('"stdin": "hello"', result["stdout"])
 
+    def test_runner_rejects_disabled_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            base = Path(temporary_directory)
+            root = base / "skills"
+            root.mkdir()
+            _write_skill(root)
+            definition = _source_definition(root, enabled=False)
+            request = {
+                "source_definition": definition,
+                "source_id": "test-source",
+                "skill_id": "echo-skill",
+                "skill_sha256": "unused",
+                "script_path": "scripts/echo.py",
+                "args": [],
+                "stdin_text": None,
+                "run_dir": str(base / "run"),
+            }
+
+            completed = subprocess.run(
+                [sys.executable, "-m", "otomekairo.agent_skill_runner"],
+                input=json.dumps(request),
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=10,
+                check=True,
+                env={
+                    "PATH": os.environ.get("PATH", ""),
+                    "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+                },
+            )
+            result = json.loads(completed.stdout)
+
+            self.assertEqual(result["status"], "failed")
+            self.assertIn("source is not enabled", result["error"])
+
     def test_config_api_replaces_and_reloads_registry_atomically(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             base = Path(temporary_directory)
@@ -158,7 +204,7 @@ class AgentSkillRegistryTests(unittest.TestCase):
             state = service.store.read_state()
             state["console_access_token"] = "token"
             service.store.write_state(state)
-            definition = _source_definition(root, execution_enabled=False)
+            definition = _source_definition(root, enabled=True)
 
             response = service.replace_agent_skill_sources_editor_state(
                 "token",
@@ -206,7 +252,7 @@ class AgentSkillRegistryTests(unittest.TestCase):
             child_references = child / "references"
             child_references.mkdir()
             (child_references / "child.md").write_text("child guide", encoding="utf-8")
-            definition = _source_definition(root, execution_enabled=False)
+            definition = _source_definition(root, enabled=True)
             material_contexts: list[dict] = []
 
             class FakeLlm:
@@ -277,7 +323,7 @@ class AgentSkillRegistryTests(unittest.TestCase):
             references = skill_dir / "references"
             references.mkdir()
             (references / "guide.md").write_text("optional guide", encoding="utf-8")
-            definition = _source_definition(root, execution_enabled=False)
+            definition = _source_definition(root, enabled=True)
 
             class FakeLlm:
                 def generate_agent_skill_selection(self, **_kwargs):
@@ -507,7 +553,7 @@ class AgentSkillRegistryTests(unittest.TestCase):
             state = service.store.read_state()
             state["console_access_token"] = "token"
             service.store.write_state(state)
-            definition = _source_definition(root, execution_enabled=True)
+            definition = _source_definition(root, enabled=True)
             service.replace_agent_skill_sources_editor_state(
                 "token",
                 {"agent_skill_sources": [definition]},
@@ -621,7 +667,7 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
             root = Path(temporary_directory) / "skills"
             root.mkdir()
             _write_skill(root)
-            definition = _source_definition(root, execution_enabled=False)
+            definition = _source_definition(root, enabled=True)
             selection_contexts: list[dict] = []
 
             class FakeLlm:

@@ -61,12 +61,12 @@ skill が Human の明示依頼、trusted host policy、trusted workflow を求�
 
 ## script 実行と信頼境界
 
-source ごとの `script_execution.enabled=true` は、その root 全体を code execution まで信頼する明示設定である。個別 script の都度承認は設けない。
+source の `enabled=true` は、その root 全体を instructions、resource、code execution まで信頼する明示設定である。script 実行を source 有効化から分けない。個別 script の都度承認は設けない。
 
-script は `agent_skill.run_script` capability からだけ実行する。server process 内で import や eval をせず、専用 runner process が次を再検証して実行する。
+script は `agent_skill.run_script` capability からだけ実行する。これは skill の管理軸ではなく、MCP の `mcp.call_tool` と同じ実行の入口である。server process 内で import や eval をせず、専用 runner process が次を再検証して実行する。
 
 - source、skill、package digest、script resource が現在の registry snapshot と一致する
-- source 設定で `script_execution.enabled=true` である
+- source が enabled であり、registry に載っている
 - package を request 固有の `agent-skill-runs/<request-id>/workspace/` へコピーし、copy 内の script を実行する
 - 実行 interpreter は OtomeKairo ホストの Python（`sys.executable`）に固定する。source ごとの runtime 選択は設けない
 - child environment は `PATH / LANG / LC_ALL` だけにする
@@ -90,8 +90,7 @@ git clone https://github.com/Divedesign/elyth-remote-mcp-skills.git /opt/elyth-r
 
 - 名前（`source_id`）: `elyth-skills`
 - root path: `/opt/elyth-remote-mcp-skills/skills`
-- 有効: `false`（既定）
-- script 実行を許可: `false`（既定）。repository 内の script が必要な場合だけ、信頼確認後に `true`
+- 有効: `false`（既定）。有効化は root 内の script 実行も含む信頼確認である
 
 checkout 後にブラウザ UI の「Agent Skills」で source を有効にする。
 path を変えた場合は `root_path` を合わせて更新する。
