@@ -239,6 +239,8 @@ response:
 `runtime_detail.wake_runtime_state.retry_after` は、思考前観測 の一時失敗後に interval を消費せず短く再試行する時刻を表す。
 `runtime_detail.wake_runtime_state.waiting_for_vision_source_ids` は、思考前観測の対象 vision source がこの process で未登録のため定期思考を待っている間だけ入る。意味は [状態と設定.md](状態と設定.md) を正とする。
 各項目は `enabled / vision_source_id / interval_seconds / last_run_at / last_status / last_summary / last_error` を返す。
+`last_status` は `succeeded` / `skipped` / `failed` のいずれかである。意味は [../capability/視覚機能.md](../capability/視覚機能.md) を正とする。
+`last_status=skipped` では `last_error` は `null` とし、見送り理由は `last_summary` に入れる。
 visual observation では、比較入力と発話済み観測の追跡用に `last_observation_signature / same_observation_count / last_prompted_observation_summary / last_prompted_at` も返す。
 `last_*` は process-local runtime state であり、server restart をまたいで保持しない。
 `capability_inspection` は `GET /api/inspection/capabilities` と同じ availability 導出結果を current-state snapshot の中で参照しやすく束ねたものである。

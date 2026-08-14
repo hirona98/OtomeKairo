@@ -7,6 +7,41 @@ from otomekairo.service.common import ServiceError
 from otomekairo.service.input.constants import SCHEDULE_SLOT_LIMIT
 
 
+# vision.capture result.error の閉集合。失敗ではなく正常スキップ。
+VISION_CAPTURE_SKIPPED_EXCLUDED_WINDOW_TITLE = "capture skipped (excluded window title)"
+VISION_CAPTURE_SKIPPED_IDLE = "capture skipped (idle)"
+VISION_CAPTURE_SKIP_REASONS = {
+    VISION_CAPTURE_SKIPPED_EXCLUDED_WINDOW_TITLE: "excluded_window_title",
+    VISION_CAPTURE_SKIPPED_IDLE: "idle",
+}
+VISION_CAPTURE_SKIP_REASON_SUMMARIES = {
+    "excluded_window_title": "除外ウィンドウのため視覚観測を見送った。",
+    "idle": "アイドルのため視覚観測を見送った。",
+}
+
+
+def vision_capture_skip_reason(error: Any) -> str | None:
+    if not isinstance(error, str):
+        return None
+    return VISION_CAPTURE_SKIP_REASONS.get(error.strip())
+
+
+def vision_capture_skip_reason_summary(skip_reason: str) -> str:
+    summary = VISION_CAPTURE_SKIP_REASON_SUMMARIES.get(skip_reason)
+    if summary is None:
+        raise ValueError(f"Unknown vision.capture skip_reason: {skip_reason}")
+    return summary
+
+
+def capability_result_has_error(*, capability_id: str, result_payload: dict[str, Any]) -> bool:
+    error = result_payload.get("error")
+    if not isinstance(error, str) or not error.strip():
+        return False
+    if capability_id == "vision.capture" and vision_capture_skip_reason(error) is not None:
+        return False
+    return True
+
+
 @dataclass(frozen=True, slots=True)
 class CapabilityResultPayloadSpec:
     summary_field: str
@@ -57,10 +92,17 @@ class ServiceSpontaneousCapabilityPayloadMixin:
             if error is not None and not isinstance(error, str):
                 raise ServiceError(400, "invalid_capability_result", "vision.capture result.error must be a string or null.")
             normalized_images = self._normalize_vision_capture_result_images(images)
+            normalized_error = error.strip() if isinstance(error, str) and error.strip() else None
+            if vision_capture_skip_reason(normalized_error) is not None and normalized_images:
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "vision.capture result.error skip code cannot be combined with images.",
+                )
             return {
                 "images": normalized_images,
                 "client_context": client_context or {},
-                "error": error.strip() if isinstance(error, str) and error.strip() else None,
+                "error": normalized_error,
             }
         if capability_id == "mcp.call_tool":
             return self._normalize_mcp_call_tool_result_payload(result_payload=result_payload)
@@ -258,6 +300,9 @@ class ServiceSpontaneousCapabilityPayloadMixin:
         if capability_id == "vision.capture":
             images = result_payload.get("images")
             image_count = len(images) if isinstance(images, list) else 0
+            skip_reason = vision_capture_skip_reason(result_payload.get("error"))
+            if skip_reason is not None:
+                return f"images={image_count} skipped={skip_reason}"
             return f"images={image_count} error={bool(result_payload.get('error'))}"
         if capability_id == "camera.ptz":
             status = result_payload.get("status")

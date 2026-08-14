@@ -406,6 +406,7 @@ class ServiceInputTraceCompactMixin:
                 "source_owner",
                 "visual_summary_text",
                 "reason_summary",
+                "skip_reason",
                 "error",
                 "request_id",
             ):

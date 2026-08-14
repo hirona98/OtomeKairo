@@ -10,6 +10,7 @@ from otomekairo.service.capability import (
     PreSendCheckFailureError,
 )
 from otomekairo.service.common import ServiceError, debug_log
+from otomekairo.service.spontaneous.capability_payload import capability_result_has_error
 
 
 class ServiceSpontaneousCapabilityCycleMixin:
@@ -176,7 +177,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
             (
                 f"{self._short_cycle_id(cycle_id)} start capability={capability_id} "
                 f"recent_turns={len(recent_turns)} {image_count_summary}"
-                f"error={bool(capability_response.get('error'))}"
+                f"error={capability_result_has_error(capability_id=capability_id, result_payload=capability_response)}"
             ),
             level="DEBUG",
         )
@@ -419,7 +420,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
 
         decision_kind = str(decision.get("kind") or "").strip()
         if decision_kind == "pending_intent":
-            result_error = result_payload.get("error") not in {None, ""}
+            result_error = capability_result_has_error(capability_id=capability_id, result_payload=result_payload)
             return self._finish_capability_ongoing_action(
                 request_record=request_record,
                 current_time=current_time,
@@ -440,8 +441,10 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 ),
             )
 
-        terminal_kind = "interrupted" if result_payload.get("error") not in {None, ""} else "completed"
+        result_error = capability_result_has_error(capability_id=capability_id, result_payload=result_payload)
+        terminal_kind = "interrupted" if result_error else "completed"
         reason_code = self._capability_result_followup_reason_code(
+            capability_id=capability_id,
             decision=decision,
             result_payload=result_payload,
         )
@@ -462,7 +465,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
             ),
             transition_source="capability_result_followup",
             decision_kind=decision_kind or None,
-            result_error=result_payload.get("error") not in {None, ""},
+            result_error=result_error,
             detail_summary=self._capability_result_followup_detail_summary(
                 capability_id=capability_id,
                 decision=decision,

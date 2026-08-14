@@ -435,6 +435,8 @@ class ServiceInputWorldStateSourcePackMixin:
             return False
         if observation_summary.get("source") == "wake_reference":
             return True
+        if observation_summary.get("skip_reason") is not None:
+            return False
         return (
             observation_summary.get("source") == "capability_result"
             and observation_summary.get("capability_id") == "vision.capture"

@@ -6,6 +6,11 @@ from otomekairo.llm.client import LLMError
 from otomekairo.service.capability import CapabilityDispatchError
 from otomekairo.service.common import debug_log
 from otomekairo.service.input.source_owner import visual_source_owner
+from otomekairo.service.spontaneous.capability_payload import (
+    capability_result_has_error,
+    vision_capture_skip_reason,
+    vision_capture_skip_reason_summary,
+)
 
 
 # 思考前観測の再試行と trace が共有する機械判定値。
@@ -289,6 +294,31 @@ class ServiceInputWakeObservationMixin:
         capability_request_summary = self._capability_request_summary(request_record)
         client_context = self._build_capability_result_client_context(capability_response)
         observation_summary = self._capability_result_observation_summary(capability_response)
+        if (
+            capability_id == "vision.capture"
+            and vision_capture_skip_reason(capability_response.get("error")) is not None
+        ):
+            transition_summary = self._finish_wake_policy_observation_ongoing_action(
+                request_record=request_record,
+                current_time=self._now_iso(),
+                capability_id=capability_id,
+                capability_response=capability_response,
+                observation_summary=observation_summary,
+                failure_reason=None,
+            )
+            self._apply_capability_runtime_state_followup(
+                capability_id=capability_id,
+                current_time=self._now_iso(),
+                observation_summary=observation_summary,
+                result_payload=capability_response,
+                ongoing_action_transition_summary=transition_summary,
+            )
+            return self._wake_policy_observation_success_summary(
+                observation=observation,
+                capability_response=capability_response,
+                observation_summary=observation_summary,
+                capability_request_summary=capability_request_summary,
+            )
         input_text = self._build_capability_result_input_text(
             client_context=client_context,
             capability_response=capability_response,
@@ -403,15 +433,22 @@ class ServiceInputWakeObservationMixin:
         observation_summary: dict[str, Any] | None,
         failure_reason: str | None,
     ) -> dict[str, Any] | None:
-        result_error = capability_response.get("error") not in {None, ""} or failure_reason is not None
-        terminal_kind = "interrupted" if result_error else "completed"
-        terminal_reason = (
-            "思考前観測 の取得または反映に失敗した。"
-            if result_error
-            else "思考前観測 の取得結果を判断材料へ反映した。"
+        skip_reason = vision_capture_skip_reason(capability_response.get("error"))
+        result_error = (
+            capability_result_has_error(capability_id=capability_id, result_payload=capability_response)
+            or failure_reason is not None
         )
+        terminal_kind = "interrupted" if result_error else "completed"
+        if result_error:
+            terminal_reason = "思考前観測 の取得または反映に失敗した。"
+        elif skip_reason is not None:
+            terminal_reason = vision_capture_skip_reason_summary(skip_reason)
+        else:
+            terminal_reason = "思考前観測 の取得結果を判断材料へ反映した。"
         if result_error:
             final_step_summary = "思考前観測 を中断した。"
+        elif skip_reason is not None:
+            final_step_summary = "思考前観測 を見送った。"
         elif self._observation_summary_is_vision_capture(observation_summary):
             final_step_summary = "視覚の思考前観測の結果を視覚記録候補と判断材料へ反映した。"
         else:
@@ -443,11 +480,18 @@ class ServiceInputWakeObservationMixin:
     ) -> dict[str, Any]:
         payload = self._wake_policy_observation_base_summary(observation)
         error = observation_summary.get("error")
-        has_error = isinstance(error, str) and error.strip()
-        payload["status"] = "failed" if has_error else "succeeded"
-        if has_error:
+        skip_reason = vision_capture_skip_reason(error)
+        has_error = isinstance(error, str) and error.strip() and skip_reason is None
+        if skip_reason is not None:
+            payload["status"] = "skipped"
+            payload["skip_reason"] = skip_reason
+            payload["reason_summary"] = vision_capture_skip_reason_summary(skip_reason)
+        elif has_error:
+            payload["status"] = "failed"
             payload["failure_code"] = "capability_result_failed"
             payload["reason_summary"] = error.strip()
+        else:
+            payload["status"] = "succeeded"
         request_id = capability_response.get("request_id")
         if isinstance(request_id, str) and request_id.strip():
             payload["request_id"] = request_id.strip()
@@ -461,11 +505,12 @@ class ServiceInputWakeObservationMixin:
             "change_state",
             "change_basis",
             "change_reason_summary",
-            "error",
         ):
             value = observation_summary.get(key)
             if isinstance(value, str) and value.strip():
                 payload[key] = value.strip()
+        if has_error and isinstance(error, str) and error.strip():
+            payload["error"] = error.strip()
         image_count = observation_summary.get("image_count")
         if isinstance(image_count, int):
             payload["image_count"] = image_count
@@ -522,6 +567,10 @@ class ServiceInputWakeObservationMixin:
                 if text is None:
                     text = "取得済み"
                 parts.append(f"{label}: {text}")
+                continue
+            if summary.get("status") == "skipped":
+                reason = self._client_context_text(summary.get("reason_summary"), limit=120) or "見送り"
+                parts.append(f"{label}: skipped {reason}")
                 continue
             reason = self._client_context_text(summary.get("reason_summary"), limit=120) or "取得失敗"
             parts.append(f"{label}: failed {reason}")
@@ -613,9 +662,13 @@ class ServiceInputWakeObservationMixin:
         last_summary = self._client_context_text(summary.get("visual_summary_text"), limit=160)
         if last_summary is None and status == "succeeded":
             last_summary = self._client_context_text(summary.get("source_label"), limit=80) or "取得済み"
-        last_error = self._client_context_text(summary.get("reason_summary"), limit=160)
-        if last_error is None:
-            last_error = self._client_context_text(summary.get("error"), limit=160)
+        if last_summary is None and status == "skipped":
+            last_summary = self._client_context_text(summary.get("reason_summary"), limit=160)
+        last_error = None
+        if status == "failed":
+            last_error = self._client_context_text(summary.get("reason_summary"), limit=160)
+            if last_error is None:
+                last_error = self._client_context_text(summary.get("error"), limit=160)
         payload: dict[str, Any] = {
             "observation_id": normalized_observation_id,
             "last_run_at": current_time,

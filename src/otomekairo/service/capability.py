@@ -13,6 +13,7 @@ from otomekairo.capabilities import (
 )
 from otomekairo.service.common import debug_log
 from otomekairo.service.config.constants import CAPABILITY_UNAVAILABLE_REASONS
+from otomekairo.service.spontaneous.capability_payload import vision_capture_skip_reason
 
 
 class CapabilityDispatchError(ValueError):
@@ -1667,6 +1668,8 @@ class ServiceCapabilityMixin:
             return "capability result 後の判断に失敗し、継続を中断した。"
         if reason_code == "result_empty":
             return "capability result が空で、継続を完了した。"
+        if reason_code == "result_skipped":
+            return "capability result を見送り、継続を完了した。"
         if reason_code == "result_error":
             return "capability result の error を受け、継続を中断した。"
         return "capability result を受けて継続を完了した。"
@@ -1677,6 +1680,11 @@ class ServiceCapabilityMixin:
 
     def _capability_result_terminal_reason(self, *, capability_id: str, result_payload: dict[str, Any]) -> str:
         error = result_payload.get("error")
+        if capability_id == "vision.capture" and vision_capture_skip_reason(error) is not None:
+            return self._capability_terminal_transition_reason_summary(
+                reason_code="result_skipped",
+                result_error=False,
+            )
         if isinstance(error, str) and error.strip():
             return self._capability_terminal_transition_reason_summary(
                 reason_code="result_error",
@@ -1714,6 +1722,8 @@ class ServiceCapabilityMixin:
 
     def _capability_result_terminal_step_summary(self, *, capability_id: str, result_payload: dict[str, Any]) -> str:
         error = result_payload.get("error")
+        if capability_id == "vision.capture" and vision_capture_skip_reason(error) is not None:
+            return f"{capability_id} を見送った。"
         if isinstance(error, str) and error.strip():
             return f"{capability_id} が error で終了した。"
         if capability_id == "camera.ptz" and result_payload.get("status") in {"rejected", "failed"}:

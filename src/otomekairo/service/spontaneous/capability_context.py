@@ -4,6 +4,11 @@ from typing import Any
 
 from otomekairo.capabilities import capability_manifests, capability_readiness_result_digest
 from otomekairo.service.input.constants import SCHEDULE_SLOT_LIMIT
+from otomekairo.service.spontaneous.capability_payload import (
+    capability_result_has_error,
+    vision_capture_skip_reason,
+    vision_capture_skip_reason_summary,
+)
 
 
 class ServiceSpontaneousCapabilityContextMixin:
@@ -84,6 +89,9 @@ class ServiceSpontaneousCapabilityContextMixin:
             summary["image_count"] = image_count
         if capability_id == "vision.capture":
             summary["image_interpreted"] = False
+            skip_reason = vision_capture_skip_reason(capability_response.get("error"))
+            if skip_reason is not None:
+                summary["skip_reason"] = skip_reason
         client_id = capability_response.get("client_id")
         if isinstance(client_id, str) and client_id.strip():
             summary["client_id"] = client_id.strip()
@@ -452,6 +460,9 @@ class ServiceSpontaneousCapabilityContextMixin:
                 visual_summary_text = observation_summary.get("visual_summary_text")
             if isinstance(visual_summary_text, str) and visual_summary_text.strip():
                 return f"視覚観測では {visual_summary_text.strip()}"
+            skip_reason = vision_capture_skip_reason((result_payload or {}).get("error"))
+            if skip_reason is not None:
+                return vision_capture_skip_reason_summary(skip_reason)
             image_count = self._capability_result_payload_image_count(result_payload or {})
             if image_count is not None and image_count <= 0:
                 return "視覚観測は空で、追加の手掛かりを得られなかった。"
@@ -580,7 +591,12 @@ class ServiceSpontaneousCapabilityContextMixin:
         if source_kind is not None:
             parts.append(f"source kind は {source_kind}。")
         error = capability_response.get("error")
-        if isinstance(error, str) and error.strip():
+        skip_reason = (
+            vision_capture_skip_reason(error) if capability_id == "vision.capture" else None
+        )
+        if skip_reason is not None:
+            parts.append(vision_capture_skip_reason_summary(skip_reason))
+        elif isinstance(error, str) and error.strip():
             parts.append(f"結果は error だった。 error={error.strip()}")
         status_text = self._capability_result_status_text(capability_response)
         if status_text is not None:
@@ -647,7 +663,12 @@ class ServiceSpontaneousCapabilityContextMixin:
                 parts.append(f"MCP 結果要約は {summary}")
             else:
                 parts.append("MCP tool の結果を踏まえて返答や次の行動を決めたい。")
-        elif capability_id == "vision.capture" and image_count is not None and image_count <= 0:
+        elif (
+            capability_id == "vision.capture"
+            and skip_reason is None
+            and image_count is not None
+            and image_count <= 0
+        ):
             parts.append("観測結果は空だった。")
         else:
             parts.append("受け取った結果を踏まえて返答や次の行動を決めたい。")
@@ -681,6 +702,10 @@ class ServiceSpontaneousCapabilityContextMixin:
         return None
 
     def _capability_result_active_step_summary(self, *, capability_id: str, result_payload: dict[str, Any]) -> str:
+        if capability_id == "vision.capture":
+            skip_reason = vision_capture_skip_reason(result_payload.get("error"))
+            if skip_reason is not None:
+                return f"{capability_id} の見送り結果を受け、次の1手を判断中。"
         error = result_payload.get("error")
         if isinstance(error, str) and error.strip():
             return f"{capability_id} の error 結果を受け、次の1手を判断中。"
@@ -693,8 +718,9 @@ class ServiceSpontaneousCapabilityContextMixin:
         result_payload: dict[str, Any],
         decision: dict[str, Any],
     ) -> str:
-        has_error = result_payload.get("error") not in {None, ""}
+        has_error = capability_result_has_error(capability_id=capability_id, result_payload=result_payload)
         reason_code = self._capability_result_followup_reason_code(
+            capability_id=capability_id,
             decision=decision,
             result_payload=result_payload,
         )
@@ -711,6 +737,7 @@ class ServiceSpontaneousCapabilityContextMixin:
     def _capability_result_followup_reason_code(
         self,
         *,
+        capability_id: str,
         decision: dict[str, Any],
         result_payload: dict[str, Any],
     ) -> str:
@@ -719,8 +746,10 @@ class ServiceSpontaneousCapabilityContextMixin:
             return "followup_speech"
         if decision_kind == "noop":
             return "followup_noop"
-        if result_payload.get("error") not in {None, ""}:
+        if capability_result_has_error(capability_id=capability_id, result_payload=result_payload):
             return "result_error"
+        if capability_id == "vision.capture" and vision_capture_skip_reason(result_payload.get("error")) is not None:
+            return "result_skipped"
         return "result_received"
 
     def _capability_result_followup_detail_summary(
@@ -742,6 +771,10 @@ class ServiceSpontaneousCapabilityContextMixin:
         if hook_summary is not None:
             return hook_summary
         if isinstance(result_payload, dict):
+            if capability_id == "vision.capture":
+                skip_reason = vision_capture_skip_reason(result_payload.get("error"))
+                if skip_reason is not None:
+                    return vision_capture_skip_reason_summary(skip_reason)
             error = result_payload.get("error")
             if isinstance(error, str) and error.strip():
                 return error.strip()
@@ -790,7 +823,7 @@ class ServiceSpontaneousCapabilityContextMixin:
         decision: dict[str, Any],
     ) -> str:
         decision_kind = str(decision.get("kind") or "").strip()
-        has_error = result_payload.get("error") not in {None, ""}
+        has_error = capability_result_has_error(capability_id=capability_id, result_payload=result_payload)
         if decision_kind == "speech":
             if has_error:
                 return f"{capability_id} の error を受けて speech した。"

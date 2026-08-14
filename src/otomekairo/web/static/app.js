@@ -113,6 +113,12 @@ const RESULT_KIND_LABELS = {
   failed: "失敗",
 };
 
+const OBSERVATION_STATUS_LABELS = {
+  succeeded: "成功",
+  skipped: "見送り",
+  failed: "失敗",
+};
+
 const DESKTOP_WAKE_OBSERVATION_ID = "observation:main_desktop";
 const DEFAULT_WAKE_INTERVAL_SECONDS = 300;
 const WEB_MICROPHONE_DEVICE_KEY = "otomekairo.web_microphone_device_id";
@@ -834,8 +840,10 @@ function renderDashboardWorld() {
         humanDisplayValue(observation.observation_id) || humanDisplayValue(observation.capability_id),
         "観測",
       )}`,
-      badge: observation.enabled ? displayValue(observation.last_status, "有効") : "無効",
-      badgeKind: observation.last_status === "failed" || observation.last_error ? "error" : "",
+      badge: observation.enabled
+        ? (OBSERVATION_STATUS_LABELS[observation.last_status] || displayValue(observation.last_status, "有効"))
+        : "無効",
+      badgeKind: observation.last_status === "failed" ? "error" : "",
       body: displayValue(observation.last_summary || observation.last_error, "まだ観測結果がありません"),
       meta: [
         humanDisplayValue(observation.vision_source_id),
