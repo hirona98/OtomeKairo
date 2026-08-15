@@ -516,6 +516,8 @@ class ServiceConfigInspectionMixin:
                     "not_before": candidate.get("not_before"),
                     "expires_at": candidate.get("expires_at"),
                     "dedupe_key": candidate.get("dedupe_key"),
+                    "consecutive_evaluation_count": candidate.get("consecutive_evaluation_count"),
+                    "cooldown_until": candidate.get("cooldown_until"),
                     "created_at": candidate.get("created_at"),
                     "updated_at": candidate.get("updated_at"),
                 }

@@ -19,12 +19,15 @@ OtomeKairo では、次をコードで守る。
 - 候補の作成、更新、期限切れ削除
 - `memory_set_id` の一致
 - `not_before`、`expires_at`、wake の interval due
+- 保留意図の lifecycle による再評価可能時刻
 - 同じ `dedupe_key` に対する recent speech 抑制
 - LLM が返した `candidate_ref` と実 candidate の照合
 
 LLM に任せるのは、eligible な候補群の中から今再評価に乗せる 1 件を選ぶか、今回は選ばないかだけである。
 `not_before`、`expires_at`、wake interval の比較は offset 付きローカル timestamp と duration でコードが行う。
 LLM には時刻の生活文脈要約だけを渡す。
+
+`not_before` を含む候補 lifecycle と連続再評価cooldownの意味は [../runtime/判断と行動.md](../runtime/判断と行動.md#保留意図) を正とする。この文書では、codeがeligibleとした候補からLLMが最大1件を選ぶ境界だけを定める。
 
 ## 対象範囲
 

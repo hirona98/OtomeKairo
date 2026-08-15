@@ -665,8 +665,6 @@ class LongSmokeRunner:
         env["OTOMEKAIRO_TLS_CERT_FILE"] = str(self.cert_file)
         env["OTOMEKAIRO_TLS_KEY_FILE"] = str(self.key_file)
         env["OTOMEKAIRO_DATA_DIR"] = str(self.data_dir)
-        # smoke では selected pending-intent を決定的に踏むため、再評価待機を短縮する。
-        env["OTOMEKAIRO_PENDING_INTENT_NOT_BEFORE_MINUTES"] = "0"
         env["PYTHONPATH"] = str(self.repo_root / "src")
         self.server_process = subprocess.Popen(
             [str(python_bin), "-m", "otomekairo.run"],

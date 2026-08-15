@@ -404,6 +404,144 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             self.assertEqual(updated["status"], "completed")
             self.assertEqual(updated["last_result_context"]["source_capability_id"], "mcp.call_tool")
 
+    def test_twentieth_continue_step_starts_five_minute_cooldown(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            run = self._run_record(
+                status="active",
+                waiting_request_id=None,
+            )
+            run["consecutive_step_count"] = 19
+
+            updated = service._apply_autonomous_step_transition(
+                run=run,
+                step={
+                    "action": {"kind": "none", "capability_request": None, "speech": None},
+                    "transition": {"kind": "continue", "next_run_at": None},
+                    "run_update": {
+                        "current_step_summary": "確認を続ける。",
+                        "history_summary": "確認を続けた。",
+                    },
+                },
+                action_kind="none",
+                current_time="2026-06-20T12:00:00+09:00",
+                capability_request_summary=None,
+            )
+
+            self.assertEqual(updated["status"], "waiting_timer")
+            self.assertEqual(updated["consecutive_step_count"], 0)
+            self.assertEqual(updated["cooldown_until"], "2026-06-20T12:05:00+09:00")
+            self.assertEqual(updated["next_run_at"], updated["cooldown_until"])
+            public_summary = service._autonomous_run_public_summary(
+                updated,
+                current_time="2026-06-20T12:00:00+09:00",
+            )
+            self.assertEqual(public_summary["consecutive_step_count"], 0)
+            self.assertEqual(public_summary["cooldown_until"], updated["cooldown_until"])
+
+    def test_nineteenth_continue_step_keeps_normal_delay(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            run = self._run_record(status="active", waiting_request_id=None)
+            run["consecutive_step_count"] = 18
+
+            updated = service._apply_autonomous_step_transition(
+                run=run,
+                step={
+                    "action": {"kind": "none", "capability_request": None, "speech": None},
+                    "transition": {"kind": "continue", "next_run_at": None},
+                    "run_update": {
+                        "current_step_summary": "確認を続ける。",
+                        "history_summary": "19回目の確認を続けた。",
+                    },
+                },
+                action_kind="none",
+                current_time="2026-06-20T12:00:00+09:00",
+                capability_request_summary=None,
+            )
+
+            self.assertEqual(updated["consecutive_step_count"], 19)
+            self.assertIsNone(updated["cooldown_until"])
+            self.assertEqual(updated["next_run_at"], "2026-06-20T12:00:05+09:00")
+
+    def test_explicit_wait_resets_continuous_step_count_without_forced_cooldown(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            run = self._run_record(
+                status="active",
+                waiting_request_id=None,
+            )
+            run["consecutive_step_count"] = 19
+
+            updated = service._apply_autonomous_step_transition(
+                run=run,
+                step={
+                    "action": {"kind": "none", "capability_request": None, "speech": None},
+                    "transition": {
+                        "kind": "wait_until",
+                        "next_run_at": "2026-06-20T12:01:00+09:00",
+                    },
+                    "run_update": {
+                        "current_step_summary": "1分待つ。",
+                        "history_summary": "次の確認まで待つ。",
+                    },
+                },
+                action_kind="none",
+                current_time="2026-06-20T12:00:00+09:00",
+                capability_request_summary=None,
+            )
+
+            self.assertEqual(updated["consecutive_step_count"], 0)
+            self.assertIsNone(updated["cooldown_until"])
+            self.assertEqual(updated["next_run_at"], "2026-06-20T12:01:00+09:00")
+
+    def test_twentieth_capability_step_waits_only_for_remaining_cooldown_after_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            run = self._run_record(
+                status="active",
+                waiting_request_id=None,
+            )
+            run["consecutive_step_count"] = 19
+            updated = service._apply_autonomous_step_transition(
+                run=run,
+                step={
+                    "action": {
+                        "kind": "capability_request",
+                        "capability_request": {
+                            "capability_id": "vision.capture",
+                            "input": {"vision_source_id": "vision_source:main", "mode": "still"},
+                        },
+                        "speech": None,
+                    },
+                    "transition": {"kind": "continue", "next_run_at": None},
+                    "run_update": {
+                        "current_step_summary": "結果を待つ。",
+                        "history_summary": "20回目の観測を依頼した。",
+                    },
+                },
+                action_kind="capability_request",
+                current_time="2026-06-20T12:00:00+09:00",
+                capability_request_summary={"request_id": "vision_capture_request:20"},
+            )
+
+            self.assertEqual(updated["status"], "waiting_result")
+            self.assertEqual(updated["cooldown_until"], "2026-06-20T12:05:00+09:00")
+            self.assertEqual(
+                service._autonomous_run_after_result_schedule(
+                    run=updated,
+                    current_time="2026-06-20T12:02:00+09:00",
+                ),
+                ("waiting_timer", "2026-06-20T12:05:00+09:00", "2026-06-20T12:05:00+09:00"),
+            )
+            self.assertEqual(
+                service._autonomous_run_after_result_schedule(
+                    run=updated,
+                    current_time="2026-06-20T12:06:00+09:00",
+                ),
+                ("active", "2026-06-20T12:06:00+09:00", None),
+            )
+
     def test_people_context_includes_observed_mcp_persons(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))
@@ -505,7 +643,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
         self,
         *,
         status: str,
-        waiting_request_id: str,
+        waiting_request_id: str | None,
         run_id: str = "autonomous_run:test",
         pause_reason: str | None = None,
     ) -> dict:
@@ -521,6 +659,8 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             "waiting_request_id": waiting_request_id,
             "pause_reason": pause_reason,
             "resume_status": "waiting_result" if status == "paused" else None,
+            "consecutive_step_count": 0,
+            "cooldown_until": None,
             "created_at": "2026-06-20T11:00:00+09:00",
             "updated_at": "2026-06-20T11:00:00+09:00",
             "completed_at": "2026-06-20T11:30:00+09:00" if status == "cancelled" else None,
@@ -586,6 +726,8 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             "waiting_request_id": None,
             "pause_reason": None,
             "resume_status": None,
+            "consecutive_step_count": 0,
+            "cooldown_until": None,
             "created_at": "2026-06-20T11:00:00+09:00",
             "updated_at": "2026-06-20T11:00:00+09:00",
             "completed_at": "2026-06-20T11:03:00+09:00" if status in {"completed", "cancelled"} else None,

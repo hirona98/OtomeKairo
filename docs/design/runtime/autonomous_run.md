@@ -25,6 +25,8 @@
 | `next_run_at` | timer 待機の再開時刻 |
 | `waiting_request_id` | capability result 待ちの request |
 | `pause_reason` | pause 理由 |
+| `consecutive_step_count` | 明示待機を挟まず連続して完了した step 数 |
+| `cooldown_until` | 20連続 step 後の強制休止中だけ入る再開可能時刻 |
 | `created_at / updated_at / completed_at` | lifecycle 時刻 |
 | `source_cycle_id` | run を開始した入力サイクル |
 | `source_commitment_memory_unit_ids` | run の根拠になった commitment memory |
@@ -65,7 +67,7 @@ terminal 時の発話と terminal 監査イベントは `events` に残し、com
 
 run の次の一手は `autonomous_step_generation` が決める。
 人物依頼でも定期思考でも、個が `autonomous_run` または `capability_request` を選んでよい。server は due な関心や MCP 定義から作業を作らない。
-MCP tool の連鎖も、他の capability や skill と同じく通常の run step で選ぶ。対象 server への固定や回数上限は置かない。
+MCP tool の連鎖も、他の capability や skill と同じく通常の run step で選ぶ。対象 server への固定や総step数の上限は置かない。連続実行の休止境界は「連続stepクールダウン」を正とする。
 
 ## run 調整
 
@@ -128,11 +130,19 @@ run の `objective_summary` は作成時に固定し、`autonomous_step_generati
 run 内では、目的に整合する capability 連鎖を許可する。
 `vision.capture -> camera.ptz -> vision.capture -> desktop vision.capture` のような連鎖を扱う。
 manifest は schema、権限、source 条件、timeout、busy 判定を担当する。
-固定 step 数や固定観測回数の上限は置かない。
+総step数や総観測回数の上限は置かない。
+
+## 連続stepクールダウン
+
+副作用と状態遷移まで成功した `continue` step を `consecutive_step_count` に数える。capability request の `waiting_result` とresult受信は同じstepの完了過程であり、連続回数をリセットしない。`wait_until / complete / cancel` はカウントを0へ戻す。
+
+20回目の連続stepは実行し、21回目の開始前に5分待つ。20回目が capability request 以外なら `waiting_timer` とし、`next_run_at / cooldown_until` を20回目の完了時刻の5分後にする。capability requestなら `waiting_result`を維持し、同じ時刻を `cooldown_until` に保持する。result、timeout、startup時のorphan回復が先に到来した場合は残り時間だけ `waiting_timer` で待ち、到来時点ですでに5分経過していれば追加待機しない。
+
+cooldown中のpauseは `cooldown_until` を保持し、resumeで残り時間を飛ばさない。cooldown終了後は通常の `autonomous_step_generation` で継続、完了、cancelを再評価する。serverがrunを終了させる回数上限ではない。
 
 capability request が timeout した場合、server は該当 run の `waiting_request_id` を消し、timeout 事実を `last_result_context` と `history_summary` に記録する。
-pause 中ではない run は `active` に戻し、`next_run_at` を現在時刻にして `autonomous_step_generation` の再評価対象にする。
-pause 中の run は `paused` を維持し、再開時に `active` へ戻る状態にする。
+pause 中ではない run は、cooldownが残っていなければ `active` に戻して `autonomous_step_generation` の再評価対象にし、残っていれば `waiting_timer` にする。
+pause 中の run は `paused` を維持し、再開時にresult待ちまたはtimer待ちを復元する。
 timeout 後に再試行、待機、完了、cancel のどれを選ぶかは `autonomous_step_generation` が判断する。
 
 run 内の capability result は、通常の会話 capability result と同じく `capability_result` event として残す。

@@ -21,6 +21,8 @@ from otomekairo.service.common import ServiceError, debug_log
 AUTONOMOUS_RUN_POLL_SECONDS = 1.0
 AUTONOMOUS_RUN_CONTINUE_DELAY_SECONDS = 1
 AUTONOMOUS_RUN_IDLE_CONTINUE_DELAY_SECONDS = 5
+AUTONOMOUS_RUN_CONSECUTIVE_STEP_LIMIT = 20
+AUTONOMOUS_RUN_COOLDOWN_SECONDS = 5 * 60
 AUTONOMOUS_RUN_ACTIVE_STATUSES = {"active", "waiting_timer", "waiting_result", "paused"}
 AUTONOMOUS_RUN_TERMINAL_STATUSES = {"completed", "cancelled"}
 AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK = (
@@ -158,12 +160,35 @@ class ServiceAutonomousRunMixin:
         )
         current_time = self._now_iso()
         if run.get("status") == "paused":
+            cooldown_until = self._autonomous_run_active_cooldown_until(
+                run=run,
+                current_time=current_time,
+            )
+            resume_status = run.get("resume_status")
+            waiting_request_id = run.get("waiting_request_id")
+            if (
+                resume_status == "waiting_result"
+                and isinstance(waiting_request_id, str)
+                and waiting_request_id.strip()
+            ):
+                next_status = "waiting_result"
+                next_run_at = None
+            elif cooldown_until is not None:
+                next_status = "waiting_timer"
+                next_run_at = cooldown_until
+            elif resume_status == "waiting_timer":
+                next_status = "waiting_timer"
+                next_run_at = run.get("next_run_at")
+            else:
+                next_status = "active"
+                next_run_at = current_time
             run = {
                 **run,
-                "status": "active",
+                "status": next_status,
                 "pause_reason": None,
                 "resume_status": None,
-                "next_run_at": current_time,
+                "next_run_at": next_run_at,
+                "cooldown_until": cooldown_until,
                 "updated_at": current_time,
             }
             self.store.upsert_autonomous_run(autonomous_run=run)
@@ -407,13 +432,24 @@ class ServiceAutonomousRunMixin:
                 ),
                 "updated_at": current_time,
             }
+            next_status, next_run_at, cooldown_until = self._autonomous_run_after_result_schedule(
+                run=run,
+                current_time=current_time,
+            )
             if run.get("status") == "paused":
-                updated["resume_status"] = "active"
+                updated.update(
+                    {
+                        "resume_status": next_status,
+                        "next_run_at": next_run_at,
+                        "cooldown_until": cooldown_until,
+                    }
+                )
             else:
                 updated.update(
                     {
-                        "status": "active",
-                        "next_run_at": current_time,
+                        "status": next_status,
+                        "next_run_at": next_run_at,
+                        "cooldown_until": cooldown_until,
                         "pause_reason": None,
                         "resume_status": None,
                     }
@@ -569,6 +605,8 @@ class ServiceAutonomousRunMixin:
             "next_run_at": current_time,
             "waiting_request_id": None,
             "pause_reason": None,
+            "consecutive_step_count": 0,
+            "cooldown_until": None,
             "created_at": current_time,
             "updated_at": current_time,
             "completed_at": None,
@@ -742,6 +780,11 @@ class ServiceAutonomousRunMixin:
         previous_request_finished = False
 
         try:
+            self._autonomous_run_consecutive_step_count(run)
+            self._autonomous_run_active_cooldown_until(
+                run=run,
+                current_time=started_at,
+            )
             current_time = started_at
             selected_preset = state["model_presets"][state["selected_model_preset_id"]]
             step_context = self._build_autonomous_step_context(
@@ -1428,6 +1471,7 @@ class ServiceAutonomousRunMixin:
         transition = step["transition"]
         run_update = step["run_update"]
         transition_kind = str(transition.get("kind") or "").strip()
+        consecutive_step_count = self._autonomous_run_consecutive_step_count(run)
         updated = {
             **run,
             "current_step_summary": str(
@@ -1441,16 +1485,23 @@ class ServiceAutonomousRunMixin:
             "updated_at": current_time,
             "last_step": deepcopy(step),
             "last_result_context": run.get("last_result_context"),
+            "cooldown_until": None,
         }
 
         if action_kind == "capability_request":
             request_id = capability_request_summary.get("request_id") if isinstance(capability_request_summary, dict) else None
+            next_count, cooldown_until = self._next_autonomous_run_continuation_state(
+                consecutive_step_count=consecutive_step_count,
+                current_time=current_time,
+            )
             updated.update(
                 {
                     "status": "waiting_result",
                     "waiting_request_id": request_id,
                     "next_run_at": None,
                     "pause_reason": None,
+                    "consecutive_step_count": next_count,
+                    "cooldown_until": cooldown_until,
                 }
             )
         elif transition_kind == "wait_until":
@@ -1460,6 +1511,8 @@ class ServiceAutonomousRunMixin:
                     "waiting_request_id": None,
                     "next_run_at": str(transition.get("next_run_at") or "").strip(),
                     "pause_reason": None,
+                    "consecutive_step_count": 0,
+                    "cooldown_until": None,
                 }
             )
         elif transition_kind == "complete":
@@ -1483,19 +1536,98 @@ class ServiceAutonomousRunMixin:
                 ),
             )
         else:
-            delay_seconds = AUTONOMOUS_RUN_CONTINUE_DELAY_SECONDS
-            if action_kind == "none":
-                delay_seconds = AUTONOMOUS_RUN_IDLE_CONTINUE_DELAY_SECONDS
+            next_count, cooldown_until = self._next_autonomous_run_continuation_state(
+                consecutive_step_count=consecutive_step_count,
+                current_time=current_time,
+            )
+            if cooldown_until is None:
+                delay_seconds = AUTONOMOUS_RUN_CONTINUE_DELAY_SECONDS
+                if action_kind == "none":
+                    delay_seconds = AUTONOMOUS_RUN_IDLE_CONTINUE_DELAY_SECONDS
+                next_run_at = (
+                    self._parse_iso(current_time) + timedelta(seconds=delay_seconds)
+                ).isoformat()
+            else:
+                next_run_at = cooldown_until
             updated.update(
                 {
                     "status": "waiting_timer",
                     "waiting_request_id": None,
-                    "next_run_at": (self._parse_iso(current_time) + timedelta(seconds=delay_seconds)).isoformat(),
+                    "next_run_at": next_run_at,
                     "pause_reason": None,
+                    "consecutive_step_count": next_count,
+                    "cooldown_until": cooldown_until,
                 }
             )
         self.store.upsert_autonomous_run(autonomous_run=updated)
         return updated
+
+    def _autonomous_run_consecutive_step_count(self, run: dict[str, Any]) -> int:
+        count = run.get("consecutive_step_count")
+        if (
+            not isinstance(count, int)
+            or isinstance(count, bool)
+            or count < 0
+            or count >= AUTONOMOUS_RUN_CONSECUTIVE_STEP_LIMIT
+        ):
+            raise ValueError("autonomous_run.consecutive_step_count is invalid.")
+        return count
+
+    def _autonomous_run_active_cooldown_until(
+        self,
+        *,
+        run: dict[str, Any],
+        current_time: str,
+    ) -> str | None:
+        self._autonomous_run_consecutive_step_count(run)
+        cooldown_until = run.get("cooldown_until")
+        if cooldown_until is None:
+            return None
+        if not isinstance(cooldown_until, str) or not cooldown_until.strip():
+            raise ValueError("autonomous_run.cooldown_until is invalid.")
+        normalized = cooldown_until.strip()
+        if self._parse_iso(normalized) <= self._parse_iso(current_time):
+            return None
+        return normalized
+
+    def _next_autonomous_run_continuation_state(
+        self,
+        *,
+        consecutive_step_count: int,
+        current_time: str,
+    ) -> tuple[int, str | None]:
+        next_count = consecutive_step_count + 1
+        if next_count < AUTONOMOUS_RUN_CONSECUTIVE_STEP_LIMIT:
+            return next_count, None
+        cooldown_until = (
+            self._parse_iso(current_time) + timedelta(seconds=AUTONOMOUS_RUN_COOLDOWN_SECONDS)
+        ).isoformat()
+        debug_log(
+            "AutonomousRun",
+            f"continuous step cooldown started until={cooldown_until}",
+        )
+        return 0, cooldown_until
+
+    def _autonomous_run_after_result_schedule(
+        self,
+        *,
+        run: dict[str, Any],
+        current_time: str,
+    ) -> tuple[str, str, str | None]:
+        cooldown_until = self._autonomous_run_active_cooldown_until(
+            run=run,
+            current_time=current_time,
+        )
+        if cooldown_until is not None:
+            debug_log(
+                "AutonomousRun",
+                f"continuous step cooldown remains until={cooldown_until}",
+                level="DEBUG",
+            )
+            return "waiting_timer", cooldown_until, cooldown_until
+        if run.get("cooldown_until") is not None:
+            debug_log("AutonomousRun", "continuous step cooldown completed", level="DEBUG")
+        return "active", current_time, None
 
     def _updated_autonomous_run_history(
         self,
@@ -1552,6 +1684,8 @@ class ServiceAutonomousRunMixin:
             "waiting_request_id": None,
             "next_run_at": None,
             "pause_reason": reason_summary if status == "cancelled" else None,
+            "consecutive_step_count": 0,
+            "cooldown_until": None,
             "completed_at": current_time,
             "updated_at": current_time,
         }
@@ -1697,12 +1831,20 @@ class ServiceAutonomousRunMixin:
                         result_error=False,
                     )
                     return
-                next_status = "paused" if run.get("status") == "paused" else "active"
+                resumed_status, resumed_next_run_at, cooldown_until = (
+                    self._autonomous_run_after_result_schedule(
+                        run=run,
+                        current_time=started_at,
+                    )
+                )
+                next_status = "paused" if run.get("status") == "paused" else resumed_status
                 updated_run = {
                     **run,
                     "status": next_status,
                     "waiting_request_id": None,
-                    "next_run_at": started_at if next_status == "active" else run.get("next_run_at"),
+                    "next_run_at": resumed_next_run_at,
+                    "resume_status": resumed_status if next_status == "paused" else None,
+                    "cooldown_until": cooldown_until,
                     "last_result_context": last_result_context,
                     "observed_result_summaries": self._append_autonomous_observed_result_summaries(
                         run=run,
@@ -1733,6 +1875,13 @@ class ServiceAutonomousRunMixin:
                         source_request_record=request_record,
                         current_time=self._now_iso(),
                         reason_summary="autonomous_run が pause 中のため capability result 後の step を保留した。",
+                    )
+                    return
+                if updated_run.get("status") == "waiting_timer":
+                    self._finish_autonomous_source_request_on_hold(
+                        source_request_record=request_record,
+                        current_time=self._now_iso(),
+                        reason_summary="連続 step のクールダウン中のため result 後の step を保留した。",
                     )
                     return
                 if self._user_response_cycle_active():
@@ -2648,6 +2797,8 @@ class ServiceAutonomousRunMixin:
             "waiting_request_id": run.get("waiting_request_id"),
             "pause_reason": run.get("pause_reason"),
             "resume_status": run.get("resume_status"),
+            "consecutive_step_count": run.get("consecutive_step_count"),
+            "cooldown_until": run.get("cooldown_until"),
             "created_at": run.get("created_at"),
             "updated_at": run.get("updated_at"),
         }
@@ -2668,6 +2819,8 @@ class ServiceAutonomousRunMixin:
             "waiting_request_id": run.get("waiting_request_id"),
             "pause_reason": run.get("pause_reason"),
             "resume_status": run.get("resume_status"),
+            "consecutive_step_count": run.get("consecutive_step_count"),
+            "cooldown_until": run.get("cooldown_until"),
             "coordination": run.get("coordination"),
             "created_at": run.get("created_at"),
             "updated_at": run.get("updated_at"),

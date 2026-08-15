@@ -8,24 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 
-def _read_non_negative_int_env(name: str, default: int) -> int:
-    raw = os.environ.get(name)
-    if raw is None or not raw.strip():
-        return default
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise SystemExit(f"{name} must be an integer >= 0.") from exc
-    if value < 0:
-        raise SystemExit(f"{name} must be an integer >= 0.")
-    return value
-
-
 # 定数
-PENDING_INTENT_NOT_BEFORE_MINUTES = _read_non_negative_int_env(
-    "OTOMEKAIRO_PENDING_INTENT_NOT_BEFORE_MINUTES",
-    30,
-)
 PENDING_INTENT_EXPIRES_HOURS = 24
 WAKE_RECENT_DEDUPE_WINDOW_MINUTES = 30
 BACKGROUND_THINKING_POLL_SECONDS = 5.0

@@ -7,9 +7,12 @@ from typing import Any
 from otomekairo.llm.client import LLMContractError, LLMError
 from otomekairo.service.common import (
     PENDING_INTENT_EXPIRES_HOURS,
-    PENDING_INTENT_NOT_BEFORE_MINUTES,
     debug_log,
 )
+
+
+PENDING_INTENT_CONSECUTIVE_EVALUATION_LIMIT = 20
+PENDING_INTENT_COOLDOWN_MINUTES = 5
 
 
 class PendingIntentSelectionError(LLMError):
@@ -426,6 +429,8 @@ class ServiceSpontaneousPendingIntentMixin:
                     "not_before": not_before,
                     "expires_at": expires_at,
                     "dedupe_key": base_summary["dedupe_key"],
+                    "consecutive_evaluation_count": 0,
+                    "cooldown_until": None,
                     "created_at": occurred_at,
                     "updated_at": occurred_at,
                 }
@@ -433,14 +438,21 @@ class ServiceSpontaneousPendingIntentMixin:
                 queue_action = "created"
             else:
                 candidate = existing
+                cooldown_until = candidate.get("cooldown_until")
+                cooldown_active = (
+                    isinstance(cooldown_until, str)
+                    and bool(cooldown_until)
+                    and self._parse_iso(cooldown_until) > self._parse_iso(occurred_at)
+                )
                 candidate.update(
                     {
                         "intent_kind": base_summary["intent_kind"],
                         "intent_summary": base_summary["intent_summary"],
                         "reason_summary": base_summary["reason_summary"],
                         "source_cycle_id": cycle_id,
-                        "not_before": not_before,
+                        "not_before": candidate["not_before"] if cooldown_active else not_before,
                         "expires_at": expires_at,
+                        "cooldown_until": cooldown_until if cooldown_active else None,
                         "updated_at": occurred_at,
                     }
                 )
@@ -453,6 +465,69 @@ class ServiceSpontaneousPendingIntentMixin:
                 "queue_action": queue_action,
                 "not_before": candidate["not_before"],
                 "expires_at": candidate["expires_at"],
+                "consecutive_evaluation_count": candidate["consecutive_evaluation_count"],
+                "cooldown_until": candidate["cooldown_until"],
+            }
+
+    def _record_pending_intent_candidate_evaluation(
+        self,
+        *,
+        candidate_id: Any,
+        current_time: str,
+    ) -> dict[str, Any] | None:
+        if not isinstance(candidate_id, str) or not candidate_id:
+            return None
+        with self._runtime_state_lock:
+            candidate = next(
+                (
+                    item
+                    for item in self._pending_intent_candidates
+                    if item.get("candidate_id") == candidate_id
+                ),
+                None,
+            )
+            if candidate is None:
+                return None
+            count = candidate.get("consecutive_evaluation_count")
+            if (
+                not isinstance(count, int)
+                or isinstance(count, bool)
+                or count < 0
+                or count >= PENDING_INTENT_CONSECUTIVE_EVALUATION_LIMIT
+            ):
+                raise ValueError("pending_intent candidate.consecutive_evaluation_count is invalid.")
+            next_count = count + 1
+            candidate["updated_at"] = current_time
+            previous_cooldown_until = candidate.get("cooldown_until")
+            candidate["cooldown_until"] = None
+            if previous_cooldown_until is not None:
+                debug_log(
+                    "PendingIntent",
+                    f"cooldown completed candidate={candidate_id}",
+                    level="DEBUG",
+                )
+            if next_count < PENDING_INTENT_CONSECUTIVE_EVALUATION_LIMIT:
+                candidate["consecutive_evaluation_count"] = next_count
+                return {
+                    "candidate_id": candidate_id,
+                    "consecutive_evaluation_count": next_count,
+                    "cooldown_until": None,
+                }
+
+            cooldown_until = (
+                self._parse_iso(current_time) + timedelta(minutes=PENDING_INTENT_COOLDOWN_MINUTES)
+            ).isoformat()
+            candidate["consecutive_evaluation_count"] = 0
+            candidate["not_before"] = cooldown_until
+            candidate["cooldown_until"] = cooldown_until
+            debug_log(
+                "PendingIntent",
+                f"cooldown started candidate={candidate_id} until={cooldown_until}",
+            )
+            return {
+                "candidate_id": candidate_id,
+                "consecutive_evaluation_count": 0,
+                "cooldown_until": cooldown_until,
             }
 
     def _remove_pending_intent_candidate(self, candidate_id: Any) -> None:
@@ -512,8 +587,8 @@ class ServiceSpontaneousPendingIntentMixin:
             }
 
     def _pending_intent_not_before(self, occurred_at: str) -> str:
-        # オフセット
-        return (self._parse_iso(occurred_at) + timedelta(minutes=PENDING_INTENT_NOT_BEFORE_MINUTES)).isoformat()
+        # 次の wake から再評価可能
+        return self._parse_iso(occurred_at).isoformat()
 
     def _pending_intent_expires_at(self, occurred_at: str) -> str:
         # オフセット

@@ -475,6 +475,12 @@ class ServiceSpontaneousWakeMixin:
                 )
             return
 
+        if selected_candidate is not None:
+            self._record_pending_intent_candidate_evaluation(
+                candidate_id=selected_candidate.get("candidate_id"),
+                current_time=current_time,
+            )
+
         if self._decision_has_any_kind(decision, {"pending_intent"}):
             return
 

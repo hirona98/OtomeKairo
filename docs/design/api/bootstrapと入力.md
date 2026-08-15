@@ -235,6 +235,8 @@ TTS の配送先が接続されていない場合と queue が満杯の場合も
       "next_run_at": "2026-06-08T01:11:45+09:00",
       "waiting_request_id": null,
       "pause_reason": null,
+      "consecutive_step_count": 0,
+      "cooldown_until": null,
       "created_at": "2026-06-08T01:10:45+09:00",
       "updated_at": "2026-06-08T01:10:45+09:00",
       "completed_at": null
