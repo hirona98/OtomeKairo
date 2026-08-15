@@ -491,6 +491,78 @@ class AgentSkillRegistryTests(unittest.TestCase):
         self.assertIn("キーが不正", repair_prompt)
         self.assertIn("3キーだけ", repair_prompt)
 
+    def test_material_selection_accepts_already_active_skill_id(self) -> None:
+        payload = {
+            "additional_skill_ids": ["elyth-handle-inbox", "elyth-read-thread"],
+            "resource_reads": [],
+            "reason_summary": "inbox は読込済みで、thread を追加する",
+        }
+
+        LLMClient()._validate_agent_skill_material_selection(
+            payload,
+            selection_context={
+                "allowed_additional_skill_ids": ["elyth-read-thread"],
+                "active_skills": [{"skill_id": "elyth-handle-inbox"}],
+                "allowed_resource_reads": [],
+            },
+        )
+
+    def test_already_active_additional_skill_finishes_context_build(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory) / "skills"
+            root.mkdir()
+            root_skill = root / "root-skill"
+            root_skill.mkdir()
+            (root_skill / "SKILL.md").write_text(
+                "---\nname: root-skill\ndescription: Root workflow.\n---\n"
+                "Use [child](../child-skill/SKILL.md).\n",
+                encoding="utf-8",
+            )
+            child = root / "child-skill"
+            child.mkdir()
+            (child / "SKILL.md").write_text(
+                "---\nname: child-skill\ndescription: Child workflow.\n---\nChild instructions.\n",
+                encoding="utf-8",
+            )
+            definition = _source_definition(root, enabled=True)
+            material_calls = 0
+
+            class FakeLlm:
+                def generate_agent_skill_selection(self, **_kwargs):
+                    return {"selected_skill_ids": ["root-skill"], "reason_summary": "needed"}
+
+                def generate_agent_skill_material_selection(self, **_kwargs):
+                    nonlocal material_calls
+                    material_calls += 1
+                    return {
+                        "additional_skill_ids": ["root-skill", "child-skill"],
+                        "resource_reads": [],
+                        "reason_summary": "root is already active",
+                    }
+
+            class Subject(ServiceAgentSkillsMixin):
+                def __init__(self):
+                    self._runtime_state_lock = threading.RLock()
+                    self._agent_skill_registry = AgentSkillRegistry.load({"test-source": definition})
+                    self.llm = FakeLlm()
+
+            context = Subject()._build_agent_skill_context(
+                model_config={"model": "real-model"},
+                current_input=CurrentInput(
+                    sender_kind="person",
+                    sender_ref="person:test",
+                    source_kind="user_message",
+                    response_target_refs=("person:test",),
+                    interaction_context=None,
+                    text="perform the workflow",
+                ),
+                trigger_kind="user_message",
+                capability_decision_view=[],
+            )
+
+            self.assertEqual(context["selected_skill_ids"], ["root-skill", "child-skill"])
+            self.assertEqual(material_calls, 1)
+
     def test_material_selection_fails_after_second_candidate_violation(self) -> None:
         response = json.dumps(
             {
@@ -736,6 +808,7 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
         self.assertIn("work_log", selection[0]["content"])
         self.assertIn("current_individual_decision", applied[0]["content"])
         self.assertIn("trusted host policy", applied[0]["content"])
+        self.assertIn("skill_id は capability_id でも MCP tool_name でもありません", applied[0]["content"])
 
 
 if __name__ == "__main__":

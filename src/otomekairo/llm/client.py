@@ -243,7 +243,12 @@ class LLMClient:
             for value in additional_candidates
             if isinstance(value, str)
         } if isinstance(additional_candidates, list) else set()
-        invalid_additional = sorted(set(skill_ids) - allowed_additional_ids)
+        active_ids = {
+            str(entry.get("skill_id") or "").strip()
+            for entry in selection_context.get("active_skills") or []
+            if isinstance(entry, dict) and str(entry.get("skill_id") or "").strip()
+        }
+        invalid_additional = sorted(set(skill_ids) - allowed_additional_ids - active_ids)
         if invalid_additional:
             raise LLMError(
                 "AgentSkillMaterialSelection が候補にない skill_id を返しました: "

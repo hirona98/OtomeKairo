@@ -207,7 +207,7 @@ class ServiceAgentSkillsMixin:
                 },
             )
             additional_ids = list(material["additional_skill_ids"])
-            invalid_additional = sorted(set(additional_ids) - set(linked_candidates))
+            invalid_additional = sorted(set(additional_ids) - set(linked_candidates) - active_set)
             if invalid_additional:
                 raise LLMError(
                     "AgentSkillMaterialSelection が候補にない skill_id を返しました: "

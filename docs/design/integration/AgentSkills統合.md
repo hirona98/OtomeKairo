@@ -33,7 +33,7 @@ skill の適用可否は固定文字列や keyword 表では決めない。通�
 
 1. 全 skill の `name / description / source_id / digest` と、その catalog から作った `allowed_skill_ids` から必要な skill を選ぶ。capability catalog は必要性の判断材料とし、capability id を skill id として返さない
 2. 選択した `SKILL.md` 本文と resource catalog、本文から直接参照された sibling skill 候補を提示する
-3. LLM が `allowed_additional_skill_ids` と `allowed_resource_reads` から必要な追加 skill と UTF-8 text resource だけを選ぶ。選択した resource 本文と追加 skill 本文を次の選択へ渡し、両方の選択結果が空になるまで段階的に読む。sibling `SKILL.md` へのリンクは追加 skill 候補であり resource path として扱わず、script と binary resource は本文読込候補に含めない
+3. LLM が `allowed_additional_skill_ids` と `allowed_resource_reads` から必要な追加 skill と UTF-8 text resource だけを選ぶ。すでに `active_skills` にある skill_id を `additional_skill_ids` に含めた場合は追加済みとして扱い、候補外とはしない。選択した resource 本文と追加 skill 本文を次の選択へ渡し、両方の選択結果が空になるまで段階的に読む。sibling `SKILL.md` へのリンクは追加 skill 候補であり resource path として扱わず、script と binary resource は本文読込候補に含めない
 4. 選択済み instructions と resource を trusted Agent Skill system context として decision、expression、autonomous step に渡す
 
 capability request と autonomous run の起点には instructions 本文ではなく `source_id / skill_id / digest` の activation summary を残す。result follow-up と次 run step の選択 LLM へこの summary を前回文脈として渡し、現在の catalog と目的を基に再選択させる。古い本文を暗黙再利用しない。
@@ -42,7 +42,7 @@ material 選択の出力は `additional_skill_ids / resource_reads / reason_summ
 
 選択結果が catalog 外の skill id または提示した候補外の skill/resource path を含む場合は、同じ source pack と validator error を使って 1 回だけ repair する。repair 後も契約違反や候補違反が残る場合は判断サイクルを失敗させる。暗黙に skill なしへ戻さない。
 
-Agent Skill context は host の役割、出力契約、capability availability、安全境界、観測事実を上書きしない。skill に書かれた tool 名は capability との固定対応表ではなく、実行時 catalog と manifest に基づいて通常どおり LLM が capability request を組み立てる。
+Agent Skill context は host の役割、出力契約、capability availability、安全境界、観測事実を上書きしない。`skill_id` は `capability_id` でも MCP `tool_name` でもない。skill に書かれた tool 名は capability との固定対応表ではなく、実行時 catalog と manifest に基づいて通常どおり LLM が capability request を組み立てる。
 
 ## ホスト許可
 
