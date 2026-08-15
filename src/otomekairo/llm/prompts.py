@@ -1017,7 +1017,8 @@ def _build_decision_system_prompt(
             "target_stances の各 object は target, stance, reason_summary の 3 個に固定してください。\n"
             "target は outward_speech または self_activity、stance は advance または hold です。\n"
             "outward_speech は毎回必須です。standing_concern、ongoing_action、autonomous_run、または available な autonomous family があるときは self_activity も必須です。\n"
-            "kind=speech では outward_speech=advance、kind=capability_request または autonomous_run では self_activity=advance です。\n"
+            "kind=speech では outward_speech=advance、載っている self_activity は hold です。対話の継続は outward_speech です。\n"
+            "kind=capability_request または autonomous_run では self_activity=advance、outward_speech は hold です。\n"
             "kind=noop は載っている対象をすべて hold したときだけです。外向きだけ控える判断を noop にしないでください。\n"
             "人物側の状況は outward_speech の hold 理由にだけ使い、self_activity の hold は向き自身の理由で書いてください。",
         ),
@@ -1268,7 +1269,8 @@ def _decision_output_contract_section(comparison_scope: str) -> str:
         shared
         + "target は outward_speech または self_activity です。\n"
         "outward_speech は毎回必須です。standing_concern、ongoing_action、autonomous_run、または available な autonomous family があるときは self_activity も必須です。\n"
-        "kind=speech では outward_speech=advance、kind=capability_request または autonomous_run では self_activity=advance です。\n"
+        "kind=speech では outward_speech=advance、載っている self_activity は hold です。対話の継続は outward_speech です。\n"
+        "kind=capability_request または autonomous_run では self_activity=advance、outward_speech は hold です。\n"
         "kind=noop は載っている対象をすべて hold したときだけです。外向きだけ控える判断を noop にしないでください。\n"
         "人物側の状況は outward_speech の hold 理由にだけ使い、self_activity の hold は向き自身の理由で書いてください。"
     )

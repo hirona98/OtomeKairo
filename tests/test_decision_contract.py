@@ -867,6 +867,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
         system = self._system_prompt("full")
         self.assertIn("伝達、能力実行、保留、見送り、継続目的開始のどれが", system)
         self.assertIn("outward_speech は毎回必須です", system)
+        self.assertIn("載っている self_activity は hold です。対話の継続は outward_speech です。", system)
         self.assertIn("AffectContext の affect_states と recent_episode_affects は WorkspaceContext の affect 候補です。", system)
 
     def test_repair_prompt_follows_comparison_scope(self) -> None:
