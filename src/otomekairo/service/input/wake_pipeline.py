@@ -153,7 +153,6 @@ class ServiceInputWakePipelineMixin:
                 current_time=started_at,
                 client_context=client_context,
             )
-            debug_log("Wake", f"{cycle_label} autonomous path no_selected_candidate")
 
         # 発話抑制
         if selected_candidate is not None:

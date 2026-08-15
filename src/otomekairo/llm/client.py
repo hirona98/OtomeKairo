@@ -81,9 +81,6 @@ from otomekairo.world_state.models import WorldStateSourcePack
 from otomekairo.llm.transport import complete_text, generate_embeddings as transport_generate_embeddings
 from otomekairo.service.common import debug_log
 
-ROUTINE_SUPPRESSED_LLM_OPERATIONS = {
-    "visual_observation",
-}
 DEBUG_REJECTED_TEXT_LIMIT = 2000
 DEBUG_REJECTED_STRING_LIMIT = 200
 DEBUG_REJECTED_LIST_LIMIT = 12
@@ -1342,8 +1339,7 @@ class LLMClient:
                 source_pack,
                 images,
             )
-            if self._should_log_routine_llm_operation(operation):
-                debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
+            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
 
         messages = build_visual_observation_messages(
@@ -1470,9 +1466,6 @@ class LLMClient:
             return value
         return self._debug_clip(str(value), DEBUG_REJECTED_STRING_LIMIT)
 
-    def _should_log_routine_llm_operation(self, operation: str) -> bool:
-        return operation not in ROUTINE_SUPPRESSED_LLM_OPERATIONS
-
     def _is_mock_model_config(self, model_config: dict) -> bool:
         # model=mock* は開発用の内蔵ロジックへ切り替える。
         model = model_config.get("model")
@@ -1500,16 +1493,15 @@ class LLMClient:
                 payload = parse_json_object(content)
                 try:
                     validator(payload)
-                    if self._should_log_routine_llm_operation(operation):
-                        debug_log(
-                            "LLM",
-                            (
-                                f"{operation} done model={self._debug_model(model_config)} "
-                                f"attempt={attempt + 1} response_chars={len(content)} "
-                                f"keys={self._debug_payload_keys(payload)}"
-                            ),
-                            level="DEBUG",
-                        )
+                    debug_log(
+                        "LLM",
+                        (
+                            f"{operation} done model={self._debug_model(model_config)} "
+                            f"attempt={attempt + 1} response_chars={len(content)} "
+                            f"keys={self._debug_payload_keys(payload)}"
+                        ),
+                        level="DEBUG",
+                    )
                     return payload
                 except LLMError as exc:
                     last_error = LLMContractError(str(exc)) if wrap_validation_error else exc

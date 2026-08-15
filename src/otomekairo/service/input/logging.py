@@ -106,25 +106,14 @@ class ServiceInputLoggingMixin:
         pending_intent_selection: dict[str, Any] | None = None,
     ) -> None:
         # ログ群
-        logs = [
-            self._build_live_log_record(
-                level="INFO",
-                component="Input",
-                message=(
-                    f"{self._short_cycle_id(cycle_id)} trigger={trigger_kind} "
-                    f"input={self._conversation_log_excerpt(input_text)}"
-                ),
+        self._emit_live_log(
+            level="ERROR",
+            component="Failure",
+            message=(
+                f"{self._short_cycle_id(cycle_id)} internal_failure "
+                f"reason={self._clamp(failure_reason)}"
             ),
-            self._build_live_log_record(
-                level="ERROR",
-                component="Failure",
-                message=(
-                    f"{self._short_cycle_id(cycle_id)} internal_failure "
-                    f"reason={self._clamp(failure_reason)}"
-                ),
-            ),
-        ]
-        self._emit_live_logs(logs)
+        )
 
     def _emit_memory_trace_logs(self, *, cycle_id: str, memory_trace: dict[str, Any]) -> None:
         # status判定

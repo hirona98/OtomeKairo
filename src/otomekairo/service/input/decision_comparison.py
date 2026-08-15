@@ -47,25 +47,11 @@ class ServiceInputDecisionComparisonMixin:
             persona_context=kwargs["persona_context"],
             context=self_context,
         )
-        debug_log(
-            "Pipeline",
-            (
-                f"{cycle_label} self_activity decision done kind={self_decision['kind']} "
-                f"reason={self._clamp(self_decision['reason_summary'])}"
-            ),
-        )
         outward_context = self._build_outward_speech_decision_context(**kwargs)
         outward_decision = self.llm.generate_decision(
             model_config=kwargs["model_config"],
             persona_context=kwargs["persona_context"],
             context=outward_context,
-        )
-        debug_log(
-            "Pipeline",
-            (
-                f"{cycle_label} outward_speech decision done kind={outward_decision['kind']} "
-                f"reason={self._clamp(outward_decision['reason_summary'])}"
-            ),
         )
         composed = self._compose_separated_decisions(
             self_decision=self_decision,

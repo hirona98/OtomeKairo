@@ -166,17 +166,6 @@ class ServiceMemoryMixin:
                 ),
             }
             self.store.upsert_memory_postprocess_job(job=completed_job)
-            debug_log(
-                "MemoryWorker",
-                (
-                    f"job done cycle={self._short_cycle_id(started_job['cycle_id'])} "
-                    f"status={completed_job['result_status']} "
-                    f"vector={postprocess_result['vector_index_sync']['result_status']} "
-                    f"relation={postprocess_result['relation_index_sync']['result_status']} "
-                    f"correction={postprocess_result['correction_reconciliation']['result_status']} "
-                    f"reflection={postprocess_result['reflective_consolidation']['result_status']}"
-                ),
-            )
         except Exception as exc:  # noqa: BLE001
             # 想定外失敗
             failure_reason = str(exc)

@@ -2223,13 +2223,6 @@ class ServiceInputPipelineMixin:
                 step_capability_request = step_result.get("capability_request_summary")
                 if isinstance(step_capability_request, dict):
                     dispatched_capability_request_summary = step_capability_request
-            debug_log(
-                "Pipeline",
-                (
-                    f"{cycle_label} autonomous_run started "
-                    f"run={autonomous_run_summary.get('run_id') if isinstance(autonomous_run_summary, dict) else '-'}"
-                ),
-            )
         speech_suppressed = (
             outward_decision.get("kind") == "speech"
             and current_input.source_kind == "capability_result"
@@ -2313,16 +2306,11 @@ class ServiceInputPipelineMixin:
                     "autonomous_run_summary": autonomous_run_summary,
                     "autonomous_run_step_result": autonomous_run_step_result,
                 }
-            debug_log("Pipeline", f"{cycle_label} speech done speech_chars={len(speech_payload['speech_text'])}")
             self._emit_live_log(
                 level="INFO",
                 component="Result",
                 message=f"{cycle_label} speech done speech={self._conversation_log_excerpt(speech_payload['speech_text'])}",
             )
-        elif speech_payload is not None:
-            debug_log("Pipeline", f"{cycle_label} speech prepared kinds={self._decision_kind_log(decision)}")
-        else:
-            debug_log("Pipeline", f"{cycle_label} speech skipped kinds={self._decision_kind_log(decision)}")
         return {
             "speech_payload": speech_payload,
             "capability_request_summary": dispatched_capability_request_summary,
