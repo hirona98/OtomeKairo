@@ -64,6 +64,12 @@ class MemoryConsolidator:
             finished_at=finished_at,
         )
 
+        correction_targets = [
+            self.correction.compact_target(target)
+            for target in correction_prepared.get("targets", [])
+            if isinstance(target, dict)
+        ]
+
         # 解釈
         interpretation = self.llm.generate_memory_interpretation(
             model_config=selected_preset,
@@ -80,6 +86,7 @@ class MemoryConsolidator:
                 events=events,
             ),
             current_time=finished_at,
+            correction_targets=correction_targets or None,
         )
         provenance = self._turn_provenance(events=events, memory_context=memory_context)
 
@@ -179,6 +186,9 @@ class MemoryConsolidator:
                         "requested_scope_count": 0,
                         "succeeded_scope_count": 0,
                         "failed_scopes": [],
+                        "dirty_scope_count": 0,
+                        "dirty_reasons": [],
+                        "llm_call_count": 0,
                     },
                     "drive_state_update": {
                         "result_status": "queued",
@@ -224,6 +234,7 @@ class MemoryConsolidator:
                     event_ids=event_ids,
                     cycle_id=cycle_id,
                     prepared=correction_prepared,
+                    interpretation=interpretation,
                 ),
             ),
         )
@@ -462,6 +473,9 @@ class MemoryConsolidator:
                 "requested_scope_count": 0,
                 "succeeded_scope_count": 0,
                 "failed_scopes": [],
+                "dirty_scope_count": 0,
+                "dirty_reasons": [],
+                "llm_call_count": 0,
             },
             "drive_state_update": {
                 "result_status": "not_started",
@@ -500,16 +514,7 @@ class MemoryConsolidator:
 
         # 実行
         try:
-            state_snapshot = job["state_snapshot"]
-            selected_model_preset = state_snapshot["model_presets"][state_snapshot["selected_model_preset_id"]]
-            selected_persona = state_snapshot["personas"][state_snapshot["selected_persona_id"]]
             return self.correction.run(
-                llm=self.llm,
-                model_config=selected_model_preset,
-                persona_context=build_persona_context(
-                    selected_persona,
-                    role="memory_correction_reconciliation",
-                ),
                 context=correction_context,
                 finished_at=finished_at,
             )
@@ -602,6 +607,7 @@ class MemoryConsolidator:
         event_ids: list[str],
         cycle_id: str,
         prepared: dict[str, Any],
+        interpretation: dict[str, Any],
     ) -> dict[str, Any] | None:
         # 候補なし
         targets = prepared.get("targets", [])
@@ -616,7 +622,24 @@ class MemoryConsolidator:
             "event_ids": event_ids,
             "cycle_ids": [cycle_id],
             "targets": targets,
+            "selection": self._memory_interpretation_correction_selection(interpretation),
         }
+
+    def _memory_interpretation_correction_selection(
+        self,
+        interpretation: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        selection = {
+            "correction_status": interpretation.get("correction_status"),
+            "selected_targets": interpretation.get("selected_targets"),
+        }
+        try:
+            from otomekairo.llm.contracts import validate_memory_correction_reconciliation_contract
+
+            validate_memory_correction_reconciliation_contract(selection)
+        except Exception:  # noqa: BLE001
+            return None
+        return selection
 
     def _memory_decision_summary(self, decision: dict[str, Any]) -> dict[str, Any]:
         summary: dict[str, Any] = {

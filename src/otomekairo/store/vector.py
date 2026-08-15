@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import struct
 from typing import Any
 
 import sqlite_vec
@@ -105,7 +106,9 @@ class StoreVectorMixin:
                         ),
                     )
 
-                # ベクトルupsert
+                embedding = entry.get("embedding")
+                if embedding is None:
+                    continue
                 vector_table_name = self._vector_table_name(entry["source_kind"])
                 conn.execute(
                     f"DELETE FROM {vector_table_name} WHERE id = ?",
@@ -115,9 +118,82 @@ class StoreVectorMixin:
                     f"INSERT INTO {vector_table_name}(id, embedding) VALUES (?, ?)",
                     (
                         vector_entry_id,
-                        sqlite_vec.serialize_float32(entry["embedding"]),
+                        sqlite_vec.serialize_float32(embedding),
                     ),
                 )
+
+    def list_vector_index_metadata(
+        self,
+        *,
+        memory_set_id: str,
+        sources: list[tuple[str, str]],
+    ) -> dict[tuple[str, str], dict[str, Any]]:
+        if not sources:
+            return {}
+        unique_sources = list(dict.fromkeys(sources))
+        clauses = " OR ".join("(source_kind = ? AND source_id = ?)" for _ in unique_sources)
+        params: list[Any] = [memory_set_id]
+        for source_kind, source_id in unique_sources:
+            params.extend([source_kind, source_id])
+        query = f"""
+            SELECT source_kind, source_id, text_hash, vector_entry_id
+            FROM vector_index_entries
+            WHERE memory_set_id = ?
+              AND ({clauses})
+        """
+        with self._memory_db() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return {
+            (str(row["source_kind"]), str(row["source_id"])): {
+                "text_hash": row["text_hash"],
+                "vector_entry_id": int(row["vector_entry_id"]),
+            }
+            for row in rows
+        }
+
+    def get_memory_unit_embeddings(
+        self,
+        *,
+        memory_set_id: str,
+        memory_unit_ids: list[str],
+        embedding_dimension: int,
+    ) -> dict[str, dict[str, Any]]:
+        unique_ids = [value for value in dict.fromkeys(memory_unit_ids) if isinstance(value, str) and value]
+        if not unique_ids:
+            return {}
+        metadata = self.list_vector_index_metadata(
+            memory_set_id=memory_set_id,
+            sources=[("memory_unit", memory_unit_id) for memory_unit_id in unique_ids],
+        )
+        embeddings: dict[str, dict[str, Any]] = {}
+        with self._memory_db() as conn:
+            self._ensure_vector_tables(conn, embedding_dimension)
+            for source_key, item in metadata.items():
+                _, source_id = source_key
+                row = conn.execute(
+                    "SELECT embedding FROM memory_unit_vec WHERE id = ?",
+                    (item["vector_entry_id"],),
+                ).fetchone()
+                if row is None:
+                    continue
+                vector = self._deserialize_float32(row["embedding"], embedding_dimension)
+                if vector is None:
+                    continue
+                embeddings[source_id] = {
+                    "embedding": vector,
+                    "text_hash": item["text_hash"],
+                }
+        return embeddings
+
+    def _deserialize_float32(self, value: Any, embedding_dimension: int) -> list[float] | None:
+        if isinstance(value, memoryview):
+            value = value.tobytes()
+        if not isinstance(value, (bytes, bytearray)):
+            return None
+        expected_size = embedding_dimension * 4
+        if len(value) != expected_size:
+            return None
+        return list(struct.unpack(f"{embedding_dimension}f", value))
 
     def search_memory_unit_vector_entries(
         self,

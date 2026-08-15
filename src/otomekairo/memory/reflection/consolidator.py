@@ -55,9 +55,9 @@ class ReflectiveConsolidator(
         affect_state_update = self._empty_affect_state_update("not_started")
         memory_link_update = self._empty_memory_link_update("not_started")
         latest_run = self.store.get_latest_reflection_run(memory_set_id)
-        latest_updated_run = self.store.get_latest_reflection_run(
+        latest_evaluated_run = self.store.get_latest_reflection_run(
             memory_set_id,
-            result_status="updated",
+            result_statuses=("updated", "no_change"),
         )
         trigger_reasons = self._reflective_trigger_reasons(
             memory_set_id=memory_set_id,
@@ -82,7 +82,7 @@ class ReflectiveConsolidator(
         # 実行状態
         reflection_run_id = f"reflection_run:{uuid.uuid4().hex}"
         started_at = now_iso()
-        since_iso = latest_updated_run["finished_at"] if isinstance(latest_updated_run, dict) else None
+        since_iso = latest_evaluated_run["finished_at"] if isinstance(latest_evaluated_run, dict) else None
         episodes: list[dict[str, Any]] = []
         reflection_actions: list[dict[str, Any]] = []
 
@@ -146,6 +146,13 @@ class ReflectiveConsolidator(
             )
 
             # アクション構築
+            previous_failed_scopes = []
+            if isinstance(latest_run, dict):
+                previous_summary = latest_run.get("summary_generation")
+                if isinstance(previous_summary, dict):
+                    failed_scopes = previous_summary.get("failed_scopes")
+                    if isinstance(failed_scopes, list):
+                        previous_failed_scopes = failed_scopes
             summary_actions, summary_generation = self._build_reflective_summary_actions(
                 memory_set_id=memory_set_id,
                 finished_at=finished_at,
@@ -155,6 +162,10 @@ class ReflectiveConsolidator(
                 reflection_summary_model_config=reflection_summary_model_config,
                 selected_persona=selected_persona,
                 scope_support_index=scope_support_index,
+                memory_actions=memory_actions,
+                affect_state_updates=affect_state_updates,
+                previous_failed_scopes=previous_failed_scopes,
+                trigger_reasons=trigger_reasons,
             )
             reflection_actions.extend(summary_actions)
             reflection_actions.extend(

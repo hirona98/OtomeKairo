@@ -28,7 +28,7 @@ from otomekairo.llm.contracts import (
     validate_disclosure_review_contract,
     validate_event_evidence_contract,
     validate_initiative_entry_check_contract,
-    validate_memory_correction_reconciliation_contract,
+
     validate_memory_interpretation_contract,
     validate_memory_reflection_summary_contract,
     validate_pre_send_check_contract,
@@ -59,8 +59,7 @@ from otomekairo.llm.prompts import (
     build_initiative_entry_check_repair_prompt,
     build_input_interpretation_messages,
     build_input_interpretation_repair_prompt,
-    build_memory_correction_reconciliation_messages,
-    build_memory_correction_reconciliation_repair_prompt,
+
     build_memory_interpretation_messages,
     build_memory_interpretation_repair_prompt,
     build_memory_reflection_summary_messages,
@@ -1052,6 +1051,7 @@ class LLMClient:
         speech_text: str | None,
         memory_context: dict[str, Any] | None,
         current_time: str,
+        correction_targets: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         operation = "memory_interpretation"
         # モック経路
@@ -1064,6 +1064,7 @@ class LLMClient:
                 speech_text,
                 memory_context,
                 persona_context=persona_context,
+                correction_targets=correction_targets,
             )
             debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
@@ -1077,8 +1078,9 @@ class LLMClient:
             speech_text=speech_text,
             memory_context=memory_context,
             current_time=current_time,
+            correction_targets=correction_targets,
         )
-        return self._generate_structured_payload(
+        payload = self._generate_structured_payload(
             model_config=model_config,
             messages=messages,
             validator=validate_memory_interpretation_contract,
@@ -1086,20 +1088,24 @@ class LLMClient:
             failure_message="MemoryInterpretation の生成に失敗しました。解析可能な応答が得られませんでした。",
             operation=operation,
         )
+        if not correction_targets:
+            payload.setdefault("correction_status", "no_correction")
+            payload.setdefault("selected_targets", [])
+        return payload
 
     def generate_memory_reflection_summary(
         self,
         *,
         model_config: dict,
         persona_context: PersonaContext,
-        evidence_pack: dict[str, Any],
+        source_pack: dict[str, Any],
     ) -> dict[str, Any]:
         operation = "memory_reflection_summary"
         # モック経路
         if self._is_mock_model_config(model_config):
             payload = self.mock_client.generate_memory_reflection_summary(
                 model_config,
-                self._source_pack_with_persona_context(evidence_pack, persona_context),
+                self._source_pack_with_persona_context(source_pack, persona_context),
             )
             debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
@@ -1107,7 +1113,7 @@ class LLMClient:
         # プロンプト構築
         messages = build_memory_reflection_summary_messages(
             persona_context=persona_context,
-            evidence_pack=evidence_pack,
+            source_pack=source_pack,
         )
         return self._generate_structured_payload(
             model_config=model_config,
@@ -1115,35 +1121,6 @@ class LLMClient:
             validator=validate_memory_reflection_summary_contract,
             repair_prompt_builder=build_memory_reflection_summary_repair_prompt,
             failure_message="MemoryReflectionSummary の生成に失敗しました。解析可能な応答が得られませんでした。",
-            operation=operation,
-        )
-
-    def generate_memory_correction_reconciliation(
-        self,
-        *,
-        model_config: dict,
-        persona_context: PersonaContext,
-        source_pack: dict[str, Any],
-    ) -> dict[str, Any]:
-        operation = "memory_correction_reconciliation"
-        source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
-        # モック経路
-        if self._is_mock_model_config(model_config):
-            payload = self.mock_client.generate_memory_correction_reconciliation(model_config, source_pack)
-            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
-            return payload
-
-        # プロンプト構築
-        messages = build_memory_correction_reconciliation_messages(
-            persona_context=persona_context,
-            source_pack=source_pack,
-        )
-        return self._generate_structured_payload(
-            model_config=model_config,
-            messages=messages,
-            validator=validate_memory_correction_reconciliation_contract,
-            repair_prompt_builder=build_memory_correction_reconciliation_repair_prompt,
-            failure_message="MemoryCorrectionReconciliation の生成に失敗しました。解析可能な応答が得られませんでした。",
             operation=operation,
         )
 

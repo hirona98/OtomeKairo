@@ -52,19 +52,14 @@ OtomeKairo では、`event_evidence` 全体を LLM 任せにはしない。
 `event_evidence` 生成は、次の 5 段に分ける。
 
 1. 既存ロジックで selected `event_id` 群を決める
-2. selected event を読み、各 event ごとに source pack を作る
-3. `event_evidence_generation` role を **event 単位** で呼ぶ
-4. 返ってきた slot payload を検証し、`event_id` と `kind` をコード側で付け直す
+2. selected event を読み、request-local な `event_ref` を付けた source pack 配列を作る
+3. `event_evidence_generation` role を **選定済み event 群に対して 1 回** 呼ぶ
+4. 返ってきた各 slot payload を検証し、`event_id` と `kind` をコード側で付け直す
 5. 失敗があっても recall cycle 自体は継続し、failure を inspection へ残す
 
-event 単位の LLM 圧縮は、選定済み event の順序を index として保持した上で、上限付き並列実行する。
-並列化しても `event_id` 選定、`events` 読み込み、最終的な `RecallPack.event_evidence` の並び順はコード側で固定する。
-
-ここで event 単位の呼び出しにする理由は次である。
-
-- selected event は最大 8 件で、call 数が膨らみすぎない
-- 1 件だけ失敗しても他の `event_evidence` を残せる
-- `event_id` と生成失敗の対応を inspection で追いやすい
+1 回の呼び出しに標準選定と precise 追加をまとめる。
+`event_id` 選定、`events` 読み込み、最終的な `RecallPack.event_evidence` の並び順はコード側で固定する。
+項目単位の失敗は、欠けた `event_ref`、未知 ref、slot 不正としてその event だけ閉じる。
 
 ## 論理 role
 
@@ -72,7 +67,7 @@ event 単位の LLM 圧縮は、選定済み event の順序を index として�
 
 この role の責務は次だけである。
 
-- selected event 1 件分の source pack を読み、slot payload を返す
+- 選定済み event 群の source pack を読み、各 `event_ref` の slot payload を返す
 
 この role を `input_interpretation` や `decision_generation` から分ける理由は次である。
 
@@ -84,7 +79,7 @@ event 単位の LLM 圧縮は、選定済み event の順序を index として�
 
 ## source pack の設計
 
-LLM に渡すのは raw `events` 全文ではなく、selected event 1 件ぶんの圧縮済み source pack とする。
+LLM に渡すのは raw `events` 全文ではなく、共通の想起文脈と、選定済み event ごとの圧縮済み項目である。
 
 最低限、次を含める。
 
@@ -94,36 +89,38 @@ LLM に渡すのは raw `events` 全文ではなく、selected event 1 件ぶん
   "secondary_recall_focuses": ["episodic"],
   "time_reference": "past",
   "risk_flags": ["ambiguous_reference"],
-  "selection_basis": {
-    "retrieval_sections": ["active_commitments", "episodic_evidence"],
-    "source_summaries": [
-      "また体調の話の続きをしたい流れがある。",
-      "前回の相談の続きとして様子を確認した。"
-    ],
-    "selection_mode": "precise",
-    "precise_reason_summary": "曖昧参照や継続判断の確認が必要なため、selected source の sibling event を限定ロードして確認する。"
-  },
-  "event": {
-    "kind": "decision",
-    "role": "system",
-    "created_time_label": "2026年4月12日 10時30分（日本時間）",
-    "text": null,
-    "result_kind": "speech",
-    "external_result_kind": "speech",
-    "reason_code": "follow_up_gently",
-    "reason_summary": "結論を急がず、次も様子を見ながら話を続ける方針にした。",
-    "pending_intent_summary": null
-  }
+  "events": [
+    {
+      "event_ref": "event:0",
+      "selection_mode": "standard",
+      "retrieval_sections": ["active_commitments", "episodic_evidence"],
+      "source_summaries": [
+        "また体調の話の続きをしたい流れがある。",
+        "前回の相談の続きとして様子を確認した。"
+      ],
+      "precise_reason_summary": null,
+      "kind": "decision",
+      "role": "system",
+      "created_time_label": "2026年4月12日 10時30分（日本時間）",
+      "text": null,
+      "result_kind": "speech",
+      "external_result_kind": "speech",
+      "reason_code": "follow_up_gently",
+      "reason_summary": "結論を急がず、次も様子を見ながら話を続ける方針にした。",
+      "pending_intent_summary": null
+    }
+  ]
 }
 ```
 
 入力の原則は次である。
 
-- source pack は selected event 1 件だけを扱う
-- `selection_basis.source_summaries` は、その event を指していた `episode / memory_unit` の `summary_text` を最大 2 件だけ入れる
+- 共通文脈は 1 回だけ渡し、event は配列にする
+- 各 event は request-local な `event_ref` を持つ。突合は `event_ref` だけを使う
+- `source_summaries` は、その event を指していた `episode / memory_unit` の `summary_text` を最大 2 件だけ入れる
 - `retrieval_sections` は section 名だけを入れ、内部 ID は渡さない
-- `selection_basis.selection_mode` は `standard | precise` を使い、追加ロードした event だけ `precise` を入れる
-- `selection_basis.precise_reason_summary` は precise event のときだけ入れ、なぜ追加確認したかを短く伝える
+- `selection_mode` は `standard | precise` を使い、追加ロードした event だけ `precise` を入れる
+- `precise_reason_summary` は precise event のときだけ入れ、なぜ追加確認したかを短く伝える
 - `created_at` のような正本 timestamp は、生活文脈向けに整形した `created_time_label` として渡す
 - `decision` event では `reason_summary` と `result_kind` を優先して渡す
 - `speech` / `observation` event では `text` を主材料にし、不要なメタデータは増やさない
@@ -135,17 +132,24 @@ LLM の出力は JSON object 1 個に固定する。
 
 ```json
 {
-  "anchor": "前回の体調相談の続きの場面",
-  "topic": "休み方と体調の様子見",
-  "decision_or_result": "結論を急がず、次も確認しながら話を続ける流れになった",
-  "tone_or_note": "慎重に様子を見る空気だった"
+  "evidence": [
+    {
+      "event_ref": "event:0",
+      "anchor": "前回の体調相談の続きの場面",
+      "topic": "休み方と体調の様子見",
+      "decision_or_result": "結論を急がず、次も確認しながら話を続ける流れになった",
+      "tone_or_note": "慎重に様子を見る空気だった"
+    }
+  ]
 }
 ```
 
-契約は次とする。
+トップレベルキーは `evidence` だけである。
+各要素の契約は次とする。
 
-- 必須キーは `anchor / topic / decision_or_result / tone_or_note` の 4 つ
-- 各値は `string | null`
+- 必須キーは `event_ref / anchor / topic / decision_or_result / tone_or_note` の 5 つ
+- `event_ref` は source pack にある request-local ref だけを使う
+- slot の各値は `string | null`
 - 4 slot のうち少なくとも 1 つは `null` ではない
 - 文字列なら前後空白を除いて空でない
 - 改行を含まない
@@ -153,6 +157,10 @@ LLM の出力は JSON object 1 個に固定する。
 - 内部識別子を含まない
 - 生ログの長い逐語引用にしない
 - source pack に無い事実を補わない
+
+未知の `event_ref`、欠けた event、slot 不正は、その event だけ失敗として閉じる。
+LLM client の validator は envelope（`evidence` 配列）だけを検証する。
+各項目の検証、重複 ref、未知 ref の扱いは呼び出し側が行う。
 
 最終的な `RecallPack.event_evidence` では、`null` slot は落とし、コード側で次の shape に戻す。
 
@@ -187,14 +195,17 @@ user prompt では、recall 文脈と selected event の source pack をその�
 
 1. 既存ロジックで `event_evidence` が必要か判定する
 2. 既存ロジックで標準 `selected_event_id` 群を決める
-3. precise evidence 判定ゲートを通したときだけ、selected source に残る sibling `event_id` を最大 1-3 件だけ追加選定する
+3. precise evidence 判定ゲートを通したときだけ、selected source に残る sibling `event_id` を最大 8 件追加選定する
 4. store から標準 event と precise event を順序付きで読む
-5. 読み込めた各 event について source pack を構築する
-6. `event_evidence_generation` role で slot payload を上限付き並列生成する
-7. contract を検証し、`event_id` と `kind` をコード側で付ける
+5. 読み込めた各 event について `event_ref` 付き source pack 項目を構築する
+6. `event_evidence_generation` role で選定済み event 群の slot payload を 1 回生成する
+7. 各項目の contract を検証し、`event_id` と `kind` をコード側で付ける
 8. 結果を選定済み event の順序へ戻し、`null` slot を落として `RecallPack.event_evidence` へ積む
 9. `selected_event_ids` は標準選定分だけ保持し、precise 追加分は別 trace へ出す
 10. recall trace と retrieval run へ生成結果を記録する
+
+precise 追加の上限 8 は、曖昧参照と継続履歴の sibling を落とさないための精度側の上限である。
+標準選定 8 と合わせて 1 回の出力配列は最大 16 件である。
 
 ## 失敗時の扱い
 
@@ -203,7 +214,8 @@ LLM が失敗したときに、古い `_event_evidence_anchor()` 系ロジック
 
 代わりに、失敗は **event 単位** で閉じ込める。
 
-- ある event の source pack 構築や LLM 生成が失敗しても、他 event の圧縮は続ける
+- ある event の source pack 構築や項目検証が失敗しても、他 event の圧縮は続ける
+- 呼び出し全体の envelope が壊れたときだけ、その 1 回を repair 対象にする
 - 失敗した event だけ `RecallPack.event_evidence` へ入れない
 - selected `event_id` は trace に残す
 - selected event が全件失敗した場合でも、無言で `event_evidence=[]` にするのではなく、failure を trace と audit event に残す

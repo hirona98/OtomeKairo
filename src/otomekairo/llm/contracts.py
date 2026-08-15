@@ -223,19 +223,25 @@ INTERNAL_IDENTIFIER_PATTERN = re.compile(
 
 
 # 補助検証
-def _validate_exact_keys(value: Any, required_keys: set[str], label: str) -> None:
+def _validate_exact_keys(
+    value: Any,
+    required_keys: set[str],
+    label: str,
+    optional_keys: set[str] | None = None,
+) -> None:
     # 形状
     if not isinstance(value, dict):
         raise LLMError(f"{label} はオブジェクトである必要があります。")
 
     # キー確認
     actual_keys = set(value.keys())
-    if actual_keys == required_keys:
+    allowed_extra = optional_keys or set()
+    missing_keys = sorted(required_keys - actual_keys)
+    extra_keys = sorted(actual_keys - required_keys - allowed_extra)
+    if not missing_keys and not extra_keys:
         return
 
     # 詳細
-    missing_keys = sorted(required_keys - actual_keys)
-    extra_keys = sorted(actual_keys - required_keys)
     details: list[str] = []
     if missing_keys:
         details.append(f"不足={','.join(missing_keys)}")
@@ -1064,14 +1070,21 @@ def validate_autonomous_step_contract(payload: dict[str, Any]) -> None:
 
 
 # memory interpretation検証
-def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
-    # 必須キー群
+def validate_memory_interpretation_contract(
+    payload: dict[str, Any],
+) -> None:
+    # 必須キー群。訂正キーは任意で、違反しても記憶解釈本体は落とさない。
     required_keys = {
         "episode",
         "candidate_memory_units",
         "episode_affects",
     }
-    _validate_exact_keys(payload, required_keys, "MemoryInterpretation")
+    _validate_exact_keys(
+        payload,
+        required_keys,
+        "MemoryInterpretation",
+        optional_keys={"correction_status", "selected_targets"},
+    )
 
     # episode検証
     episode = payload["episode"]
@@ -1209,97 +1222,122 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
         seen_episode_affects.add(affect_key)
 
 
-def validate_memory_reflection_summary_contract(payload: dict[str, Any]) -> None:
-    # 必須キー群
-    _validate_exact_keys(payload, {"summary_text"}, "MemoryReflectionSummary")
-
-    # summary_text
-    summary_text = payload["summary_text"]
+def validate_memory_reflection_summary_text(summary_text: Any, *, label: str = "MemoryReflectionSummary") -> str:
     if not isinstance(summary_text, str):
-        raise LLMError("MemoryReflectionSummary summary_text は文字列である必要があります。")
-
+        raise LLMError(f"{label} summary_text は文字列である必要があります。")
     normalized = summary_text.strip()
     if not normalized:
-        raise LLMError("MemoryReflectionSummary summary_text は空にできません。")
+        raise LLMError(f"{label} summary_text は空にできません。")
     if "\n" in normalized or "\r" in normalized:
-        raise LLMError("MemoryReflectionSummary summary_text に改行を含めてはいけません。")
+        raise LLMError(f"{label} summary_text に改行を含めてはいけません。")
     if len(normalized) > MAX_MEMORY_REFLECTION_SUMMARY_LENGTH:
-        raise LLMError("MemoryReflectionSummary summary_text が最大長を超えています。")
+        raise LLMError(f"{label} summary_text が最大長を超えています。")
     if INTERNAL_IDENTIFIER_PATTERN.search(normalized) is not None:
-        raise LLMError("MemoryReflectionSummary summary_text に内部識別子を含めてはいけません。")
+        raise LLMError(f"{label} summary_text に内部識別子を含めてはいけません。")
+    return normalized
 
 
-def validate_memory_correction_reconciliation_contract(payload: dict[str, Any]) -> None:
-    # 必須キー群
-    _validate_exact_keys(payload, {"correction_status", "selected_targets"}, "MemoryCorrectionReconciliation")
+def validate_memory_reflection_summary_item(item: Any, *, label: str = "MemoryReflectionSummary summary") -> str:
+    if not isinstance(item, dict):
+        raise LLMError(f"{label} は object である必要があります。")
+    _validate_exact_keys(item, {"scope_ref", "summary_text"}, label)
+    scope_ref = item["scope_ref"]
+    if not isinstance(scope_ref, str) or not scope_ref.startswith("scope:"):
+        raise LLMError(f"{label}.scope_ref が不正です。")
+    validate_memory_reflection_summary_text(item["summary_text"], label=label)
+    return scope_ref
 
-    # status
+
+def validate_memory_reflection_summary_contract(payload: dict[str, Any]) -> None:
+    # envelope だけを検証する。項目の契約は呼び出し側で閉じる。
+    _validate_exact_keys(payload, {"summaries"}, "MemoryReflectionSummary")
+    if not isinstance(payload["summaries"], list):
+        raise LLMError("MemoryReflectionSummary summaries は配列である必要があります。")
+
+
+def _validate_memory_correction_selection(payload: dict[str, Any], *, label: str) -> None:
     if payload["correction_status"] not in MEMORY_CORRECTION_STATUS_VALUES:
-        raise LLMError("MemoryCorrectionReconciliation correction_status が不正です。")
+        raise LLMError(f"{label} correction_status が不正です。")
 
-    # selected targets
     selected_targets = payload["selected_targets"]
     if not isinstance(selected_targets, list):
-        raise LLMError("MemoryCorrectionReconciliation selected_targets は配列である必要があります。")
+        raise LLMError(f"{label} selected_targets は配列である必要があります。")
     if payload["correction_status"] == "no_correction" and selected_targets:
-        raise LLMError("MemoryCorrectionReconciliation no_correction では selected_targets を空にしてください。")
+        raise LLMError(f"{label} no_correction では selected_targets を空にしてください。")
     if payload["correction_status"] == "selected" and not selected_targets:
-        raise LLMError("MemoryCorrectionReconciliation selected では selected_targets を 1 件以上入れてください。")
+        raise LLMError(f"{label} selected では selected_targets を 1 件以上入れてください。")
     if len(selected_targets) > 8:
-        raise LLMError("MemoryCorrectionReconciliation selected_targets は最大 8 件までです。")
+        raise LLMError(f"{label} selected_targets は最大 8 件までです。")
 
     seen_revision_ids: set[str] = set()
     for item in selected_targets:
         required_keys = {"revision_id", "memory_unit_id", "correction_kind", "reason_summary"}
-        _validate_exact_keys(item, required_keys, "MemoryCorrectionReconciliation selected_target")
+        _validate_exact_keys(item, required_keys, f"{label} selected_target")
         revision_id = item["revision_id"]
         if not isinstance(revision_id, str) or not revision_id.startswith("revision:"):
-            raise LLMError("MemoryCorrectionReconciliation selected_target.revision_id が不正です。")
+            raise LLMError(f"{label} selected_target.revision_id が不正です。")
         if revision_id in seen_revision_ids:
-            raise LLMError("MemoryCorrectionReconciliation selected_targets に重複した revision_id があります。")
+            raise LLMError(f"{label} selected_targets に重複した revision_id があります。")
         seen_revision_ids.add(revision_id)
 
         memory_unit_id = item["memory_unit_id"]
         if not isinstance(memory_unit_id, str) or not memory_unit_id.startswith("memory_unit:"):
-            raise LLMError("MemoryCorrectionReconciliation selected_target.memory_unit_id が不正です。")
+            raise LLMError(f"{label} selected_target.memory_unit_id が不正です。")
         if item["correction_kind"] not in MEMORY_CORRECTION_KIND_VALUES:
-            raise LLMError("MemoryCorrectionReconciliation selected_target.correction_kind が不正です。")
+            raise LLMError(f"{label} selected_target.correction_kind が不正です。")
         reason_summary = item["reason_summary"]
         if not isinstance(reason_summary, str) or not reason_summary.strip():
-            raise LLMError("MemoryCorrectionReconciliation selected_target.reason_summary が不正です。")
+            raise LLMError(f"{label} selected_target.reason_summary が不正です。")
         if "\n" in reason_summary or "\r" in reason_summary:
-            raise LLMError("MemoryCorrectionReconciliation selected_target.reason_summary に改行を含めてはいけません。")
+            raise LLMError(f"{label} selected_target.reason_summary に改行を含めてはいけません。")
 
 
-def validate_event_evidence_contract(payload: dict[str, Any]) -> None:
-    # 必須キー群
-    required_keys = {
-        "anchor",
-        "topic",
-        "decision_or_result",
-        "tone_or_note",
-    }
-    _validate_exact_keys(payload, required_keys, "EventEvidence")
+def validate_memory_correction_reconciliation_contract(payload: dict[str, Any]) -> None:
+    _validate_exact_keys(payload, {"correction_status", "selected_targets"}, "MemoryCorrectionReconciliation")
+    _validate_memory_correction_selection(payload, label="MemoryCorrectionReconciliation")
 
-    # slot 群
-    present_slot_count = 0
+
+def validate_event_evidence_item_slots(payload: dict[str, Any], *, label: str = "EventEvidence") -> dict[str, str]:
+    present_slots: dict[str, str] = {}
     for slot_name in ("anchor", "topic", "decision_or_result", "tone_or_note"):
-        value = payload[slot_name]
+        value = payload.get(slot_name)
         if value is None:
             continue
         if not isinstance(value, str):
-            raise LLMError(f"EventEvidence {slot_name} は文字列または null である必要があります。")
+            raise LLMError(f"{label} {slot_name} は文字列または null である必要があります。")
         normalized = value.strip()
         if not normalized:
-            raise LLMError(f"EventEvidence {slot_name} は指定する場合、空にできません。")
+            raise LLMError(f"{label} {slot_name} は指定する場合、空にできません。")
         if "\n" in normalized or "\r" in normalized:
-            raise LLMError(f"EventEvidence {slot_name} に改行を含めてはいけません。")
+            raise LLMError(f"{label} {slot_name} に改行を含めてはいけません。")
         if INTERNAL_IDENTIFIER_PATTERN.search(normalized) is not None:
-            raise LLMError(f"EventEvidence {slot_name} に内部識別子を含めてはいけません。")
-        present_slot_count += 1
+            raise LLMError(f"{label} {slot_name} に内部識別子を含めてはいけません。")
+        present_slots[slot_name] = normalized
+    if not present_slots:
+        raise LLMError(f"{label} には少なくとも 1 つの null でない slot が必要です。")
+    return present_slots
 
-    if present_slot_count == 0:
-        raise LLMError("EventEvidence には少なくとも 1 つの null でない slot が必要です。")
+
+def validate_event_evidence_item(item: Any, *, label: str = "EventEvidence item") -> str:
+    if not isinstance(item, dict):
+        raise LLMError(f"{label} は object である必要があります。")
+    _validate_exact_keys(
+        item,
+        {"event_ref", "anchor", "topic", "decision_or_result", "tone_or_note"},
+        label,
+    )
+    event_ref = item["event_ref"]
+    if not isinstance(event_ref, str) or not event_ref.startswith("event:"):
+        raise LLMError(f"{label}.event_ref が不正です。")
+    validate_event_evidence_item_slots(item, label=label)
+    return event_ref
+
+
+def validate_event_evidence_contract(payload: dict[str, Any]) -> None:
+    # envelope だけを検証する。項目の契約は呼び出し側で閉じる。
+    _validate_exact_keys(payload, {"evidence"}, "EventEvidence")
+    if not isinstance(payload["evidence"], list):
+        raise LLMError("EventEvidence evidence は配列である必要があります。")
 
 
 def validate_world_state_contract(

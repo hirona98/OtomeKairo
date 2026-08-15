@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from otomekairo.memory.utils import (
     NON_SEMANTIC_QUALIFIER_KEYS,
     build_memory_unit_semantic_text,
+    source_text_hash,
     clamp_score,
     local_datetime,
     merged_cycle_ids,
@@ -113,6 +114,7 @@ class MemoryActionResolver:
             ),
             candidate=normalized_candidate,
             embedding_definition=embedding_definition,
+            memory_set_id=memory_set_id,
         )
         matches = self._ordered_matches(matches)
 
@@ -1311,6 +1313,7 @@ class MemoryActionResolver:
         matches: list[dict[str, Any]],
         candidate: dict[str, Any],
         embedding_definition: dict[str, Any] | None,
+        memory_set_id: str,
     ) -> list[dict[str, Any]]:
         # 対象外
         if not matches or not self._should_compare_semantically(candidate, embedding_definition):
@@ -1323,24 +1326,54 @@ class MemoryActionResolver:
         )
         if not candidate_text:
             return matches
-        match_texts = [
-            build_memory_unit_semantic_text(
+        stored_embeddings = self.store.get_memory_unit_embeddings(
+            memory_set_id=memory_set_id,
+            memory_unit_ids=[
+                str(match.get("memory_unit_id"))
+                for match in matches
+                if isinstance(match.get("memory_unit_id"), str)
+            ],
+            embedding_dimension=int(embedding_definition["embedding_dimension"]),
+        )
+        reused_embeddings: dict[int, list[float]] = {}
+        texts_to_embed = [candidate_text]
+        embed_slots: list[tuple[str, int]] = [("candidate", 0)]
+        for index, match in enumerate(matches):
+            match_text = build_memory_unit_semantic_text(
                 match,
                 exclude_qualifier_keys=SEMANTIC_EXCLUDED_QUALIFIER_KEYS,
             )
-            for match in matches
-        ]
+            memory_unit_id = match.get("memory_unit_id")
+            stored = (
+                stored_embeddings.get(memory_unit_id)
+                if isinstance(memory_unit_id, str)
+                else None
+            )
+            if (
+                isinstance(stored, dict)
+                and stored.get("text_hash") == source_text_hash(match_text)
+                and isinstance(stored.get("embedding"), list)
+            ):
+                reused_embeddings[index] = stored["embedding"]
+                continue
+            embed_slots.append(("match", index))
+            texts_to_embed.append(match_text)
 
-        # 埋め込み比較
-        embeddings = self.llm.generate_embeddings(
+        generated = self.llm.generate_embeddings(
             model_config=embedding_definition,
-            texts=[candidate_text, *match_texts],
+            texts=texts_to_embed,
         )
-        candidate_embedding = embeddings[0]
+        generated_by_slot = {
+            slot: embedding
+            for slot, embedding in zip(embed_slots, generated, strict=True)
+        }
+        candidate_embedding = generated_by_slot[("candidate", 0)]
 
-        # 注釈付与
         annotated_matches: list[dict[str, Any]] = []
-        for match, match_embedding in zip(matches, embeddings[1:], strict=True):
+        for index, match in enumerate(matches):
+            match_embedding = reused_embeddings.get(index)
+            if match_embedding is None:
+                match_embedding = generated_by_slot[("match", index)]
             annotated_matches.append(
                 {
                     **match,

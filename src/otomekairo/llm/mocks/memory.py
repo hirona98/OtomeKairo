@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.llm.contracts import (
-    validate_memory_correction_reconciliation_contract,
     validate_memory_interpretation_contract,
     validate_memory_reflection_summary_contract,
 )
@@ -20,6 +19,7 @@ class LLMMockMemoryMixin:
         memory_context: dict[str, Any] | None = None,
         *,
         persona_context: Any,
+        correction_targets: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         # model確認
         self._assert_mock_model(model_config)
@@ -61,79 +61,81 @@ class LLMMockMemoryMixin:
             "candidate_memory_units": candidate_memory_units,
             "episode_affects": episode_affects,
         }
+        if correction_targets:
+            payload["correction_status"] = "no_correction"
+            payload["selected_targets"] = []
         validate_memory_interpretation_contract(payload)
+        if not correction_targets:
+            payload["correction_status"] = "no_correction"
+            payload["selected_targets"] = []
         return payload
 
     def generate_memory_reflection_summary(
-        self,
-        model_config: dict,
-        evidence_pack: dict[str, Any],
-    ) -> dict[str, Any]:
-        # model確認
-        self._assert_mock_model(model_config)
-
-        # evidence pack
-        scope_type = str(evidence_pack.get("scope_type") or "")
-        scope_key = str(evidence_pack.get("scope_key") or "")
-        scope_label = str(evidence_pack.get("scope_label") or scope_key).strip()
-        counts = evidence_pack.get("evidence_counts", {})
-        open_loop_count = counts.get("open_loops", 0) if isinstance(counts, dict) else 0
-        summary_status = str(evidence_pack.get("summary_status_candidate") or "inferred")
-        persona = evidence_pack.get("persona_context")
-        mood_state = evidence_pack.get("mood_state")
-        affect_state = evidence_pack.get("affect_state")
-        theme = self._mock_reflection_theme(
-            evidence_pack.get("memory_units"),
-            mood_state=mood_state,
-            affect_state=affect_state,
-        )
-        persona_lead = self._mock_reflection_persona_lead(persona)
-
-        # 文面
-        if scope_type == "topic":
-            topic_label = self._mock_reflection_scope_label(scope_key)
-            if int(open_loop_count) > 0:
-                summary_text = f"最近は {topic_label} に関する話題が未完了の流れを含みながら続いている。"
-            else:
-                summary_text = f"最近は {topic_label} に関する話題が繰り返し現れている。"
-        elif scope_type == "relationship":
-            relation_label = f"{self._mock_reflection_scope_label(scope_key)} の関係文脈"
-            if int(open_loop_count) > 0:
-                summary_text = f"最近の{relation_label}では、{persona_lead}{theme}がありつつ、続きを確かめる流れが続いている。"
-            elif summary_status == "confirmed":
-                summary_text = f"最近の{relation_label}では、{persona_lead}{theme}が少しずつ安定している。"
-            else:
-                summary_text = f"最近の{relation_label}では、{persona_lead}{theme}がゆるやかに積み上がっている。"
-        elif scope_type == "self":
-            if int(open_loop_count) > 0:
-                summary_text = f"最近の自分側の応答では、{persona_lead}{theme}があり、継続中の確認事項も抱えている。"
-            else:
-                summary_text = f"最近の自分側の応答では、{persona_lead}{theme}が続いている。"
-        else:
-            summary_text = f"最近の{scope_label}に関するやり取りでは、{theme}の理解が少しずつ積み上がっている。"
-
-        # payload
-        payload = {
-            "summary_text": summary_text[:140].replace("\n", " ").strip(),
-        }
-        validate_memory_reflection_summary_contract(payload)
-        return payload
-
-    def generate_memory_correction_reconciliation(
         self,
         model_config: dict,
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
         # model確認
         self._assert_mock_model(model_config)
-        _ = source_pack
 
-        # mock は訂正 reconciliation を自動選定しない。
-        payload = {
-            "correction_status": "no_correction",
-            "selected_targets": [],
-        }
-        validate_memory_correction_reconciliation_contract(payload)
+        scopes = source_pack.get("scopes")
+        if not isinstance(scopes, list) or not scopes:
+            scopes = [source_pack]
+
+        summaries: list[dict[str, str]] = []
+        for index, evidence_pack in enumerate(scopes):
+            if not isinstance(evidence_pack, dict):
+                continue
+            scope_ref = evidence_pack.get("scope_ref")
+            if not isinstance(scope_ref, str) or not scope_ref.startswith("scope:"):
+                scope_ref = f"scope:{index}"
+            scope_type = str(evidence_pack.get("scope_type") or "")
+            scope_key = str(evidence_pack.get("scope_key") or "")
+            scope_label = str(evidence_pack.get("scope_label") or scope_key).strip()
+            counts = evidence_pack.get("evidence_counts", {})
+            open_loop_count = counts.get("open_loops", 0) if isinstance(counts, dict) else 0
+            summary_status = str(evidence_pack.get("summary_status_candidate") or "inferred")
+            persona = evidence_pack.get("persona_context")
+            mood_state = evidence_pack.get("mood_state")
+            affect_state = evidence_pack.get("affect_state")
+            theme = self._mock_reflection_theme(
+                evidence_pack.get("memory_units"),
+                mood_state=mood_state,
+                affect_state=affect_state,
+            )
+            persona_lead = self._mock_reflection_persona_lead(persona)
+
+            if scope_type == "topic":
+                topic_label = self._mock_reflection_scope_label(scope_key)
+                if int(open_loop_count) > 0:
+                    summary_text = f"最近は {topic_label} に関する話題が未完了の流れを含みながら続いている。"
+                else:
+                    summary_text = f"最近は {topic_label} に関する話題が繰り返し現れている。"
+            elif scope_type == "relationship":
+                relation_label = f"{self._mock_reflection_scope_label(scope_key)} の関係文脈"
+                if int(open_loop_count) > 0:
+                    summary_text = f"最近の{relation_label}では、{persona_lead}{theme}がありつつ、続きを確かめる流れが続いている。"
+                elif summary_status == "confirmed":
+                    summary_text = f"最近の{relation_label}では、{persona_lead}{theme}が少しずつ安定している。"
+                else:
+                    summary_text = f"最近の{relation_label}では、{persona_lead}{theme}がゆるやかに積み上がっている。"
+            elif scope_type == "self":
+                if int(open_loop_count) > 0:
+                    summary_text = f"最近の自分側の応答では、{persona_lead}{theme}があり、継続中の確認事項も抱えている。"
+                else:
+                    summary_text = f"最近の自分側の応答では、{persona_lead}{theme}が続いている。"
+            else:
+                summary_text = f"最近の{scope_label}に関するやり取りでは、{theme}の理解が少しずつ積み上がっている。"
+
+            summaries.append(
+                {
+                    "scope_ref": scope_ref,
+                    "summary_text": summary_text[:140].replace("\n", " ").strip(),
+                }
+            )
+
+        payload = {"summaries": summaries}
+        validate_memory_reflection_summary_contract(payload)
         return payload
 
     def _mock_episode_type(self, primary_recall_focus: str) -> str:

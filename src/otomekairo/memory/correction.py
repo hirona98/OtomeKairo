@@ -7,8 +7,6 @@ from otomekairo.memory.actions import MemoryActionResolver
 from otomekairo.memory.utils import action_counts
 
 if TYPE_CHECKING:
-    from otomekairo.llm.client import LLMClient
-    from otomekairo.llm.contexts import PersonaContext
     from otomekairo.store.file_store import FileStore
 
 
@@ -75,12 +73,12 @@ class MemoryCorrectionReconciler:
             "failure_reason": reason,
         }
 
+    def compact_target(self, target: dict[str, Any]) -> dict[str, Any]:
+        return self._compact_target(target)
+
     def run(
         self,
         *,
-        llm: "LLMClient",
-        model_config: dict[str, Any],
-        persona_context: "PersonaContext",
         context: dict[str, Any] | None,
         finished_at: str,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -92,23 +90,32 @@ class MemoryCorrectionReconciler:
         if not isinstance(targets, list) or not targets:
             return [], self.skipped_trace(reason="no_targets")
 
-        # LLM選定
-        source_pack = {
-            "input_text": context.get("input_text"),
-            "speech_text": context.get("speech_text"),
-            "decision_summary": context.get("decision_summary"),
-            "target_candidates": [
-                self._compact_target(target)
-                for target in targets
-                if isinstance(target, dict)
-            ],
-            "persona_context": persona_context.to_prompt_payload(),
-        }
-        selection = llm.generate_memory_correction_reconciliation(
-            model_config=model_config,
-            persona_context=persona_context,
-            source_pack=source_pack,
-        )
+        selection = context.get("selection")
+        if not isinstance(selection, dict):
+            return [], {
+                **self.skipped_trace(reason="no_selection"),
+                "result_status": "failed",
+                "selection_status": "failed",
+                "target_candidate_count": len(targets),
+                "failure_reason": "memory_interpretation の訂正選定がありません。",
+            }
+        try:
+            from otomekairo.llm.contracts import validate_memory_correction_reconciliation_contract
+
+            validate_memory_correction_reconciliation_contract(selection)
+        except Exception as exc:  # noqa: BLE001
+            return [], {
+                "result_status": "failed",
+                "selection_status": "failed",
+                "target_candidate_count": len(targets),
+                "selected_target_count": 0,
+                "selected_revision_ids": [],
+                "correction_group_ids": [],
+                "action_count": 0,
+                "operation_counts": {},
+                "actions": [],
+                "failure_reason": str(exc),
+            }
 
         # アクション作成
         event_ids = [

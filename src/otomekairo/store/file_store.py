@@ -706,13 +706,23 @@ class SQLiteMemoryStore(
         memory_set_id: str,
         *,
         result_status: str | None = None,
+        result_statuses: list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any] | None:
         # Query部品群
         clauses = ["memory_set_id = ?"]
         params: list[Any] = [memory_set_id]
-        if isinstance(result_status, str) and result_status:
+        statuses = [
+            value
+            for value in (result_statuses or ((result_status,) if isinstance(result_status, str) and result_status else ()))
+            if isinstance(value, str) and value
+        ]
+        if len(statuses) == 1:
             clauses.append("result_status = ?")
-            params.append(result_status)
+            params.append(statuses[0])
+        elif statuses:
+            placeholders = ", ".join("?" for _ in statuses)
+            clauses.append(f"result_status IN ({placeholders})")
+            params.extend(statuses)
 
         query = f"""
             SELECT payload_json

@@ -18,7 +18,6 @@
 - `event_evidence_generation`
 - `memory_interpretation`
 - `memory_reflection_summary`
-- `memory_correction_reconciliation`
 - `disclosure_review`
 - `pre_send_check`
 - `world_state` 候補抽出

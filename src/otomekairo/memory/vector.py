@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from typing import Any
 
 from otomekairo.llm.client import LLMClient
@@ -8,6 +7,7 @@ from otomekairo.memory.utils import (
     NON_SEMANTIC_QUALIFIER_KEYS,
     build_memory_unit_semantic_text,
     normalized_text_list,
+    source_text_hash,
 )
 from otomekairo.store.file_store import FileStore
 
@@ -41,22 +41,31 @@ class MemoryVectorIndexer:
         if not entries:
             return
 
-        # 埋め込み群
-        embeddings = self.llm.generate_embeddings(
-            model_config=embedding_definition,
-            texts=[entry["source_text"] for entry in entries],
+        existing = self.store.list_vector_index_metadata(
+            memory_set_id=state["selected_memory_set_id"],
+            sources=[(entry["source_kind"], entry["source_id"]) for entry in entries],
         )
+        changed_indexes: list[int] = []
+        payloads: list[dict[str, Any]] = []
+        for index, entry in enumerate(entries):
+            previous = existing.get((entry["source_kind"], entry["source_id"]))
+            if isinstance(previous, dict) and previous.get("text_hash") == entry["text_hash"]:
+                payloads.append(entry)
+                continue
+            changed_indexes.append(index)
+            payloads.append(entry)
 
-        # payload群
-        payloads = [
-            {
-                **entry,
-                "embedding": embedding,
-            }
-            for entry, embedding in zip(entries, embeddings, strict=True)
-        ]
+        if changed_indexes:
+            embeddings = self.llm.generate_embeddings(
+                model_config=embedding_definition,
+                texts=[entries[index]["source_text"] for index in changed_indexes],
+            )
+            for index, embedding in zip(changed_indexes, embeddings, strict=True):
+                payloads[index] = {
+                    **payloads[index],
+                    "embedding": embedding,
+                }
 
-        # 永続化
         self.store.upsert_vector_index_entries(
             entries=payloads,
             embedding_dimension=embedding_dimension,
@@ -127,7 +136,7 @@ class MemoryVectorIndexer:
             "salience": record["salience"],
             "has_open_loops": bool(record.get("open_loops")),
             "updated_at": finished_at,
-            "text_hash": self._text_hash(source_text),
+            "text_hash": source_text_hash(source_text),
         }
 
     def _vector_entry_for_memory_unit(
@@ -157,7 +166,7 @@ class MemoryVectorIndexer:
             "salience": record["salience"],
             "has_open_loops": False,
             "updated_at": finished_at,
-            "text_hash": self._text_hash(source_text),
+            "text_hash": source_text_hash(source_text),
         }
 
     def _episode_source_text(self, record: dict[str, Any]) -> str:
@@ -177,6 +186,4 @@ class MemoryVectorIndexer:
             raise ValueError("memory_set.embedding.embedding_dimension must be a positive integer.")
         return embedding_dimension
 
-    def _text_hash(self, value: str) -> str:
-        # ハッシュ
-        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+

@@ -20,6 +20,10 @@ def stable_json(value: Any) -> str:
     ).hexdigest()
 
 
+def source_text_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 # 時間
 def local_now() -> datetime:
     # OtomeKairo が生活するローカルタイムゾーンの現在時刻を正本にする。
