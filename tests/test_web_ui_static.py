@@ -43,6 +43,7 @@ class WebUiHttpBoundaryTests(unittest.TestCase):
     def test_web_ui_assets_are_served_without_token(self) -> None:
         for path, content_type in (
             ("/ui/", "text/html"),
+            ("/ui/favicon.ico", "image/x-icon"),
             ("/ui/app.js", "text/javascript"),
             ("/ui/audio-worklet.js", "text/javascript"),
             ("/ui/logs", "text/html"),

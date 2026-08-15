@@ -85,6 +85,7 @@ WEB_STATIC_PACKAGE = "otomekairo.web.static"
 WEB_STATIC_FILES = {
     "/ui/": ("index.html", "text/html; charset=utf-8", "no-store"),
     "/ui/index.html": ("index.html", "text/html; charset=utf-8", "no-store"),
+    "/ui/favicon.ico": ("favicon.ico", "image/x-icon", "max-age=86400"),
     "/ui/app.js": ("app.js", "text/javascript; charset=utf-8", "max-age=60"),
     "/ui/audio-worklet.js": (
         "audio-worklet.js",
