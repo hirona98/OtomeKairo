@@ -1,4 +1,3 @@
-import sqlite3
 import tempfile
 import threading
 import unittest
@@ -235,58 +234,6 @@ class StandingConcernStoreTests(unittest.TestCase):
             store = FileStore(Path(temp_dir))
             state = store.read_state()
             self.assertEqual(state["standing_concerns"], build_default_standing_concerns())
-
-    def test_schema_version_eighteen_migrates_standing_concerns(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root_dir = Path(temp_dir)
-            db_path = root_dir / "config.db"
-            with sqlite3.connect(db_path) as conn:
-                conn.executescript(
-                    """
-                    CREATE TABLE server_identity (
-                        id INTEGER PRIMARY KEY CHECK (id = 1),
-                        server_id TEXT NOT NULL,
-                        server_display_name TEXT NOT NULL,
-                        api_version TEXT NOT NULL,
-                        console_access_token TEXT
-                    );
-                    CREATE TABLE current_config (
-                        id INTEGER PRIMARY KEY CHECK (id = 1),
-                        selected_persona_id TEXT NOT NULL,
-                        selected_memory_set_id TEXT NOT NULL,
-                        selected_model_preset_id TEXT NOT NULL,
-                        pre_send_check_model_preset_id TEXT NOT NULL,
-                        selected_avatar_id TEXT NOT NULL,
-                        thinking_speech_level INTEGER NOT NULL DEFAULT 5,
-                        selected_conversation_display_name_id TEXT,
-                        wake_policy_json TEXT NOT NULL,
-                        audio_output_settings_json TEXT NOT NULL,
-                        microphone_settings_json TEXT NOT NULL
-                    );
-                    INSERT INTO server_identity VALUES (
-                        1, 'server:test', 'OtomeKairo', '0.10.0', NULL
-                    );
-                    INSERT INTO current_config VALUES (
-                        1,
-                        'persona:default',
-                        'memory_set:default',
-                        'model_preset:default',
-                        'model_preset:pre_send_check',
-                        'avatar:default',
-                        5,
-                        NULL,
-                        '{"mode":"disabled","interval_seconds":300}',
-                        '{"destination":"otomekairo","local_output_device":null}',
-                        '{"input_source":"local_microphone","local_input_device":null,"console":null,"vad_probability_threshold":0.5,"speaker_recognition_threshold":0.6}'
-                    );
-                    PRAGMA user_version = 18;
-                    """
-                )
-            store = FileStore(root_dir)
-            state = store.read_state()
-            self.assertEqual(state["standing_concerns"], build_default_standing_concerns())
-            with sqlite3.connect(db_path) as conn:
-                self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 19)
 
 
 class StandingConcernAttendanceMixinTests(unittest.TestCase):

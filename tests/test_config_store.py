@@ -11,9 +11,9 @@ class ConfigStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root_dir = Path(temp_dir)
             with sqlite3.connect(root_dir / "config.db") as conn:
-                conn.execute("PRAGMA user_version = 10")
+                conn.execute("PRAGMA user_version = 18")
 
-            with self.assertRaisesRegex(RuntimeError, "Unsupported config.db schema version: 10"):
+            with self.assertRaisesRegex(RuntimeError, "Unsupported config.db schema version: 18"):
                 FileStore(root_dir)
 
     def test_file_store_uses_config_db_without_server_state_json(self) -> None:
