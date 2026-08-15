@@ -176,6 +176,7 @@ class ServiceInputDecisionComparisonMixin:
                 "ongoing_action",
                 "autonomous_run",
                 "drive_state",
+                "affect",
             }:
                 kept.append(candidate)
                 continue

@@ -412,11 +412,22 @@ class WakeInterventionLoadTests(unittest.TestCase):
                         "factor_ref": "capability:mcp.call_tool",
                         "kind": "capability",
                     },
+                    {
+                        "factor_ref": "affect_context:recent_episode_affects:0",
+                        "kind": "affect",
+                    },
                 ]
             }
         )
         refs = {item["factor_ref"] for item in isolated["workspace_candidates"]}
-        self.assertEqual(refs, {"standing_concern:elyth", "capability:mcp.call_tool"})
+        self.assertEqual(
+            refs,
+            {
+                "standing_concern:elyth",
+                "capability:mcp.call_tool",
+                "affect_context:recent_episode_affects:0",
+            },
+        )
 
     def test_self_activity_input_asks_how_to_engage(self) -> None:
         service = DummyInputService()

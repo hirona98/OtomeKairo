@@ -35,6 +35,25 @@ class WorkspaceContextTests(unittest.TestCase):
             initiative_context=None,
             capability_result_context=None,
             visual_observation_context=None,
+            affect_context={
+                "mood_state": {"current_vad": {"v": 0.1, "a": 0.0, "d": 0.0}},
+                "affect_states": [
+                    {
+                        "target_scope_type": "self",
+                        "target_scope_key": "self",
+                        "affect_label": "composed",
+                        "summary_text": text,
+                    }
+                ],
+                "recent_episode_affects": [
+                    {
+                        "target_scope_type": "self",
+                        "target_scope_key": "self",
+                        "affect_label": "composed",
+                        "summary_text": text,
+                    }
+                ],
+            },
             self_state_context={
                 "sensory_confidence": [
                     {
@@ -75,14 +94,19 @@ class WorkspaceContextTests(unittest.TestCase):
         )
 
         kinds = {candidate["kind"] for candidate in payload["workspace_candidates"]}
+        refs = [candidate["factor_ref"] for candidate in payload["workspace_candidates"]]
 
+        self.assertIn("affect", kinds)
         self.assertIn("self_state", kinds)
         self.assertIn("relationship", kinds)
         self.assertIn("prediction_error", kinds)
         self.assertIn("default_mode", kinds)
+        self.assertIn("affect_context:affect_states:0", refs)
+        self.assertIn("affect_context:recent_episode_affects:0", refs)
+        self.assertNotIn("affect_context:mood_state", refs)
         self.assertIn(
             "relationship:memory_unit:relationship",
-            [candidate["factor_ref"] for candidate in payload["workspace_candidates"]],
+            refs,
         )
 
     def test_workspace_context_keeps_all_relationship_items_as_candidates(self) -> None:
@@ -176,6 +200,54 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertGreater(payload["total_candidate_count"], WORKSPACE_CANDIDATE_LIMIT)
         self.assertGreater(len(payload["workspace_candidates"]), WORKSPACE_CANDIDATE_LIMIT)
 
+    def test_workspace_context_retains_affect_candidates_after_limit(self) -> None:
+        service = ServiceInputPipelineMixin()
+
+        payload = service._build_workspace_context(
+            current_input=CurrentInput(
+                sender_kind="system",
+                sender_ref=None,
+                source_kind="wake",
+                response_target_refs=(),
+                interaction_context=None,
+                text="自律判断機会",
+            ),
+            recall_pack={},
+            drive_state_summary=None,
+            foreground_world_state=None,
+            activity_context=None,
+            ongoing_action_summary=None,
+            autonomous_run_summaries=None,
+            capability_decision_view=[
+                {
+                    "id": f"capability.{index}",
+                    "available": True,
+                    "what_it_does": f"能力{index}",
+                }
+                for index in range(WORKSPACE_CANDIDATE_LIMIT)
+            ],
+            initiative_context=None,
+            capability_result_context=None,
+            visual_observation_context=None,
+            affect_context={
+                "recent_episode_affects": [
+                    {
+                        "summary_text": "直近の感情揺れ",
+                        "affect_label": "composed",
+                    }
+                ],
+            },
+            self_state_context=None,
+            relationship_context=None,
+            prediction_error_context=None,
+            default_mode_context=None,
+        )
+
+        refs = [candidate["factor_ref"] for candidate in payload["workspace_candidates"]]
+        self.assertIn("affect_context:recent_episode_affects:0", refs)
+        self.assertGreater(payload["total_candidate_count"], WORKSPACE_CANDIDATE_LIMIT)
+        self.assertGreater(len(payload["workspace_candidates"]), WORKSPACE_CANDIDATE_LIMIT)
+
     def test_relationship_context_prompt_omits_item_ref(self) -> None:
         compact = _compact_relationship_context(
             {
@@ -221,6 +293,12 @@ class WorkspaceContextTests(unittest.TestCase):
             initiative_context=None,
             capability_result_context=None,
             visual_observation_context=None,
+            affect_context={
+                "recent_episode_affects": [
+                    {"summary_text": f"直近感情{index}", "affect_label": "composed"}
+                    for index in range(2)
+                ],
+            },
             self_state_context={
                 "sensory_confidence": [
                     {"summary_text": f"感覚{index}", "channel": f"visual:{index}"}
@@ -252,6 +330,10 @@ class WorkspaceContextTests(unittest.TestCase):
         )
 
         refs = [candidate["factor_ref"] for candidate in payload["workspace_candidates"]]
+        self.assertEqual(
+            [f"affect_context:recent_episode_affects:{index}" for index in range(2)],
+            [ref for ref in refs if ref.startswith("affect_context:recent_episode_affects:")],
+        )
         self.assertEqual(
             [f"self_state:sensory_confidence:{index}" for index in range(4)],
             [ref for ref in refs if ref.startswith("self_state:sensory_confidence:")],

@@ -1123,6 +1123,7 @@ def _decision_foreground_selection_rules() -> str:
 def _decision_context_view_rules() -> str:
     return (
         "SelfStateContext は AI 本体側の感覚信頼度、働きかけやすさ、継続行動の安定です。気分は AffectContext.mood_state を参照します。\n"
+        "AffectContext の affect_states と recent_episode_affects は WorkspaceContext の affect 候補です。\n"
         "RelationshipContext は距離感、境界、継続話題の現在 view です。\n"
         "PredictionErrorContext は世界状態や capability result の構造化差分候補です。\n"
         "DefaultModeContext は静かな再浮上候補です。WorkspaceContext 上で speech / pending_intent / noop のどれへ置くか比べます。\n"
@@ -1181,6 +1182,7 @@ def _decision_self_activity_rules_section() -> str:
         "今関わらないときは pending_intent または noop を選び、控える理由は今その関心に関わらないこととして書きます。\n"
         + _decision_foreground_selection_rules()
         + "SelfStateContext は AI 本体側の感覚信頼度、働きかけやすさ、継続行動の安定です。気分は AffectContext.mood_state を参照します。\n"
+        + "AffectContext の affect_states と recent_episode_affects は WorkspaceContext の affect 候補です。\n"
         + _decision_capability_run_rules(include_person_start=False)
         + "空文字だけの入力は noop を選びます。"
     )

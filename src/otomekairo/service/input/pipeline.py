@@ -23,6 +23,7 @@ WORKSPACE_SUPPORTING_SELECTION_LIMIT = 3
 WORKSPACE_SUPPRESSED_SELECTION_LIMIT = 5
 WORKSPACE_LIMIT_RETAINED_KINDS = frozenset(
     {
+        "affect",
         "self_state",
         "relationship",
         "prediction_error",
@@ -937,6 +938,7 @@ class ServiceInputPipelineMixin:
             relationship_context=relationship_context,
             prediction_error_context=prediction_error_context,
             default_mode_context=default_mode_context,
+            affect_context=affect_context,
         )
         return {
             "time_context": time_context,
@@ -1357,6 +1359,7 @@ class ServiceInputPipelineMixin:
         relationship_context: dict[str, Any] | None,
         prediction_error_context: dict[str, Any] | None,
         default_mode_context: dict[str, Any] | None,
+        affect_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         candidates: list[dict[str, Any]] = []
         used_refs: set[str] = set()
@@ -1517,6 +1520,7 @@ class ServiceInputPipelineMixin:
             candidates=candidates,
             used_refs=used_refs,
             source_counts=source_counts,
+            affect_context=affect_context,
             self_state_context=self_state_context,
             relationship_context=relationship_context,
             prediction_error_context=prediction_error_context,
@@ -1550,11 +1554,37 @@ class ServiceInputPipelineMixin:
         candidates: list[dict[str, Any]],
         used_refs: set[str],
         source_counts: dict[str, int],
+        affect_context: dict[str, Any] | None,
         self_state_context: dict[str, Any] | None,
         relationship_context: dict[str, Any] | None,
         prediction_error_context: dict[str, Any] | None,
         default_mode_context: dict[str, Any] | None,
     ) -> None:
+        if isinstance(affect_context, dict):
+            for source_key in ("affect_states", "recent_episode_affects"):
+                entries = affect_context.get(source_key)
+                if not isinstance(entries, list):
+                    continue
+                for index, entry in enumerate(entries):
+                    if not isinstance(entry, dict):
+                        continue
+                    self._append_workspace_context_item(
+                        candidates=candidates,
+                        used_refs=used_refs,
+                        source_counts=source_counts,
+                        factor_ref=f"affect_context:{source_key}:{index}",
+                        kind="affect",
+                        source=f"affect_context.{source_key}",
+                        item=entry,
+                        summary_keys=("summary_text", "affect_label"),
+                        metadata_keys=(
+                            "target_scope_type",
+                            "target_scope_key",
+                            "affect_label",
+                            "intensity",
+                            "confidence",
+                        ),
+                    )
         if isinstance(self_state_context, dict):
             for source_key in ("sensory_confidence", "agency_confidence"):
                 entries = self_state_context.get(source_key)

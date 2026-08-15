@@ -157,6 +157,102 @@ class DecisionContractTests(unittest.TestCase):
 
         validate_decision_contract(payload)
 
+    def test_decision_accepts_affect_context_workspace_factor_ref(self) -> None:
+        payload = {
+            "kind": "speech",
+            "reason_code": "evaluation_acknowledgment",
+            "reason_summary": "評価に落ち着いて返す。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+            "capability_request": None,
+            "autonomous_run": None,
+            "foreground_selection": {
+                "primary_factor_ref": "current_input:user_message",
+                "supporting_factor_refs": ["affect_context:recent_episode_affects:0"],
+                "suppressed_factors": [],
+                "summary_text": "評価への応答を主因にし、直近感情を補助にした。",
+            },
+            "target_stances": build_decision_target_stances_for_kind(
+                "speech",
+                required_targets=("outward_speech",),
+                reason_summary="評価に落ち着いて返す。",
+            ),
+        }
+        context = replace(
+            _decision_context([]),
+            workspace_context={
+                "workspace_candidates": [
+                    {
+                        "factor_ref": "current_input:user_message",
+                        "kind": "current_input",
+                        "summary_text": "評価",
+                    },
+                    {
+                        "factor_ref": "affect_context:recent_episode_affects:0",
+                        "kind": "affect",
+                        "summary_text": "直近の感情",
+                    },
+                ]
+            },
+        )
+
+        with patch(
+            "otomekairo.llm.client.complete_text",
+            return_value=json.dumps(payload),
+        ):
+            actual = LLMClient().generate_decision(
+                model_config={"model": "real-model"},
+                persona_context=_persona_context(),
+                context=context,
+            )
+
+        self.assertEqual(actual, payload)
+
+    def test_decision_rejects_unknown_affect_context_factor_ref(self) -> None:
+        payload = {
+            "kind": "speech",
+            "reason_code": "evaluation_acknowledgment",
+            "reason_summary": "評価に落ち着いて返す。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+            "capability_request": None,
+            "autonomous_run": None,
+            "foreground_selection": {
+                "primary_factor_ref": "current_input:user_message",
+                "supporting_factor_refs": ["affect_context:recent_episode_affects:0"],
+                "suppressed_factors": [],
+                "summary_text": "評価への応答を主因にし、直近感情を補助にした。",
+            },
+            "target_stances": build_decision_target_stances_for_kind(
+                "speech",
+                required_targets=("outward_speech",),
+                reason_summary="評価に落ち着いて返す。",
+            ),
+        }
+        context = replace(
+            _decision_context([]),
+            workspace_context={
+                "workspace_candidates": [
+                    {
+                        "factor_ref": "current_input:user_message",
+                        "kind": "current_input",
+                        "summary_text": "評価",
+                    }
+                ]
+            },
+        )
+
+        with patch(
+            "otomekairo.llm.client.complete_text",
+            return_value=json.dumps(payload),
+        ):
+            with self.assertRaisesRegex(LLMError, r"不明な参照=affect_context:recent_episode_affects:0"):
+                LLMClient().generate_decision(
+                    model_config={"model": "real-model"},
+                    persona_context=_persona_context(),
+                    context=context,
+                )
+
     def test_decision_contract_names_duplicate_foreground_factor_ref(self) -> None:
         payload = {
             "kind": "noop",
@@ -753,6 +849,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertNotIn("伝達、能力実行、保留、見送り、継続目的開始のどれが", system)
         self.assertNotIn("人物発話自体が未来実行", system)
         self.assertNotIn("outward_speech は毎回必須です", system)
+        self.assertIn("AffectContext の affect_states と recent_episode_affects は WorkspaceContext の affect 候補です。", system)
 
     def test_outward_speech_prompt_asks_short_view_not_visit(self) -> None:
         system = self._system_prompt("outward_speech")
@@ -761,6 +858,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("観測事実に基づく一文の状況認識", system)
         self.assertIn("助言、依頼、支援提案、休息促し、身体注意、画面への一般コメントは speech ではなく控える理由", system)
         self.assertIn("target_stances は outward_speech を 1 件だけ持ちます", system)
+        self.assertIn("AffectContext の affect_states と recent_episode_affects は WorkspaceContext の affect 候補です。", system)
         self.assertNotIn("今見に行く自然さがあれば capability_request", system)
         self.assertNotIn("向きと CapabilityDecisionView の catalog から autonomous_run", system)
         self.assertNotIn("有限 MCP セッションは CapabilityDecisionView", system)
@@ -769,6 +867,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
         system = self._system_prompt("full")
         self.assertIn("伝達、能力実行、保留、見送り、継続目的開始のどれが", system)
         self.assertIn("outward_speech は毎回必須です", system)
+        self.assertIn("AffectContext の affect_states と recent_episode_affects は WorkspaceContext の affect 候補です。", system)
 
     def test_repair_prompt_follows_comparison_scope(self) -> None:
         self_repair = build_decision_repair_prompt("kind が不正です。", "self_activity")
