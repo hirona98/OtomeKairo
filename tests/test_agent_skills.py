@@ -700,6 +700,8 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
                 ),
                 trigger_kind="background_thinking",
                 capability_decision_view=[],
+                recent_turns=[{"role": "person", "text": "返信してみたら？"}],
+                work_log=[{"capability_id": "mcp.call_tool", "tool_name": "get_thread"}],
             )
 
             self.assertEqual(
@@ -709,6 +711,14 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
             self.assertEqual(
                 context["host_authorization"]["kind"],
                 "current_individual_decision",
+            )
+            self.assertEqual(
+                selection_contexts[0]["recent_turns"],
+                [{"role": "person", "text": "返信してみたら？"}],
+            )
+            self.assertEqual(
+                selection_contexts[0]["work_log"],
+                [{"capability_id": "mcp.call_tool", "tool_name": "get_thread"}],
             )
 
     def test_skill_prompts_describe_host_authorization(self) -> None:
@@ -722,6 +732,8 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
             }
         )
         self.assertIn("trusted host", selection[0]["content"])
+        self.assertIn("recent_turns", selection[0]["content"])
+        self.assertIn("work_log", selection[0]["content"])
         self.assertIn("current_individual_decision", applied[0]["content"])
         self.assertIn("trusted host policy", applied[0]["content"])
 

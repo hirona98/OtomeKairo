@@ -210,7 +210,7 @@ class WorldStateContractTests(unittest.TestCase):
             ),
             {
                 "mode": "external_service_service",
-                "key": "external_service:elyth%2Fmain",
+                "key": "external_service:elyth%2Fmain:timeline%2Fread",
             },
         )
         self.assertEqual(

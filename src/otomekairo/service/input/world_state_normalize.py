@@ -322,11 +322,22 @@ class ServiceInputWorldStateNormalizeMixin:
                 raise ValueError("visual_context requires vision_source_id.")
             return {"mode": "vision_source", "key": f"visual_context:{vision_source_key}"}
         if state_type == "external_service":
+            if isinstance(context, WorldStateExternalServiceContext) and context.capability_id == "mcp.call_tool":
+                if not isinstance(context.mcp_server_id, str) or not context.mcp_server_id.strip():
+                    raise ValueError("mcp.call_tool external_service requires mcp_server_id.")
+                if not isinstance(context.tool_name, str) or not context.tool_name.strip():
+                    raise ValueError("mcp.call_tool external_service requires tool_name.")
+                return {
+                    "mode": "external_service_service",
+                    "key": (
+                        "external_service:"
+                        f"{quote(context.mcp_server_id.strip(), safe='')}:"
+                        f"{quote(context.tool_name.strip(), safe='')}"
+                    ),
+                }
             service_key = self._world_state_service_key(context)
             if service_key is not None:
                 return {"mode": "external_service_service", "key": f"external_service:{service_key}"}
-            if isinstance(context, WorldStateExternalServiceContext) and context.capability_id == "mcp.call_tool":
-                raise ValueError("mcp.call_tool external_service requires mcp_server_id.")
             return {"mode": "scope", "key": f"{state_type}:{scope_type}:{scope_key}"}
         if state_type == "body":
             return {"mode": "body_foreground", "key": "body:self"}

@@ -107,6 +107,8 @@ class ServiceAgentSkillsMixin:
         run: dict[str, Any] | None = None,
         prior_activation: dict[str, Any] | None = None,
         origin_source_kind: str | None = None,
+        recent_turns: list[dict[str, Any]] | None = None,
+        work_log: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         with self._runtime_state_lock:
             registry = self._agent_skill_registry
@@ -125,6 +127,8 @@ class ServiceAgentSkillsMixin:
             selection_context={
                 "current_input": current_input.to_prompt_payload(),
                 "trigger_kind": trigger_kind,
+                "recent_turns": recent_turns or [],
+                "work_log": work_log or [],
                 "run": run,
                 "prior_activation": prior_activation,
                 "host_authorization": host_authorization,

@@ -145,6 +145,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
         assistant_message_target_client_id = self._request_record_assistant_message_target_client_id(request_record)
         interaction_context = self._capability_result_interaction_context(capability_request_summary)
         user_facing_result = bool(self._capability_result_response_target_refs(capability_request_summary))
+        observation_summary = self._capability_result_observation_summary(capability_response)
         self._activate_capability_ongoing_action(
             request_record=request_record,
             current_time=started_at,
@@ -152,13 +153,13 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 capability_id=capability_id,
                 result_payload=capability_response,
             ),
+            work_log_entry=self._capability_result_work_log_entry(observation_summary),
         )
         cycle_id = self._new_cycle_id()
         recent_turns = self._load_recent_turns(state, interaction_context)
         runtime_summary = self._build_runtime_summary(state)
         pending_intent_selection = self._empty_pending_intent_selection_trace()
         client_context = self._build_capability_result_client_context(capability_response)
-        observation_summary = self._capability_result_observation_summary(capability_response)
         input_text = self._build_capability_result_input_text(
             client_context=client_context,
             capability_response=capability_response,

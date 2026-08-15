@@ -1037,6 +1037,7 @@ class ServiceCapabilityMixin:
         request_record: Any,
         current_time: str,
         active_step_summary: str,
+        work_log_entry: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         if not isinstance(request_record, dict):
             return None
@@ -1060,6 +1061,11 @@ class ServiceCapabilityMixin:
             "step_summary": active_step_summary,
             "updated_at": current_time,
         }
+        if isinstance(work_log_entry, dict):
+            existing_log = current_action.get("work_log")
+            work_log = list(existing_log) if isinstance(existing_log, list) else []
+            work_log.append(work_log_entry)
+            updated_action["work_log"] = work_log
         self.store.upsert_ongoing_action(ongoing_action=updated_action)
         return updated_action
 

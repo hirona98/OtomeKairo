@@ -427,7 +427,8 @@ capability 実行を開始した場合は、`POST /api/conversation` と同じ `
 - server は wake 入力を `current_input.sender_kind=system`、`source_kind=wake` として shared pipeline に渡す
 - `interaction_context` がある場合は参加人物参照を `response_target_refs` に使い、無い場合は空配列とする
 - 再評価時刻に達した保留意図があれば再評価し、必要なら `speech` を返す
-- capability request は dispatch 時点の `current_input` を request record の `source_current_input` に保存し、capability result の `response_target_refs` は `source_current_input.response_target_refs` を引き継ぐ
+- capability request は dispatch 時点の向きを request record の `source_current_input` に保存し、capability result の `response_target_refs` は `source_current_input.response_target_refs` を引き継ぐ
+- 人物発話から始まった capability result の判断では、shared pipeline の `current_input` は起点の人物発話である。結果本文は到着として `capability_result_context` と作業記録へ入れる。意味境界は [../llm/プロンプト文脈分離方針.md](../llm/プロンプト文脈分離方針.md) を正とする
 - `source_current_input.response_target_refs=空配列` の capability result は内部観測結果として扱い、実効判断を `noop` に正規化し、assistant message を送信しない
 - `source_current_input.response_target_refs=<current person_ref>` の capability request は request record に外向き応答先 client を内部保存し、follow-up capability request へ引き継ぐ
 - capability result follow-up の assistant message は、capability result を返した client ではなく request record の外向き応答先 client へ送る

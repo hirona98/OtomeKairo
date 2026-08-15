@@ -221,7 +221,16 @@ class ServiceInputVisualMixin:
         input_text: str,
         trigger_kind: str,
         observation_summary: dict[str, Any] | None,
+        current_input: Any = None,
     ) -> str:
+        if (
+            trigger_kind == "capability_result"
+            and getattr(current_input, "sender_kind", None) == "person"
+        ):
+            return self._person_orientation_augmented_query_text(
+                origin_text=input_text,
+                observation_summary=observation_summary,
+            )
         if trigger_kind != "user_message":
             return input_text
         visual_summary_text = self._visual_observation_summary_text(observation_summary)
@@ -243,6 +252,28 @@ class ServiceInputVisualMixin:
         if not normalized_input_text:
             return visual_input_summary
         return f"{normalized_input_text}\n\n{visual_input_summary}"
+
+    def _person_orientation_augmented_query_text(
+        self,
+        *,
+        origin_text: str,
+        observation_summary: dict[str, Any] | None,
+    ) -> str:
+        result_summary = None
+        if isinstance(observation_summary, dict):
+            for key in ("mcp_result_summary", "visual_summary_text"):
+                value = observation_summary.get(key)
+                if isinstance(value, str) and value.strip():
+                    result_summary = value.strip()
+                    break
+        if result_summary is None:
+            return origin_text
+        return (
+            f"{origin_text.strip()}\n\n"
+            "<<<OTOMEKAIRO_INTERNAL_CONTEXT capability_result>>>\n"
+            f"{result_summary}\n"
+            "<<<END_OTOMEKAIRO_INTERNAL_CONTEXT>>>"
+        )
 
     def _observation_summary_is_conversation_attachment(self, observation_summary: dict[str, Any] | None) -> bool:
         if not isinstance(observation_summary, dict):

@@ -663,7 +663,7 @@ class ServiceConfigInspectionMixin:
     def _summarize_ongoing_action(self, ongoing_action: dict[str, Any] | None) -> dict[str, Any] | None:
         if not isinstance(ongoing_action, dict):
             return None
-        return {
+        summary = {
             "action_id": ongoing_action.get("action_id"),
             "goal_summary": ongoing_action.get("goal_summary"),
             "step_summary": ongoing_action.get("step_summary"),
@@ -673,6 +673,10 @@ class ServiceConfigInspectionMixin:
             "updated_at": ongoing_action.get("updated_at"),
             "expires_at": ongoing_action.get("expires_at"),
         }
+        work_log = ongoing_action.get("work_log")
+        if isinstance(work_log, list) and work_log:
+            summary["work_log"] = [item for item in work_log if isinstance(item, dict)]
+        return summary
 
     def _world_state_scope_ref(self, *, scope_type: str, scope_key: str) -> str:
         if scope_type in {"self", "world"}:

@@ -1229,11 +1229,13 @@ class ServiceAutonomousRunMixin:
             state=state,
             current_time=current_time,
         )
+        recent_turns = self._load_recent_turns(state, interaction_context)
         agent_skill_context = self._build_agent_skill_context(
             model_config=state["model_presets"][state["selected_model_preset_id"]],
             current_input=current_input,
             trigger_kind="autonomous_run",
             capability_decision_view=capability_decision_view,
+            recent_turns=recent_turns,
             run=self._autonomous_run_prompt_summary(run),
             prior_activation=(
                 source_current_input.get("agent_skill_activation")
@@ -1245,7 +1247,7 @@ class ServiceAutonomousRunMixin:
         return AutonomousStepContext(
             run=self._autonomous_run_prompt_summary(run),
             current_input=current_input,
-            recent_turns=self._load_recent_turns(state, interaction_context),
+            recent_turns=recent_turns,
             time_context=self._build_time_context(current_time=current_time),
             foreground_world_state=foreground_world_state,
             activity_context=self._autonomous_run_activity_context(

@@ -26,7 +26,8 @@ server 起動時と設定全体置換時に immutable registry snapshot を作�
 
 ## LLM による選択と progressive disclosure
 
-skill の適用可否は固定文字列や keyword 表では決めない。通常判断と各 autonomous run step の前に、LLM が current input、run 目的、capability decision view と `name / description` catalog を比較して必要な skill を選ぶ。
+skill の適用可否は固定文字列や keyword 表では決めない。通常判断と各 autonomous run step の前に、LLM が向きである current input、直近会話、作業記録、run 目的、capability decision view と `name / description` catalog を比較して必要な skill を選ぶ。
+人物発話の向きでは、直近会話と作業記録を見ずに skill を選ばない。向きと到着の分離は [../llm/プロンプト文脈分離方針.md](../llm/プロンプト文脈分離方針.md) を正とする。
 
 選択は次の順で行う。
 

@@ -104,6 +104,8 @@ class ServiceInputPipelineMixin:
             interaction_context=interaction_context,
             capability_request_summary=capability_request_summary,
         )
+        if trigger_kind == "capability_result" and current_input.sender_kind == "person":
+            input_text = current_input.text
         pipeline_assistant_message_target_client_id = self._pipeline_assistant_message_target_client_id(
             current_input=current_input,
             client_context=current_client_context,
@@ -113,6 +115,7 @@ class ServiceInputPipelineMixin:
             input_text=input_text,
             trigger_kind=trigger_kind,
             observation_summary=observation_summary,
+            current_input=current_input,
         )
         visual_observation_context = self._build_visual_observation_decision_context(
             trigger_kind=trigger_kind,
@@ -415,6 +418,9 @@ class ServiceInputPipelineMixin:
             source_kind = normalized_trigger
             response_target_refs = interaction_context.participant_refs if interaction_context is not None else ()
         elif normalized_trigger == "capability_result":
+            origin_input = self._person_origin_current_input(capability_request_summary)
+            if origin_input is not None:
+                return origin_input
             sender_kind = "capability"
             sender_ref = None
             source_kind = "capability_result"
@@ -484,6 +490,52 @@ class ServiceInputPipelineMixin:
             "interaction_ref": current_input.interaction_ref,
             "recipient_person_refs": list(current_input.participant_refs),
         }
+
+    def _person_origin_current_input(
+        self,
+        capability_request_summary: dict[str, Any] | None,
+    ) -> CurrentInput | None:
+        if not isinstance(capability_request_summary, dict):
+            return None
+        source_current_input = capability_request_summary.get("source_current_input")
+        if not isinstance(source_current_input, dict):
+            return None
+        return CurrentInput.from_source_payload(source_current_input)
+
+    def _orientation_work_log(
+        self,
+        *,
+        ongoing_action_summary: dict[str, Any] | None,
+        observation_summary: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        work_log: list[dict[str, Any]] = []
+        if isinstance(ongoing_action_summary, dict):
+            existing = ongoing_action_summary.get("work_log")
+            if isinstance(existing, list):
+                work_log.extend(item for item in existing if isinstance(item, dict))
+        current_entry = self._capability_result_work_log_entry(observation_summary)
+        if current_entry is not None and current_entry not in work_log:
+            work_log.append(current_entry)
+        return work_log
+
+    def _capability_result_work_log_entry(
+        self,
+        observation_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(observation_summary, dict):
+            return None
+        capability_id = observation_summary.get("capability_id")
+        if not isinstance(capability_id, str) or not capability_id.strip():
+            return None
+        entry: dict[str, Any] = {"capability_id": capability_id.strip()}
+        for key in ("mcp_server_id", "tool_name", "status"):
+            value = observation_summary.get(key)
+            if isinstance(value, str) and value.strip():
+                entry[key] = value.strip()
+        summary_text = observation_summary.get("mcp_result_summary")
+        if isinstance(summary_text, str) and summary_text.strip():
+            entry["summary_text"] = summary_text.strip()
+        return entry
 
     def _capability_result_response_target_refs(
         self,
@@ -774,6 +826,11 @@ class ServiceInputPipelineMixin:
             current_input=current_input,
             trigger_kind=trigger_kind,
             capability_decision_view=capability_decision_view,
+            recent_turns=recent_turns,
+            work_log=self._orientation_work_log(
+                ongoing_action_summary=ongoing_action_summary,
+                observation_summary=observation_summary,
+            ),
             prior_activation=(
                 capability_request_summary.get("source_current_input", {}).get("agent_skill_activation")
                 if isinstance(capability_request_summary, dict)
@@ -820,6 +877,11 @@ class ServiceInputPipelineMixin:
             trigger_kind=trigger_kind,
             observation_summary=observation_summary,
             capability_request_summary=capability_request_summary,
+            work_log=self._orientation_work_log(
+                ongoing_action_summary=ongoing_action_summary,
+                observation_summary=observation_summary,
+            ),
+            current_input=current_input,
         )
         self_state_context = self._build_self_state_context(
             foreground_world_state=foreground_world_state,

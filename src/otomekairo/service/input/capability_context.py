@@ -257,6 +257,8 @@ class ServiceInputCapabilityContextMixin:
         trigger_kind: str,
         observation_summary: dict[str, Any] | None,
         capability_request_summary: dict[str, Any] | None,
+        work_log: list[dict[str, Any]] | None = None,
+        current_input: Any = None,
     ) -> dict[str, Any] | None:
         if trigger_kind != "capability_result":
             return None
@@ -267,12 +269,19 @@ class ServiceInputCapabilityContextMixin:
         if source_capability_id is None:
             return None
         allowed_capability_ids = self._capability_result_allowed_followup_capability_ids(source_capability_id)
+        orientation_kind = (
+            "person"
+            if getattr(current_input, "sender_kind", None) == "person"
+            else "arrival"
+        )
         payload: dict[str, Any] = {
             "source_capability_id": source_capability_id,
+            "orientation_kind": orientation_kind,
             "allowed_followup_capability_ids": allowed_capability_ids,
             "followup_policy_summary": self._capability_result_followup_policy_summary(
                 source_capability_id=source_capability_id,
                 allowed_capability_ids=allowed_capability_ids,
+                orientation_kind=orientation_kind,
             ),
         }
         source_request_summary = self._compact_capability_request_summary(capability_request_summary)
@@ -287,6 +296,8 @@ class ServiceInputCapabilityContextMixin:
         compact_observation_summary = self._compact_capability_followup_observation_summary(observation_summary)
         if isinstance(compact_observation_summary, dict):
             payload["observation_summary"] = compact_observation_summary
+        if work_log:
+            payload["work_log"] = work_log
         observed_persons = self._observed_persons_from_mcp_observation(observation_summary)
         if observed_persons:
             payload["observed_persons"] = observed_persons
@@ -371,7 +382,14 @@ class ServiceInputCapabilityContextMixin:
         *,
         source_capability_id: str,
         allowed_capability_ids: list[str],
+        orientation_kind: str = "arrival",
     ) -> str:
+        if orientation_kind == "person":
+            return (
+                "向きは起点の人物発話である。"
+                "allowed_followup_capability_ids に含まれる能力は同じ向きの続きとして使ってよい。"
+                "speech は会話の続きであり、結果本文を向きにしない。"
+            )
         if source_capability_id == "camera.ptz" and "vision.capture" in allowed_capability_ids:
             return (
                 "camera.ptz result follow-up では同じ vision_source_id の vision.capture だけを追加で出せる。"

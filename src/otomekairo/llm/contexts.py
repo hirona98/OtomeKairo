@@ -138,6 +138,46 @@ class CurrentInput:
             payload["interaction_context"] = self.interaction_context.to_prompt_payload()
         return payload
 
+    @classmethod
+    def from_source_payload(cls, payload: dict[str, Any]) -> "CurrentInput | None":
+        sender_kind = payload.get("sender_kind")
+        source_kind = payload.get("source_kind")
+        text = payload.get("text")
+        if sender_kind != "person" or source_kind != "user_message":
+            return None
+        if not isinstance(text, str) or not text.strip():
+            return None
+        raw_refs = payload.get("response_target_refs")
+        if not isinstance(raw_refs, list):
+            return None
+        response_target_refs = tuple(
+            value.strip()
+            for value in raw_refs
+            if isinstance(value, str) and value.strip()
+        )
+        if not response_target_refs:
+            return None
+        sender_ref = payload.get("sender_ref")
+        if not isinstance(sender_ref, str) or not sender_ref.strip():
+            return None
+        raw_context = payload.get("interaction_context")
+        if not isinstance(raw_context, dict):
+            return None
+        from otomekairo.interaction import normalize_interaction_context
+
+        return cls(
+            sender_kind="person",
+            sender_ref=sender_ref.strip(),
+            source_kind="user_message",
+            response_target_refs=response_target_refs,
+            interaction_context=normalize_interaction_context(
+                raw_context,
+                required=True,
+                require_speaker=False,
+            ),
+            text=text,
+        )
+
 @dataclass(frozen=True, slots=True)
 class InitiativeCandidateFamily:
     family: str
