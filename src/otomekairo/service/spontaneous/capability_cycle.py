@@ -113,11 +113,6 @@ class ServiceSpontaneousCapabilityCycleMixin:
             daemon=True,
         )
         thread.start()
-        debug_log(
-            "CapabilityResult",
-            f"async cycle queued request={request_label} capability={capability_id}",
-            level="DEBUG",
-        )
 
     def _execute_async_capability_result_cycle(
         self,
@@ -146,7 +141,6 @@ class ServiceSpontaneousCapabilityCycleMixin:
     ) -> None:
         request_record = capability_response.get("request_record")
         capability_id = self._capability_result_capability_id(capability_response)
-        image_count = self._capability_result_payload_image_count(capability_response)
         capability_request_summary = self._capability_request_summary(request_record)
         assistant_message_target_client_id = self._request_record_assistant_message_target_client_id(request_record)
         interaction_context = self._capability_result_interaction_context(capability_request_summary)
@@ -171,17 +165,6 @@ class ServiceSpontaneousCapabilityCycleMixin:
         )
         pipeline: dict[str, Any] | None = None
         ongoing_action_transition_summary: dict[str, Any] | None = None
-        image_count_summary = f"images={image_count} " if image_count is not None else ""
-        debug_log(
-            "CapabilityResult",
-            (
-                f"{self._short_cycle_id(cycle_id)} start capability={capability_id} "
-                f"recent_turns={len(recent_turns)} {image_count_summary}"
-                f"error={capability_result_has_error(capability_id=capability_id, result_payload=capability_response)}"
-            ),
-            level="DEBUG",
-        )
-
         if user_facing_result:
             self._begin_user_response_cycle()
         try:
@@ -506,16 +489,10 @@ class ServiceSpontaneousCapabilityCycleMixin:
     ) -> None:
         speech_payload = pipeline.get("speech_payload")
         if not isinstance(speech_payload, dict):
-            debug_log("CapabilityResult", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_speech", level="DEBUG")
             return
 
         request_record = capability_response.get("request_record")
         if interaction_context is None:
-            debug_log(
-                "CapabilityResult",
-                f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_interaction",
-                level="DEBUG",
-            )
             return
 
         request_id = capability_response.get("request_id")

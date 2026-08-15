@@ -84,7 +84,6 @@ def main() -> None:
             raise SystemExit(2) from None
         raise
     # スケジューラー開始
-    debug_log("Run", "starting background workers")
     service.start_background_memory_postprocess_worker()
     service.start_background_visual_daily_worker()
     service.start_background_autonomous_run_scheduler()

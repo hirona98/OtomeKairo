@@ -42,7 +42,6 @@ class ServiceInputDecisionComparisonMixin:
     ) -> dict[str, Any]:
         cycle_label = str(kwargs.get("cycle_label") or "")
         self_context = self._build_self_activity_decision_context(**kwargs)
-        debug_log("Pipeline", f"{cycle_label} self_activity decision start", level="DEBUG")
         self_decision = self.llm.generate_decision(
             model_config=kwargs["model_config"],
             persona_context=kwargs["persona_context"],
@@ -56,7 +55,6 @@ class ServiceInputDecisionComparisonMixin:
             ),
         )
         outward_context = self._build_outward_speech_decision_context(**kwargs)
-        debug_log("Pipeline", f"{cycle_label} outward_speech decision start", level="DEBUG")
         outward_decision = self.llm.generate_decision(
             model_config=kwargs["model_config"],
             persona_context=kwargs["persona_context"],

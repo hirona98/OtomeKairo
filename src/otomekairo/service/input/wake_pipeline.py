@@ -31,15 +31,6 @@ class ServiceInputWakePipelineMixin:
             client_context=client_context,
             selected_candidate=selected_candidate,
         )
-        debug_log(
-            "Wake",
-            (
-                f"{cycle_label} pipeline start selected_candidate="
-                f"{selected_candidate.get('candidate_id') if isinstance(selected_candidate, dict) else '-'}"
-            ),
-            level="DEBUG",
-        )
-
         # 判断機会ポリシー
         if trigger_kind == "background_thinking":
             if not self._background_thinking_should_proceed(

@@ -87,16 +87,7 @@ class ServiceSpontaneousPendingIntentMixin:
             or self._parse_iso(candidate["not_before"]) <= current_dt
         ]
         trace["eligible_candidate_count"] = len(eligible_candidates)
-        debug_log(
-            "PendingIntent",
-            (
-                f"selection start trigger={trigger_kind} pool={len(candidate_pool)} "
-                f"eligible={len(eligible_candidates)}"
-            ),
-            level="DEBUG",
-        )
         if not eligible_candidates:
-            debug_log("PendingIntent", f"selection skipped trigger={trigger_kind} reason=no_eligible_candidates")
             return {
                 "selected_candidate": None,
                 "pending_intent_selection": trace,

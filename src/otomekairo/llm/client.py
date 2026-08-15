@@ -282,15 +282,6 @@ class LLMClient:
         activity_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         operation = "input_interpretation"
-        debug_log(
-            "LLM",
-            (
-                f"{operation} start mode={self._debug_mode(model_config)} "
-                f"model={self._debug_model(model_config)} input_chars={len(input_text)} "
-                f"recent_turns={len(recent_turns)}"
-            ),
-            level="DEBUG",
-        )
         try:
             if self._is_mock_model_config(model_config):
                 recall_hint = self.mock_client.generate_recall_hint(
@@ -341,14 +332,6 @@ class LLMClient:
             )
             recall_hint = normalize_recall_hint_payload(payload["recall_hint"])
             answer_contract = normalize_answer_contract_payload(payload["answer_contract"])
-            debug_log(
-                "LLM",
-                (
-                    f"{operation} done focus={recall_hint.get('primary_recall_focus')} "
-                    f"contract={answer_contract.get('contract')}"
-                ),
-                level="DEBUG",
-            )
             return {
                 "recall_hint": recall_hint,
                 "answer_contract": answer_contract,
@@ -375,15 +358,6 @@ class LLMClient:
         context: DecisionContext,
     ) -> dict[str, Any]:
         operation = self._decision_operation_name(context)
-        debug_log(
-            "LLM",
-            (
-                f"{operation} start mode={self._debug_mode(model_config)} "
-                f"model={self._debug_model(model_config)} recent_turns={len(context.recent_turns)} "
-                f"recall_candidates={context.recall_pack.get('candidate_count', 0)}"
-            ),
-            level="DEBUG",
-        )
         try:
             # モック経路
             if self._is_mock_model_config(model_config):
@@ -549,14 +523,6 @@ class LLMClient:
         context: AutonomousStepContext,
     ) -> dict[str, Any]:
         operation = "autonomous_step"
-        debug_log(
-            "LLM",
-            (
-                f"{operation} start mode={self._debug_mode(model_config)} "
-                f"model={self._debug_model(model_config)} run={context.run.get('run_id')}"
-            ),
-            level="DEBUG",
-        )
         try:
             if self._is_mock_model_config(model_config):
                 payload = self.mock_client.generate_autonomous_step(
@@ -589,14 +555,6 @@ class LLMClient:
                 repair_prompt_builder=build_autonomous_step_repair_prompt,
                 failure_message="AutonomousStep の生成に失敗しました。解析可能な応答が得られませんでした。",
                 operation=operation,
-            )
-            debug_log(
-                "LLM",
-                (
-                    f"{operation} done action={payload.get('action', {}).get('kind')} "
-                    f"transition={payload.get('transition', {}).get('kind')}"
-                ),
-                level="DEBUG",
             )
             return payload
         except Exception as exc:
@@ -1001,14 +959,6 @@ class LLMClient:
         context: SpeechContext,
     ) -> dict[str, Any]:
         operation = "speech"
-        debug_log(
-            "LLM",
-            (
-                f"{operation} start mode={self._debug_mode(model_config)} "
-                f"model={self._debug_model(model_config)} decision_kind={context.decision.get('kind')}"
-            ),
-            level="DEBUG",
-        )
         try:
             # モック経路
             if self._is_mock_model_config(model_config):
@@ -1027,7 +977,6 @@ class LLMClient:
             )
 
             # 補完
-            debug_log("LLM", f"{operation} request messages={len(messages)}", level="DEBUG")
             content = complete_text(model_config=model_config, messages=messages)
             speech_text = content.strip()
             if not speech_text:
@@ -1039,7 +988,14 @@ class LLMClient:
                 "speech_style_notes": f"model={model_config.get('model')}",
                 "confidence_note": "litellm_model",
             }
-            debug_log("LLM", f"{operation} done response_chars={len(content)} speech_chars={len(speech_text)}", level="DEBUG")
+            debug_log(
+                "LLM",
+                (
+                    f"{operation} done model={self._debug_model(model_config)} "
+                    f"response_chars={len(content)} speech_chars={len(speech_text)}"
+                ),
+                level="DEBUG",
+            )
             return payload
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
@@ -1101,15 +1057,6 @@ class LLMClient:
         current_time: str,
     ) -> dict[str, Any]:
         operation = "memory_interpretation"
-        debug_log(
-            "LLM",
-            (
-                f"{operation} start mode={self._debug_mode(model_config)} "
-                f"model={self._debug_model(model_config)} input_chars={len(input_text)} "
-                f"decision_kind={decision.get('kind')} speech_chars={len(speech_text or '')}"
-            ),
-            level="DEBUG",
-        )
         # モック経路
         if self._is_mock_model_config(model_config):
             payload = self.mock_client.generate_memory_interpretation(
@@ -1151,14 +1098,6 @@ class LLMClient:
         evidence_pack: dict[str, Any],
     ) -> dict[str, Any]:
         operation = "memory_reflection_summary"
-        debug_log(
-            "LLM",
-            (
-                f"{operation} start mode={self._debug_mode(model_config)} "
-                f"model={self._debug_model(model_config)} evidence_keys={self._debug_payload_keys(evidence_pack)}"
-            ),
-            level="DEBUG",
-        )
         # モック経路
         if self._is_mock_model_config(model_config):
             payload = self.mock_client.generate_memory_reflection_summary(
@@ -1190,15 +1129,6 @@ class LLMClient:
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
         operation = "memory_correction_reconciliation"
-        targets = source_pack.get("target_candidates", []) if isinstance(source_pack, dict) else []
-        debug_log(
-            "LLM",
-            (
-                f"{operation} start mode={self._debug_mode(model_config)} "
-                f"model={self._debug_model(model_config)} target_count={len(targets)}"
-            ),
-            level="DEBUG",
-        )
         source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
         # モック経路
         if self._is_mock_model_config(model_config):
@@ -1228,15 +1158,6 @@ class LLMClient:
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
         operation = "event_evidence"
-        source_event = source_pack.get("event") if isinstance(source_pack, dict) else None
-        debug_log(
-            "LLM",
-            (
-                f"{operation} start mode={self._debug_mode(model_config)} "
-                f"model={self._debug_model(model_config)} events={1 if isinstance(source_event, dict) else 0}"
-            ),
-            level="DEBUG",
-        )
         source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
         # モック経路
         if self._is_mock_model_config(model_config):
@@ -1267,15 +1188,6 @@ class LLMClient:
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
         operation = "recall_pack_selection"
-        candidates = source_pack.get("candidates", []) if isinstance(source_pack, dict) else []
-        debug_log(
-            "LLM",
-            (
-                f"{operation} start mode={self._debug_mode(model_config)} "
-                f"model={self._debug_model(model_config)} candidates={len(candidates) if isinstance(candidates, list) else 0}"
-            ),
-            level="DEBUG",
-        )
         source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
         # モック経路
         if self._is_mock_model_config(model_config):
@@ -1306,15 +1218,6 @@ class LLMClient:
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
         operation = "pending_intent_selection"
-        candidates = source_pack.get("candidates", []) if isinstance(source_pack, dict) else []
-        debug_log(
-            "LLM",
-            (
-                f"{operation} start mode={self._debug_mode(model_config)} "
-                f"model={self._debug_model(model_config)} candidates={len(candidates) if isinstance(candidates, list) else 0}"
-            ),
-            level="DEBUG",
-        )
         source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
         # モック経路
         if self._is_mock_model_config(model_config):
@@ -1345,14 +1248,6 @@ class LLMClient:
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
         operation = "initiative_entry_check"
-        debug_log(
-            "LLM",
-            (
-                f"{operation} start mode={self._debug_mode(model_config)} "
-                f"model={self._debug_model(model_config)}"
-            ),
-            level="DEBUG",
-        )
         source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
         # モック経路
         if self._is_mock_model_config(model_config):
@@ -1383,14 +1278,6 @@ class LLMClient:
         source_pack: WorldStateSourcePack,
     ) -> dict[str, Any]:
         operation = "world_state"
-        debug_log(
-            "LLM",
-            (
-                f"{operation} start mode={self._debug_mode(model_config)} "
-                f"model={self._debug_model(model_config)}"
-            ),
-            level="DEBUG",
-        )
         source_pack.persona_context = persona_context.to_prompt_payload()
         if self._is_mock_model_config(model_config):
             payload = self.mock_client.generate_world_state(model_config, source_pack)
@@ -1419,14 +1306,6 @@ class LLMClient:
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
         operation = "activity_state"
-        debug_log(
-            "LLM",
-            (
-                f"{operation} start mode={self._debug_mode(model_config)} "
-                f"model={self._debug_model(model_config)}"
-            ),
-            level="DEBUG",
-        )
         source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
         if self._is_mock_model_config(model_config):
             payload = self.mock_client.generate_activity_state(model_config, source_pack)
@@ -1456,15 +1335,6 @@ class LLMClient:
         images: list[str],
     ) -> dict[str, Any]:
         operation = "visual_observation"
-        if self._should_log_routine_llm_operation(operation):
-            debug_log(
-                "LLM",
-                (
-                    f"{operation} start mode={self._debug_mode(model_config)} "
-                    f"model={self._debug_model(model_config)} images={len(images)}"
-                ),
-                level="DEBUG",
-            )
         source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
         if self._is_mock_model_config(model_config):
             payload = self.mock_client.generate_visual_observation_summary(
@@ -1499,22 +1369,12 @@ class LLMClient:
     ) -> list[list[float]]:
         # 空
         if not texts:
-            debug_log("LLM", "embeddings skipped empty_texts", level="DEBUG")
             return []
 
         # 次元
         embedding_dimension = self._embedding_dimension(model_config)
         if not isinstance(embedding_dimension, int) or embedding_dimension <= 0:
             raise LLMError("embedding_dimension は正の整数である必要があります。")
-
-        debug_log(
-            "LLM",
-            (
-                f"embeddings start mode={self._debug_mode(model_config)} "
-                f"model={self._debug_model(model_config)} texts={len(texts)} dimension={embedding_dimension}"
-            ),
-            level="DEBUG",
-        )
 
         # モック経路
         if self._is_mock_model_config(model_config):
@@ -1528,7 +1388,11 @@ class LLMClient:
             texts=texts,
             expected_dimension=embedding_dimension,
         )
-        debug_log("LLM", f"embeddings done vectors={len(vectors)}", level="DEBUG")
+        debug_log(
+            "LLM",
+            f"embeddings done model={self._debug_model(model_config)} vectors={len(vectors)}",
+            level="DEBUG",
+        )
         return vectors
 
     def _source_pack_with_persona_context(
@@ -1547,10 +1411,6 @@ class LLMClient:
         if not isinstance(model, str) or not model.strip():
             return "-"
         return model.strip()
-
-    def _debug_mode(self, model_config: dict) -> str:
-        # 実行経路
-        return "mock" if self._is_mock_model_config(model_config) else "transport"
 
     def _debug_error(self, exc: BaseException) -> str:
         # 長い応答本文をログへ出しすぎない。
@@ -1635,12 +1495,6 @@ class LLMClient:
         last_error: LLMError | None = None
         attempt_messages = list(messages)
         for attempt in range(2):
-            if self._should_log_routine_llm_operation(operation):
-                debug_log(
-                    "LLM",
-                    f"{operation} attempt={attempt + 1} request messages={len(attempt_messages)}",
-                    level="DEBUG",
-                )
             content = complete_text(model_config=model_config, messages=attempt_messages)
             try:
                 payload = parse_json_object(content)
@@ -1650,7 +1504,8 @@ class LLMClient:
                         debug_log(
                             "LLM",
                             (
-                                f"{operation} done attempt={attempt + 1} response_chars={len(content)} "
+                                f"{operation} done model={self._debug_model(model_config)} "
+                                f"attempt={attempt + 1} response_chars={len(content)} "
                                 f"keys={self._debug_payload_keys(payload)}"
                             ),
                             level="DEBUG",

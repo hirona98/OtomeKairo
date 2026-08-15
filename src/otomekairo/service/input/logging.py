@@ -220,11 +220,6 @@ class ServiceInputLoggingMixin:
             return "-"
         return self._short_cycle_id(cycle_id)
 
-    def _debug_context_keys(self, context: dict[str, Any]) -> str:
-        # 値は出さずキーだけに留める。
-        keys = sorted(str(key) for key in context.keys())[:8]
-        return ",".join(keys) if keys else "-"
-
     def _format_id_list_for_log(self, values: list[str]) -> str:
         # 空
         if not values:

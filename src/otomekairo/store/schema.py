@@ -20,11 +20,6 @@ class StoreSchemaMixin:
         # 現行 schema 以外は受け付けない。
         with self._memory_db() as conn:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-            debug_log(
-                "Store",
-                f"memory_db open path={self.memory_db_path} user_version={version} expected={CURRENT_MEMORY_DB_VERSION}",
-                level="DEBUG",
-            )
             if version not in SUPPORTED_MEMORY_DB_VERSIONS:
                 debug_log("Store", f"memory_db unsupported_schema user_version={version}", level="ERROR")
                 raise RuntimeError(

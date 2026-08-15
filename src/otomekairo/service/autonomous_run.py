@@ -98,7 +98,6 @@ class ServiceAutonomousRunMixin:
             self._background_autonomous_run_thread = thread
 
         thread.start()
-        debug_log("AutonomousRun", f"scheduler started thread={thread.name}", level="DEBUG")
 
     def stop_background_autonomous_run_scheduler(self) -> None:
         # スナップショット
@@ -445,11 +444,6 @@ class ServiceAutonomousRunMixin:
                     if stop_event.is_set():
                         return
                     if not self._cycle_coordinator.try_enter_background():
-                        debug_log(
-                            "AutonomousRun",
-                            f"scheduler skipped foreground_cycle_active run={run.get('run_id')}",
-                            level="DEBUG",
-                        )
                         continue
                     try:
                         with self._wake_execution_lock:
@@ -1603,7 +1597,6 @@ class ServiceAutonomousRunMixin:
             daemon=True,
         )
         thread.start()
-        debug_log("AutonomousRun", f"result cycle queued request={request_label} run={run_id or '-'}", level="DEBUG")
 
     def _execute_autonomous_capability_result_cycle(
         self,
@@ -1968,7 +1961,6 @@ class ServiceAutonomousRunMixin:
             pause_reason="paused_by_user_interaction",
         )
         self.store.upsert_autonomous_run(autonomous_run=paused)
-        debug_log("AutonomousRun", f"paused_by_user run={paused.get('run_id')}", level="DEBUG")
         return paused
 
     def _paused_autonomous_run(
@@ -2117,15 +2109,6 @@ class ServiceAutonomousRunMixin:
                 current_time=current_time,
                 evidence_events=[],
             )
-        debug_log(
-            "AutonomousRun",
-            (
-                f"linked commitments run={run_id} "
-                f"memory_units={self._format_id_list_for_log(commitment_ids)}"
-            ),
-            level="DEBUG",
-        )
-
     def _persist_autonomous_run_speech_event(
         self,
         *,
@@ -2367,15 +2350,6 @@ class ServiceAutonomousRunMixin:
             "updated_at": current_time,
         }
         self.store.upsert_autonomous_run(autonomous_run=updated)
-        debug_log(
-            "AutonomousRun",
-            (
-                f"commitment resolution run={run.get('run_id')} "
-                f"status={resolution.get('result_status')} "
-                f"updated={len(resolution.get('updated_memory_unit_ids', []))}"
-            ),
-            level="DEBUG",
-        )
         return self._consolidate_autonomous_run_terminal(
             state=state,
             run=updated,
@@ -2618,11 +2592,6 @@ class ServiceAutonomousRunMixin:
             or not isinstance(participant_refs, list)
             or not participant_refs
         ):
-            debug_log(
-                "AutonomousRun",
-                f"assistant_message skipped no_interaction run={run.get('run_id')}",
-                level="DEBUG",
-            )
             return
         persona_id = state["selected_persona_id"]
         persona = state["personas"][persona_id]

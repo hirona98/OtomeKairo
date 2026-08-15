@@ -367,11 +367,6 @@ class ConfigStore:
         # 現行 schema 以外は受け付けない。
         with self._config_db() as conn:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-            debug_log(
-                "Store",
-                f"config_db open path={self.config_db_path} user_version={version} expected={CURRENT_CONFIG_DB_VERSION}",
-                level="DEBUG",
-            )
             if version not in SUPPORTED_CONFIG_DB_VERSIONS:
                 debug_log("Store", f"config_db unsupported_schema user_version={version}", level="ERROR")
                 raise RuntimeError(

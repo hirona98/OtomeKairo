@@ -50,9 +50,9 @@ def test_http_response_log_levels(monkeypatch) -> None:
     handler._debug_log_response(404, {"ok": False, "error": {"code": "not_found"}})
     handler._debug_log_response(500, {"ok": False, "error": {"code": "internal_server_error"}})
 
-    assert log.call_args_list[0].kwargs == {"level": "DEBUG"}
-    assert log.call_args_list[1].kwargs == {"level": "WARNING"}
-    assert log.call_args_list[2].kwargs == {"level": "ERROR"}
+    assert len(log.call_args_list) == 2
+    assert log.call_args_list[0].kwargs == {"level": "WARNING"}
+    assert log.call_args_list[1].kwargs == {"level": "ERROR"}
 
 
 def test_watcher_runtime_config_http_log_suppressed(monkeypatch) -> None:
@@ -74,10 +74,15 @@ def test_polled_config_http_log_suppressed(monkeypatch) -> None:
     handler = object.__new__(OtomeKairoHandler)
     handler.command = "GET"
 
-    for path in ("/api/config", "/api/config/camera-sources"):
+    for path in (
+        "/api/config",
+        "/api/config/camera-sources",
+        "/api/config/connectors/tapo-c220-connector-main/runtime-config",
+    ):
         log.reset_mock()
         handler.path = path
         handler._debug_log_response(200, {"ok": True, "data": {}})
+        handler._debug_log_response(404, {"ok": False, "error": {"code": "not_found"}})
         assert log.call_args_list == [], path
         assert handler._should_log_http_path(path) is False
 

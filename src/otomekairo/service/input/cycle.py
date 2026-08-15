@@ -132,14 +132,6 @@ class ServiceInputCycleMixin:
                     state=state,
                     current_time=started_at,
                 )
-            debug_log(
-                "Conversation",
-                (
-                    f"{self._short_cycle_id(cycle_id)} start input_chars={len(input_text)} "
-                    f"recent_turns={len(recent_turns)} context_keys={self._debug_context_keys(client_context)}"
-                ),
-                level="DEBUG",
-            )
             self._emit_live_log(
                 level="INFO",
                 component="Input",

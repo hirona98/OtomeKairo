@@ -25,7 +25,6 @@ class ServiceVisualDailyMixin:
                 self._background_visual_daily_thread is not None
                 and self._background_visual_daily_thread.is_alive()
             ):
-                debug_log("VisualDaily", "already running", level="DEBUG")
                 return
 
             stop_event = threading.Event()
@@ -41,7 +40,6 @@ class ServiceVisualDailyMixin:
 
         # 開始
         thread.start()
-        debug_log("VisualDaily", f"started thread={thread.name}", level="DEBUG")
 
     def stop_background_visual_daily_worker(self) -> None:
         # スナップショット
@@ -61,14 +59,12 @@ class ServiceVisualDailyMixin:
 
     def _background_visual_daily_loop(self, stop_event: threading.Event) -> None:
         # ループ
-        debug_log("VisualDaily", "loop started", level="DEBUG")
         while not stop_event.is_set():
             try:
                 self._run_due_visual_daily_digests()
             except Exception as exc:  # noqa: BLE001
                 debug_log("VisualDaily", f"loop error={type(exc).__name__}: {exc}", level="ERROR")
             stop_event.wait(VISUAL_DAILY_CHECK_INTERVAL_SECONDS)
-        debug_log("VisualDaily", "loop stopped", level="DEBUG")
 
     def _run_due_visual_daily_digests(self) -> None:
         # 現在日はまだ途中なので、前日以前だけ整理する。

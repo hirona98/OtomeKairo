@@ -126,15 +126,6 @@ class ServiceInputPipelineMixin:
             ) if current_input.sender_ref is not None else None,
             current_time=started_at,
         )
-        debug_log(
-            "Pipeline",
-            (
-                f"{cycle_label} start memory_set={self._short_identifier(state['selected_memory_set_id'])} "
-                f"persona={state['selected_persona_id']} preset={state['selected_model_preset_id']} "
-                f"input_chars={len(input_text)} recent_turns={len(recent_turns)}"
-            ),
-            level="DEBUG",
-        )
         # モデル選択
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         persona = state["personas"][state["selected_persona_id"]]
@@ -359,7 +350,6 @@ class ServiceInputPipelineMixin:
             current_time=started_at,
         )
         # 結果
-        debug_log("Pipeline", f"{cycle_label} done", level="DEBUG")
         return {
             "persona_id": state["selected_persona_id"],
             "persona_display_name": persona["display_name"],
@@ -572,12 +562,10 @@ class ServiceInputPipelineMixin:
             return self._build_visual_observation_direct_recall_inputs(
                 augmented_query_text=augmented_query_text,
                 current_time=started_at,
-                cycle_label=cycle_label,
             )
 
         # 入口解釈
         recall_hint_recent_turns = self._recall_hint_recent_turns(recent_turns)
-        debug_log("Pipeline", f"{cycle_label} input_interpretation start recent_turns={len(recall_hint_recent_turns)}", level="DEBUG")
         input_interpretation = self.llm.generate_input_interpretation(
             model_config=model_config,
             persona_context=persona_context,
@@ -600,7 +588,6 @@ class ServiceInputPipelineMixin:
         )
 
         # recall_pack構築
-        debug_log("Pipeline", f"{cycle_label} recall_pack start", level="DEBUG")
         recall_pack = self.recall.build_recall_pack(
             state=state,
             augmented_query_text=augmented_query_text,
@@ -614,20 +601,7 @@ class ServiceInputPipelineMixin:
             ),
             current_time=started_at,
         )
-        recall_summary = self._summarize_recall_pack(recall_pack)
-        debug_log(
-            "Pipeline",
-            (
-                f"{cycle_label} recall_pack done candidates={recall_pack['candidate_count']} "
-                f"selected_memory={len(recall_pack['selected_memory_ids'])} "
-                f"selected_episode={len(recall_pack['selected_episode_ids'])} "
-                f"sections={recall_summary}"
-            ),
-            level="DEBUG",
-        )
-
         # 回答根拠解決
-        debug_log("Pipeline", f"{cycle_label} evidence_resolution start contract={answer_contract.get('contract')}", level="DEBUG")
         evidence_resolution = self.evidence.build_evidence_resolution(
             memory_set_id=state["selected_memory_set_id"],
             augmented_query_text=augmented_query_text,
@@ -676,13 +650,7 @@ class ServiceInputPipelineMixin:
         *,
         augmented_query_text: str,
         current_time: str,
-        cycle_label: str,
     ) -> dict[str, Any]:
-        debug_log(
-            "Pipeline",
-            f"{cycle_label} input_interpretation skipped reason=visual_observation_direct_entry",
-            level="DEBUG",
-        )
         recall_hint = self._empty_recall_hint()
         answer_contract = {
             "contract": "summary",
@@ -741,7 +709,6 @@ class ServiceInputPipelineMixin:
         model_config: dict[str, Any],
     ) -> dict[str, Any]:
         # 内部コンテキスト
-        debug_log("Pipeline", f"{cycle_label} context start", level="DEBUG")
         time_context = self._build_time_context(current_time=started_at)
         affect_context = self._build_affect_context(
             state=state,
@@ -908,17 +875,6 @@ class ServiceInputPipelineMixin:
             relationship_context=relationship_context,
             prediction_error_context=prediction_error_context,
             default_mode_context=default_mode_context,
-        )
-        debug_log(
-            "Pipeline",
-            (
-                f"{cycle_label} context done affect_states={len(affect_context.get('affect_states', []))} "
-                f"drives={len(drive_state_summary or [])} world_states={len(foreground_world_state or [])} "
-                f"ongoing_action={isinstance(ongoing_action_summary, dict)} "
-                f"autonomous_runs={len(autonomous_run_summaries or [])} "
-                f"capabilities={len(capability_decision_view or [])} initiative={initiative_context is not None}"
-            ),
-            level="DEBUG",
         )
         return {
             "time_context": time_context,
@@ -2100,7 +2056,6 @@ class ServiceInputPipelineMixin:
         pre_send_check_feedback: str | None = None,
     ) -> dict[str, Any]:
         # decision生成
-        debug_log("Pipeline", f"{cycle_label} decision start", level="DEBUG")
         if self._should_compare_self_activity_separately(
             trigger_kind=trigger_kind,
             workspace_context=workspace_context,
@@ -2310,7 +2265,6 @@ class ServiceInputPipelineMixin:
             )
             debug_log("Pipeline", f"{cycle_label} speech skipped {reason_code}")
         elif outward_decision.get("kind") == "speech":
-            debug_log("Pipeline", f"{cycle_label} speech start", level="DEBUG")
             speech_context = self._build_speech_context(
                 input_text=input_text,
                 current_input=current_input,

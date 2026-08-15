@@ -40,7 +40,6 @@ class ServiceInputWakeObservationMixin:
             return client_context
 
         cycle_label = self._debug_cycle_label(cycle_id)
-        debug_log("Wake", f"{cycle_label} observations start count={len(observations)}", level="DEBUG")
         summaries: list[dict[str, Any]] = []
         for observation in observations:
             summary = self._run_wake_policy_observation(

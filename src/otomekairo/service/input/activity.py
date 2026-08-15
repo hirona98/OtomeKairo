@@ -110,14 +110,6 @@ class ServiceInputActivityMixin:
                     "candidate_summary": self._compact_activity_candidate(candidate),
                 }
             )
-            debug_log(
-                "Activity",
-                (
-                    f"{cycle_label} activity done status={trace['result_status']} "
-                    f"candidates={trace['candidate_count']} updated={trace['updated_count']}"
-                ),
-                level="DEBUG",
-            )
             return activity_context, trace
         except (LLMError, KeyError, TypeError, ValueError) as exc:
             trace.update(

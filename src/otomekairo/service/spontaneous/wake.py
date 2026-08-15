@@ -31,7 +31,6 @@ class ServiceSpontaneousWakeMixin:
             return None
         speech_payload = pipeline.get("speech_payload")
         if not isinstance(speech_payload, dict):
-            debug_log("Wake", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_speech", level="DEBUG")
             return None
         sent, audio_delivery = self._emit_assistant_message_with_audio(
             event_data={
@@ -80,7 +79,6 @@ class ServiceSpontaneousWakeMixin:
             else False
         )
         if is_background and not entered:
-            debug_log("Wake", "background thinking skipped foreground_cycle_active", level="DEBUG")
             return {
                 "cycle_id": None,
                 "interaction_ref": None,
@@ -131,15 +129,6 @@ class ServiceSpontaneousWakeMixin:
                 client_context=client_context,
                 selected_candidate=None,
             )
-            debug_log(
-                "Wake",
-                (
-                    f"{self._short_cycle_id(cycle_id)} start trigger={trigger_kind} "
-                    f"recent_turns={len(recent_turns)} context_keys={self._debug_context_keys(client_context)}"
-                ),
-                level="DEBUG",
-            )
-
             try:
                 if trigger_kind == "wake":
                     client_context, observation_summary, reference_context = self._prepare_wake_reference_context(
@@ -382,17 +371,10 @@ class ServiceSpontaneousWakeMixin:
         current_time = self._now_iso()
         unseen_sources = self._unseen_wake_observation_sources(state)
         if unseen_sources:
-            debug_log(
-                "Wake",
-                "background thinking skipped waiting_for_vision_sources "
-                f"count={len(unseen_sources)}",
-                level="DEBUG",
-            )
             return
         regular_due = self._wake_is_due(state=state, current_time=current_time)["should_skip"] is not True
         standing_due = bool(self._due_standing_concerns(state=state, current_time=current_time))
         if not (regular_due or standing_due):
-            debug_log("Wake", "background thinking skipped not_due", level="DEBUG")
             return
         client_context: dict[str, Any] = {"source": "background_thinking_scheduler"}
         self._execute_wake_cycle(
