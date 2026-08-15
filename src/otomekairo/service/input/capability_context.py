@@ -274,6 +274,7 @@ class ServiceInputCapabilityContextMixin:
             if getattr(current_input, "sender_kind", None) == "person"
             else "arrival"
         )
+        completed_mcp_tool = self._capability_result_completed_mcp_tool(observation_summary)
         payload: dict[str, Any] = {
             "source_capability_id": source_capability_id,
             "orientation_kind": orientation_kind,
@@ -282,6 +283,7 @@ class ServiceInputCapabilityContextMixin:
                 source_capability_id=source_capability_id,
                 allowed_capability_ids=allowed_capability_ids,
                 orientation_kind=orientation_kind,
+                completed_mcp_tool=completed_mcp_tool,
             ),
         }
         source_request_summary = self._compact_capability_request_summary(capability_request_summary)
@@ -290,6 +292,7 @@ class ServiceInputCapabilityContextMixin:
         followup_constraints = self._capability_result_followup_constraints(
             source_capability_id=source_capability_id,
             source_request_summary=source_request_summary,
+            completed_mcp_tool=completed_mcp_tool,
         )
         if followup_constraints:
             payload["followup_constraints"] = followup_constraints
@@ -383,13 +386,23 @@ class ServiceInputCapabilityContextMixin:
         source_capability_id: str,
         allowed_capability_ids: list[str],
         orientation_kind: str = "arrival",
+        completed_mcp_tool: dict[str, str] | None = None,
     ) -> str:
         if orientation_kind == "person":
-            return (
+            summary = (
                 "向きは起点の人物発話である。"
-                "allowed_followup_capability_ids に含まれる能力は同じ向きの続きとして使ってよい。"
+                "今回の結果で向きが果たされていれば、人物への発話として閉じる。"
+                "まだ足りない観測や未完了の手順があるときだけ、"
+                "allowed_followup_capability_ids に含まれる能力を続ける。"
                 "speech は会話の続きであり、結果本文を向きにしない。"
             )
+            completed_label = self._capability_result_completed_mcp_tool_label(completed_mcp_tool)
+            if completed_label is not None:
+                summary += (
+                    f"今回完了した tool は {completed_label} である。"
+                    "次は未完了の別手順か、人物への発話である。"
+                )
+            return summary
         if source_capability_id == "camera.ptz" and "vision.capture" in allowed_capability_ids:
             return (
                 "camera.ptz result follow-up では同じ vision_source_id の vision.capture だけを追加で出せる。"
@@ -400,41 +413,90 @@ class ServiceInputCapabilityContextMixin:
             "受け取った result への speech / noop / pending_intent で閉じる。"
         )
 
+    def _capability_result_completed_mcp_tool(
+        self,
+        observation_summary: dict[str, Any] | None,
+    ) -> dict[str, str] | None:
+        if not isinstance(observation_summary, dict):
+            return None
+        if observation_summary.get("capability_id") != "mcp.call_tool":
+            return None
+        if observation_summary.get("status") != "completed":
+            return None
+        if observation_summary.get("is_error") is not False:
+            return None
+        error = observation_summary.get("error")
+        if isinstance(error, str) and error.strip():
+            return None
+        mcp_server_id = observation_summary.get("mcp_server_id")
+        tool_name = observation_summary.get("tool_name")
+        if not isinstance(mcp_server_id, str) or not mcp_server_id.strip():
+            return None
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            return None
+        return {
+            "mcp_server_id": mcp_server_id.strip(),
+            "tool_name": tool_name.strip(),
+        }
+
+    def _capability_result_completed_mcp_tool_label(
+        self,
+        completed_mcp_tool: dict[str, str] | None,
+    ) -> str | None:
+        if not isinstance(completed_mcp_tool, dict):
+            return None
+        mcp_server_id = completed_mcp_tool.get("mcp_server_id")
+        tool_name = completed_mcp_tool.get("tool_name")
+        if not isinstance(mcp_server_id, str) or not mcp_server_id.strip():
+            return None
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            return None
+        return f"{mcp_server_id.strip()}/{tool_name.strip()}"
+
     def _capability_result_followup_constraints(
         self,
         *,
         source_capability_id: str,
         source_request_summary: dict[str, Any] | None,
+        completed_mcp_tool: dict[str, str] | None = None,
     ) -> list[dict[str, Any]]:
+        constraints: list[dict[str, Any]] = []
         state_policy = capability_manifests().get(source_capability_id, {}).get("state_policy", {})
         followup_requests = (
             state_policy.get("allow_followup_capability_requests")
             if isinstance(state_policy, dict)
             else None
         )
-        if not isinstance(followup_requests, list):
-            return []
-        constraints: list[dict[str, Any]] = []
-        for entry in followup_requests:
-            if not isinstance(entry, dict):
-                continue
-            capability_id = entry.get("capability_id")
-            constraint = entry.get("constraint")
-            if not isinstance(capability_id, str) or not capability_id.strip():
-                continue
-            payload: dict[str, Any] = {
-                "capability_id": capability_id.strip(),
-            }
-            if isinstance(constraint, str) and constraint.strip():
-                payload["constraint"] = constraint.strip()
-            if (
-                payload.get("constraint") == "same_vision_source_id"
-                and isinstance(source_request_summary, dict)
-            ):
-                vision_source_id = source_request_summary.get("vision_source_id")
-                if isinstance(vision_source_id, str) and vision_source_id.strip():
-                    payload["vision_source_id"] = vision_source_id.strip()
-            constraints.append(payload)
+        if isinstance(followup_requests, list):
+            for entry in followup_requests:
+                if not isinstance(entry, dict):
+                    continue
+                capability_id = entry.get("capability_id")
+                constraint = entry.get("constraint")
+                if not isinstance(capability_id, str) or not capability_id.strip():
+                    continue
+                payload: dict[str, Any] = {
+                    "capability_id": capability_id.strip(),
+                }
+                if isinstance(constraint, str) and constraint.strip():
+                    payload["constraint"] = constraint.strip()
+                if (
+                    payload.get("constraint") == "same_vision_source_id"
+                    and isinstance(source_request_summary, dict)
+                ):
+                    vision_source_id = source_request_summary.get("vision_source_id")
+                    if isinstance(vision_source_id, str) and vision_source_id.strip():
+                        payload["vision_source_id"] = vision_source_id.strip()
+                constraints.append(payload)
+        if isinstance(completed_mcp_tool, dict):
+            constraints.append(
+                {
+                    "capability_id": "mcp.call_tool",
+                    "constraint": "exclude_completed_mcp_tool",
+                    "mcp_server_id": completed_mcp_tool["mcp_server_id"],
+                    "tool_name": completed_mcp_tool["tool_name"],
+                }
+            )
         return constraints
 
     def _capability_result_source_capability_id(

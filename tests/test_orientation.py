@@ -187,6 +187,7 @@ class OrientationTests(unittest.TestCase):
         self.assertEqual(context["orientation_kind"], "person")
         self.assertIn("mcp.call_tool", context["allowed_followup_capability_ids"])
         self.assertIn("向きは起点の人物発話", context["followup_policy_summary"])
+        self.assertIn("今回の結果で向きが果たされていれば", context["followup_policy_summary"])
         self.assertEqual(
             context["work_log"],
             [{"capability_id": "mcp.call_tool", "tool_name": "get_notifications"}],
@@ -197,8 +198,96 @@ class OrientationTests(unittest.TestCase):
             capability_result_context=context,
         )
         self.assertTrue(any("起点の人物発話" in item for item in policies))
-        self.assertTrue(any("会話を打ち切らない" in item for item in policies))
+        self.assertTrue(any("向きが果たされていれば" in item for item in policies))
+        self.assertFalse(any("会話を打ち切らない" in item for item in policies))
         self.assertFalse(any("speech / noop / pending_intent で閉じ" in item for item in policies))
+
+    def test_completed_mcp_tool_is_excluded_from_immediate_followup(self) -> None:
+        interaction = _interaction()
+        origin = CurrentInput(
+            sender_kind="person",
+            sender_ref="person:web:abc",
+            source_kind="user_message",
+            response_target_refs=("person:web:abc",),
+            interaction_context=interaction,
+            text="なんか投稿してみて",
+        )
+        context = _CapabilityContextSubject()._build_capability_result_decision_context(
+            trigger_kind="capability_result",
+            observation_summary={
+                "capability_id": "mcp.call_tool",
+                "mcp_server_id": "elyth",
+                "tool_name": "create_post",
+                "status": "completed",
+                "is_error": False,
+                "mcp_result_summary": '{"結果":"投稿を作成しました"}',
+            },
+            capability_request_summary={
+                "capability_id": "mcp.call_tool",
+                "source_current_input": origin.to_prompt_payload(),
+            },
+            work_log=[
+                {
+                    "capability_id": "mcp.call_tool",
+                    "mcp_server_id": "elyth",
+                    "tool_name": "create_post",
+                    "status": "completed",
+                }
+            ],
+            current_input=origin,
+        )
+
+        self.assertIsNotNone(context)
+        assert context is not None
+        self.assertIn(
+            {
+                "capability_id": "mcp.call_tool",
+                "constraint": "exclude_completed_mcp_tool",
+                "mcp_server_id": "elyth",
+                "tool_name": "create_post",
+            },
+            context["followup_constraints"],
+        )
+        self.assertIn("今回完了した tool は elyth/create_post", context["followup_policy_summary"])
+
+        policies = _build_decision_trigger_policy(
+            initiative_context=None,
+            capability_result_context=context,
+        )
+        self.assertTrue(any("elyth/create_post" in item for item in policies))
+        self.assertTrue(any("未完了の別手順か発話" in item for item in policies))
+
+    def test_failed_mcp_tool_is_not_excluded_from_followup(self) -> None:
+        interaction = _interaction()
+        origin = CurrentInput(
+            sender_kind="person",
+            sender_ref="person:web:abc",
+            source_kind="user_message",
+            response_target_refs=("person:web:abc",),
+            interaction_context=interaction,
+            text="なんか投稿してみて",
+        )
+        context = _CapabilityContextSubject()._build_capability_result_decision_context(
+            trigger_kind="capability_result",
+            observation_summary={
+                "capability_id": "mcp.call_tool",
+                "mcp_server_id": "elyth",
+                "tool_name": "create_post",
+                "status": "failed",
+                "is_error": True,
+                "error": "mcp_tool_error",
+            },
+            capability_request_summary={
+                "capability_id": "mcp.call_tool",
+                "source_current_input": origin.to_prompt_payload(),
+            },
+            current_input=origin,
+        )
+
+        self.assertIsNotNone(context)
+        assert context is not None
+        self.assertNotIn("followup_constraints", context)
+        self.assertNotIn("今回完了した tool", context["followup_policy_summary"])
 
 
 if __name__ == "__main__":

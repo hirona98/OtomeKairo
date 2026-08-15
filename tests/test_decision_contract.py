@@ -846,6 +846,62 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("助言、依頼、支援提案、休息促し、身体注意、評価は本文へ足しません", system)
         self.assertIn("具体的な固有名、表示対象名、作品名、ページ内容は主題化しません", system)
 
+    def test_completed_mcp_tool_followup_rejects_same_tool(self) -> None:
+        client = LLMClient()
+        capability_result_context = {
+            "source_capability_id": "mcp.call_tool",
+            "allowed_followup_capability_ids": ["mcp.call_tool"],
+            "followup_constraints": [
+                {
+                    "capability_id": "mcp.call_tool",
+                    "constraint": "exclude_completed_mcp_tool",
+                    "mcp_server_id": "elyth",
+                    "tool_name": "create_post",
+                }
+            ],
+        }
+
+        with self.assertRaises(LLMError) as raised:
+            client._validate_decision_capability_result_context(
+                payload=_capability_decision(
+                    "mcp.call_tool",
+                    {
+                        "mcp_server_id": "elyth",
+                        "tool_name": "create_post",
+                        "arguments": {"content": "思索。"},
+                    },
+                ),
+                capability_result_context=capability_result_context,
+            )
+
+        self.assertIn("elyth/create_post", str(raised.exception))
+        self.assertIn("再実行を許可しません", str(raised.exception))
+
+    def test_completed_mcp_tool_followup_allows_different_tool(self) -> None:
+        client = LLMClient()
+        client._validate_decision_capability_result_context(
+            payload=_capability_decision(
+                "mcp.call_tool",
+                {
+                    "mcp_server_id": "elyth",
+                    "tool_name": "get_my_posts",
+                    "arguments": {},
+                },
+            ),
+            capability_result_context={
+                "source_capability_id": "mcp.call_tool",
+                "allowed_followup_capability_ids": ["mcp.call_tool"],
+                "followup_constraints": [
+                    {
+                        "capability_id": "mcp.call_tool",
+                        "constraint": "exclude_completed_mcp_tool",
+                        "mcp_server_id": "elyth",
+                        "tool_name": "create_post",
+                    }
+                ],
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

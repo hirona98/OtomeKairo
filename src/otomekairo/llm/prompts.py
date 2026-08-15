@@ -260,6 +260,7 @@ def build_agent_skill_selection_messages(*, selection_context: dict[str, Any]) -
                 "Agent Skills catalog から、現在の判断や作業に実際に必要な skill だけを選択します。\n"
                 "名前の一致ではなく、current_input、recent_turns、work_log、run、capability の意味と skill description を比較してください。\n"
                 "人物発話の向きでは recent_turns はその会話の本体です。work_log は同じ向きで得た能力結果です。\n"
+                "work_log の完了済み手順はすでに進んだ作業です。今まだ必要な skill だけを選びます。\n"
                 "prior_activation は直前の capability または run step で使った skill の識別要約であり、継続性の根拠として現在も必要か再評価してください。\n"
                 + _agent_skill_host_authorization_instruction()
                 + "\n"
@@ -1378,6 +1379,27 @@ def _outward_speech_trigger_policies(
     return policies
 
 
+def _completed_mcp_tool_label_from_followup_constraints(
+    capability_result_context: dict[str, Any],
+) -> str | None:
+    constraints = capability_result_context.get("followup_constraints")
+    if not isinstance(constraints, list):
+        return None
+    for constraint in constraints:
+        if not isinstance(constraint, dict):
+            continue
+        if constraint.get("constraint") != "exclude_completed_mcp_tool":
+            continue
+        mcp_server_id = constraint.get("mcp_server_id")
+        tool_name = constraint.get("tool_name")
+        if not isinstance(mcp_server_id, str) or not mcp_server_id.strip():
+            continue
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            continue
+        return f"{mcp_server_id.strip()}/{tool_name.strip()}"
+    return None
+
+
 def _capability_result_trigger_policies(
     capability_result_context: dict[str, Any],
 ) -> list[str]:
@@ -1390,10 +1412,18 @@ def _capability_result_trigger_policies(
         policies.extend(
             [
                 "この follow-up の向きは起点の人物発話です。結果本文を向きにしないでください。",
-                "同じ向きのあいだは、許可された能力を続けてよく、人物へ発話するまで会話を打ち切らないでください。",
+                "今回の結果で向きが果たされていれば、人物への発話として閉じてください。",
+                "まだ足りない観測や未完了の手順があるときだけ、許可された能力を続けてください。",
                 "speech を選ぶときは会話の続きとして閉じてください。空の通知一覧を根拠に URL の再確認へ戻らないでください。",
             ]
         )
+        completed_tool_label = _completed_mcp_tool_label_from_followup_constraints(
+            capability_result_context
+        )
+        if completed_tool_label is not None:
+            policies.append(
+                f"今回完了した tool は {completed_tool_label} です。次は未完了の別手順か発話です。"
+            )
     else:
         policies.append(
             "許可されない capability_request は出さず、受け取った結果への speech / noop / pending_intent で閉じてください。"

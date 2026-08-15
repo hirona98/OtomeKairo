@@ -897,21 +897,45 @@ class LLMClient:
             if constraint.get("capability_id") != request_capability_id:
                 continue
             constraint_kind = constraint.get("constraint")
-            if constraint_kind != "same_vision_source_id":
+            if constraint_kind == "same_vision_source_id":
+                expected_source_id = constraint.get("vision_source_id")
+                actual_source_id = input_payload.get("vision_source_id")
+                if (
+                    isinstance(expected_source_id, str)
+                    and expected_source_id.strip()
+                    and isinstance(actual_source_id, str)
+                    and actual_source_id.strip() == expected_source_id.strip()
+                ):
+                    continue
+                raise LLMError(
+                    "CapabilityResultContext の followup_constraints は "
+                    f"{request_capability_id} に same_vision_source_id を要求しています。"
+                    f"vision_source_id={expected_source_id} と異なる capability_request は不正です。"
+                )
+            if constraint_kind != "exclude_completed_mcp_tool":
                 continue
-            expected_source_id = constraint.get("vision_source_id")
-            actual_source_id = input_payload.get("vision_source_id")
-            if (
-                isinstance(expected_source_id, str)
-                and expected_source_id.strip()
-                and isinstance(actual_source_id, str)
-                and actual_source_id.strip() == expected_source_id.strip()
+            completed_server_id = constraint.get("mcp_server_id")
+            completed_tool_name = constraint.get("tool_name")
+            requested_server_id = input_payload.get("mcp_server_id")
+            requested_tool_name = input_payload.get("tool_name")
+            if not (
+                isinstance(completed_server_id, str)
+                and completed_server_id.strip()
+                and isinstance(completed_tool_name, str)
+                and completed_tool_name.strip()
+                and isinstance(requested_server_id, str)
+                and requested_server_id.strip()
+                and isinstance(requested_tool_name, str)
+                and requested_tool_name.strip()
+                and requested_server_id.strip() == completed_server_id.strip()
+                and requested_tool_name.strip() == completed_tool_name.strip()
             ):
                 continue
             raise LLMError(
                 "CapabilityResultContext の followup_constraints は "
-                f"{request_capability_id} に same_vision_source_id を要求しています。"
-                f"vision_source_id={expected_source_id} と異なる capability_request は不正です。"
+                f"今回完了した MCP tool {completed_server_id.strip()}/{completed_tool_name.strip()} "
+                "の再実行を許可しません。"
+                "speech / noop / pending_intent、または未完了の別 tool を選んでください。"
             )
 
     def _capability_result_context_allows_same_vision_source_capture(
