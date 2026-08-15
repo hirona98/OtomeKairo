@@ -66,6 +66,26 @@ class WebUiHttpBoundaryTests(unittest.TestCase):
         self.assertIn("application/json", headers["Content-Type"])
         self.assertTrue(payload["ok"])
 
+    def test_web_ui_reads_saved_avatar_speech_settings_without_browser_token(self) -> None:
+        state = self.service.store.read_state()
+        state["microphone_settings"]["vad_probability_threshold"] = 0.7
+        state["microphone_settings"]["speaker_recognition_threshold"] = 0.75
+        self.service.store.write_state(state)
+
+        status, headers, body = self.request("/ui/api/config/avatar-speech")
+        payload = json.loads(body.decode("utf-8"))
+
+        self.assertEqual(status, 200)
+        self.assertIn("application/json", headers["Content-Type"])
+        self.assertEqual(
+            payload["data"]["microphone_settings"]["vad_probability_threshold"],
+            0.7,
+        )
+        self.assertEqual(
+            payload["data"]["microphone_settings"]["speaker_recognition_threshold"],
+            0.75,
+        )
+
     def test_existing_api_still_requires_token(self) -> None:
         status, headers, body = self.request("/api/status")
         payload = json.loads(body.decode("utf-8"))

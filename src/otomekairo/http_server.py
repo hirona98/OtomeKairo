@@ -1302,6 +1302,12 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         if method == "GET" and path == "/ui/api/config/editor-state":
             self._write_success(HTTPStatus.OK, self.server.service.get_editor_state(token))
             return
+        if method == "GET" and path == "/ui/api/config/avatar-speech":
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.get_avatar_speech(token),
+            )
+            return
         if method == "PUT" and path == "/ui/api/config/editor-state":
             payload = self._read_json_body()
             self._write_success(HTTPStatus.OK, self.server.service.replace_editor_state(token, payload))

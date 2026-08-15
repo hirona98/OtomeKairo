@@ -284,6 +284,15 @@ async function loadConversationConfig() {
   }
 }
 
+async function loadAvatarSpeech() {
+  try {
+    state.avatarSpeech = clone(await apiRequest("/ui/api/config/avatar-speech"));
+    renderAudioMeters();
+  } catch (error) {
+    showNotice(error.message, true);
+  }
+}
+
 function arrayById(items, idKey, id) {
   return (items || []).find((item) => item[idKey] === id) || null;
 }
@@ -4779,6 +4788,7 @@ async function startApp() {
   loadConversationIdentity();
   await loadIdentity();
   await loadConversationConfig();
+  await loadAvatarSpeech();
   await loadStatus({ silent: true });
   await refreshDashboard({ silent: true });
   await refreshWebMicrophoneDevices({ requestPermission: false });
