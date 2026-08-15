@@ -2,6 +2,7 @@ import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from otomekairo.audio.models import SpeakerIdentification
 from otomekairo.audio.runtime import AUDIO_FORMAT, QueuedUtterance
@@ -547,6 +548,48 @@ class AudioRuntimeControlTests(unittest.TestCase):
                         },
                     ],
                 )
+            finally:
+                service.close_audio_runtime()
+
+    def test_speaker_unidentified_is_not_written_to_debug_log(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            try:
+                item = QueuedUtterance(
+                    utterance_seq=2,
+                    source="local_microphone",
+                    source_client_id="microphone-connector-main",
+                    lease_generation=1,
+                    settings_generation=1,
+                    work_generation=1,
+                    explicit_input=False,
+                    utterance=SegmentedUtterance(
+                        amivoice_pcm16le=b"\x00\x00" * 8000,
+                        speaker_pcm16le=b"\x00\x00" * 8000,
+                        voiced_samples=8000,
+                        forced_split=False,
+                    ),
+                )
+                identification = SpeakerIdentification(
+                    person_ref=None,
+                    accepted=False,
+                    top1_person_ref=None,
+                    top1_similarity=-0.0042,
+                    top2_person_ref=None,
+                    top2_similarity=None,
+                )
+
+                with patch("otomekairo.audio.runtime.debug_log") as debug_log:
+                    service._audio_runtime._log_utterance_result(
+                        item=item,
+                        result_code="speaker_unidentified",
+                        stt_ms=1566.9,
+                        speaker_ms=149.9,
+                        stt_error=None,
+                        identification=identification,
+                    )
+
+                debug_log.assert_not_called()
             finally:
                 service.close_audio_runtime()
 
