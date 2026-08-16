@@ -23,6 +23,7 @@ from otomekairo.llm.contracts import (
     build_decision_target_stances_for_kind,
     validate_activity_state_contract,
     validate_answer_contract_contract,
+    validate_autonomous_completion_review_contract,
     validate_autonomous_step_contract,
     validate_decision_contract,
     validate_disclosure_review_contract,
@@ -47,6 +48,8 @@ from otomekairo.llm.prompts import (
     build_agent_skill_selection_repair_prompt,
     build_activity_state_messages,
     build_activity_state_repair_prompt,
+    build_autonomous_completion_review_messages,
+    build_autonomous_completion_review_repair_prompt,
     build_autonomous_step_messages,
     build_autonomous_step_repair_prompt,
     build_decision_messages,
@@ -1066,6 +1069,36 @@ class LLMClient:
             validator=validate_pre_send_check_contract,
             repair_prompt_builder=build_pre_send_check_repair_prompt,
             failure_message="PreSendCheck の生成に失敗しました。",
+            operation=operation,
+        )
+
+    def generate_autonomous_completion_review(
+        self,
+        *,
+        model_config: dict,
+        review_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        operation = "autonomous_completion_review"
+        if self._is_mock_model_config(model_config):
+            payload = {
+                "outcome": "allow_complete",
+                "reason_summary": "mock model は complete 候補を許可する。",
+            }
+            validate_autonomous_completion_review_contract(payload)
+            debug_log(
+                "LLM",
+                f"{operation} done mode=mock outcome={payload['outcome']}",
+                level="DEBUG",
+            )
+            return payload
+        return self._generate_structured_payload(
+            model_config=model_config,
+            messages=build_autonomous_completion_review_messages(
+                review_context=review_context,
+            ),
+            validator=validate_autonomous_completion_review_contract,
+            repair_prompt_builder=build_autonomous_completion_review_repair_prompt,
+            failure_message="AutonomousCompletionReview の生成に失敗しました。",
             operation=operation,
         )
 

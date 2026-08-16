@@ -8,10 +8,13 @@ from otomekairo.llm.contexts import AutonomousStepContext, CurrentInput, Decisio
 from otomekairo.llm.contracts import (
     LLMError,
     build_decision_target_stances_for_kind,
+    validate_autonomous_completion_review_contract,
     validate_decision_contract,
 )
 from otomekairo.llm.prompts import (
     _build_speech_system_prompt,
+    build_autonomous_completion_review_messages,
+    build_autonomous_step_messages,
     build_decision_messages,
     build_decision_repair_prompt,
     _build_decision_trigger_policy,
@@ -1002,6 +1005,90 @@ class DecisionPromptScopeTests(unittest.TestCase):
                 ],
             },
         )
+
+
+class AutonomousCompletionReviewContractTests(unittest.TestCase):
+    def test_contract_accepts_only_completion_review_shape(self) -> None:
+        validate_autonomous_completion_review_contract(
+            {
+                "outcome": "allow_complete",
+                "reason_summary": "目的は実績で満たされている。",
+            }
+        )
+        with self.assertRaises(LLMError):
+            validate_autonomous_completion_review_contract(
+                {
+                    "outcome": "allow",
+                    "reason_summary": "不正な outcome。",
+                }
+            )
+
+    def test_client_repairs_invalid_completion_review_once(self) -> None:
+        invalid = {
+            "outcome": "allow",
+            "reason_summary": "契約外。",
+        }
+        valid = {
+            "outcome": "continue_run",
+            "reason_summary": "外界への作用がまだ必要である。",
+        }
+        with patch(
+            "otomekairo.llm.client.complete_text",
+            side_effect=[json.dumps(invalid), json.dumps(valid)],
+        ) as complete:
+            actual = LLMClient().generate_autonomous_completion_review(
+                model_config={"model": "real-model"},
+                review_context={
+                    "run": {"objective_summary": "投稿を1件作成する。"},
+                    "candidate": {
+                        "action_kind": "speech",
+                        "run_update": {
+                            "current_step_summary": "投稿準備を終えた。",
+                            "history_summary": "投稿準備を終えた。",
+                        },
+                        "speech_text": "これから投稿します。",
+                    },
+                },
+            )
+
+        self.assertEqual(actual, valid)
+        self.assertEqual(complete.call_count, 2)
+
+    def test_review_prompt_distinguishes_effect_from_announcement(self) -> None:
+        messages = build_autonomous_completion_review_messages(
+            review_context={
+                "run": {"objective_summary": "投稿を1件作成する。"},
+                "candidate": {
+                    "action_kind": "speech",
+                    "run_update": {},
+                    "speech_text": "これから投稿します。",
+                },
+            }
+        )
+        system = messages[0]["content"]
+        self.assertIn("予定、準備、意思表明だけを作用の完了実績にしません", system)
+        self.assertIn("allow_complete または continue_run", system)
+
+    def test_autonomous_step_context_includes_completion_feedback(self) -> None:
+        context = AutonomousStepContext(
+            run={"run_id": "autonomous_run:test"},
+            current_input=_current_input(),
+            recent_turns=[],
+            time_context={},
+            foreground_world_state=None,
+            activity_context=None,
+            ongoing_action_summary=None,
+            capability_decision_view=_mcp_capability_view(),
+            last_result_context=None,
+            completion_review_feedback="目的に沿う実行を続ける。",
+        )
+        messages = build_autonomous_step_messages(
+            persona_context=_persona_context(),
+            context=context,
+        )
+
+        self.assertIn("completion_review_feedback", messages[1]["content"])
+        self.assertIn("目的に沿う実行を続ける。", messages[1]["content"])
 
 
 if __name__ == "__main__":

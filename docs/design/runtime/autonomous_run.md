@@ -125,6 +125,33 @@ run の `objective_summary` は作成時に固定し、`autonomous_step_generati
 ユーザー起点の開始直後で外向き承諾が自然な場合、`autonomous_step_generation` は `action.kind=speech` と `transition.kind=wait_until` を同時に選ぶ。
 固定承諾文は server が生成しない。
 
+## 完了前意味検証
+
+`transition.kind=complete` は、run の目的が今回までの実績で満たされたときだけ確定する。
+server は capability request 以外の complete 候補について、状態遷移や発話配送より前に `autonomous_completion_review` を行う。
+
+review には次だけを渡す。
+
+- run の目的、現在段階、履歴、観測済み capability result 要約
+- complete 候補の `action.kind / run_update`
+- `action.kind=speech` の場合だけ生成済み候補本文
+
+review の結果は `allow_complete / continue_run` のいずれかである。
+
+- `allow_complete` は、観測済みの実行結果または今回の発話行為そのものによって目的が満たされ、候補発話も実績と一致していることを表す
+- `continue_run` は、目的達成にまだ外界作用、観測、待機が必要か、候補発話が未実行の次行動を現在 run の続きとして表していることを表す
+
+発話自体が目的である run では、今回の speech を完了実績にできる。
+外界への作用が目的である run では、予定、準備、意思表明だけを作用の完了実績にしない。
+`speech + complete` は、今回の発話で伝達目的を果たす場合、または既に得られた実績を報告して閉じる場合に使う。
+次の外界作用を行う向きが残る場合は、その作用を capability request として実行するか、適切な時刻まで `wait_until` で run を維持する。
+
+最初の review が `continue_run` の場合、候補発話を配送せず、complete 遷移も適用しない。
+server は候補本文や reviewer の理由を戻さず、固定 feedback で `autonomous_step_generation` を 1 回だけ再実行する。
+再生成した complete 候補も `continue_run` の場合、または review 自体が失敗した場合は、未検証の完了へ進めず当該 run を `cancelled` にして明示的な内部失敗として扱う。
+
+各 review は `autonomous_completion_review` event として監査する。保存内容の正本は [デバッグ可能性.md](デバッグ可能性.md) とする。
+
 ## capability 連鎖
 
 run 内では、目的に整合する capability 連鎖を許可する。
@@ -149,6 +176,7 @@ run 内の capability result は、通常の会話 capability result と同じ�
 `mcp.call_tool` の結果は `mcp_result_summary`、対象 server / tool、観測した `observed_person_refs` を event に持つ。
 `last_result_context` は完了後も破棄しない。直近 result の要約と観測人物参照を terminal まで残す。
 `run_update.history_summary` は LLM が更新してよい。観測事実は `observed_result_summaries` として追記だけし、上書きしない。
+各要約は `capability_id / tool_name / result_status / is_error / summary_text / created_at` を持ち、成功実績と失敗到着を区別できるようにする。
 公開の働きかけに返すときは、通知や一覧の短い抜粋だけでなく、その会話の根と流れを見てから返す。未読の有無だけで返信要否を決めない。
 空の未読一覧や空の私信は、公開のやり取りが無いことの根拠にしない。自分の投稿や公開の会話履歴を見てから、やり取りの有無を確定する。
 

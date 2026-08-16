@@ -7,6 +7,7 @@ from unittest.mock import Mock
 from otomekairo.llm.contexts import CurrentInput
 from otomekairo.service.app import OtomeKairoService
 from otomekairo.service.autonomous_run import AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK
+from otomekairo.service.autonomous_run import AUTONOMOUS_COMPLETION_REVIEW_RETRY_FEEDBACK
 from otomekairo.service.capability import PreSendCheckWithheldError
 
 
@@ -85,6 +86,267 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK,
             )
             service._record_autonomous_pre_send_check_terminal.assert_called_once()
+
+    def test_unperformed_future_speech_is_replaced_by_capability_request(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
+            run.update(
+                {
+                    "objective_summary": "ELYTHに投稿を1件作成する。",
+                    "current_step_summary": "投稿内容を決める。",
+                    "history_summary": "タイムラインと自分の投稿を確認した。",
+                    "observed_result_summaries": [
+                        {
+                            "capability_id": "mcp.call_tool",
+                            "tool_name": "get_my_posts",
+                            "summary_text": "自分の投稿履歴を確認した。",
+                        }
+                    ],
+                }
+            )
+            run["source_current_input"]["text"] = "ELYTHに投稿して。"
+            service.store.upsert_autonomous_run(autonomous_run=run)
+            context = SimpleNamespace(
+                run=service._autonomous_run_prompt_summary(run),
+                current_input=SimpleNamespace(to_prompt_payload=lambda: {}),
+            )
+            service._build_autonomous_step_context = Mock(return_value=context)
+            service._autonomous_run_step_guard = Mock(return_value=None)
+            future_speech_step = {
+                "action": {
+                    "kind": "speech",
+                    "capability_request": None,
+                    "speech": {
+                        "reason_code": "announce_post",
+                        "reason_summary": "これから投稿することを伝える。",
+                    },
+                },
+                "transition": {"kind": "complete", "next_run_at": None},
+                "run_update": {
+                    "current_step_summary": "投稿の準備を整えた。",
+                    "history_summary": "投稿へ移る準備を整えた。",
+                },
+            }
+            create_post_step = {
+                "action": {
+                    "kind": "capability_request",
+                    "capability_request": {
+                        "capability_id": "mcp.call_tool",
+                        "input": {
+                            "mcp_server_id": "elyth",
+                            "tool_name": "create_post",
+                            "arguments": {"content": "朝の空気を言葉にする。"},
+                        },
+                    },
+                    "speech": None,
+                },
+                "transition": {"kind": "continue", "next_run_at": None},
+                "run_update": {
+                    "current_step_summary": "create_post の結果を待つ。",
+                    "history_summary": "投稿作成を要求した。",
+                },
+            }
+            generate_step = Mock(side_effect=[future_speech_step, create_post_step])
+            review = Mock(
+                return_value={
+                    "outcome": "continue_run",
+                    "reason_summary": "外界への投稿作用がまだ実行されていない。",
+                }
+            )
+            service.llm = SimpleNamespace(
+                generate_autonomous_step=generate_step,
+                generate_autonomous_completion_review=review,
+            )
+            service._generate_autonomous_run_speech = Mock(
+                return_value={"speech_text": "さて、そろそろ私も何か投稿してみるとします。"}
+            )
+            service._dispatch_autonomous_run_capability_request = Mock(
+                return_value={
+                    "request_id": "mcp_call_tool_request:create-post",
+                    "capability_id": "mcp.call_tool",
+                }
+            )
+            service._emit_autonomous_run_assistant_message_event = Mock()
+            service._persist_autonomous_run_speech_event = Mock()
+
+            result = service._execute_autonomous_run_step_locked(
+                state=state,
+                run_id=run["run_id"],
+                started_at="2026-08-16T09:44:30+09:00",
+                source_current_input=run["source_current_input"],
+                emit_speech_event=True,
+                allow_during_user_response=True,
+            )
+
+            self.assertEqual(result["status"], "waiting_result")
+            self.assertIsNone(result["speech_payload"])
+            self.assertEqual(result["step"], create_post_step)
+            self.assertEqual(generate_step.call_count, 2)
+            self.assertEqual(review.call_count, 1)
+            self.assertEqual(
+                service._build_autonomous_step_context.call_args.kwargs[
+                    "completion_review_feedback"
+                ],
+                AUTONOMOUS_COMPLETION_REVIEW_RETRY_FEEDBACK,
+            )
+            service._emit_autonomous_run_assistant_message_event.assert_not_called()
+            service._persist_autonomous_run_speech_event.assert_not_called()
+
+    def test_completed_effect_report_is_reviewed_before_delivery(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
+            run.update(
+                {
+                    "objective_summary": "ELYTHに投稿を1件作成する。",
+                    "observed_result_summaries": [
+                        {
+                            "capability_id": "mcp.call_tool",
+                            "tool_name": "create_post",
+                            "result_status": "completed",
+                            "is_error": False,
+                            "summary_text": "投稿を作成し、投稿IDを受け取った。",
+                        }
+                    ],
+                }
+            )
+            service.store.upsert_autonomous_run(autonomous_run=run)
+            context = SimpleNamespace(
+                run=service._autonomous_run_prompt_summary(run),
+                current_input=SimpleNamespace(to_prompt_payload=lambda: {}),
+            )
+            service._build_autonomous_step_context = Mock(return_value=context)
+            service._autonomous_run_step_guard = Mock(return_value=None)
+            complete_step = {
+                "action": {
+                    "kind": "speech",
+                    "capability_request": None,
+                    "speech": {
+                        "reason_code": "post_completed",
+                        "reason_summary": "投稿が完了したことを報告する。",
+                    },
+                },
+                "transition": {"kind": "complete", "next_run_at": None},
+                "run_update": {
+                    "current_step_summary": "投稿作成を完了した。",
+                    "history_summary": "create_post の成功結果を確認した。",
+                },
+            }
+            call_order: list[str] = []
+            review = Mock(
+                side_effect=lambda **_: (
+                    call_order.append("review")
+                    or {
+                        "outcome": "allow_complete",
+                        "reason_summary": "投稿作成の成功結果と完了報告が一致する。",
+                    }
+                )
+            )
+            service.llm = SimpleNamespace(
+                generate_autonomous_step=Mock(return_value=complete_step),
+                generate_autonomous_completion_review=review,
+            )
+            service._generate_autonomous_run_speech = Mock(
+                return_value={"speech_text": "投稿が完了しました。"}
+            )
+            service._emit_autonomous_run_assistant_message_event = Mock(
+                side_effect=lambda **_: call_order.append("delivery")
+            )
+            service._persist_autonomous_run_speech_event = Mock(return_value=None)
+            service._finalize_autonomous_run_commitments = Mock(
+                side_effect=lambda **kwargs: kwargs["run"]
+            )
+
+            result = service._execute_autonomous_run_step_locked(
+                state=state,
+                run_id=run["run_id"],
+                started_at="2026-08-16T09:45:00+09:00",
+                source_current_input=run["source_current_input"],
+                emit_speech_event=True,
+                allow_during_user_response=True,
+            )
+
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["speech_payload"]["speech_text"], "投稿が完了しました。")
+            self.assertEqual(call_order, ["review", "delivery"])
+            review_context = review.call_args.kwargs["review_context"]
+            self.assertEqual(
+                review_context["run"]["observed_result_summaries"][0]["tool_name"],
+                "create_post",
+            )
+            self.assertFalse(
+                review_context["run"]["observed_result_summaries"][0]["is_error"]
+            )
+            self.assertEqual(
+                review_context["candidate"]["speech_text"],
+                "投稿が完了しました。",
+            )
+
+    def test_second_completion_rejection_cancels_without_speech_delivery(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
+            run["objective_summary"] = "ELYTHに投稿を1件作成する。"
+            service.store.upsert_autonomous_run(autonomous_run=run)
+            context = SimpleNamespace(
+                run=service._autonomous_run_prompt_summary(run),
+                current_input=SimpleNamespace(to_prompt_payload=lambda: {}),
+            )
+            service._build_autonomous_step_context = Mock(return_value=context)
+            service._autonomous_run_step_guard = Mock(return_value=None)
+            incomplete_step = {
+                "action": {
+                    "kind": "speech",
+                    "capability_request": None,
+                    "speech": {
+                        "reason_code": "announce_post",
+                        "reason_summary": "これから投稿することを伝える。",
+                    },
+                },
+                "transition": {"kind": "complete", "next_run_at": None},
+                "run_update": {
+                    "current_step_summary": "投稿準備を終えた。",
+                    "history_summary": "投稿はまだ実行していない。",
+                },
+            }
+            service.llm = SimpleNamespace(
+                generate_autonomous_step=Mock(return_value=incomplete_step),
+                generate_autonomous_completion_review=Mock(
+                    return_value={
+                        "outcome": "continue_run",
+                        "reason_summary": "投稿作用がまだ実行されていない。",
+                    }
+                ),
+            )
+            service._generate_autonomous_run_speech = Mock(
+                side_effect=[
+                    {"speech_text": "投稿してみるとします。"},
+                    {"speech_text": "これから投稿へ移ります。"},
+                ]
+            )
+            service._emit_autonomous_run_assistant_message_event = Mock()
+            service._persist_autonomous_run_speech_event = Mock()
+            service._finalize_autonomous_run_commitments = Mock(
+                side_effect=lambda **kwargs: kwargs["run"]
+            )
+
+            result = service._execute_autonomous_run_step_locked(
+                state=state,
+                run_id=run["run_id"],
+                started_at="2026-08-16T09:45:30+09:00",
+                source_current_input=run["source_current_input"],
+                emit_speech_event=True,
+                allow_during_user_response=True,
+            )
+
+            self.assertEqual(result["status"], "cancelled")
+            self.assertIn("2回続けて", result["error"])
+            service._emit_autonomous_run_assistant_message_event.assert_not_called()
+            service._persist_autonomous_run_speech_event.assert_not_called()
 
     def test_links_autonomous_run_to_commitment_created_by_source_cycle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -403,6 +665,36 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             )
             self.assertEqual(updated["status"], "completed")
             self.assertEqual(updated["last_result_context"]["source_capability_id"], "mcp.call_tool")
+
+    def test_observed_result_summary_keeps_completion_status(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            summaries = service._append_autonomous_observed_result_summaries(
+                run={"observed_result_summaries": []},
+                capability_id="mcp.call_tool",
+                observation_summary={
+                    "tool_name": "create_post",
+                    "status": "completed",
+                    "is_error": False,
+                    "mcp_result_summary": "投稿を作成した。",
+                },
+                result_payload={"status": "completed", "is_error": False},
+                created_at="2026-08-16T09:45:00+09:00",
+            )
+
+            self.assertEqual(
+                summaries,
+                [
+                    {
+                        "capability_id": "mcp.call_tool",
+                        "tool_name": "create_post",
+                        "result_status": "completed",
+                        "is_error": False,
+                        "summary_text": "投稿を作成した。",
+                        "created_at": "2026-08-16T09:45:00+09:00",
+                    }
+                ],
+            )
 
     def test_twentieth_continue_step_starts_five_minute_cooldown(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

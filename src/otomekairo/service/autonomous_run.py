@@ -35,6 +35,12 @@ AUTONOMOUS_PRE_SEND_CHECK_WITHHELD_NOTICE = (
 AUTONOMOUS_PRE_SEND_CHECK_FAILURE_NOTICE = (
     "外部送信内容の安全確認を完了できなかったため、送信しませんでした。"
 )
+AUTONOMOUS_COMPLETION_REVIEW_RETRY_FEEDBACK = (
+    "前の complete 候補では、目的達成を裏付ける実績と発話の時間関係が一致しなかった。"
+    "run を継続し、目的を実績として満たす capability_request または wait_until、"
+    "実行不能を確定する cancel のいずれかを選ぶ。"
+    "speech を選ぶ場合は、実行済み結果または継続中の状態を表す。"
+)
 
 
 class ServiceAutonomousRunMixin:
@@ -787,20 +793,12 @@ class ServiceAutonomousRunMixin:
             )
             current_time = started_at
             selected_preset = state["model_presets"][state["selected_model_preset_id"]]
-            step_context = self._build_autonomous_step_context(
+            step_context, step, speech_payload = self._generate_reviewed_autonomous_step_candidate(
                 state=state,
                 run=run,
-                current_time=current_time,
+                selected_preset=selected_preset,
                 source_current_input=source_current_input,
                 last_result_context=last_result_context or run.get("last_result_context"),
-            )
-            step = self.llm.generate_autonomous_step(
-                model_config=selected_preset,
-                persona_context=self._build_selected_persona_context(
-                    state=state,
-                    role="autonomous_step_generation",
-                ),
-                context=step_context,
             )
             action = step["action"]
             transition = step["transition"]
@@ -828,32 +826,6 @@ class ServiceAutonomousRunMixin:
             run = self.store.get_autonomous_run(run_id=run_id) or run
 
             if action_kind == "speech":
-                speech_payload = self._generate_autonomous_run_speech(
-                    state=state,
-                    selected_preset=selected_preset,
-                    step_context=step_context,
-                    step=step,
-                )
-                current_time = self._now_iso()
-                guard_result = self._autonomous_run_step_guard(
-                    run_id=run_id,
-                    current_time=current_time,
-                    allow_during_user_response=allow_during_user_response,
-                )
-                if guard_result is not None:
-                    previous_request_finished = self._finish_autonomous_source_request_on_hold(
-                        source_request_record=source_request_record,
-                        current_time=current_time,
-                        reason_summary="ユーザー応答中または run 状態変更により autonomous_run speech を保留した。",
-                    )
-                    return {
-                        **guard_result,
-                        "speech_payload": None,
-                        "capability_request_summary": None,
-                        "previous_request_finished": previous_request_finished,
-                        "step": step,
-                    }
-                run = self.store.get_autonomous_run(run_id=run_id) or run
                 if emit_speech_event:
                     self._emit_autonomous_run_assistant_message_event(
                         state=state,
@@ -906,21 +878,13 @@ class ServiceAutonomousRunMixin:
                     )
                 except PreSendCheckWithheldError as first_withhold:
                     # autonomous step も候補本文を戻さず、同じ run 文脈で一度だけ再生成する。
-                    step_context = self._build_autonomous_step_context(
+                    step_context, step, speech_payload = self._generate_reviewed_autonomous_step_candidate(
                         state=state,
                         run=run,
-                        current_time=self._now_iso(),
+                        selected_preset=selected_preset,
                         source_current_input=source_current_input,
                         last_result_context=last_result_context or run.get("last_result_context"),
                         pre_send_check_feedback=AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK,
-                    )
-                    step = self.llm.generate_autonomous_step(
-                        model_config=selected_preset,
-                        persona_context=self._build_selected_persona_context(
-                            state=state,
-                            role="autonomous_step_generation",
-                        ),
-                        context=step_context,
                     )
                     action = step["action"]
                     transition = step["transition"]
@@ -971,32 +935,6 @@ class ServiceAutonomousRunMixin:
                                 },
                             )
                     elif action_kind == "speech":
-                        speech_payload = self._generate_autonomous_run_speech(
-                            state=state,
-                            selected_preset=selected_preset,
-                            step_context=step_context,
-                            step=step,
-                        )
-                        current_time = self._now_iso()
-                        guard_result = self._autonomous_run_step_guard(
-                            run_id=run_id,
-                            current_time=current_time,
-                            allow_during_user_response=allow_during_user_response,
-                        )
-                        if guard_result is not None:
-                            previous_request_finished = self._finish_autonomous_source_request_on_hold(
-                                source_request_record=source_request_record,
-                                current_time=current_time,
-                                reason_summary="状態変更により pre-send check 後の autonomous_run speech を保留した。",
-                            )
-                            return {
-                                **guard_result,
-                                "speech_payload": None,
-                                "capability_request_summary": None,
-                                "previous_request_finished": previous_request_finished,
-                                "step": step,
-                            }
-                        run = self.store.get_autonomous_run(run_id=run_id) or run
                         if emit_speech_event:
                             self._emit_autonomous_run_assistant_message_event(
                                 state=state,
@@ -1212,6 +1150,188 @@ class ServiceAutonomousRunMixin:
             "step": step,
         }
 
+    def _generate_reviewed_autonomous_step_candidate(
+        self,
+        *,
+        state: dict[str, Any],
+        run: dict[str, Any],
+        selected_preset: dict[str, Any],
+        source_current_input: dict[str, Any] | None,
+        last_result_context: dict[str, Any] | None,
+        pre_send_check_feedback: str | None = None,
+    ) -> tuple[AutonomousStepContext, dict[str, Any], dict[str, Any] | None]:
+        completion_review_feedback: str | None = None
+        for review_attempt in (1, 2):
+            step_context = self._build_autonomous_step_context(
+                state=state,
+                run=run,
+                current_time=self._now_iso(),
+                source_current_input=source_current_input,
+                last_result_context=last_result_context,
+                pre_send_check_feedback=pre_send_check_feedback,
+                completion_review_feedback=completion_review_feedback,
+            )
+            step = self.llm.generate_autonomous_step(
+                model_config=selected_preset,
+                persona_context=self._build_selected_persona_context(
+                    state=state,
+                    role="autonomous_step_generation",
+                ),
+                context=step_context,
+            )
+            action = step["action"]
+            action_kind = str(action.get("kind") or "").strip()
+            speech_payload = (
+                self._generate_autonomous_run_speech(
+                    state=state,
+                    selected_preset=selected_preset,
+                    step_context=step_context,
+                    step=step,
+                )
+                if action_kind == "speech"
+                else None
+            )
+            transition_kind = str(step.get("transition", {}).get("kind") or "").strip()
+            if action_kind == "capability_request" or transition_kind != "complete":
+                return step_context, step, speech_payload
+
+            outcome = self._review_autonomous_completion_candidate(
+                run=run,
+                selected_preset=selected_preset,
+                step_context=step_context,
+                step=step,
+                speech_payload=speech_payload,
+                review_attempt=review_attempt,
+            )
+            if outcome == "allow_complete":
+                return step_context, step, speech_payload
+            if review_attempt == 1:
+                completion_review_feedback = AUTONOMOUS_COMPLETION_REVIEW_RETRY_FEEDBACK
+                continue
+            raise LLMError(
+                "AutonomousCompletionReview が2回続けて run の継続を要求したため、"
+                "未検証の complete を確定しません。"
+            )
+
+        raise LLMError("AutonomousCompletionReview の再判断回数が不正です。")
+
+    def _review_autonomous_completion_candidate(
+        self,
+        *,
+        run: dict[str, Any],
+        selected_preset: dict[str, Any],
+        step_context: AutonomousStepContext,
+        step: dict[str, Any],
+        speech_payload: dict[str, Any] | None,
+        review_attempt: int,
+    ) -> str:
+        current_time = self._now_iso()
+        try:
+            review = self.llm.generate_autonomous_completion_review(
+                model_config=selected_preset,
+                review_context={
+                    "run": self._autonomous_completion_review_run_context(
+                        step_context.run
+                    ),
+                    "candidate": {
+                        "action_kind": step["action"]["kind"],
+                        "run_update": deepcopy(step["run_update"]),
+                        "speech_text": (
+                            speech_payload.get("speech_text")
+                            if isinstance(speech_payload, dict)
+                            else None
+                        ),
+                    },
+                },
+            )
+        except LLMError:
+            self._persist_autonomous_completion_review_audit(
+                run=run,
+                current_time=current_time,
+                audit_summary={
+                    "result_status": "failed",
+                    "outcome": None,
+                    "reason_code": "reviewer_failure",
+                    "review_attempt": review_attempt,
+                },
+            )
+            raise
+
+        outcome = str(review.get("outcome") or "").strip()
+        if outcome not in {"allow_complete", "continue_run"}:
+            self._persist_autonomous_completion_review_audit(
+                run=run,
+                current_time=current_time,
+                audit_summary={
+                    "result_status": "failed",
+                    "outcome": None,
+                    "reason_code": "reviewer_invalid_outcome",
+                    "review_attempt": review_attempt,
+                },
+            )
+            raise LLMError("AutonomousCompletionReview.outcome が不正です。")
+        reason_code = (
+            "reviewer_allowed_complete"
+            if outcome == "allow_complete"
+            else "reviewer_requested_continue"
+        )
+        self._persist_autonomous_completion_review_audit(
+            run=run,
+            current_time=current_time,
+            audit_summary={
+                "result_status": "completed",
+                "outcome": outcome,
+                "reason_code": reason_code,
+                "review_attempt": review_attempt,
+            },
+        )
+        debug_log(
+            "AutonomousRun",
+            (
+                f"completion review run={run.get('run_id')} attempt={review_attempt} "
+                f"outcome={outcome}"
+            ),
+            level="DEBUG",
+        )
+        return outcome
+
+    def _autonomous_completion_review_run_context(
+        self,
+        run_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "objective_summary": run_summary.get("objective_summary"),
+            "current_step_summary": run_summary.get("current_step_summary"),
+            "history_summary": run_summary.get("history_summary"),
+            "observed_result_summaries": deepcopy(
+                run_summary.get("observed_result_summaries") or []
+            ),
+        }
+
+    def _persist_autonomous_completion_review_audit(
+        self,
+        *,
+        run: dict[str, Any],
+        current_time: str,
+        audit_summary: dict[str, Any],
+    ) -> None:
+        self.store.append_events(
+            events=[
+                {
+                    "event_id": f"event:{uuid.uuid4().hex}",
+                    "cycle_id": self._autonomous_run_event_cycle_id(run),
+                    "memory_set_id": run["memory_set_id"],
+                    "kind": "autonomous_completion_review",
+                    "role": "system",
+                    "text": None,
+                    "created_at": current_time,
+                    "source_kind": "autonomous_run",
+                    "run_id": run.get("run_id"),
+                    "completion_review": deepcopy(audit_summary),
+                }
+            ]
+        )
+
     def _build_autonomous_step_context(
         self,
         *,
@@ -1221,6 +1341,7 @@ class ServiceAutonomousRunMixin:
         source_current_input: dict[str, Any] | None,
         last_result_context: dict[str, Any] | None,
         pre_send_check_feedback: str | None = None,
+        completion_review_feedback: str | None = None,
     ) -> AutonomousStepContext:
         current_input_payload = source_current_input if isinstance(source_current_input, dict) else None
         if current_input_payload is None:
@@ -1309,6 +1430,7 @@ class ServiceAutonomousRunMixin:
                 structured_sources=[run, last_result_context],
             ),
             pre_send_check_feedback=pre_send_check_feedback,
+            completion_review_feedback=completion_review_feedback,
             agent_skill_context=agent_skill_context,
         )
 
@@ -1993,14 +2115,30 @@ class ServiceAutonomousRunMixin:
         existing = run.get("observed_result_summaries")
         summaries = [deepcopy(item) for item in existing] if isinstance(existing, list) else []
         tool_name = None
+        result_status = None
+        is_error = None
         summary_text = None
         if isinstance(observation_summary, dict):
             raw_tool = observation_summary.get("tool_name")
             if isinstance(raw_tool, str) and raw_tool.strip():
                 tool_name = raw_tool.strip()
+            raw_status = observation_summary.get("status")
+            if isinstance(raw_status, str) and raw_status.strip():
+                result_status = raw_status.strip()
+            raw_is_error = observation_summary.get("is_error")
+            if isinstance(raw_is_error, bool):
+                is_error = raw_is_error
             raw_summary = observation_summary.get("mcp_result_summary")
             if isinstance(raw_summary, str) and raw_summary.strip():
                 summary_text = raw_summary.strip()
+        if result_status is None:
+            raw_status = result_payload.get("status")
+            if isinstance(raw_status, str) and raw_status.strip():
+                result_status = raw_status.strip()
+        if is_error is None:
+            raw_is_error = result_payload.get("is_error")
+            if isinstance(raw_is_error, bool):
+                is_error = raw_is_error
         if summary_text is None:
             summary_text = self._capability_result_followup_hint_summary(
                 capability_id=capability_id,
@@ -2013,6 +2151,8 @@ class ServiceAutonomousRunMixin:
             {
                 "capability_id": capability_id,
                 "tool_name": tool_name,
+                "result_status": result_status,
+                "is_error": is_error,
                 "summary_text": summary_text.strip(),
                 "created_at": created_at,
             }
