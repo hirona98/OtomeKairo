@@ -190,6 +190,11 @@ class ServiceCapabilityMixin:
             capability_id=capability_id,
             current_time=current_time,
             state_policy=state_policy,
+            vision_source_id=(
+                input_payload.get("vision_source_id")
+                if capability_id == "vision.capture"
+                else None
+            ),
         )
         if capability_id == "agent_skill.run_script":
             return self._dispatch_agent_skill_script_capability(
@@ -1439,6 +1444,21 @@ class ServiceCapabilityMixin:
             entry = self._capability_runtime_state_entry(capability_id)
             entry["paused"] = paused
 
+    def _set_vision_source_runtime_paused(
+        self,
+        *,
+        vision_source_id: str,
+        paused: bool,
+    ) -> None:
+        with self._runtime_state_lock:
+            entry = self._vision_source_runtime_state.setdefault(vision_source_id, {})
+            entry["paused"] = paused
+
+    def _vision_source_runtime_paused(self, *, vision_source_id: str) -> bool:
+        with self._runtime_state_lock:
+            entry = self._vision_source_runtime_state.get(vision_source_id, {})
+            return entry.get("paused") is True
+
     def _validate_capability_runtime_dispatchable(
         self,
         *,
@@ -1446,7 +1466,18 @@ class ServiceCapabilityMixin:
         capability_id: str,
         current_time: str,
         state_policy: dict[str, Any],
+        vision_source_id: str | None = None,
     ) -> None:
+        if (
+            capability_id == "vision.capture"
+            and isinstance(vision_source_id, str)
+            and self._vision_source_runtime_paused(vision_source_id=vision_source_id)
+        ):
+            raise CapabilityUnavailableError(
+                f"Vision source is paused: {vision_source_id}",
+                reason_code="paused",
+                unavailable_reason="paused",
+            )
         dispatch_block = self._capability_runtime_dispatch_block(
             memory_set_id=memory_set_id,
             capability_id=capability_id,

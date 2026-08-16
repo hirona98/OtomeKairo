@@ -91,6 +91,7 @@ class OtomeKairoService(
         self._capability_request_lock = threading.RLock()
         self._pending_capability_requests: dict[str, dict[str, Any]] = {}
         self._capability_runtime_state: dict[str, dict[str, Any]] = {}
+        self._vision_source_runtime_state: dict[str, dict[str, Any]] = {}
         self._stream_event_lock = threading.Lock()
         self._next_stream_event_value = 1
         self._audio_runtime = AudioRuntime(self)

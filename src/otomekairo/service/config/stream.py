@@ -216,17 +216,42 @@ class ServiceConfigStreamMixin:
         manifest = capability_manifests().get(normalized_capability_id)
         if manifest is None:
             raise ServiceError(404, "capability_not_found", "The requested capability_id does not exist.")
-        if set(payload.keys()) != {"paused"}:
-            raise ServiceError(400, "invalid_capability_state", "capability state patch requires only paused.")
+        source_scoped = normalized_capability_id == "vision.capture"
+        expected_fields = {"paused", "vision_source_id"} if source_scoped else {"paused"}
+        if set(payload.keys()) != expected_fields:
+            detail = "paused and vision_source_id" if source_scoped else "only paused"
+            raise ServiceError(
+                400,
+                "invalid_capability_state",
+                f"capability state patch requires {detail}.",
+            )
         paused = payload.get("paused")
         if not isinstance(paused, bool):
             raise ServiceError(400, "invalid_capability_paused", "paused must be a boolean.")
 
-        # runtime state を更新する。in-flight request は破棄せず、以後の新規 dispatch だけを止める。
-        self._set_capability_runtime_paused(
-            capability_id=normalized_capability_id,
-            paused=paused,
-        )
+        vision_source_id = None
+        if source_scoped:
+            raw_source_id = payload.get("vision_source_id")
+            if not isinstance(raw_source_id, str) or not raw_source_id.strip():
+                raise ServiceError(
+                    400,
+                    "invalid_vision_source_id",
+                    "vision_source_id must be a non-empty string.",
+                )
+            vision_source_id = raw_source_id.strip()
+            source = self._event_stream_registry.get_vision_source(vision_source_id)
+            if not isinstance(source, dict):
+                raise ServiceError(404, "vision_source_not_found", "The requested vision source does not exist.")
+            self._set_vision_source_runtime_paused(
+                vision_source_id=vision_source_id,
+                paused=paused,
+            )
+        else:
+            # runtime state を更新する。in-flight request は破棄せず、以後の新規 dispatch だけを止める。
+            self._set_capability_runtime_paused(
+                capability_id=normalized_capability_id,
+                paused=paused,
+            )
         generated_at = self._now_iso()
         bindings = self._event_stream_registry.list_capability_bindings()
         vision_sources = bindings.get("vision_sources", [])
@@ -247,7 +272,15 @@ class ServiceConfigStreamMixin:
         )
         debug_log(
             "Capability",
-            f"state patched capability={normalized_capability_id} paused={paused}",
+            " ".join(
+                part
+                for part in (
+                    f"state patched capability={normalized_capability_id}",
+                    f"vision_source_id={vision_source_id}" if vision_source_id is not None else None,
+                    f"paused={paused}",
+                )
+                if part is not None
+            ),
         )
         return {
             "generated_at": generated_at,
@@ -776,6 +809,17 @@ class ServiceConfigStreamMixin:
             and not parallel_blocked
         )
         normalized_vision_sources = self._inspection_vision_sources(vision_sources)
+        if capability_id == "vision.capture":
+            for source in normalized_vision_sources:
+                source_id = source.get("vision_source_id")
+                source_paused = (
+                    isinstance(source_id, str)
+                    and self._vision_source_runtime_paused(vision_source_id=source_id)
+                )
+                source["paused"] = source_paused
+                if source_paused:
+                    source["available"] = False
+                    source["unavailable_reason"] = "paused"
         if capability_id == "camera.ptz":
             normalized_vision_sources = self._camera_ptz_inspection_vision_sources(
                 vision_sources=normalized_vision_sources,
