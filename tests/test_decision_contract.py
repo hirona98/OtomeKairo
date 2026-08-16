@@ -15,6 +15,7 @@ from otomekairo.llm.prompts import (
     _build_speech_system_prompt,
     build_autonomous_completion_review_messages,
     build_autonomous_step_messages,
+    build_autonomous_step_repair_prompt,
     build_decision_messages,
     build_decision_repair_prompt,
     _build_decision_trigger_policy,
@@ -848,6 +849,9 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("向きと CapabilityDecisionView の catalog から autonomous_run を始めてよい", system)
         self.assertIn("autonomous_run.objective_summary は向き自身の言葉です", system)
         self.assertIn("capability_request.input の自然文は、その能力の先の場へ向けた個の表現です", system)
+        self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です", system)
+        self.assertIn("使わない排他キーもキーとして残し、値は null にします", system)
+        self.assertIn("kind が capability_request のとき capability_request は object、pending_intent と autonomous_run は null です", system)
         self.assertIn("その関心に関われる手段が CapabilityDecisionView に available=true であるときだけ", system)
         self.assertIn("手段が無いときは今は関わらない", system)
         self.assertIn("target_stances は self_activity を 1 件だけ持ちます", system)
@@ -874,6 +878,8 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("outward_speech は毎回必須です", system)
         self.assertIn("載っている self_activity は hold です。対話の継続は outward_speech です。", system)
         self.assertIn("Agent Skill の skill_id は capability_id でも MCP tool_name でもありません。", system)
+        self.assertIn("使わない排他キーもキーとして残し、値は null にします", system)
+        self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です", system)
         self.assertIn("AffectContext の affect_states と recent_episode_affects は WorkspaceContext の affect 候補です。", system)
 
     def test_repair_prompt_follows_comparison_scope(self) -> None:
@@ -881,6 +887,8 @@ class DecisionPromptScopeTests(unittest.TestCase):
         outward_repair = build_decision_repair_prompt("kind が不正です。", "outward_speech")
         self.assertIn("capability_request / autonomous_run / pending_intent / noop", self_repair)
         self.assertIn("target_stances は self_activity を 1 件だけ持ちます", self_repair)
+        self.assertIn("使わない排他キーもキーとして残し、値は null にします", self_repair)
+        self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です", self_repair)
         self.assertNotIn("outward_speech は毎回必須です", self_repair)
         self.assertIn("speech / noop / pending_intent", outward_repair)
         self.assertIn("target_stances は outward_speech を 1 件だけ持ちます", outward_repair)
@@ -971,6 +979,24 @@ class DecisionPromptScopeTests(unittest.TestCase):
             "capability_request.input の自然文は、その能力の先の場へ向けた個の表現です",
             messages[0]["content"],
         )
+        self.assertIn(
+            "capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です",
+            messages[0]["content"],
+        )
+        self.assertIn(
+            "arguments など入れ子も object のまま書きます",
+            messages[0]["content"],
+        )
+
+    def test_autonomous_step_repair_prompt_asks_nested_input_object(self) -> None:
+        repair = build_autonomous_step_repair_prompt(
+            "AutonomousStep action.capability_request.input は object である必要があります。"
+        )
+        self.assertIn(
+            "capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です",
+            repair,
+        )
+        self.assertIn("arguments など入れ子も object のまま書きます", repair)
 
     def test_completed_mcp_tool_followup_rejects_same_tool(self) -> None:
         client = LLMClient()

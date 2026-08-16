@@ -42,6 +42,13 @@ def _person_reference_instruction() -> str:
     )
 
 
+def _capability_request_input_shape_instruction() -> str:
+    return (
+        "capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です。"
+        "arguments など入れ子も object のまま書きます。"
+    )
+
+
 def _external_write_address_instruction() -> str:
     return (
         "capability_request.input の自然文は、その能力の先の場へ向けた個の表現です。"
@@ -717,6 +724,8 @@ def build_autonomous_step_repair_prompt(validation_error: str) -> str:
         "action のキーは kind, capability_request, speech の 3 つだけです。\n"
         "action.kind は capability_request, speech, none のいずれかです。\n"
         "capability_request action では capability_request に capability_id と input を入れ、speech を null にしてください。\n"
+        + _capability_request_input_shape_instruction()
+        + "\n"
         "speech action では speech に reason_code と reason_summary を入れ、capability_request を null にしてください。\n"
         "none action では capability_request と speech を null にしてください。\n"
         "transition のキーは kind, next_run_at の 2 つだけです。\n"
@@ -1043,41 +1052,7 @@ def _build_decision_system_prompt(
         ),
         (
             "出力契約",
-            "返すキーは必ず次の 9 個です:\n"
-            '- kind: "speech" または "noop" または "pending_intent" または "capability_request" または "autonomous_run"\n'
-            "- reason_code: string\n"
-            "- reason_summary: string\n"
-            "- requires_confirmation: boolean\n"
-            "- pending_intent: null または object\n"
-            "- capability_request: null または object\n"
-            "- autonomous_run: null または object\n"
-            "- foreground_selection: object\n"
-            "- target_stances: object 配列\n"
-            "この role は発話本文を生成しません。speech_text, text, message, content, output などの本文キーは禁止です。\n"
-            "発話本文は後続の expression_generation が生成します。\n"
-            "kind が pending_intent のときだけ pending_intent object を返してください。\n"
-            "pending_intent object のキーは intent_kind, intent_summary, dedupe_key の 3 個に固定してください。\n"
-            "kind が pending_intent のとき requires_confirmation は false にしてください。\n"
-            "kind が capability_request のときだけ capability_request object を返してください。\n"
-            "capability_request object のキーは capability_id, input の 2 個に固定してください。\n"
-            "kind が capability_request のとき requires_confirmation は false にしてください。\n"
-            "kind が autonomous_run のときだけ autonomous_run object を返してください。\n"
-            "autonomous_run object のキーは objective_summary, initial_step_summary, coordination の 3 個に固定してください。\n"
-            "coordination object のキーは mode, target_run_ids, reason_summary の 3 個に固定してください。\n"
-            "coordination.mode は create_new, replace_existing のいずれかです。\n"
-            "create_new では target_run_ids を空配列にし、replace_existing では対象 run id を 1 件以上入れてください。\n"
-            "kind が autonomous_run のとき requires_confirmation は false にしてください。\n"
-            "foreground_selection object のキーは primary_factor_ref, supporting_factor_refs, suppressed_factors, summary_text の 4 個に固定してください。\n"
-            "foreground_selection.primary_factor_ref は WorkspaceContext.workspace_candidates[].factor_ref から選び、候補がない場合だけ null にしてください。\n"
-            "foreground_selection.supporting_factor_refs は primary 以外の factor_ref を最大 3 件にしてください。\n"
-            "foreground_selection.suppressed_factors の各 object は factor_ref, reason_summary の 2 個に固定してください。\n"
-            "target_stances の各 object は target, stance, reason_summary の 3 個に固定してください。\n"
-            "target は outward_speech または self_activity、stance は advance または hold です。\n"
-            "outward_speech は毎回必須です。standing_concern、ongoing_action、autonomous_run、または available な autonomous family があるときは self_activity も必須です。\n"
-            "kind=speech では outward_speech=advance、載っている self_activity は hold です。対話の継続は outward_speech です。\n"
-            "kind=capability_request または autonomous_run では self_activity=advance、outward_speech は hold です。\n"
-            "kind=noop は載っている対象をすべて hold したときだけです。外向きだけ控える判断を noop にしないでください。\n"
-            "人物側の状況は outward_speech の hold 理由にだけ使い、self_activity の hold は向き自身の理由で書いてください。",
+            _decision_output_contract_section("full"),
         ),
         (
             "禁止",
@@ -1194,7 +1169,8 @@ def _decision_capability_run_rules(*, include_person_start: bool) -> str:
         "Agent Skill の skill_id は capability_id でも MCP tool_name でもありません。"
         "mcp.call_tool の tool_name は CapabilityDecisionView の mcp_servers[].tools[].name から選びます。\n"
         "autonomous_run は、継続する行動や観測、未完了の向きを目的として保持するときに選びます。次の一手は autonomous_step_generation が決めます。\n"
-        "capability_request.input は required_input に従う最小 object です。target_client_id や資格情報は入れません。\n"
+        + _capability_request_input_shape_instruction()
+        + "target_client_id や資格情報は入れません。\n"
         "OngoingActionSummary.status=waiting_result のときは新しい capability_request を出しません。\n"
         "既存 run と並行する追加目的なら coordination.mode=create_new、中核目的の置換なら replace_existing です。\n"
     )
@@ -1286,13 +1262,16 @@ def _decision_output_contract_section(comparison_scope: str) -> str:
         "この role は発話本文を生成しません。speech_text, text, message, content, output などの本文キーは禁止です。\n"
         "発話本文は後続の expression_generation が生成します。\n"
         f"kind は {kinds} のいずれかだけです。\n"
-        "kind が pending_intent のときだけ pending_intent object を返してください。\n"
+        "9 個のキーは常にすべて出します。使わない排他キーもキーとして残し、値は null にします。\n"
+        "kind が pending_intent のとき pending_intent は object、capability_request と autonomous_run は null です。\n"
         "pending_intent object のキーは intent_kind, intent_summary, dedupe_key の 3 個に固定してください。\n"
         "kind が pending_intent のとき requires_confirmation は false にしてください。\n"
-        "kind が capability_request のときだけ capability_request object を返してください。\n"
+        "kind が capability_request のとき capability_request は object、pending_intent と autonomous_run は null です。\n"
         "capability_request object のキーは capability_id, input の 2 個に固定してください。\n"
+        + _capability_request_input_shape_instruction()
+        + "\n"
         "kind が capability_request のとき requires_confirmation は false にしてください。\n"
-        "kind が autonomous_run のときだけ autonomous_run object を返してください。\n"
+        "kind が autonomous_run のとき autonomous_run は object、pending_intent と capability_request は null です。\n"
         "autonomous_run object のキーは objective_summary, initial_step_summary, coordination の 3 個に固定してください。\n"
         "coordination object のキーは mode, target_run_ids, reason_summary の 3 個に固定してください。\n"
         "coordination.mode は create_new, replace_existing のいずれかです。\n"
@@ -1573,6 +1552,8 @@ def _build_autonomous_step_system_prompt() -> str:
             "action のキーは必ず kind, capability_request, speech の 3 個です。\n"
             "action.kind は capability_request, speech, none のいずれかです。\n"
             "capability_request action では capability_request object のキーを capability_id, input の 2 個に固定し、speech は null にしてください。\n"
+            + _capability_request_input_shape_instruction()
+            + "\n"
             "speech action では speech object のキーを reason_code, reason_summary の 2 個に固定し、capability_request は null にしてください。\n"
             "none action では capability_request と speech を null にしてください。\n"
             "transition.kind は continue, wait_until, complete, cancel のいずれかです。\n"

@@ -115,6 +115,7 @@ server は既存 run との意味的な近さを文字列一致で判定しな�
 `action` は常に `kind / capability_request / speech` の 3 キーを持つ。
 `action.kind` は `capability_request / speech / none` のいずれかである。
 使わない `capability_request` と `speech` は `null` にする。
+`capability_request.input` は `required_input` と `readiness.input_keys` に対応する入れ子の JSON object とする。
 `transition.kind` は `continue / wait_until / complete / cancel` のいずれかである。
 `transition` は `kind / next_run_at` の 2 キーだけを持つ。
 `capability_request` action 以外で `wait_until` を使う場合、`next_run_at` を必ず持つ。
