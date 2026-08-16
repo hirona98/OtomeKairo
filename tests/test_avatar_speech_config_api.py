@@ -84,7 +84,7 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
             avatar["tts"]["aivis_cloud_config"]["output_format"],
             "wav",
         )
-        self.assertEqual(service.store.events[-1]["kind"], "avatar_speech_editor_state_read")
+        self.assertEqual(service.store.events, [])
 
     def test_public_read_masks_stt_and_tts_api_keys(self) -> None:
         service = DummyService()
@@ -149,10 +149,7 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
             response["avatars"][0]["tts"]["voicevox_config"]["secondary_endpoint_url"],
             "http://127.0.0.1:50022",
         )
-        self.assertEqual(
-            service.store.events[-2]["kind"],
-            "avatar_speech_editor_state_write",
-        )
+        self.assertEqual(service.store.events, [])
 
     def test_avatar_stt_rejects_wake_words_field(self) -> None:
         # 音声起動ワードは persona.wake_words。avatar.stt への残存は未対応として拒否する。

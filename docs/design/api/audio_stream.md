@@ -169,7 +169,6 @@ owner の event stream 切断、Web audio stream 切断、heartbeat timeout で�
 - 他の avatar field、microphone_settings、avatars 一覧は変更しない
 - 値が変わらない保存でも成功 response を返す
 - 値が変わった保存では音声 runtime の設定 reload を行い、`audio_runtime_state` を配信する
-- write を認証済み設定編集操作として audit に残す
 - response body に秘密値を含めない
 
 request:
@@ -213,7 +212,6 @@ response:
 - 他の avatar field、microphone_settings、avatars 一覧は変更しない
 - 値が変わらない保存でも成功 response を返す
 - 値が変わった保存では音声入力 runtime の lease を破棄せず、`audio_runtime_state` を force 配信する
-- write を認証済み設定編集操作として audit に残す
 - response body に秘密値を含めない
 
 request:

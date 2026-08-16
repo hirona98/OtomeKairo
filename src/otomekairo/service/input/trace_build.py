@@ -138,6 +138,15 @@ class ServiceInputTraceBuildMixin:
                 "speaker_ref": input_speaker_ref,
                 "participant_refs": participant_refs,
                 "created_at": started_at,
+                "display_name": (
+                    next(
+                        participant.display_name
+                        for participant in interaction_context.participants
+                        if participant.person_ref == input_speaker_ref
+                    )
+                    if interaction_context is not None and input_speaker_ref is not None
+                    else None
+                ),
             }
         ]
 

@@ -67,6 +67,38 @@ class WebUiHttpBoundaryTests(unittest.TestCase):
         self.assertIn("application/json", headers["Content-Type"])
         self.assertTrue(payload["ok"])
 
+    def test_web_ui_loads_last_thirty_messages_for_interaction(self) -> None:
+        state = self.service.store.read_state()
+        memory_set_id = state["selected_memory_set_id"]
+        events = []
+        for index in range(35):
+            events.append({
+                "event_id": f"event:history-{index}",
+                "cycle_id": f"cycle:history-{index}",
+                "memory_set_id": memory_set_id,
+                "kind": "conversation_input" if index % 2 == 0 else "speech",
+                "role": "person" if index % 2 == 0 else "assistant",
+                "text": f"message-{index}",
+                "interaction_ref": "interaction:web:test",
+                "speaker_ref": "person:test" if index % 2 == 0 else "self",
+                "participant_refs": ["person:test"],
+                "created_at": f"2026-08-16T12:{index:02d}:00+09:00",
+                "display_name": "利用者" if index % 2 == 0 else "おとめ",
+            })
+        self.service.store.append_events(events=events)
+
+        status, _, body = self.request(
+            "/ui/api/conversation/history?interaction_ref=interaction%3Aweb%3Atest"
+        )
+        payload = json.loads(body.decode("utf-8"))
+
+        self.assertEqual(status, 200)
+        messages = payload["data"]["messages"]
+        self.assertEqual(len(messages), 30)
+        self.assertEqual(messages[0]["message"], "message-5")
+        self.assertEqual(messages[-1]["message"], "message-34")
+        self.assertEqual(messages[-1]["display_name"], "利用者")
+
     def test_web_ui_reads_saved_avatar_speech_settings_without_browser_token(self) -> None:
         state = self.service.store.read_state()
         state["microphone_settings"]["vad_probability_threshold"] = 0.7

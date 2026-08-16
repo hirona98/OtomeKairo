@@ -221,7 +221,6 @@ class ServiceConfigResourcesMixin:
     def get_editor_state(self, token: str | None) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
-        self._append_editor_state_audit_event(state=state, operation="read")
         return self._build_editor_state(state)
 
     def get_avatar_speech(self, token: str | None) -> dict[str, Any]:
@@ -238,7 +237,6 @@ class ServiceConfigResourcesMixin:
     def get_avatar_speech_editor_state(self, token: str | None) -> dict[str, Any]:
         # 設定編集面だけがSTT/TTSの秘密値を含む。
         state = self._require_token(token)
-        self._append_avatar_speech_editor_state_audit_event(state=state, operation="read")
         return self._build_avatar_speech_editor_state(state)
 
     def get_stt_enabled(self, token: str | None) -> dict[str, Any]:
@@ -277,10 +275,6 @@ class ServiceConfigResourcesMixin:
             selected_avatar["stt"]["enabled"] = enabled
             self.store.write_state(state)
             self._reload_audio_runtime_settings()
-            self._append_stt_enabled_audit_event(
-                state=state,
-                enabled=enabled,
-            )
         return {
             "enabled": enabled,
             "selected_avatar_id": selected_avatar_id,
@@ -323,10 +317,6 @@ class ServiceConfigResourcesMixin:
             selected_avatar["tts"]["enabled"] = enabled
             self.store.write_state(state)
             self._publish_audio_runtime_state()
-            self._append_tts_enabled_audit_event(
-                state=state,
-                enabled=enabled,
-            )
         return {
             "enabled": enabled,
             "selected_avatar_id": selected_avatar_id,
@@ -398,7 +388,6 @@ class ServiceConfigResourcesMixin:
         self.store.write_state(state)
         self._reload_audio_runtime_settings()
         self._publish_audio_runtime_state()
-        self._append_avatar_speech_editor_state_audit_event(state=state, operation="write")
         return self._build_avatar_speech_editor_state(state)
 
     def get_catalog(self, token: str | None) -> dict[str, Any]:
@@ -936,7 +925,6 @@ class ServiceConfigResourcesMixin:
     def get_camera_sources_editor_state(self, token: str | None) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
-        self._append_camera_sources_editor_state_audit_event(state=state, operation="read")
         return self._build_camera_sources_editor_state(state)
 
     def replace_camera_sources_editor_state(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
@@ -955,7 +943,6 @@ class ServiceConfigResourcesMixin:
         # 永続化
         state["camera_sources"] = normalized_sources
         self.store.write_state(state)
-        self._append_camera_sources_editor_state_audit_event(state=state, operation="write")
         return self._build_camera_sources_editor_state(state)
 
     def list_mcp_servers(self, token: str | None) -> dict[str, Any]:
@@ -1017,7 +1004,6 @@ class ServiceConfigResourcesMixin:
     def get_mcp_servers_editor_state(self, token: str | None) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
-        self._append_mcp_servers_editor_state_audit_event(state=state, operation="read")
         return self._build_mcp_servers_editor_state(state)
 
     def replace_mcp_servers_editor_state(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
@@ -1035,12 +1021,10 @@ class ServiceConfigResourcesMixin:
         # 永続化
         state["mcp_servers"] = normalized_servers
         self.store.write_state(state)
-        self._append_mcp_servers_editor_state_audit_event(state=state, operation="write")
         return self._build_mcp_servers_editor_state(state)
 
     def get_agent_skill_sources_editor_state(self, token: str | None) -> dict[str, Any]:
         state = self._require_token(token)
-        self._append_agent_skill_sources_audit_event(state=state, operation="read")
         return self._build_agent_skill_sources_editor_state(state)
 
     def replace_agent_skill_sources_editor_state(
@@ -1067,7 +1051,6 @@ class ServiceConfigResourcesMixin:
         with self._runtime_state_lock:
             self.store.write_state(state)
             self._agent_skill_registry = prospective_registry
-        self._append_agent_skill_sources_audit_event(state=state, operation="write")
         return self._build_agent_skill_sources_editor_state(state)
 
     def reload_agent_skill_sources(self, token: str | None) -> dict[str, Any]:
@@ -1080,7 +1063,6 @@ class ServiceConfigResourcesMixin:
             raise ServiceError(409, exc.code, str(exc)) from exc
         with self._runtime_state_lock:
             self._agent_skill_registry = prospective_registry
-        self._append_agent_skill_sources_audit_event(state=state, operation="reload")
         return self.inspect_agent_skills(token)
 
     def inspect_agent_skills(self, token: str | None) -> dict[str, Any]:
@@ -1111,12 +1093,6 @@ class ServiceConfigResourcesMixin:
                 "connector_runtime_config_not_found",
                 "The requested connector runtime config does not exist.",
             )
-        self._append_connector_runtime_config_audit_event(
-            state=state,
-            client_id=normalized_client_id,
-            camera_source_count=len(camera_sources),
-            mcp_server_count=len(mcp_servers),
-        )
         return {
             "client_id": normalized_client_id,
             "camera_sources": sorted(
@@ -1149,11 +1125,6 @@ class ServiceConfigResourcesMixin:
                 "watcher_runtime_config_not_found",
                 "The requested watcher runtime config does not exist.",
             )
-        self._append_watcher_runtime_config_audit_event(
-            state=state,
-            watcher_id=normalized_watcher_id,
-            vision_source_id=str(camera_source.get("vision_source_id") or ""),
-        )
         runtime_camera_source = deepcopy(camera_source)
         runtime_camera_source.pop("enabled", None)
         return {
@@ -1297,7 +1268,6 @@ class ServiceConfigResourcesMixin:
         )
         # 人格設定の音声起動ワード変更を音声 runtime へ反映する。
         self._reload_audio_runtime_settings()
-        self._append_editor_state_audit_event(state=state, operation="write")
         return self._build_editor_state(state)
 
     def _reload_audio_runtime_settings(self) -> None:
@@ -1609,220 +1579,11 @@ class ServiceConfigResourcesMixin:
             result[normalized_id] = entry
         return result
 
-    def _append_editor_state_audit_event(self, *, state: dict[str, Any], operation: str) -> None:
-        # 秘密値を含む editor-state 本文は audit に残さない。
-        self.store.append_events(
-            events=[
-                {
-                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
-                    "cycle_id": "config:editor-state",
-                    "memory_set_id": state["selected_memory_set_id"],
-                    "kind": f"editor_state_{operation}",
-                    "role": "system",
-                    "created_at": self._now_iso(),
-                    "selected_persona_id": state["selected_persona_id"],
-                    "selected_memory_set_id": state["selected_memory_set_id"],
-                    "selected_model_preset_id": state["selected_model_preset_id"],
-                    "pre_send_check_model_preset_id": state[
-                        "pre_send_check_model_preset_id"
-                    ],
-                    "persona_count": len(state["personas"]),
-                    "memory_set_count": len(state["memory_sets"]),
-                    "model_preset_count": len(state["model_presets"]),
-                }
-            ]
-        )
-
-    def _append_avatar_speech_editor_state_audit_event(
-        self,
-        *,
-        state: dict[str, Any],
-        operation: str,
-    ) -> None:
-        # API keyや音声設定本文はauditへ記録しない。
-        self.store.append_events(
-            events=[
-                {
-                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
-                    "cycle_id": "config:avatar-speech-editor-state",
-                    "memory_set_id": state["selected_memory_set_id"],
-                    "kind": f"avatar_speech_editor_state_{operation}",
-                    "role": "system",
-                    "created_at": self._now_iso(),
-                    "selected_persona_id": state["selected_persona_id"],
-                    "selected_memory_set_id": state["selected_memory_set_id"],
-                    "selected_model_preset_id": state["selected_model_preset_id"],
-                    "selected_avatar_id": state["selected_avatar_id"],
-                    "avatar_count": len(state["avatars"]),
-                }
-            ]
-        )
-
-    def _append_stt_enabled_audit_event(
-        self,
-        *,
-        state: dict[str, Any],
-        enabled: bool,
-    ) -> None:
-        # 運用トグルの変更だけを audit に残し、秘密値は含めない。
-        self.store.append_events(
-            events=[
-                {
-                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
-                    "cycle_id": "config:stt-enabled",
-                    "memory_set_id": state["selected_memory_set_id"],
-                    "kind": "stt_enabled_write",
-                    "role": "system",
-                    "created_at": self._now_iso(),
-                    "selected_avatar_id": state["selected_avatar_id"],
-                    "enabled": enabled,
-                }
-            ]
-        )
-
-    def _append_tts_enabled_audit_event(
-        self,
-        *,
-        state: dict[str, Any],
-        enabled: bool,
-    ) -> None:
-        # 運用トグルの変更だけを audit に残し、秘密値は含めない。
-        self.store.append_events(
-            events=[
-                {
-                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
-                    "cycle_id": "config:tts-enabled",
-                    "memory_set_id": state["selected_memory_set_id"],
-                    "kind": "tts_enabled_write",
-                    "role": "system",
-                    "created_at": self._now_iso(),
-                    "selected_avatar_id": state["selected_avatar_id"],
-                    "enabled": enabled,
-                }
-            ]
-        )
-
     def _publish_audio_runtime_state(self) -> None:
         # TTS など入力 lease を壊さない運用変更のあと、snapshot だけを配る。
         audio_runtime = getattr(self, "_audio_runtime", None)
         if audio_runtime is not None:
             audio_runtime.publish_state(force=True)
-
-    def _append_camera_sources_editor_state_audit_event(self, *, state: dict[str, Any], operation: str) -> None:
-        # 秘密値を含む camera source editor-state 本文は audit に残さない。
-        self.store.append_events(
-            events=[
-                {
-                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
-                    "cycle_id": "config:camera-sources-editor-state",
-                    "memory_set_id": state["selected_memory_set_id"],
-                    "kind": f"camera_sources_editor_state_{operation}",
-                    "role": "system",
-                    "created_at": self._now_iso(),
-                    "selected_persona_id": state["selected_persona_id"],
-                    "selected_memory_set_id": state["selected_memory_set_id"],
-                    "selected_model_preset_id": state["selected_model_preset_id"],
-                    "camera_source_count": len(self._camera_sources_from_state(state)),
-                }
-            ]
-        )
-
-    def _append_mcp_servers_editor_state_audit_event(self, *, state: dict[str, Any], operation: str) -> None:
-        # 秘密値を含む MCP server editor-state 本文は audit に残さない。
-        self.store.append_events(
-            events=[
-                {
-                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
-                    "cycle_id": "config:mcp-servers-editor-state",
-                    "memory_set_id": state["selected_memory_set_id"],
-                    "kind": f"mcp_servers_editor_state_{operation}",
-                    "role": "system",
-                    "created_at": self._now_iso(),
-                    "selected_persona_id": state["selected_persona_id"],
-                    "selected_memory_set_id": state["selected_memory_set_id"],
-                    "selected_model_preset_id": state["selected_model_preset_id"],
-                    "mcp_server_count": len(self._mcp_servers_from_state(state)),
-                }
-            ]
-        )
-
-    def _append_agent_skill_sources_audit_event(self, *, state: dict[str, Any], operation: str) -> None:
-        # Skill 本文、resource 内容、実行設定は audit に残さない。
-        sources = state.get("agent_skill_sources")
-        source_count = len(sources) if isinstance(sources, dict) else 0
-        with self._runtime_state_lock:
-            skill_count = len(self._agent_skill_registry.skills)
-        self.store.append_events(
-            events=[
-                {
-                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
-                    "cycle_id": "config:agent-skill-sources",
-                    "memory_set_id": state["selected_memory_set_id"],
-                    "kind": f"agent_skill_sources_{operation}",
-                    "role": "system",
-                    "created_at": self._now_iso(),
-                    "selected_persona_id": state["selected_persona_id"],
-                    "selected_memory_set_id": state["selected_memory_set_id"],
-                    "selected_model_preset_id": state["selected_model_preset_id"],
-                    "agent_skill_source_count": source_count,
-                    "agent_skill_count": skill_count,
-                }
-            ]
-        )
-
-    def _append_connector_runtime_config_audit_event(
-        self,
-        *,
-        state: dict[str, Any],
-        client_id: str,
-        camera_source_count: int,
-        mcp_server_count: int,
-    ) -> None:
-        # 秘密値を含む runtime config 本文は audit に残さない。
-        self.store.append_events(
-            events=[
-                {
-                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
-                    "cycle_id": "config:connector-runtime-config",
-                    "memory_set_id": state["selected_memory_set_id"],
-                    "kind": "connector_runtime_config_read",
-                    "role": "system",
-                    "created_at": self._now_iso(),
-                    "selected_persona_id": state["selected_persona_id"],
-                    "selected_memory_set_id": state["selected_memory_set_id"],
-                    "selected_model_preset_id": state["selected_model_preset_id"],
-                    "client_id": client_id,
-                    "camera_source_count": camera_source_count,
-                    "mcp_server_count": mcp_server_count,
-                }
-            ]
-        )
-
-    def _append_watcher_runtime_config_audit_event(
-        self,
-        *,
-        state: dict[str, Any],
-        watcher_id: str,
-        vision_source_id: str,
-    ) -> None:
-        # 秘密値を含む watcher runtime config 本文は audit に残さない。
-        self.store.append_events(
-            events=[
-                {
-                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
-                    "cycle_id": "config:watcher-runtime-config",
-                    "memory_set_id": state["selected_memory_set_id"],
-                    "kind": "watcher_runtime_config_read",
-                    "role": "system",
-                    "created_at": self._now_iso(),
-                    "selected_persona_id": state["selected_persona_id"],
-                    "selected_memory_set_id": state["selected_memory_set_id"],
-                    "selected_model_preset_id": state["selected_model_preset_id"],
-                    "watcher_id": watcher_id,
-                    "vision_source_id": vision_source_id,
-                }
-            ]
-        )
 
     def _embedding_definition_changed(
         self,

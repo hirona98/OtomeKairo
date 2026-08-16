@@ -783,6 +783,39 @@ class SQLiteMemoryStore(
         ]
         return turns
 
+    def load_conversation_history(
+        self,
+        *,
+        memory_set_id: str,
+        interaction_ref: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload_json
+                FROM events
+                WHERE memory_set_id = ?
+                  AND interaction_ref = ?
+                  AND kind IN ('conversation_input', 'speech')
+                  AND text IS NOT NULL
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT ?
+                """,
+                (memory_set_id, interaction_ref, limit),
+            ).fetchall()
+
+        messages = []
+        for row in reversed(rows):
+            event = json.loads(row["payload_json"])
+            messages.append({
+                "role": event["role"],
+                "message": event["text"],
+                "created_at": event["created_at"],
+                "display_name": event.get("display_name"),
+            })
+        return messages
+
     def load_events_for_evidence(
         self,
         *,

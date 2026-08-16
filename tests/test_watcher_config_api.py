@@ -117,7 +117,7 @@ class WatcherConfigApiTests(unittest.TestCase):
         self.assertNotIn("enabled", response["camera_source"])
         self.assertEqual(response["camera_source"]["connection"]["camera_password"], "camera-password")
         self.assertEqual(response["snapshot_dir"], "/tmp/otomekairo-test/wake-references/watcher-C220")
-        self.assertEqual(service.store.events[-1]["kind"], "watcher_runtime_config_read")
+        self.assertEqual(service.store.events, [])
 
     def test_duplicate_generated_camera_source_id_is_rejected(self) -> None:
         service = DummyService()

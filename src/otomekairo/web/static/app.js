@@ -2104,7 +2104,10 @@ function addMessage(kind, text, images = [], options = {}) {
 
     const time = document.createElement("div");
     time.className = "message-time";
-    time.textContent = nowLabel();
+    time.textContent = options.createdAt
+      ? new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit" })
+        .format(new Date(options.createdAt))
+      : nowLabel();
     if (kind === "person") {
       wrapper.append(time, content);
     } else {
@@ -2113,6 +2116,18 @@ function addMessage(kind, text, images = [], options = {}) {
   }
   element("messages").append(wrapper);
   element("messages").scrollTop = element("messages").scrollHeight;
+}
+
+async function loadConversationHistory() {
+  const history = await apiRequest(
+    `/ui/api/conversation/history?interaction_ref=${encodeURIComponent(state.conversationInteractionRef)}`,
+  );
+  for (const message of history.messages || []) {
+    addMessage(message.role === "person" ? "person" : "assistant", message.message, [], {
+      displayName: message.display_name || "",
+      createdAt: message.created_at,
+    });
+  }
 }
 
 function resultText(result) {
@@ -4788,6 +4803,7 @@ async function startApp() {
   loadConversationIdentity();
   await loadIdentity();
   await loadConversationConfig();
+  await loadConversationHistory();
   await loadAvatarSpeech();
   await loadStatus({ silent: true });
   await refreshDashboard({ silent: true });

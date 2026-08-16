@@ -81,6 +81,7 @@ class ServiceInputTracePersistMixin:
             decision=decision,
             result_kind=result_kind,
             speech_payload=speech_payload,
+            persona_display_name=pipeline["persona_display_name"],
             pending_intent_summary=pending_intent_summary,
             capability_decision_view=pipeline.get("capability_decision_view"),
             initiative_context=pipeline.get("initiative_context"),
@@ -203,6 +204,7 @@ class ServiceInputTracePersistMixin:
         decision: dict[str, Any],
         result_kind: str,
         speech_payload: dict[str, Any] | None,
+        persona_display_name: str,
         pending_intent_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: InitiativeContext | None,
@@ -240,6 +242,10 @@ class ServiceInputTracePersistMixin:
             pending_intent_summary=pending_intent_summary,
             system_notice=system_notice,
         )
+        if speech_payload is not None:
+            for event in events:
+                if event.get("kind") == "speech":
+                    event["display_name"] = persona_display_name
         events.extend(
             self._build_event_evidence_audit_events(
                 cycle_id=cycle_id,

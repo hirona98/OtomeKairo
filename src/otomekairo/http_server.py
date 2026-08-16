@@ -229,6 +229,16 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             if method == "GET" and parsed.path == "/api/config":
                 self._write_success(HTTPStatus.OK, self.server.service.get_config(token))
                 return
+            if method == "GET" and parsed.path == "/api/conversation/history":
+                query = parse_qs(parsed.query)
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.get_conversation_history(
+                        token,
+                        interaction_ref=query.get("interaction_ref", [""])[0],
+                    ),
+                )
+                return
             if method == "GET" and parsed.path == "/api/config/conversation-display-names":
                 self._write_success(
                     HTTPStatus.OK,
@@ -1258,6 +1268,16 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             return
         if method == "GET" and path == "/ui/api/config":
             self._write_success(HTTPStatus.OK, self.server.service.get_config(token))
+            return
+        if method == "GET" and path == "/ui/api/conversation/history":
+            query = parse_qs(urlparse(self.path).query)
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.get_conversation_history(
+                    token,
+                    interaction_ref=query.get("interaction_ref", [""])[0],
+                ),
+            )
             return
         if method == "PATCH" and path == "/ui/api/config/current":
             payload = self._read_json_body()

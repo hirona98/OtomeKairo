@@ -98,6 +98,19 @@ response:
 
 ## 対話面
 
+### `GET /api/conversation/history`
+
+指定した会話場の保存済み発話を、現在選択中の記憶セットから直近30件返す。
+Web UI は初期表示時にこの API を読み終えてから event stream の購読を開始する。
+
+query:
+
+- `interaction_ref`: 必須の非空文字列
+
+response の `messages` は古い順で、各要素に `role / message / created_at / display_name` を持つ。
+`role` は `person / assistant` のいずれかである。既存イベントに表示名が保存されていない場合、`display_name` は `null` とする。
+会話場は `interaction_ref`、記憶の所属は現在選択中の `memory_set_id` で分離し、別の会話場や記憶セットの発話を混ぜない。
+
 ### `POST /api/conversation`
 
 - 認証: 必要

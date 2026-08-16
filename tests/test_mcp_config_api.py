@@ -146,7 +146,7 @@ class McpConfigApiTests(unittest.TestCase):
         )
 
         self.assertEqual(response["mcp_servers"][0]["env"]["E_STAT_APP_ID"], "secret")
-        self.assertEqual(service.store.events[-1]["kind"], "mcp_servers_editor_state_write")
+        self.assertEqual(service.store.events, [])
 
     def test_runtime_config_filters_mcp_servers_by_client_and_enabled(self) -> None:
         service = DummyService()
@@ -191,7 +191,7 @@ class McpConfigApiTests(unittest.TestCase):
         self.assertEqual([item["mcp_server_id"] for item in response["mcp_servers"]], ["e-stat"])
         self.assertEqual(response["mcp_servers"][0]["env"]["E_STAT_APP_ID"], "secret")
         self.assertNotIn("pre_send_check_enabled", response["mcp_servers"][0])
-        self.assertEqual(service.store.events[-1]["mcp_server_count"], 1)
+        self.assertEqual(service.store.events, [])
 
     def test_mcp_server_rejects_invalid_definition(self) -> None:
         service = DummyService()

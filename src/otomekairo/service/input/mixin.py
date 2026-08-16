@@ -53,6 +53,24 @@ class ServiceInputMixin(
     ServiceInputLoggingMixin,
     ServiceInputTraceMixin,
 ):
+    def get_conversation_history(
+        self,
+        token: str | None,
+        *,
+        interaction_ref: str,
+    ) -> dict[str, Any]:
+        state = self._require_token(token)
+        if not isinstance(interaction_ref, str) or not interaction_ref.strip():
+            raise ServiceError(400, "invalid_interaction_ref", "interaction_ref must be a non-empty string.")
+        return {
+            "interaction_ref": interaction_ref,
+            "messages": self.store.load_conversation_history(
+                memory_set_id=state["selected_memory_set_id"],
+                interaction_ref=interaction_ref,
+                limit=30,
+            ),
+        }
+
     # 検査API群
     def list_cycle_summaries(self, token: str | None, limit: int) -> dict[str, Any]:
         # 認可
