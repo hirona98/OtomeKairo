@@ -846,6 +846,8 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("今、気にかけていることや継続中の自身の活動へ関わるか", system)
         self.assertIn("capability_request / autonomous_run / pending_intent / noop", system)
         self.assertIn("向きと CapabilityDecisionView の catalog から autonomous_run を始めてよい", system)
+        self.assertIn("autonomous_run.objective_summary は向き自身の言葉です", system)
+        self.assertIn("capability_request.input の自然文は、その能力の先の場へ向けた個の表現です", system)
         self.assertIn("その関心に関われる手段が CapabilityDecisionView に available=true であるときだけ", system)
         self.assertIn("手段が無いときは今は関わらない", system)
         self.assertIn("target_stances は self_activity を 1 件だけ持ちます", system)
@@ -949,6 +951,26 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("観測事実に基づく状況認識", system)
         self.assertIn("助言、依頼、支援提案、休息促し、身体注意、評価は本文へ足しません", system)
         self.assertIn("具体的な固有名、表示対象名、作品名、ページ内容は主題化しません", system)
+
+    def test_autonomous_step_prompt_treats_capability_input_as_external_expression(self) -> None:
+        messages = build_autonomous_step_messages(
+            persona_context=_persona_context(),
+            context=AutonomousStepContext(
+                run={"objective_summary": "向きへ関わる。"},
+                current_input=_current_input(),
+                recent_turns=[],
+                time_context={},
+                foreground_world_state=None,
+                activity_context=None,
+                ongoing_action_summary=None,
+                capability_decision_view=[],
+                last_result_context=None,
+            ),
+        )
+        self.assertIn(
+            "capability_request.input の自然文は、その能力の先の場へ向けた個の表現です",
+            messages[0]["content"],
+        )
 
     def test_completed_mcp_tool_followup_rejects_same_tool(self) -> None:
         client = LLMClient()

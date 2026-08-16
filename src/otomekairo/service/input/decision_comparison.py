@@ -66,11 +66,13 @@ class ServiceInputDecisionComparisonMixin:
         )
         return composed
 
-    def _build_self_activity_decision_context(self, **kwargs: Any) -> DecisionContext:
-        current_input = kwargs["current_input"]
-        source_workspace = kwargs.get("workspace_context")
-        has_standing_concern = bool(self._workspace_standing_concerns(source_workspace))
-        isolated_input = CurrentInput(
+    def _self_activity_current_input(
+        self,
+        current_input: CurrentInput,
+        workspace_context: dict[str, Any] | None,
+    ) -> CurrentInput:
+        has_standing_concern = bool(self._workspace_standing_concerns(workspace_context))
+        return CurrentInput(
             sender_kind="system",
             sender_ref=None,
             source_kind=current_input.source_kind,
@@ -82,6 +84,22 @@ class ServiceInputDecisionComparisonMixin:
                 else SELF_ACTIVITY_INPUT_TEXT
             ),
         )
+
+    def _build_self_activity_decision_context(self, **kwargs: Any) -> DecisionContext:
+        current_input = kwargs["current_input"]
+        source_workspace = kwargs.get("workspace_context")
+        isolated_input = kwargs.get("self_activity_current_input")
+        if not isinstance(isolated_input, CurrentInput):
+            isolated_input = self._self_activity_current_input(current_input, source_workspace)
+        recall_hint = kwargs.get("self_activity_recall_hint")
+        if not isinstance(recall_hint, dict):
+            recall_hint = kwargs.get("recall_hint") or {}
+        recall_pack = kwargs.get("self_activity_recall_pack")
+        if not isinstance(recall_pack, dict):
+            recall_pack = kwargs.get("recall_pack") or {}
+        agent_skill_context = kwargs.get("self_activity_agent_skill_context")
+        if "self_activity_agent_skill_context" not in kwargs:
+            agent_skill_context = kwargs.get("agent_skill_context")
         initiative_context = self._self_activity_initiative_context(
             kwargs.get("initiative_context"),
             workspace_context=source_workspace,
@@ -101,7 +119,7 @@ class ServiceInputDecisionComparisonMixin:
             capability_decision_view=self._self_activity_capability_view(
                 kwargs.get("capability_decision_view")
             ),
-            agent_skill_context=kwargs.get("agent_skill_context"),
+            agent_skill_context=agent_skill_context,
             initiative_context=initiative_context,
             capability_result_context=None,
             visual_observation_context=None,
@@ -115,8 +133,8 @@ class ServiceInputDecisionComparisonMixin:
                 current_input_text=isolated_input.text,
                 initiative_context=initiative_context,
             ),
-            recall_hint=kwargs.get("recall_hint") or {},
-            recall_pack=kwargs.get("recall_pack") or {},
+            recall_hint=recall_hint,
+            recall_pack=recall_pack,
             reference_context=None,
             pre_send_check_feedback=kwargs.get("pre_send_check_feedback"),
             comparison_scope="self_activity",
@@ -221,7 +239,7 @@ class ServiceInputDecisionComparisonMixin:
             ongoing_action_summary=None,
             autonomous_run_summaries=None,
             capability_decision_view=None,
-            agent_skill_context=kwargs.get("agent_skill_context"),
+            agent_skill_context=None,
             initiative_context=self._outward_speech_initiative_context(kwargs.get("initiative_context")),
             capability_result_context=None,
             visual_observation_context=kwargs.get("visual_observation_context"),

@@ -1389,6 +1389,9 @@ class ServiceAutonomousRunMixin:
             ),
             current_time=current_time,
         )
+        origin_kind = str(run.get("origin_kind") or "")
+        if origin_kind in {"wake", "background_thinking"} and not response_target_refs:
+            foreground_world_state = self._self_activity_world_state(foreground_world_state)
         capability_decision_view = self._build_capability_decision_view(
             state=state,
             current_time=current_time,

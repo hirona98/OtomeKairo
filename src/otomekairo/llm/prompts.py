@@ -42,6 +42,14 @@ def _person_reference_instruction() -> str:
     )
 
 
+def _external_write_address_instruction() -> str:
+    return (
+        "capability_request.input の自然文は、その能力の先の場へ向けた個の表現です。"
+        "会話相手への発話ではありません。"
+        "current_input.response_target_refs が空のとき、能力入力の自然文に人物への直接呼びかけを置きません。"
+    )
+
+
 def _expression_address_instruction() -> str:
     return (
         "current_input.response_target_refs に含まれる person_ref に対応する "
@@ -1229,7 +1237,9 @@ def _decision_self_activity_rules_section() -> str:
         "関わり方は、見る、返す、自分から書くを同じ盤面で比べます。"
         "今その向きに立つ言葉があれば自分から書いてよいです。"
         "向きと CapabilityDecisionView の catalog から autonomous_run を始めてよいです。人物発話による依頼はこの比較の前提ではありません。"
-        "その関心に関われる手段が CapabilityDecisionView に available=true であるときだけ、その手段で関わる。"
+        "autonomous_run.objective_summary は向き自身の言葉です。人物側の観測成果を称賛したり報告したりする目的にはしません。"
+        + _external_write_address_instruction()
+        + "その関心に関われる手段が CapabilityDecisionView に available=true であるときだけ、その手段で関わる。"
         "手段が無いときは今は関わらない。\n"
         "今関わらないときは pending_intent または noop を選び、控える理由は今その関心に関わらないこととして書きます。\n"
         + _decision_foreground_selection_rules()
@@ -1531,6 +1541,8 @@ def _build_autonomous_step_system_prompt() -> str:
             "公開の働きかけに返すときは、通知や一覧の短い抜粋だけでなく、その会話の根と流れを見てから返してください。未読の有無だけで返信要否を決めないでください。\n"
             "空の未読一覧や空の私信は、公開のやり取りが無いことの根拠にしないでください。自分の投稿や公開の会話履歴を見てから、やり取りの有無を確定してください。\n"
             "target_client_id、資格情報、内部 URL、配送先 client は出力に含めないでください。\n"
+            + _external_write_address_instruction()
+            + "\n"
             "persona_context は step 判断の基底です。run 目的、能力可否、観測事実を人格で上書きしてはいけません。",
         ),
         ("人物参照", _person_reference_instruction()),

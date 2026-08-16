@@ -95,6 +95,98 @@ class ServiceInputPipelineMixin:
             return {"standing_concerns": []}
         return build_standing_concern_orientation_context(due_standing_concerns)
 
+    def _build_pipeline_skill_and_self_activity_materials(
+        self,
+        *,
+        state: dict[str, Any],
+        started_at: str,
+        current_input: CurrentInput,
+        recent_turns: list[dict[str, Any]],
+        trigger_kind: str,
+        observation_summary: dict[str, Any] | None,
+        capability_request_summary: dict[str, Any] | None,
+        due_standing_concerns: list[dict[str, Any]],
+        ongoing_action_summary: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+        initiative_context: InitiativeContext | None,
+        workspace_context: dict[str, Any] | None,
+        model_config: dict[str, Any],
+        cycle_label: str,
+    ) -> dict[str, Any]:
+        orientation_context = self._build_agent_skill_orientation_context(
+            trigger_kind=trigger_kind,
+            due_standing_concerns=due_standing_concerns,
+        )
+        prior_activation = (
+            capability_request_summary.get("source_current_input", {}).get("agent_skill_activation")
+            if isinstance(capability_request_summary, dict)
+            and isinstance(capability_request_summary.get("source_current_input"), dict)
+            else None
+        )
+        origin_source_kind = origin_source_kind_from_capability_request(capability_request_summary)
+        if self._should_compare_self_activity_separately(
+            trigger_kind=trigger_kind,
+            workspace_context=workspace_context,
+            initiative_context=initiative_context,
+        ):
+            isolated_input = self._self_activity_current_input(current_input, workspace_context)
+            isolated_recall = self._build_pipeline_recall_inputs(
+                state=state,
+                started_at=started_at,
+                input_text=isolated_input.text,
+                current_input=isolated_input,
+                recent_turns=[],
+                augmented_query_text=isolated_input.text,
+                visual_observation_context=None,
+                activity_context=None,
+                model_config=model_config,
+                persona_context=self._build_selected_persona_context(
+                    state=state,
+                    role="input_interpretation",
+                ),
+                client_context={},
+                cycle_label=f"{cycle_label} self_activity",
+            )
+            isolated_skills = self._build_agent_skill_context(
+                model_config=model_config,
+                current_input=isolated_input,
+                trigger_kind=trigger_kind,
+                capability_decision_view=self._self_activity_capability_view(capability_decision_view),
+                recent_turns=[],
+                work_log=[],
+                orientation_context=orientation_context,
+                prior_activation=prior_activation,
+                origin_source_kind=origin_source_kind,
+            )
+            return {
+                "agent_skill_context": isolated_skills,
+                "self_activity_current_input": isolated_input,
+                "self_activity_recall_hint": isolated_recall["recall_hint"],
+                "self_activity_recall_pack": isolated_recall["recall_pack"],
+                "self_activity_agent_skill_context": isolated_skills,
+            }
+        agent_skill_context = self._build_agent_skill_context(
+            model_config=model_config,
+            current_input=current_input,
+            trigger_kind=trigger_kind,
+            capability_decision_view=capability_decision_view,
+            recent_turns=recent_turns,
+            work_log=self._orientation_work_log(
+                ongoing_action_summary=ongoing_action_summary,
+                observation_summary=observation_summary,
+            ),
+            orientation_context=orientation_context,
+            prior_activation=prior_activation,
+            origin_source_kind=origin_source_kind,
+        )
+        return {
+            "agent_skill_context": agent_skill_context,
+            "self_activity_current_input": None,
+            "self_activity_recall_hint": None,
+            "self_activity_recall_pack": None,
+            "self_activity_agent_skill_context": None,
+        }
+
     def _run_input_pipeline(
         self,
         *,
@@ -220,6 +312,10 @@ class ServiceInputPipelineMixin:
             workspace_context=pipeline_contexts["workspace_context"],
             recall_hint=recall_hint,
             recall_pack=recall_pack,
+            self_activity_current_input=pipeline_contexts.get("self_activity_current_input"),
+            self_activity_recall_hint=pipeline_contexts.get("self_activity_recall_hint"),
+            self_activity_recall_pack=pipeline_contexts.get("self_activity_recall_pack"),
+            self_activity_agent_skill_context=pipeline_contexts.get("self_activity_agent_skill_context"),
             visual_observation_context=visual_observation_context,
             reference_context=reference_context,
             model_config=selected_preset,
@@ -306,6 +402,10 @@ class ServiceInputPipelineMixin:
                 workspace_context=pipeline_contexts["workspace_context"],
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
+                self_activity_current_input=pipeline_contexts.get("self_activity_current_input"),
+                self_activity_recall_hint=pipeline_contexts.get("self_activity_recall_hint"),
+                self_activity_recall_pack=pipeline_contexts.get("self_activity_recall_pack"),
+                self_activity_agent_skill_context=pipeline_contexts.get("self_activity_agent_skill_context"),
                 visual_observation_context=visual_observation_context,
                 reference_context=reference_context,
                 model_config=selected_preset,
@@ -842,31 +942,6 @@ class ServiceInputPipelineMixin:
             state=state,
             current_time=started_at,
         )
-        agent_skill_orientation_context = self._build_agent_skill_orientation_context(
-            trigger_kind=trigger_kind,
-            due_standing_concerns=due_standing_concerns,
-        )
-        agent_skill_context = self._build_agent_skill_context(
-            model_config=model_config,
-            current_input=current_input,
-            trigger_kind=trigger_kind,
-            capability_decision_view=capability_decision_view,
-            recent_turns=recent_turns,
-            work_log=self._orientation_work_log(
-                ongoing_action_summary=ongoing_action_summary,
-                observation_summary=observation_summary,
-            ),
-            orientation_context=agent_skill_orientation_context,
-            prior_activation=(
-                capability_request_summary.get("source_current_input", {}).get("agent_skill_activation")
-                if isinstance(capability_request_summary, dict)
-                and isinstance(capability_request_summary.get("source_current_input"), dict)
-                else None
-            ),
-            origin_source_kind=origin_source_kind_from_capability_request(
-                capability_request_summary
-            ),
-        )
         activity_context, activity_trace = self._refresh_activity_context(
             state=state,
             started_at=started_at,
@@ -962,6 +1037,22 @@ class ServiceInputPipelineMixin:
             default_mode_context=default_mode_context,
             affect_context=affect_context,
         )
+        skill_materials = self._build_pipeline_skill_and_self_activity_materials(
+            state=state,
+            started_at=started_at,
+            current_input=current_input,
+            recent_turns=recent_turns,
+            trigger_kind=trigger_kind,
+            observation_summary=observation_summary,
+            capability_request_summary=capability_request_summary,
+            due_standing_concerns=due_standing_concerns,
+            ongoing_action_summary=ongoing_action_summary,
+            capability_decision_view=capability_decision_view,
+            initiative_context=initiative_context,
+            workspace_context=workspace_context,
+            model_config=model_config,
+            cycle_label=cycle_label,
+        )
         return {
             "time_context": time_context,
             "affect_context": affect_context,
@@ -973,7 +1064,11 @@ class ServiceInputPipelineMixin:
             "ongoing_action_summary": ongoing_action_summary,
             "autonomous_run_summaries": autonomous_run_summaries,
             "capability_decision_view": capability_decision_view,
-            "agent_skill_context": agent_skill_context,
+            "agent_skill_context": skill_materials["agent_skill_context"],
+            "self_activity_current_input": skill_materials["self_activity_current_input"],
+            "self_activity_recall_hint": skill_materials["self_activity_recall_hint"],
+            "self_activity_recall_pack": skill_materials["self_activity_recall_pack"],
+            "self_activity_agent_skill_context": skill_materials["self_activity_agent_skill_context"],
             "initiative_context": initiative_context,
             "capability_result_context": capability_result_context,
             "self_state_context": self_state_context,
@@ -2168,6 +2263,10 @@ class ServiceInputPipelineMixin:
         persona_context: Any,
         cycle_label: str,
         pre_send_check_feedback: str | None = None,
+        self_activity_current_input: CurrentInput | None = None,
+        self_activity_recall_hint: dict[str, Any] | None = None,
+        self_activity_recall_pack: dict[str, Any] | None = None,
+        self_activity_agent_skill_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         # decision生成
         if self._should_compare_self_activity_separately(
@@ -2200,6 +2299,10 @@ class ServiceInputPipelineMixin:
                 workspace_context=workspace_context,
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
+                self_activity_current_input=self_activity_current_input,
+                self_activity_recall_hint=self_activity_recall_hint,
+                self_activity_recall_pack=self_activity_recall_pack,
+                self_activity_agent_skill_context=self_activity_agent_skill_context,
                 reference_context=reference_context,
                 model_config=model_config,
                 persona_context=persona_context,
@@ -2286,7 +2389,14 @@ class ServiceInputPipelineMixin:
         ongoing_action_transition_summary: dict[str, Any] | None = None
         autonomous_run_summary: dict[str, Any] | None = None
         autonomous_run_step_result: dict[str, Any] | None = None
-        source_current_input = current_input.to_prompt_payload()
+        separated = self._decision_is_separated(decision)
+        if separated:
+            isolated_input = self._self_activity_current_input(current_input, workspace_context)
+            source_current_input = isolated_input.to_prompt_payload()
+            speech_agent_skill_context = None
+        else:
+            source_current_input = current_input.to_prompt_payload()
+            speech_agent_skill_context = agent_skill_context
         agent_skill_activation = self._agent_skill_activation_summary(agent_skill_context)
         if agent_skill_activation is not None:
             source_current_input["agent_skill_activation"] = agent_skill_activation
@@ -2383,7 +2493,7 @@ class ServiceInputPipelineMixin:
                 activity_context=activity_context,
                 ongoing_action_summary=ongoing_action_summary,
                 initiative_context=initiative_context,
-                agent_skill_context=agent_skill_context,
+                agent_skill_context=speech_agent_skill_context,
                 visual_observation_context=visual_observation_context,
                 self_state_context=self_state_context,
                 people_context=people_context,

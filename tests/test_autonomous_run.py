@@ -834,6 +834,51 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 ("active", "2026-06-20T12:06:00+09:00", None),
             )
 
+    def test_self_initiated_step_drops_visual_context(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
+            run["origin_kind"] = "background_thinking"
+            run["source_current_input"] = {
+                "sender_kind": "system",
+                "sender_ref": None,
+                "source_kind": "background_thinking",
+                "response_target_refs": [],
+                "text": "自己評価。しばらく関わっていない気にかけていることがある。",
+            }
+            service._list_current_world_states = Mock(
+                return_value=[
+                    {"state_type": "visual_context", "summary_text": "リズムゲームのS評価"},
+                    {"state_type": "external_service", "summary_text": "ELYTHの通知は空"},
+                ]
+            )
+            service._summarize_foreground_world_states = Mock(
+                side_effect=lambda states, current_time: states
+            )
+            service._build_capability_decision_view = Mock(return_value=[])
+            service._build_agent_skill_context = Mock(return_value=None)
+            service._build_time_context = Mock(return_value={})
+            service._load_recent_turns = Mock(return_value=[])
+            service._autonomous_run_activity_context = Mock(return_value=None)
+            service._summarize_ongoing_action = Mock(return_value=None)
+            service._current_ongoing_action = Mock(return_value=None)
+            service._build_people_context = Mock(return_value=[])
+            service._autonomous_run_prompt_summary = Mock(return_value={"objective_summary": "向きへ関わる。"})
+
+            context = service._build_autonomous_step_context(
+                state=state,
+                run=run,
+                current_time="2026-08-16T19:33:00+09:00",
+                source_current_input=run["source_current_input"],
+                last_result_context=None,
+            )
+
+            self.assertEqual(
+                context.foreground_world_state,
+                [{"state_type": "external_service", "summary_text": "ELYTHの通知は空"}],
+            )
+
     def test_people_context_includes_observed_mcp_persons(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))

@@ -730,8 +730,6 @@ class ServiceSpontaneousWakeMixin:
     ) -> list[str]:
         # 項目
         source = self._client_context_text(client_context.get("source"), limit=48)
-        active_app = self._client_context_text(client_context.get("active_app"), limit=80)
-        window_title = self._client_context_text(client_context.get("window_title"), limit=120)
         locale = self._client_context_text(client_context.get("locale"), limit=32)
         parts: list[str] = []
 
@@ -741,38 +739,15 @@ class ServiceSpontaneousWakeMixin:
                 parts.append("入力源は定期思考スケジューラ。")
             else:
                 parts.append(f"入力源は {source}。")
-        wake_observation_summary = self._client_context_text(
-            client_context.get("wake_observation_summary"),
-            limit=360,
-        )
-        if isinstance(wake_observation_summary, str):
-            parts.append(f"定期観測では、{wake_observation_summary}")
         wake_reference = client_context.get("wake_reference")
         if isinstance(wake_reference, dict):
             label = self._client_context_text(wake_reference.get("label"), limit=120)
             content_kind = self._client_context_text(wake_reference.get("content_kind"), limit=32)
             media_type = self._client_context_text(wake_reference.get("media_type"), limit=80)
-            reason_summary = self._client_context_text(wake_reference.get("reason_summary"), limit=180)
             if label is not None and content_kind is not None:
                 parts.append(f"wake 参照は {label}。content_kind={content_kind}。")
             if media_type is not None:
                 parts.append(f"wake 参照 media_type={media_type}。")
-            if reason_summary is not None:
-                parts.append(f"wake 参照理由は {reason_summary}")
-        visual_signals = self._compact_visual_observation_signals(
-            client_context.get("visual_observation_signals")
-        )
-        for visual_signal in visual_signals[:3]:
-            change_state = visual_signal.get("change_state")
-            source_kind = visual_signal.get("source_kind")
-            source_label = visual_signal.get("source_label")
-            reason_summary = visual_signal.get("reason_summary")
-            if isinstance(change_state, str):
-                source_part = source_label if isinstance(source_label, str) else source_kind
-                source_text = f"{source_part}の" if isinstance(source_part, str) else ""
-                parts.append(f"{source_text}視覚観測シグナルは change_state={change_state}。")
-            if isinstance(reason_summary, str):
-                parts.append(f"視覚観測理由は {reason_summary}")
         initiative_entry_check = client_context.get("initiative_entry_check")
         if isinstance(initiative_entry_check, dict):
             entry_kind = self._client_context_text(initiative_entry_check.get("entry_kind"), limit=24)
@@ -781,12 +756,6 @@ class ServiceSpontaneousWakeMixin:
             if entry_kind is not None and reason_summary is not None:
                 basis_text = f" basis={entry_basis}。" if entry_basis is not None else "。"
                 parts.append(f"自律入口判定は {entry_kind}{basis_text}理由は {reason_summary}")
-
-        # 前景
-        if isinstance(active_app, str):
-            parts.append(f"前景アプリは {active_app}。")
-        if isinstance(window_title, str):
-            parts.append(f"ウィンドウタイトルは {window_title}。")
 
         # ロケール
         if isinstance(locale, str):
@@ -797,9 +766,6 @@ class ServiceSpontaneousWakeMixin:
             image_count = client_context.get("image_count")
             if isinstance(image_count, int) and image_count > 0:
                 parts.append(f"キャプチャ画像を {image_count} 件受け取った。")
-            image_summary_text = self._client_context_text(client_context.get("image_summary_text"), limit=160)
-            if isinstance(image_summary_text, str):
-                parts.append(f"画像観測では、{image_summary_text}")
 
         # 結果
         return parts

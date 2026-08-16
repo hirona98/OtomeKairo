@@ -1015,6 +1015,308 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertEqual(composed["separated_comparisons"]["self_activity"]["kind"], "autonomous_run")
         self.assertEqual(composed["separated_comparisons"]["outward_speech"]["kind"], "speech")
 
+    def test_self_activity_uses_isolated_recall_not_cycle_recall(self) -> None:
+        service = DummyInputService()
+        current_input = CurrentInput(
+            sender_kind="system",
+            sender_ref=None,
+            source_kind="background_thinking",
+            response_target_refs=(),
+            interaction_context=None,
+            text="定期思考。画面ではリズムゲームのS評価が見えている。",
+        )
+        context = service._build_self_activity_decision_context(
+            current_input=current_input,
+            trigger_kind="background_thinking",
+            recent_turns=[],
+            time_context={},
+            affect_context={},
+            drive_state_summary=None,
+            foreground_world_state=[{"state_type": "visual_context", "summary_text": "S評価"}],
+            activity_context=None,
+            ongoing_action_summary=None,
+            autonomous_run_summaries=None,
+            capability_decision_view=None,
+            agent_skill_context={"skills": ["cycle"]},
+            self_activity_agent_skill_context={"skills": ["isolated"]},
+            initiative_context=None,
+            visual_observation_context=None,
+            self_state_context=None,
+            people_context=[],
+            relationship_context=None,
+            prediction_error_context=None,
+            default_mode_context=None,
+            workspace_context={
+                "workspace_candidates": [
+                    {
+                        "factor_ref": "standing_concern:elyth",
+                        "kind": "standing_concern",
+                    }
+                ]
+            },
+            recall_hint={"primary_recall_focus": "state"},
+            recall_pack={"visual_observations": [{"summary_text": "S評価"}]},
+            self_activity_recall_hint={"primary_recall_focus": "topic"},
+            self_activity_recall_pack={"event_evidence": [{"summary_text": "向き側の記憶"}]},
+            reference_context=None,
+            pre_send_check_feedback=None,
+        )
+
+        self.assertEqual(context.current_input.text, SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT)
+        self.assertEqual(context.recall_hint["primary_recall_focus"], "topic")
+        self.assertEqual(context.recall_pack["event_evidence"][0]["summary_text"], "向き側の記憶")
+        self.assertNotIn("visual_observations", context.recall_pack)
+        self.assertEqual(context.agent_skill_context, {"skills": ["isolated"]})
+        self.assertIsNone(context.foreground_world_state)
+        self.assertIsNone(context.visual_observation_context)
+
+    def test_outward_speech_context_drops_agent_skills(self) -> None:
+        service = DummyInputService()
+        current_input = CurrentInput(
+            sender_kind="system",
+            sender_ref=None,
+            source_kind="background_thinking",
+            response_target_refs=(),
+            interaction_context=None,
+            text="定期思考。",
+        )
+        context = service._build_outward_speech_decision_context(
+            current_input=current_input,
+            trigger_kind="background_thinking",
+            recent_turns=[],
+            time_context={},
+            affect_context={},
+            drive_state_summary=None,
+            foreground_world_state=None,
+            activity_context=None,
+            ongoing_action_summary=None,
+            autonomous_run_summaries=None,
+            capability_decision_view=None,
+            agent_skill_context={"skills": ["elyth-post"]},
+            initiative_context=None,
+            visual_observation_context=None,
+            self_state_context=None,
+            people_context=[],
+            relationship_context=None,
+            prediction_error_context=None,
+            default_mode_context=None,
+            workspace_context={"workspace_candidates": []},
+            recall_hint={},
+            recall_pack={},
+            reference_context=None,
+            pre_send_check_feedback=None,
+        )
+
+        self.assertIsNone(context.agent_skill_context)
+
+    def test_wake_input_text_omits_observation_summaries(self) -> None:
+        service = DummyInputService()
+        text = service._build_wake_input_text(
+            state={
+                "personas": {"p": {"initiative_baseline": "medium"}},
+                "selected_persona_id": "p",
+            },
+            client_context={
+                "source": "background_thinking_scheduler",
+                "wake_observation_summary": "リズムゲームでS評価を獲得した。",
+                "visual_observation_signals": [
+                    {
+                        "change_state": "first_seen",
+                        "source_label": "desktop",
+                        "reason_summary": "リザルト画面が見えた。",
+                    }
+                ],
+                "active_app": "KAMITSUBAKI CITY ENSEMBLE",
+                "window_title": "月光",
+            },
+            selected_candidate=None,
+        )
+
+        self.assertIn("定期思考。", text)
+        self.assertIn("入力源は定期思考スケジューラ。", text)
+        self.assertNotIn("S評価", text)
+        self.assertNotIn("リザルト画面", text)
+        self.assertNotIn("KAMITSUBAKI", text)
+        self.assertNotIn("月光", text)
+        self.assertNotIn("定期観測では", text)
+        self.assertNotIn("視覚観測", text)
+
+    def test_split_skill_selection_uses_isolated_input(self) -> None:
+        class RecordingService(DummyInputService):
+            def __init__(self) -> None:
+                super().__init__()
+                self.recall_calls: list[dict] = []
+                self.skill_calls: list[dict] = []
+
+            def _build_pipeline_recall_inputs(self, **kwargs):
+                self.recall_calls.append(kwargs)
+                return {
+                    "recall_hint": {"primary_recall_focus": "topic"},
+                    "recall_pack": {"isolated": True},
+                }
+
+            def _build_agent_skill_context(self, **kwargs):
+                self.skill_calls.append(kwargs)
+                return {"skills": ["isolated"]}
+
+            def _build_selected_persona_context(self, **kwargs):
+                _ = kwargs
+                return None
+
+        service = RecordingService()
+        current_input = CurrentInput(
+            sender_kind="system",
+            sender_ref=None,
+            source_kind="background_thinking",
+            response_target_refs=(),
+            interaction_context=None,
+            text="定期思考。画面ではリズムゲームのS評価が見えている。",
+        )
+        materials = service._build_pipeline_skill_and_self_activity_materials(
+            state={"model_presets": {}, "selected_model_preset_id": "m", "personas": {}, "selected_persona_id": "p"},
+            started_at="2026-08-16T19:33:00+09:00",
+            current_input=current_input,
+            recent_turns=[{"role": "user", "text": "よろしく"}],
+            trigger_kind="background_thinking",
+            observation_summary={"capability_id": "vision.capture", "summary_text": "S評価"},
+            capability_request_summary=None,
+            due_standing_concerns=[
+                {
+                    "concern_id": "elyth",
+                    "enabled": True,
+                    "min_interval_seconds": 3600,
+                    "concern_summary": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+                }
+            ],
+            ongoing_action_summary=None,
+            capability_decision_view=[{"id": "mcp.call_tool"}, {"id": "vision.capture"}],
+            initiative_context=None,
+            workspace_context={
+                "workspace_candidates": [
+                    {
+                        "factor_ref": "standing_concern:elyth",
+                        "kind": "standing_concern",
+                    }
+                ]
+            },
+            model_config={},
+            cycle_label="cycle:test",
+        )
+
+        self.assertEqual(len(service.recall_calls), 1)
+        self.assertEqual(service.recall_calls[0]["current_input"].text, SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT)
+        self.assertIsNone(service.recall_calls[0]["visual_observation_context"])
+        self.assertEqual(service.recall_calls[0]["recent_turns"], [])
+        self.assertEqual(len(service.skill_calls), 1)
+        self.assertEqual(service.skill_calls[0]["current_input"].text, SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT)
+        self.assertEqual(service.skill_calls[0]["recent_turns"], [])
+        self.assertEqual(service.skill_calls[0]["work_log"], [])
+        self.assertEqual(
+            [item["id"] for item in service.skill_calls[0]["capability_decision_view"]],
+            ["mcp.call_tool"],
+        )
+        self.assertEqual(materials["self_activity_recall_pack"], {"isolated": True})
+        self.assertEqual(materials["agent_skill_context"], {"skills": ["isolated"]})
+
+    def test_separated_output_starts_run_from_isolated_current_input(self) -> None:
+        class OutputService(DummyInputService):
+            def __init__(self) -> None:
+                super().__init__()
+                self.started: list[dict] = []
+
+            def _start_autonomous_run_from_decision(self, **kwargs):
+                self.started.append(kwargs)
+                return {
+                    "autonomous_run": {"run_id": "autonomous_run:test"},
+                    "step_result": {},
+                }
+
+            def _now_iso(self) -> str:
+                return "2026-08-16T19:33:00+09:00"
+
+            def _autonomous_run_public_summary(self, run, current_time):
+                _ = current_time
+                return run
+
+            def _agent_skill_activation_summary(self, context):
+                _ = context
+                return None
+
+        service = OutputService()
+        current_input = CurrentInput(
+            sender_kind="system",
+            sender_ref=None,
+            source_kind="background_thinking",
+            response_target_refs=(),
+            interaction_context=None,
+            text="定期思考。画面ではリズムゲームのS評価が見えている。",
+        )
+        decision = {
+            "reason_summary": "外向き伝達: 見送る。 自身の活動: 関わる。",
+            "requires_confirmation": False,
+            "target_stances": [],
+            "separated_comparisons": {
+                "self_activity": {
+                    "kind": "autonomous_run",
+                    "autonomous_run": {
+                        "objective_summary": "向きへ関わる。",
+                        "initial_step_summary": "最初の一手。",
+                        "coordination": {
+                            "mode": "create_new",
+                            "target_run_ids": [],
+                            "reason_summary": "新しい目的。",
+                        },
+                    },
+                },
+                "outward_speech": {
+                    "kind": "noop",
+                    "reason_summary": "見送る。",
+                },
+            },
+        }
+        service._run_pipeline_output(
+            state={"selected_memory_set_id": "memory:test"},
+            cycle_id="cycle:test",
+            input_text=current_input.text,
+            current_input=current_input,
+            recent_turns=[],
+            time_context={},
+            affect_context={},
+            drive_state_summary=None,
+            foreground_world_state=None,
+            activity_context=None,
+            ongoing_action_summary=None,
+            initiative_context=None,
+            agent_skill_context=None,
+            self_state_context=None,
+            people_context=[],
+            relationship_context=None,
+            prediction_error_context=None,
+            workspace_context={
+                "workspace_candidates": [
+                    {
+                        "factor_ref": "standing_concern:elyth",
+                        "kind": "standing_concern",
+                    }
+                ]
+            },
+            visual_observation_context=None,
+            reference_context=None,
+            recall_hint={},
+            recall_pack={},
+            model_config={},
+            persona_context=None,
+            decision=decision,
+            assistant_message_target_client_id=None,
+            cycle_label="cycle:test",
+        )
+
+        self.assertEqual(len(service.started), 1)
+        source = service.started[0]["source_current_input"]
+        self.assertEqual(source["text"], SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT)
+        self.assertEqual(source["response_target_refs"], [])
+        self.assertNotIn("S評価", source["text"])
+
     def test_pending_intent_persists_from_self_activity_when_outward_is_speech(self) -> None:
         service = ServiceSpontaneousPendingIntentMixin()
         summary = service._pending_intent_trace_summary(

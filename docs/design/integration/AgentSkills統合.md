@@ -31,6 +31,8 @@ skill の適用可否は固定文字列や keyword 表では決めない。通�
 
 `orientation_context.standing_concerns` は実行指示ではなく、しばらく関わっていない気にかけていることである。current input はこの cycle の向きの本体のままとし、関心があることだけで skill を必須にしない。関心の向き全体に合う workflow があるときは、観測の一手だけに縮めずその workflow も比較する。意味境界は [気にかけていること](../runtime/気にかけていること.md) を正とする。
 
+比較を分けた `wake / background_thinking` では、自身の活動の Skill 選択は隔離済み current input と `orientation_context` で行う。人物側の視覚観測、直近会話、観測 work_log は渡さない。外向き比較には Agent Skill context を渡さない。比較の材料境界は [../runtime/判断と行動.md](../runtime/判断と行動.md) を正とする。
+
 選択は次の順で行う。
 
 1. 全 skill の `name / description / source_id / digest` と、その catalog から作った `allowed_skill_ids` から必要な skill を選ぶ。capability catalog は必要性の判断材料とし、capability id を skill id として返さない
