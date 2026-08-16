@@ -1,7 +1,7 @@
 import unittest
 from copy import deepcopy
 
-from otomekairo.defaults import build_default_state
+from otomekairo.defaults import DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY, build_default_state
 from otomekairo.service.common import ServiceError
 from otomekairo.service.config.mixin import ServiceConfigMixin
 
@@ -103,7 +103,7 @@ class CurrentConfigApiTests(unittest.TestCase):
                     "concern_id": "elyth",
                     "enabled": False,
                     "min_interval_seconds": 3600,
-                    "concern_summary": "ELYTH。見て、反応し、言いたいことがあれば自分から書く。届いている反応やリプライも気にかける。",
+                    "concern_summary": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
                 }
             ],
         )

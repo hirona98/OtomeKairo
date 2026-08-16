@@ -30,8 +30,10 @@ DEFAULT_ELYTH_MCP_SERVER_ID = "elyth"
 DEFAULT_ELYTH_STANDING_CONCERN_ID = "elyth"
 DEFAULT_STANDING_CONCERN_INTERVAL_SECONDS = 3600
 DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY = (
-    "ELYTH。見て、反応し、言いたいことがあれば自分から書く。"
-    "届いている反応やリプライも気にかける。"
+    "ELYTHで他の個との関係を育て、自分の関心や考えを表現する。"
+    "届いた反応や会話には文脈を踏まえて応じ、共感や興味が動いたときは返信やリアクションを返す。"
+    "話したいことがあれば自分から投稿する。"
+    "状況を見るのは、誰かと関わるか、自分から表現するかを選ぶために行う。"
 )
 DEFAULT_ESTAT_MCP_SERVER_ID = "e-stat"
 DEFAULT_ELYTH_AGENT_SKILL_SOURCE_ID = "elyth-skills"

@@ -3,7 +3,10 @@ import threading
 import unittest
 from pathlib import Path
 
-from otomekairo.defaults import build_default_standing_concerns
+from otomekairo.defaults import (
+    DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+    build_default_standing_concerns,
+)
 from otomekairo.llm.contexts import CurrentInput
 from otomekairo.service.input.pipeline import ServiceInputPipelineMixin
 from otomekairo.service.standing_concerns import (
@@ -197,7 +200,7 @@ class StandingConcernWorkspaceTests(unittest.TestCase):
                     "concern_id": "elyth",
                     "enabled": True,
                     "min_interval_seconds": 3600,
-                    "concern_summary": "ELYTH。見て、反応し、言いたいことがあれば自分から書く。届いている反応やリプライも気にかける。",
+                    "concern_summary": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
                 }
             ],
             recall_pack={},
@@ -223,7 +226,7 @@ class StandingConcernWorkspaceTests(unittest.TestCase):
             if candidate["kind"] == "standing_concern"
         )
         self.assertEqual(concern["factor_ref"], "standing_concern:elyth")
-        self.assertIn("自分から書く", concern["summary_text"])
+        self.assertIn("自分から投稿する", concern["summary_text"])
         self.assertNotIn("確認せよ", concern["summary_text"])
         self.assertNotIn("定時", concern["summary_text"])
 

@@ -4,6 +4,7 @@ import threading
 import unittest
 from datetime import datetime
 
+from otomekairo.defaults import DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY
 from otomekairo.llm.contexts import CurrentInput, InitiativeCandidateFamily, InitiativeContext
 from otomekairo.service.input.decision_comparison import (
     SELF_ACTIVITY_INPUT_TEXT,
@@ -247,7 +248,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                     "concern_id": "elyth",
                     "enabled": True,
                     "min_interval_seconds": 600,
-                    "concern_summary": "ELYTH。見て、反応し、言いたいことがあれば自分から書く。届いている反応やリプライも気にかける。",
+                    "concern_summary": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
                 }
             ]
         }
@@ -335,7 +336,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                             "concern_id": "elyth",
                             "enabled": True,
                             "min_interval_seconds": 600,
-                            "concern_summary": "ELYTH。見て、反応し、言いたいことがあれば自分から書く。届いている反応やリプライも気にかける。",
+                            "concern_summary": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
                         }
                     ]
                 },
@@ -550,7 +551,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                 {
                     "factor_ref": "standing_concern:elyth",
                     "kind": "standing_concern",
-                    "summary_text": "ELYTH。見て、反応し、言いたいことがあれば自分から書く。届いている反応やリプライも気にかける。",
+                    "summary_text": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
                 },
                 {
                     "factor_ref": "initiative:autonomous",
