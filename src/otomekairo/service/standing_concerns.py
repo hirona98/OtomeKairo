@@ -97,6 +97,31 @@ def standing_concern_factor_ref(concern_id: str) -> str:
     return f"standing_concern:{concern_id}"
 
 
+def build_standing_concern_orientation_context(
+    concerns: list[dict[str, Any]] | None,
+) -> dict[str, list[dict[str, str]]]:
+    entries: list[dict[str, str]] = []
+    for concern in concerns or []:
+        if not isinstance(concern, dict):
+            continue
+        concern_id = concern.get("concern_id")
+        summary_text = concern.get("concern_summary")
+        if (
+            not isinstance(concern_id, str)
+            or not concern_id.strip()
+            or not isinstance(summary_text, str)
+            or not summary_text.strip()
+        ):
+            continue
+        entries.append(
+            {
+                "factor_ref": standing_concern_factor_ref(concern_id.strip()),
+                "summary_text": summary_text.strip(),
+            }
+        )
+    return {"standing_concerns": entries}
+
+
 def selected_standing_concern_ids(
     *,
     decision: dict[str, Any] | None,

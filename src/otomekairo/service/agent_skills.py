@@ -109,6 +109,7 @@ class ServiceAgentSkillsMixin:
         origin_source_kind: str | None = None,
         recent_turns: list[dict[str, Any]] | None = None,
         work_log: list[dict[str, Any]] | None = None,
+        orientation_context: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         with self._runtime_state_lock:
             registry = self._agent_skill_registry
@@ -129,6 +130,7 @@ class ServiceAgentSkillsMixin:
                 "trigger_kind": trigger_kind,
                 "recent_turns": recent_turns or [],
                 "work_log": work_log or [],
+                "orientation_context": orientation_context or {"standing_concerns": []},
                 "run": run,
                 "prior_activation": prior_activation,
                 "host_authorization": host_authorization,
@@ -190,6 +192,7 @@ class ServiceAgentSkillsMixin:
                 selection_context={
                     "current_input": current_input.to_prompt_payload(),
                     "trigger_kind": trigger_kind,
+                    "orientation_context": orientation_context or {"standing_concerns": []},
                     "run": run,
                     "prior_activation": prior_activation,
                     "host_authorization": host_authorization,

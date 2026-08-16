@@ -26,8 +26,10 @@ server 起動時と設定全体置換時に immutable registry snapshot を作�
 
 ## LLM による選択と progressive disclosure
 
-skill の適用可否は固定文字列や keyword 表では決めない。通常判断と各 autonomous run step の前に、LLM が向きである current input、直近会話、作業記録、run 目的、capability decision view と `name / description` catalog を比較して必要な skill を選ぶ。
+skill の適用可否は固定文字列や keyword 表では決めない。通常判断と各 autonomous run step の前に、LLM が向きである current input、直近会話、作業記録、run 目的、capability decision view と `name / description` catalog を比較して必要な skill を選ぶ。`wake / background_thinking` の通常判断で due な気にかけていることがあるときは、`concern_summary` そのものを `orientation_context.standing_concerns[].summary_text` として追加の向きの材料にする。`factor_ref` と `summary_text` 以外の workspace 判断盤面は Skill 選択へ渡さない。
 人物発話の向きでは、直近会話と作業記録を見ずに skill を選ばない。向きと到着の分離は [../llm/プロンプト文脈分離方針.md](../llm/プロンプト文脈分離方針.md) を正とする。
+
+`orientation_context.standing_concerns` は実行指示ではなく、しばらく関わっていない気にかけていることである。current input はこの cycle の向きの本体のままとし、関心があることだけで skill を必須にしない。関心の向き全体に合う workflow があるときは、観測の一手だけに縮めずその workflow も比較する。意味境界は [気にかけていること](../runtime/気にかけていること.md) を正とする。
 
 選択は次の順で行う。
 

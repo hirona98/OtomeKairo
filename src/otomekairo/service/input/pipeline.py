@@ -12,10 +12,16 @@ from otomekairo.llm.contexts import (
     build_persona_context_summary,
 )
 from otomekairo.interaction import InteractionContext
-from otomekairo.service.agent_skills import origin_source_kind_from_capability_request
+from otomekairo.service.agent_skills import (
+    SELF_INITIATED_SOURCE_KINDS,
+    origin_source_kind_from_capability_request,
+)
 from otomekairo.service.capability import PreSendCheckWithheldError
 from otomekairo.service.common import debug_log
-from otomekairo.service.standing_concerns import standing_concern_factor_ref
+from otomekairo.service.standing_concerns import (
+    build_standing_concern_orientation_context,
+    standing_concern_factor_ref,
+)
 
 
 WORKSPACE_CANDIDATE_LIMIT = 56
@@ -78,6 +84,16 @@ PRE_SEND_CHECK_WITHHELD_NOTICE = (
 class ServiceInputPipelineMixin:
     def _mark_standing_concerns_attended(self, **_kwargs) -> list[str]:
         return []
+
+    def _build_agent_skill_orientation_context(
+        self,
+        *,
+        trigger_kind: str,
+        due_standing_concerns: list[dict[str, Any]],
+    ) -> dict[str, list[dict[str, str]]]:
+        if trigger_kind not in SELF_INITIATED_SOURCE_KINDS:
+            return {"standing_concerns": []}
+        return build_standing_concern_orientation_context(due_standing_concerns)
 
     def _run_input_pipeline(
         self,
@@ -822,6 +838,14 @@ class ServiceInputPipelineMixin:
             trigger_kind=trigger_kind,
             client_context=client_context,
         )
+        due_standing_concerns = self._due_standing_concerns(
+            state=state,
+            current_time=started_at,
+        )
+        agent_skill_orientation_context = self._build_agent_skill_orientation_context(
+            trigger_kind=trigger_kind,
+            due_standing_concerns=due_standing_concerns,
+        )
         agent_skill_context = self._build_agent_skill_context(
             model_config=model_config,
             current_input=current_input,
@@ -832,6 +856,7 @@ class ServiceInputPipelineMixin:
                 ongoing_action_summary=ongoing_action_summary,
                 observation_summary=observation_summary,
             ),
+            orientation_context=agent_skill_orientation_context,
             prior_activation=(
                 capability_request_summary.get("source_current_input", {}).get("agent_skill_activation")
                 if isinstance(capability_request_summary, dict)
@@ -920,10 +945,7 @@ class ServiceInputPipelineMixin:
         )
         workspace_context = self._build_workspace_context(
             current_input=current_input,
-            due_standing_concerns=self._due_standing_concerns(
-                state=state,
-                current_time=started_at,
-            ),
+            due_standing_concerns=due_standing_concerns,
             recall_pack=recall_pack,
             drive_state_summary=drive_state_summary,
             foreground_world_state=foreground_world_state,

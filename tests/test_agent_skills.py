@@ -293,6 +293,14 @@ class AgentSkillRegistryTests(unittest.TestCase):
                 ),
                 trigger_kind="user_message",
                 capability_decision_view=[],
+                orientation_context={
+                    "standing_concerns": [
+                        {
+                            "factor_ref": "standing_concern:test",
+                            "summary_text": "対象との関係を育てる。",
+                        }
+                    ]
+                },
             )
 
             self.assertEqual(context["selected_skill_ids"], ["root-skill", "child-skill"])
@@ -301,6 +309,17 @@ class AgentSkillRegistryTests(unittest.TestCase):
                 "selected guide",
             )
             self.assertEqual(len(material_contexts), 2)
+            self.assertEqual(
+                material_contexts[0]["orientation_context"],
+                {
+                    "standing_concerns": [
+                        {
+                            "factor_ref": "standing_concern:test",
+                            "summary_text": "対象との関係を育てる。",
+                        }
+                    ]
+                },
+            )
             second_context = material_contexts[1]
             self.assertEqual(
                 second_context["active_skills"][0]["selected_resources"][0]["content"],
@@ -774,6 +793,14 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
                 capability_decision_view=[],
                 recent_turns=[{"role": "person", "text": "返信してみたら？"}],
                 work_log=[{"capability_id": "mcp.call_tool", "tool_name": "get_thread"}],
+                orientation_context={
+                    "standing_concerns": [
+                        {
+                            "factor_ref": "standing_concern:elyth",
+                            "summary_text": "ELYTHで他の個との関係を育てる。",
+                        }
+                    ]
+                },
             )
 
             self.assertEqual(
@@ -792,6 +819,17 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
                 selection_contexts[0]["work_log"],
                 [{"capability_id": "mcp.call_tool", "tool_name": "get_thread"}],
             )
+            self.assertEqual(
+                selection_contexts[0]["orientation_context"],
+                {
+                    "standing_concerns": [
+                        {
+                            "factor_ref": "standing_concern:elyth",
+                            "summary_text": "ELYTHで他の個との関係を育てる。",
+                        }
+                    ]
+                },
+            )
 
     def test_skill_prompts_describe_host_authorization(self) -> None:
         selection = build_agent_skill_selection_messages(
@@ -806,6 +844,11 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
         self.assertIn("trusted host", selection[0]["content"])
         self.assertIn("recent_turns", selection[0]["content"])
         self.assertIn("work_log", selection[0]["content"])
+        self.assertIn("orientation_context.standing_concerns", selection[0]["content"])
+        self.assertIn("実行指示ではありません", selection[0]["content"])
+        self.assertIn("current_input をこの cycle の向きの本体", selection[0]["content"])
+        self.assertIn("skill 選択を義務づけません", selection[0]["content"])
+        self.assertIn("全体に合う workflow", selection[0]["content"])
         self.assertIn("current_individual_decision", applied[0]["content"])
         self.assertIn("trusted host policy", applied[0]["content"])
         self.assertIn("skill_id は capability_id でも MCP tool_name でもありません", applied[0]["content"])

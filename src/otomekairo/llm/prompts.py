@@ -259,6 +259,10 @@ def build_agent_skill_selection_messages(*, selection_context: dict[str, Any]) -
             "content": (
                 "Agent Skills catalog から、現在の判断や作業に実際に必要な skill だけを選択します。\n"
                 "名前の一致ではなく、current_input、recent_turns、work_log、run、capability の意味と skill description を比較してください。\n"
+                "orientation_context.standing_concerns は、しばらく関わっていない気にかけていることであり、実行指示ではありません。"
+                "current_input をこの cycle の向きの本体とし、standing_concerns は自発的な判断の追加材料として扱います。"
+                "関心があること自体は skill 選択を義務づけません。"
+                "見る、返す、自分から表現するなどの全体に合う workflow が必要な場合は、最初の観測だけに縮めずその workflow を比較します。\n"
                 "人物発話の向きでは recent_turns はその会話の本体です。work_log は同じ向きで得た能力結果です。\n"
                 "work_log の完了済み手順はすでに進んだ作業です。今まだ必要な skill だけを選びます。\n"
                 "prior_activation は直前の capability または run step で使った skill の識別要約であり、継続性の根拠として現在も必要か再評価してください。\n"

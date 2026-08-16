@@ -10,6 +10,7 @@ from otomekairo.defaults import (
 from otomekairo.llm.contexts import CurrentInput
 from otomekairo.service.input.pipeline import ServiceInputPipelineMixin
 from otomekairo.service.standing_concerns import (
+    build_standing_concern_orientation_context,
     extra_background_thinking_delay_seconds,
     list_due_standing_concerns,
     selected_standing_concern_ids,
@@ -19,6 +20,30 @@ from otomekairo.store.file_store import FileStore
 
 
 class StandingConcernLogicTests(unittest.TestCase):
+    def test_orientation_context_projects_only_factor_and_summary(self) -> None:
+        context = build_standing_concern_orientation_context(
+            [
+                {
+                    "concern_id": "elyth",
+                    "enabled": True,
+                    "min_interval_seconds": 3600,
+                    "concern_summary": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+                }
+            ]
+        )
+
+        self.assertEqual(
+            context,
+            {
+                "standing_concerns": [
+                    {
+                        "factor_ref": "standing_concern:elyth",
+                        "summary_text": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+                    }
+                ]
+            },
+        )
+
     def test_due_when_never_attended(self) -> None:
         self.assertTrue(
             standing_concern_is_due(
@@ -184,6 +209,32 @@ class StandingConcernLogicTests(unittest.TestCase):
 
 
 class StandingConcernWorkspaceTests(unittest.TestCase):
+    def test_skill_orientation_uses_due_concerns_only_for_self_initiated_cycles(self) -> None:
+        service = ServiceInputPipelineMixin()
+        due = [
+            {
+                "concern_id": "elyth",
+                "enabled": True,
+                "min_interval_seconds": 3600,
+                "concern_summary": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+            }
+        ]
+
+        self.assertEqual(
+            service._build_agent_skill_orientation_context(
+                trigger_kind="background_thinking",
+                due_standing_concerns=due,
+            )["standing_concerns"][0]["summary_text"],
+            DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+        )
+        self.assertEqual(
+            service._build_agent_skill_orientation_context(
+                trigger_kind="user_message",
+                due_standing_concerns=due,
+            ),
+            {"standing_concerns": []},
+        )
+
     def test_workspace_includes_due_standing_concern(self) -> None:
         service = ServiceInputPipelineMixin()
         payload = service._build_workspace_context(
