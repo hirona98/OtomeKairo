@@ -1615,7 +1615,10 @@ class AudioRuntime:
         stt_error: AmiVoiceError | None,
         identification: SpeakerIdentification,
     ) -> None:
-        if result_code == "speaker_unidentified":
+        if result_code in {
+            "speaker_unidentified",
+            "stt_configuration_error",
+        }:
             return
         queue_size = len(self._waiting)
         top1 = (
