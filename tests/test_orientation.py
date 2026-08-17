@@ -255,7 +255,10 @@ class OrientationTests(unittest.TestCase):
             capability_result_context=context,
         )
         self.assertTrue(any("elyth/create_post" in item for item in policies))
-        self.assertTrue(any("未完了の別手順か発話" in item for item in policies))
+        self.assertTrue(any("同じ tool を再実行しません" in item for item in policies))
+        self.assertTrue(any("autonomous_run" in item for item in policies))
+        self.assertIn("autonomous_run を始める", context["followup_policy_summary"])
+        self.assertIn("同じ作用を発話で先送りしない", context["followup_policy_summary"])
 
     def test_failed_mcp_tool_is_not_excluded_from_followup(self) -> None:
         interaction = _interaction()

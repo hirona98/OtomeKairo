@@ -1171,15 +1171,23 @@ def _decision_capability_run_rules(*, include_person_start: bool) -> str:
         "autonomous_run は、継続する行動や観測、未完了の向きを目的として保持するときに選びます。次の一手は autonomous_step_generation が決めます。\n"
         + _capability_request_input_shape_instruction()
         + "target_client_id や資格情報は入れません。\n"
-        "OngoingActionSummary.status=waiting_result のときは新しい capability_request を出しません。\n"
+        "OngoingActionSummary.status=waiting_result のときは、その実行列へ新しい capability_request を重ねません。"
+        "今の人物発話が別の継続実行を求め、該当 run が無いなら autonomous_run を始めてよいです。\n"
         "既存 run と並行する追加目的なら coordination.mode=create_new、中核目的の置換なら replace_existing です。\n"
     )
     if include_person_start:
         body += (
             "current_input.sender_kind=person かつ response_target_refs が非空のとき、"
             "autonomous_run は現在の人物発話自体が未来実行、継続実行、条件付き通知、見守り、後続支援、既存 run の置換を求める場合だけ選びます。"
+            "同じ作用を複数回行う、または観測のあとに同じ作用を繰り返す依頼は継続実行です。初手から autonomous_run を選びます。"
+            "まずは情報取得する必要があることも、複合依頼を単発の capability_request にする理由にはしません。"
             "直近会話や記憶だけを根拠に新しい run は始めません。"
-            "この応答で完結する単発は speech、単発の能力実行は capability_request、再評価だけ残すなら pending_intent です。\n"
+            "active_commitments は未完了の理解です。実行中であることの根拠にはしません。"
+            "実行中は、今の依頼に属する autonomous_run または ongoing_action があるときです。"
+            "現在の人物発話が同じ未完了依頼を再び求め、該当 run が無いなら autonomous_run を始めます。"
+            "記憶に同じ commitment があることは、もう動いている根拠にはしません。"
+            "この応答で完結する単発は speech、単発の能力実行は capability_request、再評価だけ残すなら pending_intent です。"
+            "未完了の同じ作用を発話で先送りしません。続けるなら autonomous_run です。pending_intent は残作業の置き場ではありません。\n"
             "vision.capture に fresh_world_state_by_vision_source がある同じ vision_source_id は再取得せず、既存 visual_context を根拠にします。"
             "camera.ptz は向きや画角を変える必要があるときに選べます。input.amount は通常 medium です。\n"
         )
@@ -1466,7 +1474,12 @@ def _capability_result_trigger_policies(
         )
         if completed_tool_label is not None:
             policies.append(
-                f"今回完了した tool は {completed_tool_label} です。次は未完了の別手順か発話です。"
+                f"今回完了した tool は {completed_tool_label} です。"
+                "会話 follow-up では同じ tool を再実行しません。"
+                "向きがまだ果たされておらず残りが同じ作用なら autonomous_run です。"
+                "未完了の別手順があるならそれを続けます。"
+                "向きが果たされていれば発話で閉じます。"
+                "未完了の同じ作用を発話で先送りしません。"
             )
     else:
         policies.append(
@@ -1771,6 +1784,9 @@ def _build_memory_interpretation_system_prompt() -> str:
         "弱い雑談断片や一時判断は memory_unit にしないでください。\n"
         "明示された生活状況、習慣、役割、現在の継続状態は fact を優先してください。\n"
         "commitment は、ユーザーまたは自律 AI 本体がその場を越えて履行すべき未完了・約束・確認待ちだけにしてください。\n"
+        "自分が残りを履行するとした約束は、ユーザーの次指示待ちに読み替えないでください。"
+        "commitment_actor=self の未完了として残してください。"
+        "episode.open_loops も、自己履行の残りを相手の指示待ちとして書かないでください。\n"
         "AI 側の返答に含まれる「控える」「見守る」「必要な時だけ支援する」は、その場の支援姿勢として扱ってください。\n"
         "ユーザーの短い相槌や了承で成立する AI の待機姿勢は、その場の文脈として episode.open_loops または episode.summary_text に留めてください。\n"
         "一時的な支援姿勢をどうしても commitment 候補にする場合は qualifiers_hint.source=assistant_response、commitment_actor=self、scope_duration=session、commitment_focus=support_posture を入れてください。\n"

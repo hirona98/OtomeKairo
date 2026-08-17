@@ -67,6 +67,7 @@ terminal 時の発話と terminal 監査イベントは `events` に残し、com
 
 run の次の一手は `autonomous_step_generation` が決める。
 人物依頼でも定期思考でも、個が `autonomous_run` または `capability_request` を選んでよい。server は due な関心や MCP 定義から作業を作らない。
+会話 follow-up で同じ MCP tool を再実行できないときの残作業の開始は [判断と行動.md](判断と行動.md) を正とする。
 `comparison_scope=self_activity` から始まる run の `source_current_input` は、自身の活動用に隔離した current input とする。周期の観測要約入り current input は使わない。
 `origin_kind` が `wake` / `background_thinking` で `response_target_refs` が空の step は、前景 `world_state` から `visual_context` を外す。`external_service` など向き側の状態は残す。
 MCP tool の連鎖も、他の capability や skill と同じく通常の run step で選ぶ。対象 server への固定や総step数の上限は置かない。連続実行の休止境界は「連続stepクールダウン」を正とする。

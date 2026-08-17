@@ -434,6 +434,49 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(transition["metadata"]["previous_duration_label"], "約19時間")
         self.assertIn("前活動の継続時間: 約19時間", transition["summary_text"])
 
+    def test_ongoing_action_candidate_keeps_goal_not_only_status(self) -> None:
+        service = ServiceInputPipelineMixin()
+        payload = service._build_workspace_context(
+            current_input=CurrentInput(
+                sender_kind="person",
+                sender_ref="person:web:abc",
+                source_kind="user_message",
+                response_target_refs=("person:web:abc",),
+                interaction_context=None,
+                text="ELYTHで10件くらいいいねしてみて",
+            ),
+            recall_pack={},
+            drive_state_summary=None,
+            foreground_world_state=None,
+            activity_context=None,
+            ongoing_action_summary={
+                "action_id": "ongoing_action:notify",
+                "goal_summary": "ELYTHの未読通知を確認する。",
+                "step_summary": "mcp.call_tool の結果を待機している。",
+                "status": "waiting_result",
+                "last_capability_id": "mcp.call_tool",
+            },
+            autonomous_run_summaries=None,
+            capability_decision_view=None,
+            initiative_context=None,
+            capability_result_context=None,
+            visual_observation_context=None,
+            self_state_context=None,
+            relationship_context=None,
+            prediction_error_context=None,
+            default_mode_context=None,
+        )
+
+        ongoing = next(
+            candidate
+            for candidate in payload["workspace_candidates"]
+            if candidate["factor_ref"] == "ongoing_action:current"
+        )
+        self.assertIn("ELYTHの未読通知を確認する。", ongoing["summary_text"])
+        self.assertIn("mcp.call_tool の結果を待機している。", ongoing["summary_text"])
+        self.assertEqual(ongoing["metadata"]["status"], "waiting_result")
+        self.assertEqual(ongoing["metadata"]["last_capability_id"], "mcp.call_tool")
+
     def test_default_mode_context_keeps_resurfacing_as_candidate(self) -> None:
         service = ServiceInputPipelineMixin()
         text = "まだ気になっている未完了"

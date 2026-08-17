@@ -1547,8 +1547,8 @@ class ServiceInputPipelineMixin:
             kind="ongoing_action",
             source="ongoing_action_summary",
             item=ongoing_action_summary,
-            summary_keys=("reason_summary", "current_step_summary", "summary_text", "status"),
-            metadata_keys=("action_id", "status", "capability_id"),
+            summary_keys=("goal_summary", "step_summary", "reason_summary", "current_step_summary", "summary_text", "status"),
+            metadata_keys=("action_id", "status", "capability_id", "last_capability_id"),
         )
         for index, item in enumerate(autonomous_run_summaries or []):
             if not isinstance(item, dict):

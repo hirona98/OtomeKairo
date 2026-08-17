@@ -943,7 +943,10 @@ class LLMClient:
                 "CapabilityResultContext の followup_constraints は "
                 f"今回完了した MCP tool {completed_server_id.strip()}/{completed_tool_name.strip()} "
                 "の再実行を許可しません。"
-                "speech / noop / pending_intent、または未完了の別 tool を選んでください。"
+                "同じ tool の会話 follow-up 再実行はできません。"
+                "残りが同じ作用なら autonomous_run、"
+                "未完了の別手順ならその tool、"
+                "向きが果たされていれば speech または noop を選んでください。"
             )
 
     def _capability_result_context_allows_same_vision_source_capture(

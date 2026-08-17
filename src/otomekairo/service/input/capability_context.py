@@ -400,7 +400,11 @@ class ServiceInputCapabilityContextMixin:
             if completed_label is not None:
                 summary += (
                     f"今回完了した tool は {completed_label} である。"
-                    "次は未完了の別手順か、人物への発話である。"
+                    "会話 follow-up では同じ tool を再実行しない。"
+                    "向きがまだ果たされておらず残りが同じ作用なら autonomous_run を始める。"
+                    "未完了の別手順があるなら、許可された能力を続ける。"
+                    "向きが果たされていれば、人物へ発話して向きを閉じる。"
+                    "未完了の同じ作用を発話で先送りしない。"
                 )
             return summary
         if source_capability_id == "camera.ptz" and "vision.capture" in allowed_capability_ids:

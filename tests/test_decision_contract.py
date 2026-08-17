@@ -881,6 +881,14 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("使わない排他キーもキーとして残し、値は null にします", system)
         self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です", system)
         self.assertIn("AffectContext の affect_states と recent_episode_affects は WorkspaceContext の affect 候補です。", system)
+        self.assertIn("同じ作用を複数回行う、または観測のあとに同じ作用を繰り返す依頼は継続実行です", system)
+        self.assertIn("複合依頼を単発の capability_request にする理由にはしません", system)
+        self.assertIn("未完了の同じ作用を発話で先送りしません", system)
+        self.assertIn("pending_intent は残作業の置き場ではありません", system)
+        self.assertIn("active_commitments は未完了の理解です", system)
+        self.assertIn("該当 run が無いなら autonomous_run を始めます", system)
+        self.assertIn("その実行列へ新しい capability_request を重ねません", system)
+        self.assertIn("別の継続実行を求め、該当 run が無いなら autonomous_run を始めてよい", system)
 
     def test_repair_prompt_follows_comparison_scope(self) -> None:
         self_repair = build_decision_repair_prompt("kind が不正です。", "self_activity")
@@ -1028,6 +1036,9 @@ class DecisionPromptScopeTests(unittest.TestCase):
 
         self.assertIn("elyth/create_post", str(raised.exception))
         self.assertIn("再実行を許可しません", str(raised.exception))
+        self.assertIn("autonomous_run", str(raised.exception))
+        self.assertIn("同じ作用なら autonomous_run", str(raised.exception))
+        self.assertNotIn("pending_intent", str(raised.exception))
 
     def test_completed_mcp_tool_followup_allows_different_tool(self) -> None:
         client = LLMClient()
