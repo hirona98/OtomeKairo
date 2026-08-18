@@ -103,6 +103,7 @@ OtomeKairo では、次の分離を基本形にする。
 
 - LLM の自由文をそのまま state 遷移へ使う
 - validator を置かずに structured output を信じる
+- structured 呼び出しを自由文 completion へ落とす
 - 失敗を fallback で隠す
 - 失敗を silent に正常系へ丸める
 - 安全境界や実行権限を LLM に持たせる
@@ -111,6 +112,7 @@ OtomeKairo では、次の分離を基本形にする。
 
 この文書は repo 全体の判断原則を定める。
 限定的な LLM 補助処理の共通契約は [LLM補助契約共通.md](LLM補助契約共通.md) を正とする。
+JSON を返す呼び出しの transport は [LLM構造化出力transport.md](LLM構造化出力transport.md) を正とする。
 
 個別機能の詳細は、各設計書で次を具体化する。
 

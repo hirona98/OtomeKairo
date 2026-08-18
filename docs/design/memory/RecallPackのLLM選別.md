@@ -222,6 +222,8 @@ LLM の出力は JSON object 1 個に固定する。
 - 各要素は `section_name` と `candidate_refs` を持つ
 - `section_name` は `self_model / person_model / relationship_model / active_topics / active_commitments / episodic_evidence` のいずれかで、重複しない
 - `candidate_refs` は source pack 内に存在する ref だけを使う
+- 採らない section は `section_selection` に載せない
+- `candidate_refs` は空配列にしない
 - `candidate_refs` は section をまたいで重複しない
 - candidate は元の所属 section から移動させない
 - `conflict_summaries` の `conflict_ref` も source pack 内に存在する ref だけを使う

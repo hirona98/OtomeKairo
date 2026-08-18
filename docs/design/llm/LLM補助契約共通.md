@@ -72,6 +72,8 @@ LLM 補助 role は schema 値に API 由来の `person_ref` を使い、内部�
 ## 出力契約共通ルール
 
 LLM の出力は、個別文書で定めた JSON object 1 個に固定する。
+structured 呼び出しが JSON object を要求する transport は [LLM構造化出力transport.md](LLM構造化出力transport.md) を正とする。
+意味契約の検証は今どおりコードの validator が行う。
 
 次を守る。
 

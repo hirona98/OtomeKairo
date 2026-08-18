@@ -35,6 +35,7 @@ def complete_text(
     *,
     model_config: dict,
     messages: list[dict[str, Any]],
+    response_format: dict[str, Any] | None = None,
 ) -> str:
     completion = _load_litellm_completion()
     request_kwargs: dict[str, Any] = {
@@ -48,16 +49,23 @@ def complete_text(
     api_key = _resolve_api_key(model_config)
     if api_key is not None:
         request_kwargs["api_key"] = api_key
+    extra_body: dict[str, Any] = {}
     reasoning_effort = _resolve_reasoning_effort(model_config)
     if reasoning_effort is not None:
         if _model_provider_name(model_config) == "openrouter":
-            request_kwargs["extra_body"] = {
-                "reasoning": {
-                    "effort": reasoning_effort,
-                }
+            extra_body["reasoning"] = {
+                "effort": reasoning_effort,
             }
         else:
             request_kwargs["reasoning_effort"] = reasoning_effort
+    if response_format is not None:
+        request_kwargs["response_format"] = response_format
+        if _model_provider_name(model_config) == "openrouter":
+            extra_body["provider"] = {
+                "require_parameters": True,
+            }
+    if extra_body:
+        request_kwargs["extra_body"] = extra_body
     max_output_tokens = _resolve_max_output_tokens(model_config)
     if max_output_tokens is not None:
         request_kwargs["max_tokens"] = max_output_tokens

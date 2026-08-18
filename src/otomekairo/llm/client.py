@@ -41,6 +41,26 @@ from otomekairo.llm.contracts import (
 )
 from otomekairo.llm.mock import MockLLMClient
 from otomekairo.llm.parsing import parse_json_object
+from otomekairo.llm.schemas import (
+    activity_state_response_format,
+    agent_skill_material_selection_response_format,
+    agent_skill_selection_response_format,
+    autonomous_completion_review_response_format,
+    autonomous_step_response_format,
+    decision_response_format,
+    disclosure_review_response_format,
+    event_evidence_response_format,
+    initiative_entry_check_response_format,
+    input_interpretation_response_format,
+    memory_interpretation_response_format,
+    memory_reflection_summary_response_format,
+    pending_intent_selection_response_format,
+    pre_send_check_response_format,
+    recall_pack_selection_response_format,
+    response_format_schema_name,
+    visual_observation_response_format,
+    world_state_response_format,
+)
 from otomekairo.llm.prompts import (
     build_agent_skill_material_selection_messages,
     build_agent_skill_material_selection_repair_prompt,
@@ -138,6 +158,7 @@ class LLMClient:
             ),
             repair_prompt_builder=build_agent_skill_selection_repair_prompt,
             failure_message="Agent Skill の選択に失敗しました。",
+            response_format=agent_skill_selection_response_format(),
             operation="agent_skill_selection",
         )
 
@@ -162,6 +183,7 @@ class LLMClient:
             ),
             repair_prompt_builder=build_agent_skill_material_selection_repair_prompt,
             failure_message="Agent Skill resource の選択に失敗しました。",
+            response_format=agent_skill_material_selection_response_format(),
             operation="agent_skill_material_selection",
         )
 
@@ -332,6 +354,7 @@ class LLMClient:
                 validator=self._validate_input_interpretation_contract,
                 repair_prompt_builder=build_input_interpretation_repair_prompt,
                 failure_message="InputInterpretation の生成に失敗しました。解析可能な応答が得られませんでした。",
+                response_format=input_interpretation_response_format(),
                 operation=operation,
             )
             recall_hint = normalize_recall_hint_payload(payload["recall_hint"])
@@ -392,6 +415,7 @@ class LLMClient:
                     context.comparison_scope,
                 ),
                 failure_message="Decision の生成に失敗しました。解析可能な応答が得られませんでした。",
+                response_format=decision_response_format(comparison_scope=context.comparison_scope),
                 operation=operation,
             )
         except Exception as exc:
@@ -558,6 +582,7 @@ class LLMClient:
                 ),
                 repair_prompt_builder=build_autonomous_step_repair_prompt,
                 failure_message="AutonomousStep の生成に失敗しました。解析可能な応答が得られませんでした。",
+                response_format=autonomous_step_response_format(),
                 operation=operation,
             )
             return payload
@@ -1053,6 +1078,7 @@ class LLMClient:
             validator=validate_disclosure_review_contract,
             repair_prompt_builder=build_disclosure_review_repair_prompt,
             failure_message="DisclosureReview の生成に失敗しました。",
+            response_format=disclosure_review_response_format(),
             operation=operation,
         )
 
@@ -1072,6 +1098,7 @@ class LLMClient:
             validator=validate_pre_send_check_contract,
             repair_prompt_builder=build_pre_send_check_repair_prompt,
             failure_message="PreSendCheck の生成に失敗しました。",
+            response_format=pre_send_check_response_format(),
             operation=operation,
         )
 
@@ -1102,6 +1129,7 @@ class LLMClient:
             validator=validate_autonomous_completion_review_contract,
             repair_prompt_builder=build_autonomous_completion_review_repair_prompt,
             failure_message="AutonomousCompletionReview の生成に失敗しました。",
+            response_format=autonomous_completion_review_response_format(),
             operation=operation,
         )
 
@@ -1151,6 +1179,7 @@ class LLMClient:
             validator=validate_memory_interpretation_contract,
             repair_prompt_builder=build_memory_interpretation_repair_prompt,
             failure_message="MemoryInterpretation の生成に失敗しました。解析可能な応答が得られませんでした。",
+            response_format=memory_interpretation_response_format(),
             operation=operation,
         )
         if not correction_targets:
@@ -1186,6 +1215,7 @@ class LLMClient:
             validator=validate_memory_reflection_summary_contract,
             repair_prompt_builder=build_memory_reflection_summary_repair_prompt,
             failure_message="MemoryReflectionSummary の生成に失敗しました。解析可能な応答が得られませんでした。",
+            response_format=memory_reflection_summary_response_format(),
             operation=operation,
         )
 
@@ -1215,6 +1245,7 @@ class LLMClient:
             validator=validate_event_evidence_contract,
             repair_prompt_builder=build_event_evidence_repair_prompt,
             failure_message="EventEvidence の生成に失敗しました。解析可能な応答が得られませんでした。",
+            response_format=event_evidence_response_format(),
             wrap_validation_error=True,
             operation=operation,
         )
@@ -1245,6 +1276,7 @@ class LLMClient:
             validator=lambda payload: validate_recall_pack_selection_contract(payload, source_pack=source_pack),
             repair_prompt_builder=build_recall_pack_selection_repair_prompt,
             failure_message="RecallPackSelection の生成に失敗しました。解析可能な応答が得られませんでした。",
+            response_format=recall_pack_selection_response_format(),
             wrap_validation_error=True,
             operation=operation,
         )
@@ -1275,6 +1307,7 @@ class LLMClient:
             validator=lambda payload: validate_pending_intent_selection_contract(payload, source_pack=source_pack),
             repair_prompt_builder=build_pending_intent_selection_repair_prompt,
             failure_message="PendingIntentSelection の生成に失敗しました。解析可能な応答が得られませんでした。",
+            response_format=pending_intent_selection_response_format(),
             wrap_validation_error=True,
             operation=operation,
         )
@@ -1305,6 +1338,7 @@ class LLMClient:
             validator=validate_initiative_entry_check_contract,
             repair_prompt_builder=build_initiative_entry_check_repair_prompt,
             failure_message="InitiativeEntryCheck の生成に失敗しました。解析可能な応答が得られませんでした。",
+            response_format=initiative_entry_check_response_format(),
             wrap_validation_error=True,
             operation=operation,
         )
@@ -1333,6 +1367,7 @@ class LLMClient:
             validator=lambda payload: validate_world_state_contract(payload, source_pack=source_pack),
             repair_prompt_builder=build_world_state_repair_prompt,
             failure_message="WorldState の生成に失敗しました。解析可能な応答が得られませんでした。",
+            response_format=world_state_response_format(),
             wrap_validation_error=True,
             operation=operation,
         )
@@ -1361,6 +1396,7 @@ class LLMClient:
             validator=validate_activity_state_contract,
             repair_prompt_builder=build_activity_state_repair_prompt,
             failure_message="ActivityState の生成に失敗しました。解析可能な応答が得られませんでした。",
+            response_format=activity_state_response_format(),
             wrap_validation_error=True,
             operation=operation,
         )
@@ -1395,6 +1431,7 @@ class LLMClient:
             validator=validate_visual_observation_contract,
             repair_prompt_builder=build_visual_observation_repair_prompt,
             failure_message="VisualObservation の生成に失敗しました。解析可能な応答が得られませんでした。",
+            response_format=visual_observation_response_format(),
             wrap_validation_error=True,
             operation=operation,
         )
@@ -1524,13 +1561,19 @@ class LLMClient:
         validator: Callable[[dict[str, Any]], None],
         repair_prompt_builder: Callable[[str], str],
         failure_message: str,
+        response_format: dict[str, Any],
         wrap_validation_error: bool = False,
         operation: str = "structured",
     ) -> dict[str, Any]:
         last_error: LLMError | None = None
         attempt_messages = list(messages)
+        schema_name = response_format_schema_name(response_format)
         for attempt in range(2):
-            content = complete_text(model_config=model_config, messages=attempt_messages)
+            content = complete_text(
+                model_config=model_config,
+                messages=attempt_messages,
+                response_format=response_format,
+            )
             try:
                 payload = parse_json_object(content)
                 try:
@@ -1539,7 +1582,8 @@ class LLMClient:
                         "LLM",
                         (
                             f"{operation} done model={self._debug_model(model_config)} "
-                            f"attempt={attempt + 1} response_chars={len(content)} "
+                            f"schema={schema_name} attempt={attempt + 1} "
+                            f"response_chars={len(content)} "
                             f"keys={self._debug_payload_keys(payload)}"
                         ),
                         level="DEBUG",
