@@ -9,6 +9,7 @@ from typing import Any
 from otomekairo.llm.client import LLMError
 from otomekairo.llm.contexts import AutonomousStepContext, CurrentInput
 from otomekairo.llm.contracts import build_decision_target_stances_for_kind
+from otomekairo.llm.usage import summarize_usage_events
 from otomekairo.interaction import normalize_interaction_context
 from otomekairo.service.capability import (
     CapabilityDispatchError,
@@ -784,6 +785,10 @@ class ServiceAutonomousRunMixin:
         capability_request_summary: dict[str, Any] | None = None
         speech_events: list[dict[str, Any]] = []
         previous_request_finished = False
+        owned_scope = None
+        if not self.llm.has_any_usage_scope():
+            owned_scope = f"autonomous_step:{run_id}:{started_at}"
+            self.llm.push_usage_scope(owned_scope)
 
         try:
             self._autonomous_run_consecutive_step_count(run)
@@ -1134,6 +1139,9 @@ class ServiceAutonomousRunMixin:
                 "step": None,
                 "error": str(exc),
             }
+        finally:
+            if owned_scope is not None:
+                self._discard_cycle_usage_scope(owned_scope)
         debug_log(
             "AutonomousRun",
             (
@@ -2667,156 +2675,164 @@ class ServiceAutonomousRunMixin:
         if isinstance(existing, dict) and existing.get("result_status") in {"succeeded", "failed"}:
             return run
         cycle_id = self._new_cycle_id()
-        input_text = self._autonomous_run_terminal_memory_input_text(
-            run=run,
-            terminal_status=terminal_status,
-            evidence_events=evidence_events,
-        )
-        speech_payload = None
-        speech_text = None
-        for event in evidence_events:
-            if isinstance(event, dict) and event.get("kind") == "speech":
-                text = event.get("text")
-                if isinstance(text, str) and text.strip():
-                    speech_text = text.strip()
-        if speech_text is not None:
-            speech_payload = {"speech_text": speech_text}
-        source_current_input = run.get("source_current_input")
-        interaction_context = None
-        if isinstance(source_current_input, dict):
-            try:
-                interaction_context = normalize_interaction_context(
-                    source_current_input.get("interaction_context")
-                )
-            except (TypeError, ValueError):
-                interaction_context = None
-        participant_refs = tuple(
-            ref
-            for ref in (run.get("participant_refs") or [])
-            if isinstance(ref, str) and ref.startswith("person:")
-        )
-        current_input = CurrentInput(
-            sender_kind="system",
-            sender_ref=None,
-            source_kind="autonomous_run",
-            response_target_refs=participant_refs,
-            interaction_context=interaction_context,
-            text=input_text,
-        )
-        people_context = self._build_people_context(
-            state=state,
-            current_input=current_input,
-            structured_sources=[run, run.get("last_result_context")],
-        )
-        events = [
-            *[
-                deepcopy(event)
-                for event in (run.get("result_events") or [])
-                if isinstance(event, dict)
-            ],
-            *[deepcopy(event) for event in evidence_events if isinstance(event, dict)],
-            deepcopy(terminal_event),
-        ]
-        decision = {
-            "kind": "speech" if speech_payload is not None else "noop",
-            "reason_code": f"autonomous_run_{terminal_status}",
-            "reason_summary": str(run.get("current_step_summary") or run.get("history_summary") or "autonomous_run が終了した。"),
-        }
-        recall_hint = {
-            **self._empty_recall_hint(),
-            "primary_recall_focus": "episodic",
-            "time_reference": "recent",
-            "mentioned_entities": [
-                person["person_ref"]
-                for person in people_context
-                if isinstance(person, dict) and isinstance(person.get("person_ref"), str)
-            ][:4],
-        }
-        cycle_summary = self._build_cycle_summary(
-            cycle_id=cycle_id,
-            started_at=current_time,
-            finished_at=current_time,
-            state=state,
-            trigger_kind="autonomous_run",
-            result_kind=decision["kind"],
-            failed=False,
-            input_text=input_text,
-            decision=decision,
-            speech_payload=speech_payload,
-        )
-        retrieval_run = {
-            "cycle_id": cycle_id,
-            "selected_memory_set_id": state["selected_memory_set_id"],
-            "started_at": current_time,
-            "finished_at": current_time,
-            "result_status": "skipped",
-        }
-        cycle_trace = {
-            "cycle_id": cycle_id,
-            "cycle_summary": cycle_summary,
-            "input_trace": {
-                "trigger_kind": "autonomous_run",
-                "run_id": run.get("run_id"),
-                "terminal_status": terminal_status,
-            },
-        }
+        self.llm.push_usage_scope(cycle_id)
         try:
-            self.store.persist_cycle_records(
-                events=[],
-                retrieval_run=retrieval_run,
-                cycle_summary=cycle_summary,
-                cycle_trace=cycle_trace,
+            input_text = self._autonomous_run_terminal_memory_input_text(
+                run=run,
+                terminal_status=terminal_status,
+                evidence_events=evidence_events,
             )
-            memory_trace = self._finalize_memory_trace(
+            speech_payload = None
+            speech_text = None
+            for event in evidence_events:
+                if isinstance(event, dict) and event.get("kind") == "speech":
+                    text = event.get("text")
+                    if isinstance(text, str) and text.strip():
+                        speech_text = text.strip()
+            if speech_text is not None:
+                speech_payload = {"speech_text": speech_text}
+            source_current_input = run.get("source_current_input")
+            interaction_context = None
+            if isinstance(source_current_input, dict):
+                try:
+                    interaction_context = normalize_interaction_context(
+                        source_current_input.get("interaction_context")
+                    )
+                except (TypeError, ValueError):
+                    interaction_context = None
+            participant_refs = tuple(
+                ref
+                for ref in (run.get("participant_refs") or [])
+                if isinstance(ref, str) and ref.startswith("person:")
+            )
+            current_input = CurrentInput(
+                sender_kind="system",
+                sender_ref=None,
+                source_kind="autonomous_run",
+                response_target_refs=participant_refs,
+                interaction_context=interaction_context,
+                text=input_text,
+            )
+            people_context = self._build_people_context(
+                state=state,
+                current_input=current_input,
+                structured_sources=[run, run.get("last_result_context")],
+            )
+            events = [
+                *[
+                    deepcopy(event)
+                    for event in (run.get("result_events") or [])
+                    if isinstance(event, dict)
+                ],
+                *[deepcopy(event) for event in evidence_events if isinstance(event, dict)],
+                deepcopy(terminal_event),
+            ]
+            decision = {
+                "kind": "speech" if speech_payload is not None else "noop",
+                "reason_code": f"autonomous_run_{terminal_status}",
+                "reason_summary": str(run.get("current_step_summary") or run.get("history_summary") or "autonomous_run が終了した。"),
+            }
+            recall_hint = {
+                **self._empty_recall_hint(),
+                "primary_recall_focus": "episodic",
+                "time_reference": "recent",
+                "mentioned_entities": [
+                    person["person_ref"]
+                    for person in people_context
+                    if isinstance(person, dict) and isinstance(person.get("person_ref"), str)
+                ][:4],
+            }
+            cycle_summary = self._build_cycle_summary(
                 cycle_id=cycle_id,
+                started_at=current_time,
                 finished_at=current_time,
                 state=state,
-                input_text=input_text,
-                events=events,
-                pipeline={
-                    "recall_hint": recall_hint,
-                    "decision": decision,
-                    "speech_payload": speech_payload,
-                    "current_input": current_input.to_prompt_payload(),
-                    "people_context": people_context,
-                },
                 trigger_kind="autonomous_run",
-                input_event_kind="autonomous_run_terminal",
-                input_event_role="system",
+                result_kind=decision["kind"],
+                failed=False,
+                input_text=input_text,
+                decision=decision,
+                speech_payload=speech_payload,
             )
-            consolidation = {
-                "result_status": "succeeded",
+            retrieval_run = {
                 "cycle_id": cycle_id,
-                "episode_id": memory_trace.get("episode_id") if isinstance(memory_trace, dict) else None,
+                "selected_memory_set_id": state["selected_memory_set_id"],
+                "started_at": current_time,
+                "finished_at": current_time,
+                "result_status": "skipped",
+            }
+            cycle_trace = {
+                "cycle_id": cycle_id,
+                "cycle_summary": cycle_summary,
+                "input_trace": {
+                    "trigger_kind": "autonomous_run",
+                    "run_id": run.get("run_id"),
+                    "terminal_status": terminal_status,
+                },
+                "llm_usage": summarize_usage_events([]),
+            }
+            try:
+                self.store.persist_cycle_records(
+                    events=[],
+                    retrieval_run=retrieval_run,
+                    cycle_summary=cycle_summary,
+                    cycle_trace=cycle_trace,
+                )
+                memory_trace = self._finalize_memory_trace(
+                    cycle_id=cycle_id,
+                    finished_at=current_time,
+                    state=state,
+                    input_text=input_text,
+                    events=events,
+                    pipeline={
+                        "recall_hint": recall_hint,
+                        "decision": decision,
+                        "speech_payload": speech_payload,
+                        "current_input": current_input.to_prompt_payload(),
+                        "people_context": people_context,
+                    },
+                    trigger_kind="autonomous_run",
+                    input_event_kind="autonomous_run_terminal",
+                    input_event_role="system",
+                )
+                self._finish_cycle_llm_usage(cycle_id)
+                consolidation = {
+                    "result_status": "succeeded",
+                    "cycle_id": cycle_id,
+                    "episode_id": memory_trace.get("episode_id") if isinstance(memory_trace, dict) else None,
+                    "updated_at": current_time,
+                }
+            except Exception as exc:  # noqa: BLE001
+                debug_log(
+                    "AutonomousRun",
+                    f"terminal consolidation failed run={run.get('run_id')} error={type(exc).__name__}: {self._clamp(str(exc))}",
+                    level="ERROR",
+                )
+                if self.llm.has_usage_scope(cycle_id):
+                    self._finish_cycle_llm_usage(cycle_id)
+                consolidation = {
+                    "result_status": "failed",
+                    "cycle_id": cycle_id,
+                    "failure_reason": str(exc),
+                    "updated_at": current_time,
+                }
+            updated = {
+                **run,
+                "terminal_consolidation": consolidation,
                 "updated_at": current_time,
             }
-        except Exception as exc:  # noqa: BLE001
+            self.store.upsert_autonomous_run(autonomous_run=updated)
             debug_log(
                 "AutonomousRun",
-                f"terminal consolidation failed run={run.get('run_id')} error={type(exc).__name__}: {self._clamp(str(exc))}",
-                level="ERROR",
+                (
+                    f"terminal consolidation run={run.get('run_id')} "
+                    f"status={consolidation.get('result_status')} "
+                    f"cycle={self._short_cycle_id(cycle_id)}"
+                ),
             )
-            consolidation = {
-                "result_status": "failed",
-                "cycle_id": cycle_id,
-                "failure_reason": str(exc),
-                "updated_at": current_time,
-            }
-        updated = {
-            **run,
-            "terminal_consolidation": consolidation,
-            "updated_at": current_time,
-        }
-        self.store.upsert_autonomous_run(autonomous_run=updated)
-        debug_log(
-            "AutonomousRun",
-            (
-                f"terminal consolidation run={run.get('run_id')} "
-                f"status={consolidation.get('result_status')} "
-                f"cycle={self._short_cycle_id(cycle_id)}"
-            ),
-        )
-        return updated
+            return updated
+        finally:
+            self._discard_cycle_usage_scope(cycle_id)
 
     def _autonomous_run_terminal_memory_input_text(
         self,

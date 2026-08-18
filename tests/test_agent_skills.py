@@ -19,6 +19,7 @@ from otomekairo.defaults import (
 from otomekairo.llm.contexts import CurrentInput
 from otomekairo.llm.contracts import LLMError
 from otomekairo.llm.client import LLMClient
+from otomekairo.llm.transport import CompletionResult
 from otomekairo.llm.prompts import (
     _build_agent_skill_messages,
     build_agent_skill_selection_messages,
@@ -29,6 +30,12 @@ from otomekairo.service.agent_skills import (
     resolve_agent_skill_host_authorization,
 )
 from otomekairo.service.app import OtomeKairoService
+
+
+def _scoped_llm() -> LLMClient:
+    client = LLMClient()
+    client.push_usage_scope("test")
+    return client
 
 
 def _source_definition(root: Path, *, enabled: bool = True) -> dict:
@@ -410,8 +417,8 @@ class AgentSkillRegistryTests(unittest.TestCase):
             ]
         }
 
-        with patch("otomekairo.llm.client.complete_text", side_effect=lambda **_kwargs: next(responses)) as complete:
-            result = LLMClient().generate_agent_skill_selection(
+        with patch("otomekairo.llm.client.complete_text", side_effect=lambda **_kwargs: CompletionResult(text=next(responses), usage={})) as complete:
+            result = _scoped_llm().generate_agent_skill_selection(
                 model_config={"model": "real-model"},
                 selection_context=selection_context,
             )
@@ -456,8 +463,8 @@ class AgentSkillRegistryTests(unittest.TestCase):
             "resource_candidates": [],
         }
 
-        with patch("otomekairo.llm.client.complete_text", side_effect=lambda **_kwargs: next(responses)) as complete:
-            result = LLMClient().generate_agent_skill_material_selection(
+        with patch("otomekairo.llm.client.complete_text", side_effect=lambda **_kwargs: CompletionResult(text=next(responses), usage={})) as complete:
+            result = _scoped_llm().generate_agent_skill_material_selection(
                 model_config={"model": "real-model"},
                 selection_context=selection_context,
             )
@@ -496,8 +503,8 @@ class AgentSkillRegistryTests(unittest.TestCase):
             "allowed_resource_reads": [],
         }
 
-        with patch("otomekairo.llm.client.complete_text", side_effect=lambda **_kwargs: next(responses)) as complete:
-            result = LLMClient().generate_agent_skill_material_selection(
+        with patch("otomekairo.llm.client.complete_text", side_effect=lambda **_kwargs: CompletionResult(text=next(responses), usage={})) as complete:
+            result = _scoped_llm().generate_agent_skill_material_selection(
                 model_config={"model": "real-model"},
                 selection_context=selection_context,
             )
@@ -596,9 +603,12 @@ class AgentSkillRegistryTests(unittest.TestCase):
             "allowed_resource_reads": [],
         }
 
-        with patch("otomekairo.llm.client.complete_text", return_value=response) as complete:
+        with patch(
+            "otomekairo.llm.client.complete_text",
+            return_value=CompletionResult(text=response, usage={}),
+        ) as complete:
             with self.assertRaisesRegex(LLMError, "候補にない skill_id"):
-                LLMClient().generate_agent_skill_material_selection(
+                _scoped_llm().generate_agent_skill_material_selection(
                     model_config={"model": "real-model"},
                     selection_context=selection_context,
                 )
@@ -625,9 +635,12 @@ class AgentSkillRegistryTests(unittest.TestCase):
             ]
         }
 
-        with patch("otomekairo.llm.client.complete_text", return_value=response) as complete:
+        with patch(
+            "otomekairo.llm.client.complete_text",
+            return_value=CompletionResult(text=response, usage={}),
+        ) as complete:
             with self.assertRaisesRegex(LLMError, "catalog にない skill_id"):
-                LLMClient().generate_agent_skill_selection(
+                _scoped_llm().generate_agent_skill_selection(
                     model_config={"model": "real-model"},
                     selection_context=selection_context,
                 )

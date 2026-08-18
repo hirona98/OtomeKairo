@@ -4,6 +4,7 @@ import uuid
 from typing import Any
 
 from otomekairo.llm.contexts import InitiativeContext
+from otomekairo.llm.usage import consume_client_usage, merge_usage_summaries, summarize_usage_events
 from otomekairo.interaction import InteractionContext
 from otomekairo.world_state.models import WorldStateTrace
 
@@ -511,7 +512,28 @@ class ServiceInputTraceBuildMixin:
             "activity_trace": activity_trace or {},
             "result_trace": result_trace,
             "memory_trace": memory_trace or {},
+            "llm_usage": summarize_usage_events([]),
         }
+
+    def _finish_cycle_llm_usage(self, cycle_id: str) -> None:
+        summary = consume_client_usage(self.llm, scope_id=cycle_id)
+        cycle_trace = self.store.get_cycle_trace(cycle_id)
+        if cycle_trace is None:
+            return
+        existing = cycle_trace.get("llm_usage")
+        self.store.replace_cycle_trace(
+            cycle_trace={
+                **cycle_trace,
+                "llm_usage": merge_usage_summaries(
+                    existing if isinstance(existing, dict) else None,
+                    summary,
+                ),
+            }
+        )
+
+    def _discard_cycle_usage_scope(self, cycle_id: str) -> None:
+        if self.llm.has_usage_scope(cycle_id):
+            self.llm.consume_usage_scope(cycle_id)
 
     def _build_success_recall_trace(self, recall_hint: dict[str, Any], recall_pack: dict[str, Any]) -> dict[str, Any]:
         recall_pack_summary = self._summarize_recall_pack(recall_pack)

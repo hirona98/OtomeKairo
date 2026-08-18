@@ -157,6 +157,7 @@ class ServiceInputTracePersistMixin:
                 cycle_id=cycle_id,
                 memory_trace=skipped_memory_trace,
             )
+        self._finish_cycle_llm_usage(cycle_id)
 
         # 応答
         return {
@@ -505,6 +506,7 @@ class ServiceInputTracePersistMixin:
             cycle_trace=cycle_trace,
             visual_observation_records=visual_observation_records,
         )
+        self._finish_cycle_llm_usage(cycle_id)
         self._register_interaction_participants(
             memory_set_id=memory_set_id,
             interaction_context=interaction_context,

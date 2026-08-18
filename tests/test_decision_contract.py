@@ -4,6 +4,7 @@ from dataclasses import replace
 from unittest.mock import patch
 
 from otomekairo.llm.client import LLMClient
+from otomekairo.llm.transport import CompletionResult
 from otomekairo.llm.contexts import AutonomousStepContext, CurrentInput, DecisionContext, PersonaContext
 from otomekairo.llm.contracts import (
     LLMError,
@@ -20,6 +21,16 @@ from otomekairo.llm.prompts import (
     build_decision_repair_prompt,
     _build_decision_trigger_policy,
 )
+
+
+def _llm_client() -> LLMClient:
+    client = LLMClient()
+    client.push_usage_scope("test")
+    return client
+
+
+def _completion(text: str) -> CompletionResult:
+    return CompletionResult(text=text, usage={})
 
 
 def _persona_context() -> PersonaContext:
@@ -202,9 +213,9 @@ class DecisionContractTests(unittest.TestCase):
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            return_value=json.dumps(payload),
+            return_value=_completion(json.dumps(payload)),
         ):
-            actual = LLMClient().generate_decision(
+            actual = _llm_client().generate_decision(
                 model_config={"model": "real-model"},
                 persona_context=_persona_context(),
                 context=context,
@@ -248,10 +259,10 @@ class DecisionContractTests(unittest.TestCase):
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            return_value=json.dumps(payload),
+            return_value=_completion(json.dumps(payload)),
         ):
             with self.assertRaisesRegex(LLMError, r"不明な参照=affect_context:recent_episode_affects:0"):
-                LLMClient().generate_decision(
+                _llm_client().generate_decision(
                     model_config={"model": "real-model"},
                     persona_context=_persona_context(),
                     context=context,
@@ -496,9 +507,9 @@ class DecisionContractTests(unittest.TestCase):
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            side_effect=[json.dumps(invalid), json.dumps(valid)],
+            side_effect=[_completion(json.dumps(invalid)), _completion(json.dumps(valid))],
         ) as complete:
-            actual = LLMClient().generate_decision(
+            actual = _llm_client().generate_decision(
                 model_config={"model": "real-model"},
                 persona_context=_persona_context(),
                 context=_decision_context(_mcp_capability_view()),
@@ -538,9 +549,9 @@ class DecisionContractTests(unittest.TestCase):
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            side_effect=[json.dumps(invalid), json.dumps(valid)],
+            side_effect=[_completion(json.dumps(invalid)), _completion(json.dumps(valid))],
         ) as complete:
-            actual = LLMClient().generate_decision(
+            actual = _llm_client().generate_decision(
                 model_config={"model": "real-model"},
                 persona_context=_persona_context(),
                 context=_decision_context(capability_view),
@@ -575,9 +586,9 @@ class DecisionContractTests(unittest.TestCase):
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            side_effect=[json.dumps(invalid), json.dumps(valid)],
+            side_effect=[_completion(json.dumps(invalid)), _completion(json.dumps(valid))],
         ) as complete:
-            actual = LLMClient().generate_decision(
+            actual = _llm_client().generate_decision(
                 model_config={"model": "real-model"},
                 persona_context=_persona_context(),
                 context=_decision_context(capability_view),
@@ -613,9 +624,9 @@ class DecisionContractTests(unittest.TestCase):
                 invalid = _capability_decision("mcp.call_tool", invalid_input)
                 with patch(
                     "otomekairo.llm.client.complete_text",
-                    side_effect=[json.dumps(invalid), json.dumps(valid)],
+                    side_effect=[_completion(json.dumps(invalid)), _completion(json.dumps(valid))],
                 ) as complete:
-                    actual = LLMClient().generate_decision(
+                    actual = _llm_client().generate_decision(
                         model_config={"model": "real-model"},
                         persona_context=_persona_context(),
                         context=_decision_context(_mcp_capability_view()),
@@ -708,9 +719,9 @@ class DecisionContractTests(unittest.TestCase):
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            side_effect=[json.dumps(invalid), json.dumps(valid)],
+            side_effect=[_completion(json.dumps(invalid)), _completion(json.dumps(valid))],
         ) as complete:
-            actual = LLMClient().generate_autonomous_step(
+            actual = _llm_client().generate_autonomous_step(
                 model_config={"model": "real-model"},
                 persona_context=_persona_context(),
                 context=context,
@@ -724,10 +735,10 @@ class DecisionContractTests(unittest.TestCase):
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            return_value=json.dumps(invalid),
+            return_value=_completion(json.dumps(invalid)),
         ) as complete:
             with self.assertRaisesRegex(LLMError, "CapabilityDecisionView"):
-                LLMClient().generate_decision(
+                _llm_client().generate_decision(
                     model_config={"model": "real-model"},
                     persona_context=_persona_context(),
                     context=_decision_context(_mcp_capability_view()),
@@ -766,11 +777,11 @@ class DecisionContractTests(unittest.TestCase):
             patch("otomekairo.llm.client.debug_log", side_effect=capture),
             patch(
                 "otomekairo.llm.client.complete_text",
-                return_value=json.dumps(invalid),
+                return_value=_completion(json.dumps(invalid)),
             ),
         ):
             with self.assertRaisesRegex(LLMError, r"重複=visual_observation:current"):
-                LLMClient().generate_decision(
+                _llm_client().generate_decision(
                     model_config={"model": "real-model"},
                     persona_context=_persona_context(),
                     context=context,
@@ -795,11 +806,11 @@ class DecisionContractTests(unittest.TestCase):
             patch("otomekairo.llm.client.debug_log", side_effect=capture),
             patch(
                 "otomekairo.llm.client.complete_text",
-                return_value="これは JSON ではありません。",
+                return_value=_completion("これは JSON ではありません。"),
             ),
         ):
             with self.assertRaises(LLMError):
-                LLMClient().generate_decision(
+                _llm_client().generate_decision(
                     model_config={"model": "real-model"},
                     persona_context=_persona_context(),
                     context=_decision_context([]),
@@ -851,7 +862,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("capability_request.input の自然文は、その能力の先の場へ向けた個の表現です", system)
         self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です", system)
         self.assertIn("使わない排他キーもキーとして残し、値は null にします", system)
-        self.assertIn("kind が capability_request のとき capability_request は object、pending_intent と autonomous_run は null です", system)
+        self.assertIn("出力 JSON は structured schema の必須キーと enum に従います", system)
         self.assertIn("その関心に関われる手段が CapabilityDecisionView に available=true であるときだけ", system)
         self.assertIn("手段が無いときは今は関わらない", system)
         self.assertIn("target_stances は self_activity を 1 件だけ持ちます", system)
@@ -1093,9 +1104,9 @@ class AutonomousCompletionReviewContractTests(unittest.TestCase):
         }
         with patch(
             "otomekairo.llm.client.complete_text",
-            side_effect=[json.dumps(invalid), json.dumps(valid)],
+            side_effect=[_completion(json.dumps(invalid)), _completion(json.dumps(valid))],
         ) as complete:
-            actual = LLMClient().generate_autonomous_completion_review(
+            actual = _llm_client().generate_autonomous_completion_review(
                 model_config={"model": "real-model"},
                 review_context={
                     "run": {"objective_summary": "投稿を1件作成する。"},

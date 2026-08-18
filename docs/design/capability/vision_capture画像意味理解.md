@@ -107,6 +107,8 @@ LLM に渡す source pack は少なくとも次を持つ。
 
 画像は source pack の JSON に埋め込まず、multimodal message の image part として別に添付する。
 1 回の解釈で使う画像件数はコード側で制限する。
+LLM へ渡す直前に、長辺 1024 を超える画像だけを解釈用 JPEG へ再エンコードする。永続正本は `detailed_summary_text` であり、raw image は保存しない。
+同じ `vision_source_id`（無いときは `image_input_kind`）について、画像バイトの content hash が直前の解釈と一致する場合は LLM を呼ばず、直前の `summary_text` を使う。`last_prompted_observation_context` の要約が同じなら `change_state=same_as_recent_speech`、そうでなければ `stable` とする。これは同一入力の再計算回避であり、意味差分の判定を画素差分に置き換えるものではない。hash が違う画像は今どおり LLM が変化を決める。
 `vision.capture` 由来の source pack には `vision_source_id / source_kind / source_label` を含める。
 通常会話の添付画像では `image_input_kind=conversation_attachment` を使う。
 

@@ -74,8 +74,8 @@ class InputInterpretationContractTests(unittest.TestCase):
         recall_hint_keys = ", ".join(RECALL_HINT_REQUIRED_KEYS)
         answer_contract_keys = ", ".join(ANSWER_CONTRACT_REQUIRED_KEYS)
 
-        self.assertIn(f"recall_hint は {recall_hint_keys} の 8 キーだけ", system_prompt)
-        self.assertIn(f"answer_contract は {answer_contract_keys} の 5 キーだけ", system_prompt)
+        self.assertIn("出力 JSON は structured schema の必須キーと enum に従います", system_prompt)
+        self.assertIn("トップレベルは recall_hint と answer_contract だけです", system_prompt)
         self.assertIn("省略せず []", system_prompt)
         self.assertIn(f"recall_hint は {recall_hint_keys} の 8 キーだけ", repair_prompt)
         self.assertIn(f"answer_contract は {answer_contract_keys} の 5 キーだけ", repair_prompt)

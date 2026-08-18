@@ -120,6 +120,7 @@ class ServiceInputCycleMixin:
         recent_turns = self._load_recent_turns(state, interaction_context)
         runtime_summary = self._build_runtime_summary(state)
         cancel_autonomous_runs = autonomous_run_action == "cancel_all"
+        self.llm.push_usage_scope(cycle_id)
         self._begin_user_response_cycle()
         try:
             if cancel_autonomous_runs:
@@ -139,6 +140,7 @@ class ServiceInputCycleMixin:
             )
         except Exception:  # noqa: BLE001
             self._end_user_response_cycle()
+            self._discard_cycle_usage_scope(cycle_id)
             raise
         try:
             # 会話添付画像は capability 実行ではなく、会話入力の補助要約として扱う。
@@ -275,6 +277,7 @@ class ServiceInputCycleMixin:
                     state=state,
                     current_time=self._now_iso(),
                 )
+            self._discard_cycle_usage_scope(cycle_id)
 
     def _normalize_conversation_autonomous_run_action(self, value: Any) -> str | None:
         # 自然文の意味推定ではなく、API 境界の明示コマンドだけを解釈する。

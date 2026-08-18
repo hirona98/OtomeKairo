@@ -11,6 +11,16 @@ from otomekairo.service.autonomous_run import AUTONOMOUS_COMPLETION_REVIEW_RETRY
 from otomekairo.service.capability import PreSendCheckWithheldError
 
 
+def _stub_llm(**methods: object) -> SimpleNamespace:
+    return SimpleNamespace(
+        has_any_usage_scope=lambda: False,
+        push_usage_scope=lambda _scope_id: None,
+        has_usage_scope=lambda _scope_id: False,
+        consume_usage_scope=lambda _scope_id: [],
+        **methods,
+    )
+
+
 class AutonomousRunRecoveryTests(unittest.TestCase):
     def _use_mock_model(self, service: OtomeKairoService, state: dict) -> dict:
         preset_id = state["selected_model_preset_id"]
@@ -51,7 +61,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 "run_update": {"current_step_summary": "送らない", "history_summary": "送らない"},
             }
             generate_autonomous_step = Mock(side_effect=[initial_step, retry_step])
-            service.llm = SimpleNamespace(generate_autonomous_step=generate_autonomous_step)
+            service.llm = _stub_llm(generate_autonomous_step=generate_autonomous_step)
             first_audit = {
                 "mcp_server_id": "e-stat",
                 "tool_name": "create_post",
@@ -155,7 +165,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                     "reason_summary": "外界への投稿作用がまだ実行されていない。",
                 }
             )
-            service.llm = SimpleNamespace(
+            service.llm = _stub_llm(
                 generate_autonomous_step=generate_step,
                 generate_autonomous_completion_review=review,
             )
@@ -245,7 +255,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                     }
                 )
             )
-            service.llm = SimpleNamespace(
+            service.llm = _stub_llm(
                 generate_autonomous_step=Mock(return_value=complete_step),
                 generate_autonomous_completion_review=review,
             )
@@ -313,7 +323,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                     "history_summary": "投稿はまだ実行していない。",
                 },
             }
-            service.llm = SimpleNamespace(
+            service.llm = _stub_llm(
                 generate_autonomous_step=Mock(return_value=incomplete_step),
                 generate_autonomous_completion_review=Mock(
                     return_value={

@@ -8,7 +8,7 @@ from unittest.mock import patch
 from otomekairo.llm.client import LLMClient
 from otomekairo.llm.contexts import CurrentInput, PersonaContext, SpeechContext
 from otomekairo.llm.contracts import LLMError
-from otomekairo.llm.transport import complete_text
+from otomekairo.llm.transport import CompletionResult, complete_text
 
 
 def _completion_response(content: str) -> SimpleNamespace:
@@ -114,9 +114,11 @@ class LLMTransportTests(unittest.TestCase):
             calls.append(kwargs)
             raise LLMError("structured outputs not supported")
 
+        client = LLMClient()
+        client.push_usage_scope("test")
         with patch("otomekairo.llm.client.complete_text", side_effect=fake_complete):
             with self.assertRaisesRegex(LLMError, "structured outputs not supported"):
-                LLMClient().generate_pre_send_check(
+                client.generate_pre_send_check(
                     model_config={"model": "openrouter/google/gemini-3.5-flash-lite"},
                     review_context={"tool_name": "get_information", "arguments": {}},
                 )
@@ -126,11 +128,16 @@ class LLMTransportTests(unittest.TestCase):
         self.assertEqual(calls[0]["response_format"]["json_schema"]["name"], "pre_send_check")
 
     def test_structured_client_passes_json_schema(self) -> None:
+        client = LLMClient()
+        client.push_usage_scope("test")
         with patch(
             "otomekairo.llm.client.complete_text",
-            return_value=json.dumps({"outcome": "allow", "reason_summary": "公開情報のみ。"}),
+            return_value=CompletionResult(
+                text=json.dumps({"outcome": "allow", "reason_summary": "公開情報のみ。"}),
+                usage={},
+            ),
         ) as complete:
-            LLMClient().generate_pre_send_check(
+            client.generate_pre_send_check(
                 model_config={"model": "openrouter/google/gemini-3.5-flash-lite"},
                 review_context={"tool_name": "get_information", "arguments": {}},
             )
@@ -161,12 +168,18 @@ class LLMTransportTests(unittest.TestCase):
             recall_pack={},
             decision={"kind": "speech"},
         )
-        with patch("otomekairo.llm.client.complete_text", return_value="こんにちは") as complete:
-            LLMClient().generate_speech(
+        client = LLMClient()
+        client.push_usage_scope("test")
+        with patch(
+            "otomekairo.llm.client.complete_text",
+            return_value=CompletionResult(text="こんにちは", usage={}),
+        ) as complete:
+            client.generate_speech(
                 model_config={"model": "openrouter/google/gemini-3.5-flash-lite"},
                 persona_context=_persona_context(),
                 context=context,
             )
 
         kwargs = complete.call_args.kwargs
-        self.assertNotIn("response_format", kwargs)
+        self.assertIsNone(kwargs.get("response_format"))
+        self.assertEqual(kwargs.get("operation"), "speech")

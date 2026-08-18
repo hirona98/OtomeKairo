@@ -5,6 +5,7 @@ import threading
 import uuid
 from typing import Any
 
+from otomekairo.llm.usage import consume_client_usage, merge_usage_summaries
 from otomekairo.service.common import debug_log
 
 
@@ -132,7 +133,9 @@ class ServiceMemoryMixin:
         with self._runtime_state_lock:
             self._memory_postprocess_runtime_state["current_cycle_id"] = started_job["cycle_id"]
 
+        postprocess_scope_id = f"{started_job['cycle_id']}:postprocess"
         try:
+            self.llm.push_usage_scope(postprocess_scope_id)
             # 実行
             postprocess_result = self.memory.run_postprocess_job(job=started_job)
             self._update_memory_trace_postprocess(
@@ -141,6 +144,7 @@ class ServiceMemoryMixin:
                 relation_index_sync=postprocess_result["relation_index_sync"],
                 correction_reconciliation=postprocess_result["correction_reconciliation"],
                 reflective_consolidation=postprocess_result["reflective_consolidation"],
+                usage_scope_id=postprocess_scope_id,
             )
             self._append_vector_index_failure_events(
                 cycle_id=started_job["cycle_id"],
@@ -223,6 +227,8 @@ class ServiceMemoryMixin:
                 }
             )
         finally:
+            if self.llm.has_usage_scope(postprocess_scope_id):
+                self.llm.consume_usage_scope(postprocess_scope_id)
             with self._runtime_state_lock:
                 self._memory_postprocess_runtime_state["current_cycle_id"] = None
 
@@ -240,9 +246,13 @@ class ServiceMemoryMixin:
         reflective_consolidation: dict[str, Any],
         correction_reconciliation: dict[str, Any] | None = None,
         emit_logs: bool = True,
+        usage_scope_id: str | None = None,
     ) -> dict[str, Any]:
         # 検索
         cycle_trace = self.store.get_cycle_trace(cycle_id)
+        extra_usage = None
+        if usage_scope_id is not None:
+            extra_usage = consume_client_usage(self.llm, scope_id=usage_scope_id)
         if cycle_trace is None:
             return
 
@@ -259,12 +269,17 @@ class ServiceMemoryMixin:
             "drive_state_update",
             self._drive_state_update_trace("not_started"),
         )
-        self.store.replace_cycle_trace(
-            cycle_trace={
-                **cycle_trace,
-                "memory_trace": memory_trace,
-            }
-        )
+        updated_trace = {
+            **cycle_trace,
+            "memory_trace": memory_trace,
+        }
+        if extra_usage is not None:
+            existing = updated_trace.get("llm_usage")
+            updated_trace["llm_usage"] = merge_usage_summaries(
+                existing if isinstance(existing, dict) else None,
+                extra_usage,
+            )
+        self.store.replace_cycle_trace(cycle_trace=updated_trace)
 
         # 監査 / ログ
         self._append_reflective_failure_events(

@@ -565,7 +565,8 @@ response:
     "recall_trace": {},
     "decision_trace": {},
     "result_trace": {},
-    "memory_trace": {}
+    "memory_trace": {},
+    "llm_usage": {}
   }
 }
 ```
@@ -582,6 +583,7 @@ capability dispatch が起きた cycle では、`result_trace.capability_dispatc
 initiative 系 trigger の `entry_summary.candidate_families` field 契約は [../runtime/自律initiative_loop.md](../runtime/自律initiative_loop.md) を正とする。
 exact answer 系の cycle では、`recall_trace` に `answer_contract`、`evidence_pack`、`fact_resolution_trace` を含める。
 `fact_resolution_trace` は wire 上で少なくとも `query`、`selected_recall_sections`、`boundary_event_candidates`、`cycle_event_candidates`、`statement_event_candidates`、`adopted_evidence_items`、`consistency_checks` を持つ。
+`llm_usage` は cycle 内の生成と embedding の件数と token 要約である。含有内容は [../runtime/デバッグ可能性.md](../runtime/デバッグ可能性.md) を正とする。
 
 | trace | 詳細正本 |
 |-------|----------|
@@ -592,6 +594,7 @@ exact answer 系の cycle では、`recall_trace` に `answer_contract`、`evide
 | `decision_trace` | [../runtime/判断と行動.md](../runtime/判断と行動.md)、[../runtime/自律initiative_loop.md](../runtime/自律initiative_loop.md) |
 | `result_trace` | [../runtime/判断と行動.md](../runtime/判断と行動.md)、[../capability/capability_manifest.md](../capability/capability_manifest.md) |
 | `memory_trace` | [../runtime/デバッグ可能性.md](../runtime/デバッグ可能性.md)、[../memory/記憶更新と再整理.md](../memory/記憶更新と再整理.md)、[../memory/内省要約のLLM生成.md](../memory/内省要約のLLM生成.md) |
+| `llm_usage` | [../runtime/デバッグ可能性.md](../runtime/デバッグ可能性.md) |
 
 ### `GET /api/inspection/cycles/{cycle_id}/cognitive-context`
 

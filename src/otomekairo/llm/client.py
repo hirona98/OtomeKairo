@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -100,7 +101,12 @@ from otomekairo.llm.prompts import (
     build_world_state_repair_prompt,
 )
 from otomekairo.world_state.models import WorldStateSourcePack
-from otomekairo.llm.transport import complete_text, generate_embeddings as transport_generate_embeddings
+from otomekairo.llm.transport import (
+    CompletionResult,
+    complete_text,
+    generate_embeddings as transport_generate_embeddings,
+)
+from otomekairo.llm.usage import USAGE_INT_KEYS
 from otomekairo.service.common import debug_log
 
 DEBUG_REJECTED_TEXT_LIMIT = 2000
@@ -140,6 +146,7 @@ DEBUG_REJECTED_PAYLOAD_KEY_ORDER = (
 @dataclass(slots=True)
 class LLMClient:
     mock_client: MockLLMClient = field(default_factory=MockLLMClient)
+    _usage_local: threading.local = field(default_factory=threading.local, repr=False)
 
     def generate_agent_skill_selection(
         self,
@@ -1033,7 +1040,11 @@ class LLMClient:
             )
 
             # 補完
-            content = complete_text(model_config=model_config, messages=messages)
+            content = self._complete_text(
+                model_config=model_config,
+                messages=messages,
+                operation=operation,
+            )
             speech_text = content.strip()
             if not speech_text:
                 raise LLMError("Speech の生成結果が空でした。")
@@ -1458,17 +1469,99 @@ class LLMClient:
             return vectors
 
         # model差分込みの transport へ委譲する。
-        vectors = transport_generate_embeddings(
+        vectors, usage = transport_generate_embeddings(
             model_config=model_config,
             texts=texts,
             expected_dimension=embedding_dimension,
         )
+        self._record_usage(operation="embeddings", usage=usage)
         debug_log(
             "LLM",
-            f"embeddings done model={self._debug_model(model_config)} vectors={len(vectors)}",
+            (
+                f"embeddings done model={self._debug_model(model_config)} "
+                f"vectors={len(vectors)} {self._debug_usage(usage)}"
+            ),
             level="DEBUG",
         )
         return vectors
+
+    def push_usage_scope(self, scope_id: str) -> None:
+        normalized = self._usage_scope_id(scope_id)
+        stack = self._usage_stack()
+        if any(item[0] == normalized for item in stack):
+            raise LLMError(f"usage scope already open: {normalized}")
+        stack.append((normalized, []))
+
+    def consume_usage_scope(self, scope_id: str) -> list[dict[str, Any]]:
+        normalized = self._usage_scope_id(scope_id)
+        stack = self._usage_stack()
+        if not stack:
+            raise LLMError("usage scope is not open.")
+        current_id, events = stack[-1]
+        if current_id != normalized:
+            raise LLMError(f"usage scope mismatch: open={current_id} consume={normalized}")
+        stack.pop()
+        return events
+
+    def has_usage_scope(self, scope_id: str) -> bool:
+        normalized = self._usage_scope_id(scope_id)
+        return any(item[0] == normalized for item in self._usage_stack())
+
+    def has_any_usage_scope(self) -> bool:
+        return bool(self._usage_stack())
+
+    def _usage_scope_id(self, scope_id: str) -> str:
+        if not isinstance(scope_id, str) or not scope_id.strip():
+            raise LLMError("usage scope_id is required.")
+        return scope_id.strip()
+
+    def _usage_stack(self) -> list[tuple[str, list[dict[str, Any]]]]:
+        stack = getattr(self._usage_local, "stack", None)
+        if stack is None:
+            stack = []
+            self._usage_local.stack = stack
+        return stack
+
+    def _complete_text(
+        self,
+        *,
+        model_config: dict[str, Any],
+        messages: list[dict[str, Any]],
+        response_format: dict[str, Any] | None = None,
+        operation: str,
+    ) -> str:
+        result = complete_text(
+            model_config=model_config,
+            messages=messages,
+            response_format=response_format,
+            operation=operation,
+        )
+        if not isinstance(result, CompletionResult):
+            raise LLMError("LiteLLM の応答形式が不正です。")
+        self._record_usage(operation=operation, usage=result.usage)
+        return result.text
+
+    def _record_usage(self, *, operation: str, usage: dict[str, int] | None) -> None:
+        stack = self._usage_stack()
+        if not stack:
+            raise LLMError("usage scope is not open.")
+        event: dict[str, Any] = {"operation": operation}
+        if isinstance(usage, dict):
+            for key in USAGE_INT_KEYS:
+                value = usage.get(key)
+                if isinstance(value, int) and value >= 0:
+                    event[key] = value
+        stack[-1][1].append(event)
+
+    def _debug_usage(self, usage: dict[str, int] | None) -> str:
+        if not isinstance(usage, dict) or not usage:
+            return "usage=-"
+        parts = [
+            f"{key}={usage[key]}"
+            for key in USAGE_INT_KEYS
+            if isinstance(usage.get(key), int)
+        ]
+        return " ".join(parts) if parts else "usage=-"
 
     def _source_pack_with_persona_context(
         self,
@@ -1569,10 +1662,11 @@ class LLMClient:
         attempt_messages = list(messages)
         schema_name = response_format_schema_name(response_format)
         for attempt in range(2):
-            content = complete_text(
+            content = self._complete_text(
                 model_config=model_config,
                 messages=attempt_messages,
                 response_format=response_format,
+                operation=operation,
             )
             try:
                 payload = parse_json_object(content)
