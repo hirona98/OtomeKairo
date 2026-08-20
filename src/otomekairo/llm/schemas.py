@@ -409,6 +409,7 @@ def event_evidence_response_format() -> dict[str, Any]:
             {
                 "evidence": {
                     "type": "array",
+                    "maxItems": 16,
                     "items": closed_object(
                         {
                             "event_ref": {"type": "string"},

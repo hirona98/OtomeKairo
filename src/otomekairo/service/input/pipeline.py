@@ -477,6 +477,7 @@ class ServiceInputPipelineMixin:
             "augmented_query_text": augmented_query_text,
             "recall_hint": recall_hint,
             "recall_pack": recall_pack,
+            "self_activity_recall_pack": pipeline_contexts.get("self_activity_recall_pack"),
             "answer_contract": answer_contract,
             "evidence_pack": evidence_pack,
             "persona_context_summary": persona_context_summary,

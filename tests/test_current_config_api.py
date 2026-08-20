@@ -30,7 +30,7 @@ class CurrentConfigApiTests(unittest.TestCase):
         preset = state["model_presets"][state["selected_model_preset_id"]]
 
         self.assertNotIn("roles", preset)
-        self.assertEqual(preset["max_output_tokens"], 4000)
+        self.assertEqual(preset["max_output_tokens"], 8000)
         self.assertEqual(preset["timeout_seconds"], 90)
         self.assertFalse(preset["web_search_enabled"])
         self.assertNotIn("reasoning_effort", preset)

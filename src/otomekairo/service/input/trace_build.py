@@ -97,11 +97,64 @@ class ServiceInputTraceBuildMixin:
         capability_request_summary: dict[str, Any] | None = None,
     ) -> str:
         # HTTP / cycle の result_kind は response の主 payload。内部比較の kind を畳まない。
+        # capability_request_summary はその cycle が新たに開始した request だけを渡す。
         if isinstance(speech_payload, dict):
             return "speech"
         if isinstance(capability_request_summary, dict):
             return "capability_request"
         return "noop"
+
+    def _recall_pack_with_merged_event_evidence(
+        self,
+        recall_pack: dict[str, Any],
+        extra_recall_packs: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        merged = self._merge_event_evidence_generation(
+            recall_pack.get("event_evidence_generation"),
+            *(
+                pack.get("event_evidence_generation")
+                for pack in extra_recall_packs or []
+                if isinstance(pack, dict)
+            ),
+        )
+        if merged == recall_pack.get("event_evidence_generation"):
+            return recall_pack
+        return {
+            **recall_pack,
+            "event_evidence_generation": merged,
+        }
+
+    def _merge_event_evidence_generation(self, *generations: Any) -> dict[str, Any]:
+        merged = self._empty_event_evidence_generation_trace()
+        precise_reason_summary = None
+        for generation in generations:
+            if not isinstance(generation, dict):
+                continue
+            merged["requested_event_count"] += int(generation.get("requested_event_count") or 0)
+            merged["loaded_event_count"] += int(generation.get("loaded_event_count") or 0)
+            merged["succeeded_event_count"] += int(generation.get("succeeded_event_count") or 0)
+            failed_items = generation.get("failed_items")
+            if isinstance(failed_items, list):
+                merged["failed_items"].extend(item for item in failed_items if isinstance(item, dict))
+            if generation.get("precise_evidence_used") is True:
+                merged["precise_evidence_used"] = True
+            codes = generation.get("precise_reason_codes")
+            if isinstance(codes, list):
+                for code in codes:
+                    if isinstance(code, str) and code and code not in merged["precise_reason_codes"]:
+                        merged["precise_reason_codes"].append(code)
+            reason = generation.get("precise_reason_summary")
+            if isinstance(reason, str) and reason.strip():
+                precise_reason_summary = reason.strip()
+            selected = generation.get("precise_selected_event_ids")
+            if isinstance(selected, list):
+                for event_id in selected:
+                    if isinstance(event_id, str) and event_id and event_id not in merged["precise_selected_event_ids"]:
+                        merged["precise_selected_event_ids"].append(event_id)
+            merged["precise_requested_event_count"] += int(generation.get("precise_requested_event_count") or 0)
+            merged["precise_loaded_event_count"] += int(generation.get("precise_loaded_event_count") or 0)
+        merged["precise_reason_summary"] = precise_reason_summary
+        return merged
 
     def _build_cycle_events(
         self,

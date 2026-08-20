@@ -85,6 +85,8 @@ class LlmUsageTests(unittest.TestCase):
         self.assertEqual(result.text, "{}")
         self.assertEqual(result.usage["prompt_tokens"], 11)
         self.assertEqual(captured["max_tokens"], ROLE_MAX_OUTPUT_TOKENS["visual_observation"])
+        self.assertGreaterEqual(ROLE_MAX_OUTPUT_TOKENS["event_evidence"], 8000)
+        self.assertGreaterEqual(ROLE_MAX_OUTPUT_TOKENS["decision"], 8000)
 
     def test_nested_scope_keeps_parent_events(self) -> None:
         client = LLMClient()

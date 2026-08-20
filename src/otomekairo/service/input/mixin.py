@@ -444,17 +444,18 @@ class ServiceInputMixin(
     ) -> bool:
         if trigger_kind not in {"wake", "background_thinking", "capability_result"}:
             return False
-        if self._observation_summary_is_vision_capture(observation_summary):
-            return False
-        if self._client_context_has_visual_wake_observation(client_context):
-            return False
 
         decision = pipeline.get("decision")
         if isinstance(decision, dict) and self._decision_has_any_kind(
             decision,
-            {"speech", "pending_intent", "capability_request"},
+            {"speech", "pending_intent", "capability_request", "autonomous_run"},
         ):
             return True
+
+        if self._observation_summary_is_vision_capture(observation_summary):
+            return False
+        if self._client_context_has_visual_wake_observation(client_context):
+            return False
 
         if self._observation_capability_failed(observation_summary):
             return True

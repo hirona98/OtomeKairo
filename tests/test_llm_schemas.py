@@ -13,6 +13,7 @@ from otomekairo.llm.schemas import (
     SCHEMA_DIALECT_KEYS,
     all_response_formats,
     decision_response_format,
+    event_evidence_response_format,
     memory_interpretation_response_format,
     recall_pack_selection_response_format,
 )
@@ -43,6 +44,10 @@ class LLMSchemaTests(unittest.TestCase):
         for name, response_format in all_response_formats().items():
             with self.subTest(name=name):
                 self._assert_closed_objects(_root_schema(response_format), path=name)
+
+    def test_event_evidence_array_has_output_cap(self) -> None:
+        schema = _root_schema(event_evidence_response_format())
+        self.assertEqual(schema["properties"]["evidence"]["maxItems"], 16)
 
     def test_recall_pack_candidate_refs_reject_empty_array(self) -> None:
         schema = _root_schema(recall_pack_selection_response_format())
