@@ -915,7 +915,8 @@ class LLMClient:
             f"source_capability_id={source_capability_id} の follow-up です。"
             f"allowed_followup_capability_ids={allowed_summary} に含まれない "
             f"{request_capability_id.strip()} の capability_request は不正です。"
-            "受け取った result に基づく speech / noop / pending_intent を返してください。"
+            "受け取った result に基づく speech / noop / autonomous_run を返してください。"
+            "pending_intent は残作業の置き場ではありません。"
         )
 
     def _validate_decision_capability_result_followup_constraints(

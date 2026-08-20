@@ -1425,8 +1425,21 @@ def _capability_result_trigger_policies(
             )
     else:
         policies.append(
-            "許可されない capability_request は出さず、受け取った結果への speech / noop / pending_intent で閉じてください。"
+            "到着は capability result です。会話の向きへ引き上げないでください。"
+            "許可されない capability_request は出さないでください。"
+            "今回の結果でこの到着を閉じられるなら speech または noop で閉じてください。"
+            "結果を受けたあとに待機、観測、発話、確認、支援の履行が残るなら autonomous_run です。"
+            "pending_intent は残作業の置き場ではありません。"
         )
+        completed_tool_label = _completed_mcp_tool_label_from_followup_constraints(
+            capability_result_context
+        )
+        if completed_tool_label is not None:
+            policies.append(
+                f"今回完了した tool は {completed_tool_label} です。"
+                "同じ tool を再実行しません。"
+                "残りが同じ作用なら autonomous_run です。"
+            )
     return policies
 
 

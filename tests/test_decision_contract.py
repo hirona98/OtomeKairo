@@ -1076,6 +1076,23 @@ class DecisionPromptScopeTests(unittest.TestCase):
             },
         )
 
+    def test_disallowed_followup_capability_points_to_autonomous_run(self) -> None:
+        client = LLMClient()
+        with self.assertRaises(LLMError) as raised:
+            client._validate_decision_capability_result_context(
+                payload=_capability_decision("vision.capture", {"vision_source_id": "vision_source:desktop"}),
+                capability_result_context={
+                    "source_capability_id": "mcp.call_tool",
+                    "allowed_followup_capability_ids": ["mcp.call_tool"],
+                },
+            )
+
+        message = str(raised.exception)
+        self.assertIn("allowed_followup_capability_ids", message)
+        self.assertIn("autonomous_run", message)
+        self.assertIn("pending_intent は残作業の置き場ではありません", message)
+        self.assertNotIn("speech / noop / pending_intent を返してください", message)
+
 
 class AutonomousCompletionReviewContractTests(unittest.TestCase):
     def test_contract_accepts_only_completion_review_shape(self) -> None:
