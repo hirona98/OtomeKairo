@@ -22,6 +22,7 @@ from otomekairo.llm.client import LLMClient
 from otomekairo.llm.transport import CompletionResult
 from otomekairo.llm.prompts import (
     _build_agent_skill_messages,
+    build_agent_skill_material_selection_messages,
     build_agent_skill_selection_messages,
 )
 from otomekairo.service.agent_skills import (
@@ -803,7 +804,33 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
                     text="自己評価。",
                 ),
                 trigger_kind="background_thinking",
-                capability_decision_view=[],
+                capability_decision_view=[
+                    {
+                        "id": "mcp.call_tool",
+                        "kind": "external_service",
+                        "available": True,
+                        "what_it_does": "MCP toolを呼ぶ",
+                        "risk_level": "high",
+                        "unavailable_reason": None,
+                        "when_to_use": ["外部情報が必要"],
+                        "required_input": "mcp_server_id, tool_name, arguments",
+                        "mcp_servers": [
+                            {
+                                "mcp_server_id": "example",
+                                "available": True,
+                                "unavailable_reason": None,
+                                "transport": "streamable_http",
+                                "tools": [
+                                    {
+                                        "name": "observe",
+                                        "description": "現在状態を見る",
+                                        "input_schema": {"type": "object"},
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
                 recent_turns=[{"role": "person", "text": "返信してみたら？"}],
                 work_log=[{"capability_id": "mcp.call_tool", "tool_name": "get_thread"}],
                 orientation_context={
@@ -820,6 +847,13 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
                 selection_contexts[0]["host_authorization"]["kind"],
                 "current_individual_decision",
             )
+            self.assertEqual(selection_contexts[0]["selection_horizon"], "current_decision")
+            capability_summary = selection_contexts[0]["capability_selection_summary"][0]
+            self.assertNotIn("when_to_use", capability_summary)
+            self.assertNotIn("required_input", capability_summary)
+            self.assertNotIn("transport", capability_summary["mcp_servers"][0])
+            tool_summary = capability_summary["mcp_servers"][0]["tools"][0]
+            self.assertEqual(tool_summary, {"name": "observe", "description": "現在状態を見る"})
             self.assertEqual(
                 context["host_authorization"]["kind"],
                 "current_individual_decision",
@@ -858,6 +892,13 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
         self.assertIn("recent_turns", selection[0]["content"])
         self.assertIn("work_log", selection[0]["content"])
         self.assertIn("orientation_context.standing_concerns", selection[0]["content"])
+        self.assertIn("selection_horizon", selection[0]["content"])
+        self.assertIn("capability_selection_summary", selection[0]["content"])
+        self.assertNotIn("capability_decision_view", selection[0]["content"])
+        material = build_agent_skill_material_selection_messages(
+            selection_context={"selection_horizon": "current_autonomous_step"}
+        )
+        self.assertIn("将来の仮想的な step 用", material[0]["content"])
         self.assertIn("実行指示ではありません", selection[0]["content"])
         self.assertIn("current_input をこの cycle の向きの本体", selection[0]["content"])
         self.assertIn("skill 選択を義務づけません", selection[0]["content"])
@@ -865,6 +906,61 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
         self.assertIn("current_individual_decision", applied[0]["content"])
         self.assertIn("trusted host policy", applied[0]["content"])
         self.assertIn("skill_id は capability_id でも MCP tool_name でもありません", applied[0]["content"])
+
+    def test_run_context_uses_current_autonomous_step_horizon(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory) / "skills"
+            root.mkdir()
+            skill_dir = _write_skill(root)
+            references = skill_dir / "references"
+            references.mkdir()
+            (references / "guide.md").write_text("step guide", encoding="utf-8")
+            definition = _source_definition(root, enabled=True)
+            selection_contexts: list[dict] = []
+            material_contexts: list[dict] = []
+
+            class FakeLlm:
+                def generate_agent_skill_selection(self, **kwargs):
+                    selection_contexts.append(kwargs["selection_context"])
+                    return {"selected_skill_ids": ["echo-skill"], "reason_summary": "needed"}
+
+                def generate_agent_skill_material_selection(self, **kwargs):
+                    material_contexts.append(kwargs["selection_context"])
+                    return {
+                        "additional_skill_ids": [],
+                        "resource_reads": [],
+                        "reason_summary": "enough material",
+                    }
+
+            class Subject(ServiceAgentSkillsMixin):
+                def __init__(self):
+                    self._runtime_state_lock = threading.RLock()
+                    self._agent_skill_registry = AgentSkillRegistry.load({"test-source": definition})
+                    self.llm = FakeLlm()
+
+            Subject()._build_agent_skill_context(
+                model_config={"model": "real-model"},
+                current_input=CurrentInput(
+                    sender_kind="system",
+                    sender_ref=None,
+                    source_kind="autonomous_run",
+                    response_target_refs=(),
+                    interaction_context=None,
+                    text="次の一手を判断する。",
+                ),
+                trigger_kind="autonomous_run",
+                capability_decision_view=[],
+                run={"objective_summary": "一つの目的を進める。"},
+            )
+
+            self.assertEqual(
+                selection_contexts[0]["selection_horizon"],
+                "current_autonomous_step",
+            )
+            self.assertEqual(
+                material_contexts[0]["selection_horizon"],
+                "current_autonomous_step",
+            )
 
 
 if __name__ == "__main__":

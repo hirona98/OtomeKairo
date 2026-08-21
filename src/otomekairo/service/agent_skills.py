@@ -89,6 +89,62 @@ def resolve_agent_skill_host_authorization(
 class ServiceAgentSkillsMixin:
     _AGENT_SKILL_RUNNER_CLIENT_ID = "local:agent-skill-runner"
 
+    def _agent_skill_capability_selection_summary(
+        self,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        summaries: list[dict[str, Any]] = []
+        for capability in capability_decision_view or []:
+            summary = {
+                key: capability[key]
+                for key in (
+                    "id",
+                    "kind",
+                    "available",
+                    "what_it_does",
+                    "risk_level",
+                    "unavailable_reason",
+                )
+            }
+            mcp_servers = capability.get("mcp_servers")
+            if isinstance(mcp_servers, list):
+                summary["mcp_servers"] = [
+                    {
+                        "mcp_server_id": server["mcp_server_id"],
+                        "available": server["available"],
+                        "unavailable_reason": server.get("unavailable_reason"),
+                        "tools": [
+                            {
+                                "name": tool["name"],
+                                "description": tool["description"],
+                            }
+                            for tool in server.get("tools", [])
+                        ],
+                    }
+                    for server in mcp_servers
+                ]
+            vision_sources = capability.get("vision_sources")
+            if isinstance(vision_sources, list):
+                summary["vision_sources"] = [
+                    {
+                        key: source[key]
+                        for key in (
+                            "vision_source_id",
+                            "kind",
+                            "source_owner",
+                            "label",
+                            "available",
+                            "unavailable_reason",
+                            "supported_operations",
+                            "supported_amounts",
+                        )
+                        if key in source
+                    }
+                    for source in vision_sources
+                ]
+            summaries.append(summary)
+        return summaries
+
     def _agent_skill_script_execution_available(self) -> bool:
         with self._runtime_state_lock:
             registry = self._agent_skill_registry
@@ -123,6 +179,7 @@ class ServiceAgentSkillsMixin:
             run=run,
             origin_source_kind=origin_source_kind,
         )
+        selection_horizon = "current_autonomous_step" if isinstance(run, dict) else "current_decision"
         selection = self.llm.generate_agent_skill_selection(
             model_config=model_config,
             selection_context={
@@ -134,7 +191,10 @@ class ServiceAgentSkillsMixin:
                 "run": run,
                 "prior_activation": prior_activation,
                 "host_authorization": host_authorization,
-                "capability_decision_view": capability_decision_view or [],
+                "selection_horizon": selection_horizon,
+                "capability_selection_summary": self._agent_skill_capability_selection_summary(
+                    capability_decision_view
+                ),
                 "allowed_skill_ids": [entry["skill_id"] for entry in catalog],
                 "skill_catalog": catalog,
             },
@@ -196,6 +256,7 @@ class ServiceAgentSkillsMixin:
                     "run": run,
                     "prior_activation": prior_activation,
                     "host_authorization": host_authorization,
+                    "selection_horizon": selection_horizon,
                     "active_skills": active_skills,
                     "allowed_additional_skill_ids": linked_candidates,
                     "allowed_resource_reads": [

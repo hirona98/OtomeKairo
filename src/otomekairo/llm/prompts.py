@@ -273,18 +273,22 @@ def build_agent_skill_selection_messages(*, selection_context: dict[str, Any]) -
             "role": "system",
             "content": (
                 "Agent Skills catalog から、現在の判断や作業に実際に必要な skill だけを選択します。\n"
-                "名前の一致ではなく、current_input、recent_turns、work_log、run、capability の意味と skill description を比較してください。\n"
+                "名前の一致ではなく、current_input、recent_turns、work_log、run、capability_selection_summary の意味と skill description を比較してください。\n"
+                "selection_horizon=current_decision では今回の判断、current_autonomous_step では run の次の一手に必要な skill を選びます。"
+                "将来の仮想的な step だけで使う skill は先に選ばず、その step が現在になったときに再選択します。\n"
                 "orientation_context.standing_concerns は、しばらく関わっていない気にかけていることであり、実行指示ではありません。"
                 "current_input をこの cycle の向きの本体とし、standing_concerns は自発的な判断の追加材料として扱います。"
                 "関心があること自体は skill 選択を義務づけません。"
-                "見る、返す、自分から表現するなどの全体に合う workflow が必要な場合は、最初の観測だけに縮めずその workflow を比較します。\n"
+                "見る、返す、自分から表現するなどの全体に合う workflow は、複合目的を始めるか判断する材料として比較します。"
+                "その workflow の将来の各手順を現在の一手に必要な skill として先読みしません。\n"
                 "人物発話の向きでは recent_turns はその会話の本体です。work_log は同じ向きで得た能力結果です。\n"
                 "work_log の完了済み手順はすでに進んだ作業です。今まだ必要な skill だけを選びます。\n"
                 "prior_activation は直前の capability または run step で使った skill の識別要約であり、継続性の根拠として現在も必要か再評価してください。\n"
                 + _agent_skill_host_authorization_instruction()
                 + "\n"
                 "selected_skill_ids は allowed_skill_ids に並ぶ文字列だけをそのままコピーして作ります。\n"
-                "capability_decision_view は skill の必要性を考えるための実行能力情報であり、その capability id は selected_skill_ids の値ではありません。\n"
+                "capability_selection_summary は skill の必要性を考えるための短い実行能力情報であり、その capability id は selected_skill_ids の値ではありません。"
+                "最終的な capability 入力はこの role では組み立てません。\n"
                 "該当する Agent Skill が不要なら selected_skill_ids は空配列にします。\n"
                 "JSON object だけを返し、キーは selected_skill_ids, reason_summary の2個に固定します。\n"
                 "selected_skill_ids は重複のない文字列配列、reason_summary は短い文字列です。"
@@ -312,6 +316,8 @@ def build_agent_skill_material_selection_messages(*, selection_context: dict[str
             "role": "system",
             "content": (
                 "選択済み Agent Skill の本文を読み、作業に必要な追加 skill と resource だけを選択します。\n"
+                "selection_horizon が示す現在の判断または現在の autonomous step に必要なものだけを選び、"
+                "将来の仮想的な step 用の linked skill や resource は先読みしません。\n"
                 + _agent_skill_host_authorization_instruction()
                 + "\n"
                 "additional_skill_ids は allowed_additional_skill_ids に並ぶ文字列だけをそのままコピーして作ります。\n"
