@@ -136,7 +136,6 @@ def input_interpretation_response_format() -> dict[str, Any]:
 def decision_response_format(
     *,
     comparison_scope: str = "full",
-    workspace_factor_refs: tuple[str, ...] | list[str] | None = None,
 ) -> dict[str, Any]:
     if comparison_scope not in DECISION_COMPARISON_SCOPE_KINDS:
         raise ValueError(f"unsupported comparison_scope: {comparison_scope}")
@@ -172,9 +171,6 @@ def decision_response_format(
         if "autonomous_run" in kind_values
         else {"type": "null"}
     )
-    primary_factor_ref, supporting_factor_refs, suppressed_factors = (
-        _decision_foreground_reference_schemas(workspace_factor_refs)
-    )
     return structured_response_format(
         f"decision_{comparison_scope}" if comparison_scope != "full" else "decision",
         closed_object(
@@ -196,9 +192,18 @@ def decision_response_format(
                 "autonomous_run": autonomous_run,
                 "foreground_selection": closed_object(
                     {
-                        "primary_factor_ref": primary_factor_ref,
-                        "supporting_factor_refs": supporting_factor_refs,
-                        "suppressed_factors": suppressed_factors,
+                        "primary_factor_ref": nullable({"type": "string"}),
+                        "supporting_factor_refs": string_array(max_items=3),
+                        "suppressed_factors": {
+                            "type": "array",
+                            "maxItems": 5,
+                            "items": closed_object(
+                                {
+                                    "factor_ref": {"type": "string"},
+                                    "reason_summary": {"type": "string"},
+                                }
+                            ),
+                        },
                         "summary_text": {"type": "string"},
                     }
                 ),
@@ -216,48 +221,6 @@ def decision_response_format(
                 },
             }
         ),
-    )
-
-
-def _decision_foreground_reference_schemas(
-    workspace_factor_refs: tuple[str, ...] | list[str] | None,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    if workspace_factor_refs is None:
-        factor_ref = {"type": "string"}
-        return (
-            nullable(factor_ref),
-            string_array(max_items=3),
-            {
-                "type": "array",
-                "maxItems": 5,
-                "items": closed_object(
-                    {
-                        "factor_ref": factor_ref,
-                        "reason_summary": {"type": "string"},
-                    }
-                ),
-            },
-        )
-
-    factor_refs = sorted(set(workspace_factor_refs))
-    primary_factor_ref = string_enum(factor_refs) if factor_refs else {"type": "null"}
-    factor_ref = string_enum(factor_refs) if factor_refs else {"type": "string"}
-    return (
-        primary_factor_ref,
-        string_array(
-            max_items=min(3, len(factor_refs)),
-            item_enum=factor_refs or None,
-        ),
-        {
-            "type": "array",
-            "maxItems": min(5, len(factor_refs)),
-            "items": closed_object(
-                {
-                    "factor_ref": factor_ref,
-                    "reason_summary": {"type": "string"},
-                }
-            ),
-        },
     )
 
 

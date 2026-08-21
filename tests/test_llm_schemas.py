@@ -85,41 +85,16 @@ class LLMSchemaTests(unittest.TestCase):
         self.assertEqual(schema["properties"]["capability_request"], {"type": "null"})
         self.assertEqual(schema["properties"]["autonomous_run"], {"type": "null"})
 
-    def test_decision_foreground_refs_follow_runtime_workspace(self) -> None:
-        schema = _root_schema(
-            decision_response_format(
-                comparison_scope="outward_speech",
-                workspace_factor_refs=["current_input:user_message", "world_state:visual"],
-            )
-        )
+    def test_decision_foreground_refs_use_static_schema(self) -> None:
+        schema = _root_schema(decision_response_format(comparison_scope="outward_speech"))
         foreground = schema["properties"]["foreground_selection"]["properties"]
 
-        self.assertEqual(
-            set(foreground["primary_factor_ref"]["enum"]),
-            {"current_input:user_message", "world_state:visual"},
-        )
-        self.assertEqual(
-            set(foreground["supporting_factor_refs"]["items"]["enum"]),
-            {"current_input:user_message", "world_state:visual"},
-        )
+        self.assertEqual(foreground["primary_factor_ref"], {"type": ["string", "null"]})
+        self.assertEqual(foreground["supporting_factor_refs"]["items"], {"type": "string"})
+        self.assertEqual(foreground["supporting_factor_refs"]["maxItems"], 3)
+        self.assertEqual(foreground["suppressed_factors"]["maxItems"], 5)
         suppressed_factor = foreground["suppressed_factors"]["items"]["properties"]["factor_ref"]
-        self.assertEqual(
-            set(suppressed_factor["enum"]),
-            {"current_input:user_message", "world_state:visual"},
-        )
-
-    def test_decision_foreground_refs_require_empty_selection_without_candidates(self) -> None:
-        schema = _root_schema(
-            decision_response_format(
-                comparison_scope="outward_speech",
-                workspace_factor_refs=[],
-            )
-        )
-        foreground = schema["properties"]["foreground_selection"]["properties"]
-
-        self.assertEqual(foreground["primary_factor_ref"], {"type": "null"})
-        self.assertEqual(foreground["supporting_factor_refs"]["maxItems"], 0)
-        self.assertEqual(foreground["suppressed_factors"]["maxItems"], 0)
+        self.assertEqual(suppressed_factor, {"type": "string"})
 
     def _assert_dialect(self, node: Any, *, path: str) -> None:
         if isinstance(node, list):

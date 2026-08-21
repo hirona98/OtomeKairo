@@ -44,14 +44,14 @@ schema が担う範囲は次である。
 
 コードの validator が担う範囲は次である。
 
+- request ごとの source pack や WorkspaceContext、CapabilityDecisionView に存在する参照
 - schema だけでは表せない、同じ参照の重複や主参照と補助参照の重複
 - kind と stance、capability 実行可否のような相互制約
 - 内部識別子禁止、改行禁止、正規化順のような意味規則
 
-schema は原則として request ごとの動的 enum を持たない。
-`decision` は例外として、`kind` を `comparison_scope` に応じた許可集合へ絞り、`foreground_selection` の factor ref をその request の `WorkspaceContext.workspace_candidates[].factor_ref` へ絞る。候補があるときは `primary_factor_ref` をそのうち1件に固定する。
-候補が無いときは `primary_factor_ref=null`、`supporting_factor_refs=[]`、`suppressed_factors=[]` だけを許可する。
-また、比較 scope に存在しない結果種別の排他 payload は、必須キーを残したまま `null` 型へ固定する。たとえば `comparison_scope=outward_speech` の `capability_request / autonomous_run` は `null` だけを許可する。
+schema は request ごとの動的 enum を持たない。
+`decision.kind` は `comparison_scope` に応じた閉じた許可集合とする。`foreground_selection` の factor ref は文字列の shape と件数上限だけを schema で求め、その request の `WorkspaceContext.workspace_candidates[].factor_ref` に存在すること、候補があるときの `primary_factor_ref` 必須、候補が無いときの空選択は validator で検証する。
+比較 scope に存在しない結果種別の排他 payload は、必須キーを残したまま `null` 型へ固定する。たとえば `comparison_scope=outward_speech` の `capability_request / autonomous_run` は `null` だけを許可する。
 
 閉じた object は `additionalProperties: false` とし、その object の全 property を `required` にする。
 任意に見える欄もキーは常に出し、値を `null` または空配列にする。
