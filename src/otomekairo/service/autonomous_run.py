@@ -755,6 +755,76 @@ class ServiceAutonomousRunMixin:
         emit_speech_event: bool,
         allow_during_user_response: bool,
     ) -> dict[str, Any]:
+        trace_context: dict[str, Any] = {}
+        if self.llm.has_any_usage_scope():
+            return self._execute_autonomous_run_step_core_locked(
+                state=state,
+                run_id=run_id,
+                started_at=started_at,
+                source_current_input=source_current_input,
+                last_result_context=last_result_context,
+                source_request_record=source_request_record,
+                emit_speech_event=emit_speech_event,
+                allow_during_user_response=allow_during_user_response,
+                trace_context=trace_context,
+            )
+
+        cycle_id = self._new_cycle_id()
+        run_at_start = self.store.get_autonomous_run(run_id=run_id)
+        self.llm.push_usage_scope(cycle_id)
+        try:
+            try:
+                result = self._execute_autonomous_run_step_core_locked(
+                    state=state,
+                    run_id=run_id,
+                    started_at=started_at,
+                    source_current_input=source_current_input,
+                    last_result_context=last_result_context,
+                    source_request_record=source_request_record,
+                    emit_speech_event=emit_speech_event,
+                    allow_during_user_response=allow_during_user_response,
+                    trace_context=trace_context,
+                )
+            except Exception as exc:
+                self._persist_standalone_autonomous_step_cycle(
+                    cycle_id=cycle_id,
+                    started_at=started_at,
+                    state=state,
+                    run_id=run_id,
+                    run_at_start=run_at_start,
+                    result=None,
+                    trace_context=trace_context,
+                    failure=exc,
+                )
+                raise
+
+            self._persist_standalone_autonomous_step_cycle(
+                cycle_id=cycle_id,
+                started_at=started_at,
+                state=state,
+                run_id=run_id,
+                run_at_start=run_at_start,
+                result=result,
+                trace_context=trace_context,
+                failure=None,
+            )
+            return result
+        finally:
+            self._discard_cycle_usage_scope(cycle_id)
+
+    def _execute_autonomous_run_step_core_locked(
+        self,
+        *,
+        state: dict[str, Any],
+        run_id: str,
+        started_at: str,
+        source_current_input: dict[str, Any] | None = None,
+        last_result_context: dict[str, Any] | None = None,
+        source_request_record: dict[str, Any] | None = None,
+        emit_speech_event: bool,
+        allow_during_user_response: bool,
+        trace_context: dict[str, Any],
+    ) -> dict[str, Any]:
         guard_result = self._autonomous_run_step_guard(
             run_id=run_id,
             current_time=started_at,
@@ -785,10 +855,6 @@ class ServiceAutonomousRunMixin:
         capability_request_summary: dict[str, Any] | None = None
         speech_events: list[dict[str, Any]] = []
         previous_request_finished = False
-        owned_scope = None
-        if not self.llm.has_any_usage_scope():
-            owned_scope = f"autonomous_step:{run_id}:{started_at}"
-            self.llm.push_usage_scope(owned_scope)
 
         try:
             self._autonomous_run_consecutive_step_count(run)
@@ -804,6 +870,9 @@ class ServiceAutonomousRunMixin:
                 selected_preset=selected_preset,
                 source_current_input=source_current_input,
                 last_result_context=last_result_context or run.get("last_result_context"),
+            )
+            trace_context["agent_skill_activation"] = self._agent_skill_activation_summary(
+                getattr(step_context, "agent_skill_context", None)
             )
             action = step["action"]
             transition = step["transition"]
@@ -890,6 +959,9 @@ class ServiceAutonomousRunMixin:
                         source_current_input=source_current_input,
                         last_result_context=last_result_context or run.get("last_result_context"),
                         pre_send_check_feedback=AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK,
+                    )
+                    trace_context["agent_skill_activation"] = self._agent_skill_activation_summary(
+                        getattr(step_context, "agent_skill_context", None)
                     )
                     action = step["action"]
                     transition = step["transition"]
@@ -1139,9 +1211,6 @@ class ServiceAutonomousRunMixin:
                 "step": None,
                 "error": str(exc),
             }
-        finally:
-            if owned_scope is not None:
-                self._discard_cycle_usage_scope(owned_scope)
         debug_log(
             "AutonomousRun",
             (
@@ -1156,6 +1225,288 @@ class ServiceAutonomousRunMixin:
             "capability_request_summary": capability_request_summary,
             "previous_request_finished": previous_request_finished,
             "step": step,
+        }
+
+    def _persist_standalone_autonomous_step_cycle(
+        self,
+        *,
+        cycle_id: str,
+        started_at: str,
+        state: dict[str, Any],
+        run_id: str,
+        run_at_start: dict[str, Any] | None,
+        result: dict[str, Any] | None,
+        trace_context: dict[str, Any],
+        failure: Exception | None,
+    ) -> None:
+        finished_at = self._now_iso()
+        result_payload = result if isinstance(result, dict) else {}
+        run_after = result_payload.get("autonomous_run")
+        if not isinstance(run_after, dict):
+            run_after = self.store.get_autonomous_run(run_id=run_id)
+        step = result_payload.get("step")
+        step = step if isinstance(step, dict) else None
+        action = step.get("action") if isinstance(step, dict) else None
+        action = action if isinstance(action, dict) else {}
+        transition = step.get("transition") if isinstance(step, dict) else None
+        transition = transition if isinstance(transition, dict) else {}
+        action_kind = str(action.get("kind") or "none").strip()
+        failure_summary = self._standalone_autonomous_step_failure_summary(
+            result=result_payload,
+            failure=failure,
+        )
+        failed = failure_summary is not None
+        reason_summary = (
+            self._autonomous_step_reason_summary(
+                step,
+                fallback="autonomous_run step の状態を更新した。",
+            )
+            if isinstance(step, dict)
+            else self._standalone_autonomous_step_status_summary(result_payload)
+        )
+        trace_reason_summary = failure_summary or reason_summary
+        result_kind = (
+            "internal_failure"
+            if failed
+            else action_kind
+            if action_kind in {"capability_request", "speech"}
+            else "noop"
+        )
+        speech_payload = result_payload.get("speech_payload")
+        speech_payload = speech_payload if isinstance(speech_payload, dict) else None
+        capability_request_summary = self._compact_capability_request_summary(
+            result_payload.get("capability_request_summary")
+        )
+        objective_summary = self._standalone_autonomous_step_objective_summary(
+            run_at_start=run_at_start,
+            run_after=run_after,
+        )
+        decision = (
+            {
+                "kind": action_kind,
+                "reason_summary": reason_summary,
+            }
+            if not failed
+            else None
+        )
+        cycle_summary = self._build_cycle_summary(
+            cycle_id=cycle_id,
+            started_at=started_at,
+            finished_at=finished_at,
+            state=state,
+            trigger_kind="autonomous_run_step",
+            result_kind=result_kind,
+            failed=failed,
+            input_text=objective_summary,
+            decision=decision,
+            speech_payload=speech_payload,
+            capability_request_summary=capability_request_summary,
+            failure_reason=failure_summary,
+        )
+        if "outcome_summary" not in cycle_summary and reason_summary:
+            cycle_summary["outcome_summary"] = self._clamp(reason_summary, limit=160)
+
+        run_entry_summary = self._standalone_autonomous_step_run_summary(
+            run_id=run_id,
+            run=run_at_start,
+        )
+        transition_summary = self._standalone_autonomous_step_transition_summary(
+            transition=transition,
+            run_at_start=run_at_start,
+            run_after=run_after,
+            result=result_payload,
+        )
+        result_trace: dict[str, Any] = {
+            "result_kind": result_kind,
+            "action_kind": action_kind,
+            "transition_summary": transition_summary,
+            "trigger_compact_summary": {
+                "trigger_kind": "autonomous_run_step",
+                "trigger_family": "system",
+                "current_input_summary": {
+                    "sender_kind": "system",
+                    "sender_ref": None,
+                    "source_kind": "autonomous_run_step",
+                    "response_target_refs": [],
+                    "interaction_context": None,
+                    "text": self._clamp(objective_summary, limit=160) or "",
+                },
+                "entry_summary": run_entry_summary,
+                "decision_summary": (
+                    {
+                        "kind": action_kind,
+                        "reason_summary": trace_reason_summary,
+                    }
+                    if not failed
+                    else {}
+                ),
+                "result_summary": {
+                    **self._compact_trigger_result_summary(
+                        result_kind=result_kind,
+                        speech_payload=speech_payload,
+                        pending_intent_summary=None,
+                        capability_request_summary=capability_request_summary,
+                        failure_reason=failure_summary,
+                    ),
+                    "failed": failed,
+                },
+                "transition_summary": transition_summary,
+            },
+        }
+        if speech_payload is not None:
+            speech_text = speech_payload.get("speech_text")
+            if isinstance(speech_text, str) and speech_text.strip():
+                result_trace["speech_summary"] = self._clamp(speech_text.strip(), limit=240)
+        if capability_request_summary is not None:
+            result_trace["capability_request_summary"] = capability_request_summary
+        if result_kind == "noop":
+            result_trace["noop_reason_summary"] = reason_summary
+        if failure_summary is not None:
+            result_trace["internal_failure_summary"] = failure_summary
+
+        cycle_trace = {
+            "cycle_id": cycle_id,
+            "cycle_summary": cycle_summary,
+            "input_trace": {
+                "trigger_kind": "autonomous_run_step",
+                "input_summary": self._clamp(objective_summary, limit=240),
+                "run": run_entry_summary,
+            },
+            "world_state_trace": {},
+            "activity_trace": {},
+            "recall_trace": {
+                "result_status": "skipped",
+                "skip_reason": "autonomous_run step は run 文脈を直接使う。",
+            },
+            "decision_trace": {
+                "kind": action_kind,
+                "reason_summary": trace_reason_summary,
+                "autonomous_step": self._standalone_autonomous_step_decision_summary(step),
+                "agent_skill_activation": (
+                    deepcopy(trace_context["agent_skill_activation"])
+                    if isinstance(trace_context.get("agent_skill_activation"), dict)
+                    else {}
+                ),
+            },
+            "result_trace": result_trace,
+            "memory_trace": self._skipped_memory_trace("autonomous_run_step_cycle"),
+            "llm_usage": summarize_usage_events([]),
+        }
+        retrieval_run = {
+            "cycle_id": cycle_id,
+            "selected_memory_set_id": state["selected_memory_set_id"],
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "result_status": "skipped",
+        }
+        self.store.persist_cycle_records(
+            events=[],
+            retrieval_run=retrieval_run,
+            cycle_summary=cycle_summary,
+            cycle_trace=cycle_trace,
+        )
+        self._finish_cycle_llm_usage(cycle_id)
+
+    def _standalone_autonomous_step_failure_summary(
+        self,
+        *,
+        result: dict[str, Any],
+        failure: Exception | None,
+    ) -> str | None:
+        if failure is not None:
+            detail = str(failure).strip()
+            summary = f"{type(failure).__name__}: {detail}" if detail else type(failure).__name__
+            return self._clamp(summary, limit=240)
+        error = result.get("error")
+        if isinstance(error, str) and error.strip():
+            return self._clamp(error.strip(), limit=240)
+        return None
+
+    def _standalone_autonomous_step_status_summary(self, result: dict[str, Any]) -> str:
+        status = result.get("status")
+        if isinstance(status, str) and status.strip():
+            return f"autonomous_run step は status={status.strip()} のため進めなかった。"
+        return "autonomous_run step を開始できなかった。"
+
+    def _standalone_autonomous_step_objective_summary(
+        self,
+        *,
+        run_at_start: dict[str, Any] | None,
+        run_after: dict[str, Any] | None,
+    ) -> str:
+        for run in (run_at_start, run_after):
+            if not isinstance(run, dict):
+                continue
+            objective = run.get("objective_summary")
+            if isinstance(objective, str) and objective.strip():
+                return objective.strip()
+        return "autonomous_run step"
+
+    def _standalone_autonomous_step_run_summary(
+        self,
+        *,
+        run_id: str,
+        run: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        source = run if isinstance(run, dict) else {}
+        return {
+            "run_id": run_id,
+            "source_cycle_id": source.get("source_cycle_id"),
+            "origin_kind": source.get("origin_kind"),
+            "status": source.get("status") or "missing",
+            "objective_summary": source.get("objective_summary"),
+            "current_step_summary": source.get("current_step_summary"),
+        }
+
+    def _standalone_autonomous_step_transition_summary(
+        self,
+        *,
+        transition: dict[str, Any],
+        run_at_start: dict[str, Any] | None,
+        run_after: dict[str, Any] | None,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        before = run_at_start if isinstance(run_at_start, dict) else {}
+        after = run_after if isinstance(run_after, dict) else {}
+        return {
+            "kind": transition.get("kind"),
+            "next_run_at": transition.get("next_run_at"),
+            "status_before": before.get("status") or "missing",
+            "status_after": after.get("status") or result.get("status") or "missing",
+            "current_step_summary": after.get("current_step_summary"),
+        }
+
+    def _standalone_autonomous_step_decision_summary(
+        self,
+        step: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not isinstance(step, dict):
+            return {}
+        action = step.get("action")
+        transition = step.get("transition")
+        run_update = step.get("run_update")
+        return {
+            "action": {
+                "kind": action.get("kind") if isinstance(action, dict) else None,
+            },
+            "transition": {
+                "kind": transition.get("kind") if isinstance(transition, dict) else None,
+                "next_run_at": (
+                    transition.get("next_run_at") if isinstance(transition, dict) else None
+                ),
+            },
+            "run_update": {
+                "current_step_summary": (
+                    run_update.get("current_step_summary")
+                    if isinstance(run_update, dict)
+                    else None
+                ),
+                "history_summary": (
+                    run_update.get("history_summary")
+                    if isinstance(run_update, dict)
+                    else None
+                ),
+            },
         }
 
     def _generate_reviewed_autonomous_step_candidate(

@@ -224,8 +224,10 @@ step 実行前と LLM 後の副作用直前に run 状態を再読込し、termi
 `/api/status` は run 件数を返す。
 `GET /api/inspection/current-state` は active、waiting、paused、terminal の run 要約を返す。
 操作 API は pause、resume、cancel を提供する。
+既存の判断サイクルの外で実行した step は `trigger_kind=autonomous_run_step` の inspection cycle として残す。判断サイクル内で実行した最初の step はその parent cycle へ含める。含有内容と usage の境界は [デバッグ可能性.md](デバッグ可能性.md) を正とする。
 少なくとも次を追えるようにする。
 
 - run 内の capability result event
 - `observed_result_summaries` と `observed_persons`
+- 独立 step の action、transition、run status、Agent Skill activation、LLM usage
 - 完了サイクルの `turn consolidation` 成否と episode 参照

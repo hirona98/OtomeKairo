@@ -357,6 +357,152 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             self.assertIn("2回続けて", result["error"])
             service._emit_autonomous_run_assistant_message_event.assert_not_called()
             service._persist_autonomous_run_speech_event.assert_not_called()
+            summaries = service.store.list_cycle_summaries(10)
+            self.assertEqual(len(summaries), 1)
+            self.assertEqual(summaries[0]["result_kind"], "internal_failure")
+            self.assertTrue(summaries[0]["failed"])
+
+    def test_standalone_step_persists_usage_as_inspection_cycle(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
+            service.store.upsert_autonomous_run(autonomous_run=run)
+            step = {
+                "action": {"kind": "none", "capability_request": None, "speech": None},
+                "transition": {
+                    "kind": "wait_until",
+                    "next_run_at": "2099-08-21T12:05:00+09:00",
+                },
+                "run_update": {
+                    "current_step_summary": "次の確認時刻まで待つ。",
+                    "history_summary": "確認を終えて次の時刻を待つ。",
+                },
+            }
+            step_context = SimpleNamespace(
+                agent_skill_context={
+                    "selected_skill_ids": ["skill:test"],
+                    "skills": [
+                        {
+                            "source_id": "source:test",
+                            "skill_id": "skill:test",
+                            "sha256": "abc123",
+                        }
+                    ],
+                },
+                current_input=SimpleNamespace(to_prompt_payload=lambda: {}),
+            )
+            service._build_autonomous_step_context = Mock(return_value=step_context)
+            service._autonomous_run_step_guard = Mock(return_value=None)
+            open_scope: list[str] = []
+
+            def push_usage_scope(scope_id: str) -> None:
+                open_scope.append(scope_id)
+
+            def consume_usage_scope(scope_id: str) -> list[dict]:
+                self.assertEqual(open_scope.pop(), scope_id)
+                return [
+                    {
+                        "operation": "agent_skill_selection",
+                        "prompt_tokens": 120,
+                        "completion_tokens": 8,
+                        "total_tokens": 128,
+                    },
+                    {
+                        "operation": "autonomous_step_generation",
+                        "prompt_tokens": 240,
+                        "completion_tokens": 16,
+                        "total_tokens": 256,
+                    },
+                ]
+
+            service.llm = SimpleNamespace(
+                has_any_usage_scope=lambda: bool(open_scope),
+                push_usage_scope=push_usage_scope,
+                has_usage_scope=lambda scope_id: scope_id in open_scope,
+                consume_usage_scope=consume_usage_scope,
+                generate_autonomous_step=Mock(return_value=step),
+            )
+
+            result = service._execute_autonomous_run_step_locked(
+                state=state,
+                run_id=run["run_id"],
+                started_at="2026-08-21T12:00:00+09:00",
+                source_current_input=run["source_current_input"],
+                emit_speech_event=True,
+                allow_during_user_response=True,
+            )
+
+            self.assertEqual(result["status"], "waiting_timer")
+            summaries = service.store.list_cycle_summaries(10)
+            self.assertEqual(len(summaries), 1)
+            summary = summaries[0]
+            self.assertEqual(summary["trigger_kind"], "autonomous_run_step")
+            self.assertEqual(summary["result_kind"], "noop")
+            trace = service.store.get_cycle_trace(summary["cycle_id"])
+            self.assertIsNotNone(trace)
+            assert trace is not None
+            self.assertEqual(trace["input_trace"]["run"]["run_id"], run["run_id"])
+            self.assertEqual(
+                trace["input_trace"]["run"]["source_cycle_id"],
+                "cycle:source",
+            )
+            self.assertEqual(
+                trace["decision_trace"]["agent_skill_activation"]["selected_skill_ids"],
+                ["skill:test"],
+            )
+            self.assertEqual(trace["result_trace"]["action_kind"], "none")
+            self.assertEqual(
+                trace["result_trace"]["transition_summary"]["status_after"],
+                "waiting_timer",
+            )
+            self.assertEqual(trace["llm_usage"]["call_count"], 2)
+            self.assertEqual(trace["llm_usage"]["prompt_tokens"], 360)
+            self.assertEqual(open_scope, [])
+
+    def test_parent_usage_scope_does_not_create_standalone_step_cycle(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
+            service.store.upsert_autonomous_run(autonomous_run=run)
+            step = {
+                "action": {"kind": "none", "capability_request": None, "speech": None},
+                "transition": {
+                    "kind": "wait_until",
+                    "next_run_at": "2099-08-21T12:05:00+09:00",
+                },
+                "run_update": {
+                    "current_step_summary": "次の確認時刻まで待つ。",
+                    "history_summary": "確認を終えて次の時刻を待つ。",
+                },
+            }
+            service._build_autonomous_step_context = Mock(
+                return_value=SimpleNamespace(
+                    agent_skill_context=None,
+                    current_input=SimpleNamespace(to_prompt_payload=lambda: {}),
+                )
+            )
+            service._autonomous_run_step_guard = Mock(return_value=None)
+            push_usage_scope = Mock()
+            service.llm = SimpleNamespace(
+                has_any_usage_scope=Mock(return_value=True),
+                push_usage_scope=push_usage_scope,
+                generate_autonomous_step=Mock(return_value=step),
+            )
+
+            result = service._execute_autonomous_run_step_locked(
+                state=state,
+                run_id=run["run_id"],
+                started_at="2026-08-21T12:00:00+09:00",
+                source_current_input=run["source_current_input"],
+                emit_speech_event=True,
+                allow_during_user_response=True,
+            )
+
+            self.assertEqual(result["status"], "waiting_timer")
+            self.assertEqual(service.store.list_cycle_summaries(10), [])
+            push_usage_scope.assert_not_called()
 
     def test_links_autonomous_run_to_commitment_created_by_source_cycle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
