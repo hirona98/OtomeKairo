@@ -133,19 +133,47 @@ def input_interpretation_response_format() -> dict[str, Any]:
     )
 
 
-def decision_response_format(*, comparison_scope: str = "full") -> dict[str, Any]:
+def decision_response_format(
+    *,
+    comparison_scope: str = "full",
+    workspace_factor_refs: tuple[str, ...] | list[str] | None = None,
+) -> dict[str, Any]:
     if comparison_scope not in DECISION_COMPARISON_SCOPE_KINDS:
         raise ValueError(f"unsupported comparison_scope: {comparison_scope}")
     kind_values = DECISION_COMPARISON_SCOPE_KINDS[comparison_scope]
-    capability_request = nullable(
-        closed_object(
-            {
-                "capability_id": {"type": "string"},
-                "input": open_object(
-                    description="capability の request-local input。object であり、JSON 文字列ではない。"
-                ),
-            }
-        )
+    capability_request_object = closed_object(
+        {
+            "capability_id": {"type": "string"},
+            "input": open_object(
+                description="capability の request-local input。object であり、JSON 文字列ではない。"
+            ),
+        }
+    )
+    capability_request = (
+        nullable(capability_request_object)
+        if "capability_request" in kind_values
+        else {"type": "null"}
+    )
+    autonomous_run_object = closed_object(
+        {
+            "objective_summary": {"type": "string"},
+            "initial_step_summary": {"type": "string"},
+            "coordination": closed_object(
+                {
+                    "mode": string_enum({"create_new", "replace_existing"}),
+                    "target_run_ids": string_array(),
+                    "reason_summary": {"type": "string"},
+                }
+            ),
+        }
+    )
+    autonomous_run = (
+        nullable(autonomous_run_object)
+        if "autonomous_run" in kind_values
+        else {"type": "null"}
+    )
+    primary_factor_ref, supporting_factor_refs, suppressed_factors = (
+        _decision_foreground_reference_schemas(workspace_factor_refs)
     )
     return structured_response_format(
         f"decision_{comparison_scope}" if comparison_scope != "full" else "decision",
@@ -165,35 +193,12 @@ def decision_response_format(*, comparison_scope: str = "full") -> dict[str, Any
                     )
                 ),
                 "capability_request": capability_request,
-                "autonomous_run": nullable(
-                    closed_object(
-                        {
-                            "objective_summary": {"type": "string"},
-                            "initial_step_summary": {"type": "string"},
-                            "coordination": closed_object(
-                                {
-                                    "mode": string_enum({"create_new", "replace_existing"}),
-                                    "target_run_ids": string_array(),
-                                    "reason_summary": {"type": "string"},
-                                }
-                            ),
-                        }
-                    )
-                ),
+                "autonomous_run": autonomous_run,
                 "foreground_selection": closed_object(
                     {
-                        "primary_factor_ref": nullable({"type": "string"}),
-                        "supporting_factor_refs": string_array(max_items=3),
-                        "suppressed_factors": {
-                            "type": "array",
-                            "maxItems": 5,
-                            "items": closed_object(
-                                {
-                                    "factor_ref": {"type": "string"},
-                                    "reason_summary": {"type": "string"},
-                                }
-                            ),
-                        },
+                        "primary_factor_ref": primary_factor_ref,
+                        "supporting_factor_refs": supporting_factor_refs,
+                        "suppressed_factors": suppressed_factors,
                         "summary_text": {"type": "string"},
                     }
                 ),
@@ -211,6 +216,48 @@ def decision_response_format(*, comparison_scope: str = "full") -> dict[str, Any
                 },
             }
         ),
+    )
+
+
+def _decision_foreground_reference_schemas(
+    workspace_factor_refs: tuple[str, ...] | list[str] | None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    if workspace_factor_refs is None:
+        factor_ref = {"type": "string"}
+        return (
+            nullable(factor_ref),
+            string_array(max_items=3),
+            {
+                "type": "array",
+                "maxItems": 5,
+                "items": closed_object(
+                    {
+                        "factor_ref": factor_ref,
+                        "reason_summary": {"type": "string"},
+                    }
+                ),
+            },
+        )
+
+    factor_refs = sorted(set(workspace_factor_refs))
+    primary_factor_ref = string_enum(factor_refs) if factor_refs else {"type": "null"}
+    factor_ref = string_enum(factor_refs) if factor_refs else {"type": "string"}
+    return (
+        primary_factor_ref,
+        string_array(
+            max_items=min(3, len(factor_refs)),
+            item_enum=factor_refs or None,
+        ),
+        {
+            "type": "array",
+            "maxItems": min(5, len(factor_refs)),
+            "items": closed_object(
+                {
+                    "factor_ref": factor_ref,
+                    "reason_summary": {"type": "string"},
+                }
+            ),
+        },
     )
 
 

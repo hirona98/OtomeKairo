@@ -422,12 +422,32 @@ class LLMClient:
                     context.comparison_scope,
                 ),
                 failure_message="Decision の生成に失敗しました。解析可能な応答が得られませんでした。",
-                response_format=decision_response_format(comparison_scope=context.comparison_scope),
+                response_format=decision_response_format(
+                    comparison_scope=context.comparison_scope,
+                    workspace_factor_refs=self._decision_workspace_factor_refs(context),
+                ),
                 operation=operation,
             )
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
             raise
+
+    def _decision_workspace_factor_refs(self, context: DecisionContext) -> tuple[str, ...]:
+        workspace_context = context.workspace_context
+        if not isinstance(workspace_context, dict):
+            return ()
+        candidates = workspace_context.get("workspace_candidates")
+        if not isinstance(candidates, list):
+            return ()
+        return tuple(
+            dict.fromkeys(
+                candidate["factor_ref"].strip()
+                for candidate in candidates
+                if isinstance(candidate, dict)
+                and isinstance(candidate.get("factor_ref"), str)
+                and candidate["factor_ref"].strip()
+            )
+        )
 
     def _validate_decision_contract_for_context(
         self,

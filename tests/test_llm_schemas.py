@@ -79,6 +79,48 @@ class LLMSchemaTests(unittest.TestCase):
                 schema = _root_schema(decision_response_format(comparison_scope=scope))
                 self.assertEqual(set(schema["properties"]["kind"]["enum"]), set(kinds))
 
+    def test_outward_decision_disallows_self_activity_payloads_in_schema(self) -> None:
+        schema = _root_schema(decision_response_format(comparison_scope="outward_speech"))
+
+        self.assertEqual(schema["properties"]["capability_request"], {"type": "null"})
+        self.assertEqual(schema["properties"]["autonomous_run"], {"type": "null"})
+
+    def test_decision_foreground_refs_follow_runtime_workspace(self) -> None:
+        schema = _root_schema(
+            decision_response_format(
+                comparison_scope="outward_speech",
+                workspace_factor_refs=["current_input:user_message", "world_state:visual"],
+            )
+        )
+        foreground = schema["properties"]["foreground_selection"]["properties"]
+
+        self.assertEqual(
+            set(foreground["primary_factor_ref"]["enum"]),
+            {"current_input:user_message", "world_state:visual"},
+        )
+        self.assertEqual(
+            set(foreground["supporting_factor_refs"]["items"]["enum"]),
+            {"current_input:user_message", "world_state:visual"},
+        )
+        suppressed_factor = foreground["suppressed_factors"]["items"]["properties"]["factor_ref"]
+        self.assertEqual(
+            set(suppressed_factor["enum"]),
+            {"current_input:user_message", "world_state:visual"},
+        )
+
+    def test_decision_foreground_refs_require_empty_selection_without_candidates(self) -> None:
+        schema = _root_schema(
+            decision_response_format(
+                comparison_scope="outward_speech",
+                workspace_factor_refs=[],
+            )
+        )
+        foreground = schema["properties"]["foreground_selection"]["properties"]
+
+        self.assertEqual(foreground["primary_factor_ref"], {"type": "null"})
+        self.assertEqual(foreground["supporting_factor_refs"]["maxItems"], 0)
+        self.assertEqual(foreground["suppressed_factors"]["maxItems"], 0)
+
     def _assert_dialect(self, node: Any, *, path: str) -> None:
         if isinstance(node, list):
             for index, item in enumerate(node):

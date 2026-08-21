@@ -518,6 +518,64 @@ class DecisionContractTests(unittest.TestCase):
         self.assertEqual(actual, valid)
         self.assertEqual(complete.call_count, 2)
 
+    def test_decision_request_schema_uses_workspace_factor_refs(self) -> None:
+        valid = {
+            "kind": "noop",
+            "reason_code": "hold",
+            "reason_summary": "今回は見送る。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+            "capability_request": None,
+            "autonomous_run": None,
+            "foreground_selection": {
+                "primary_factor_ref": "current_input:user_message",
+                "supporting_factor_refs": [],
+                "suppressed_factors": [],
+                "summary_text": "入力を主役にした。",
+            },
+            "target_stances": build_decision_target_stances_for_kind(
+                "noop",
+                required_targets=("outward_speech",),
+                reason_summary="今回は見送る。",
+            ),
+        }
+        context = replace(
+            _decision_context([]),
+            comparison_scope="outward_speech",
+            workspace_context={
+                "workspace_candidates": [
+                    {
+                        "factor_ref": "current_input:user_message",
+                        "kind": "current_input",
+                        "summary_text": "入力。",
+                    }
+                ]
+            },
+        )
+
+        with patch(
+            "otomekairo.llm.client.complete_text",
+            return_value=_completion(json.dumps(valid)),
+        ) as complete:
+            _llm_client().generate_decision(
+                model_config={"model": "real-model"},
+                persona_context=_persona_context(),
+                context=context,
+            )
+
+        response_format = complete.call_args.kwargs["response_format"]
+        foreground = response_format["json_schema"]["schema"]["properties"][
+            "foreground_selection"
+        ]["properties"]
+        self.assertEqual(
+            foreground["primary_factor_ref"]["enum"],
+            ["current_input:user_message"],
+        )
+        self.assertEqual(
+            response_format["json_schema"]["schema"]["properties"]["capability_request"],
+            {"type": "null"},
+        )
+
     def test_decision_repairs_unavailable_capability(self) -> None:
         invalid = _capability_decision(
             "agent_skill.run_script",
