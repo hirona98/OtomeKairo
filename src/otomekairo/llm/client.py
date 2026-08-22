@@ -309,6 +309,7 @@ class LLMClient:
         current_time: str,
         visual_observation_context: dict[str, Any] | None,
         activity_context: dict[str, Any] | None = None,
+        self_activity_orientation: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         operation = "input_interpretation"
         try:
@@ -350,6 +351,7 @@ class LLMClient:
                 current_time=current_time,
                 visual_observation_context=visual_observation_context,
                 activity_context=activity_context,
+                self_activity_orientation=self_activity_orientation,
             )
             payload = self._generate_structured_payload(
                 model_config=model_config,
@@ -423,14 +425,15 @@ class LLMClient:
                 ),
                 operation=operation,
             )
-            if payload.get("kind") == "capability_request":
-                payload = self._materialize_decision_capability_input(
+            if payload.get("kind") == "capability_request" and context.materialize_capability_input:
+                payload = self.materialize_decision_capability_input(
                     payload=payload,
                     context=context,
                     model_config=model_config,
                     persona_context=persona_context,
                 )
-            self._validate_decision_contract_for_context(payload=payload, context=context)
+            if context.materialize_capability_input or payload.get("kind") != "capability_request":
+                self._validate_decision_contract_for_context(payload=payload, context=context)
             return payload
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
@@ -539,7 +542,7 @@ class LLMClient:
         }
         return projected
 
-    def _materialize_decision_capability_input(
+    def materialize_decision_capability_input(
         self,
         *,
         payload: dict[str, Any],
@@ -581,6 +584,7 @@ class LLMClient:
             "capability_id": resolved["capability_id"],
             "input": final_input,
         }
+        self._validate_decision_contract_for_context(payload=hydrated, context=context)
         return hydrated
 
     def _validate_decision_foreground_selection_refs(

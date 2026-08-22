@@ -19,6 +19,17 @@ SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT = (
     "自己評価。しばらく関わっていない気にかけていることがある。"
     "今それに関わるか、関わるなら見る、返す、自分から書くのどれが今の向きとして自然かを見る。"
 )
+SELF_ACTIVITY_BOUNDARY_RECALL_HINT = {
+    "primary_recall_focus": "self",
+    "secondary_recall_focuses": ["topic", "commitment"],
+    "confidence": 0.0,
+    "time_reference": "recent",
+    "focus_scopes": ["self"],
+    "mentioned_entities": [],
+    "mentioned_topics": [],
+    "risk_flags": [],
+}
+SELF_ACTIVITY_ORIENTATION_KINDS = ("standing_concern", "ongoing_action", "autonomous_run")
 
 
 class ServiceInputDecisionComparisonMixin:
@@ -47,6 +58,16 @@ class ServiceInputDecisionComparisonMixin:
             persona_context=kwargs["persona_context"],
             context=self_context,
         )
+        if self_decision.get("kind") == "capability_request":
+            self_decision, selected_skills = self._hydrate_self_activity_capability_request(
+                self_decision=self_decision,
+                self_context=self_context,
+                **kwargs,
+            )
+            skill_slot = kwargs.get("skill_context_slot")
+            if isinstance(skill_slot, dict):
+                skill_slot["agent_skill_context"] = selected_skills
+                skill_slot["self_activity_agent_skill_context"] = selected_skills
         outward_context = self._build_outward_speech_decision_context(**kwargs)
         outward_decision = self.llm.generate_decision(
             model_config=kwargs["model_config"],
@@ -97,9 +118,6 @@ class ServiceInputDecisionComparisonMixin:
         recall_pack = kwargs.get("self_activity_recall_pack")
         if not isinstance(recall_pack, dict):
             recall_pack = kwargs.get("recall_pack") or {}
-        agent_skill_context = kwargs.get("self_activity_agent_skill_context")
-        if "self_activity_agent_skill_context" not in kwargs:
-            agent_skill_context = kwargs.get("agent_skill_context")
         initiative_context = self._self_activity_initiative_context(
             kwargs.get("initiative_context"),
             workspace_context=source_workspace,
@@ -119,7 +137,7 @@ class ServiceInputDecisionComparisonMixin:
             capability_decision_view=self._self_activity_capability_view(
                 kwargs.get("capability_decision_view")
             ),
-            agent_skill_context=agent_skill_context,
+            agent_skill_context=None,
             initiative_context=initiative_context,
             capability_result_context=None,
             visual_observation_context=None,
@@ -138,7 +156,42 @@ class ServiceInputDecisionComparisonMixin:
             reference_context=None,
             pre_send_check_feedback=kwargs.get("pre_send_check_feedback"),
             comparison_scope="self_activity",
+            materialize_capability_input=False,
         )
+
+    def _hydrate_self_activity_capability_request(
+        self,
+        *,
+        self_decision: dict[str, Any],
+        self_context: DecisionContext,
+        **kwargs: Any,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        isolated_input = self_context.current_input
+        selected_skills = self._build_agent_skill_context(
+            model_config=kwargs["model_config"],
+            current_input=isolated_input,
+            trigger_kind=kwargs["trigger_kind"],
+            capability_decision_view=self._self_activity_capability_view(
+                kwargs.get("capability_decision_view")
+            ),
+            recent_turns=[],
+            work_log=[],
+            orientation_context=kwargs.get("agent_skill_orientation_context")
+            or {"standing_concerns": []},
+            prior_activation=kwargs.get("agent_skill_prior_activation"),
+            origin_source_kind=kwargs.get("agent_skill_origin_source_kind"),
+        )
+        request = self_decision.get("capability_request")
+        if not isinstance(request, dict) or "target_ref" not in request:
+            return self_decision, selected_skills
+        hydrated_context = replace(self_context, agent_skill_context=selected_skills)
+        hydrated = self.llm.materialize_decision_capability_input(
+            payload=self_decision,
+            context=hydrated_context,
+            model_config=kwargs["model_config"],
+            persona_context=kwargs["persona_context"],
+        )
+        return hydrated, selected_skills
 
     def _self_activity_world_state(
         self,

@@ -537,6 +537,25 @@ class DecisionContractTests(unittest.TestCase):
         self.assertEqual(actual, valid)
         self.assertEqual(complete.call_count, 3)
 
+    def test_decision_can_return_capability_choice_without_input(self) -> None:
+        choice = _capability_choice_decision("mcp.call_tool", "t1")
+
+        with patch(
+            "otomekairo.llm.client.complete_text",
+            return_value=_completion(json.dumps(choice)),
+        ) as complete:
+            actual = _llm_client().generate_decision(
+                model_config={"model": "real-model"},
+                persona_context=_persona_context(),
+                context=replace(
+                    _decision_context(_mcp_capability_view()),
+                    materialize_capability_input=False,
+                ),
+            )
+
+        self.assertEqual(actual["capability_request"], {"capability_id": "mcp.call_tool", "target_ref": "t1"})
+        self.assertEqual(complete.call_count, 1)
+
     def test_decision_request_schema_does_not_embed_workspace_factor_refs(self) -> None:
         valid = {
             "kind": "noop",

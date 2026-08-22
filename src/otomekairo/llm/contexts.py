@@ -306,6 +306,7 @@ class DecisionContext:
     pre_send_check_feedback: str | None = None
     agent_skill_context: dict[str, Any] | None = None
     comparison_scope: str = "full"
+    materialize_capability_input: bool = True
 
 
 @dataclass(frozen=True, slots=True)
