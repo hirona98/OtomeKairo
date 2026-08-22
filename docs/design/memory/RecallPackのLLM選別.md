@@ -59,7 +59,7 @@ OtomeKairo では、`RecallPack` 全体を LLM 任せにはしない。
 
 1. コードが構造レーンと連想レーンで候補群を集める
 2. コードが request-local な candidate ref を持つ source pack を作る
-3. `recall_pack_selection` role が section 配置と採用候補を返す
+3. `recall_pack_selection` role が採用候補を全体の優先順で返す
 4. コードが ref を実レコードへ戻し、dedupe / section limit / global limit を強制して `RecallPack` を確定する
 
 ここで重要なのは、LLM が **候補の外側を増やさない** ことである。
@@ -112,61 +112,47 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
   },
   "candidate_sections": [
     {
-      "section_name": "active_commitments",
-      "candidates": [
+      "section": "active_commitments",
+      "memory_candidates": [
         {
-          "candidate_ref": "candidate:active_commitments:1",
-          "source_kind": "memory_unit",
-          "retrieval_lane": "structured",
-          "summary_text": "また体調の話の続きをする流れが残っている。",
-          "memory_type": "commitment",
-          "scope_type": "relationship",
-          "scope_key": "self|person:external-123",
-          "commitment_state": "open",
+          "ref": "c1",
+          "summary": "また体調の話の続きをする流れが残っている。",
           "salience": 0.88,
-          "memory_link_summary": {
-            "label_counts": {
+          "memory_type": "commitment",
+          "scope": ["relationship", "self|person:external-123"],
+          "status": "active",
+          "commitment_state": "open",
+          "links": {
+            "counts": {
               "supports": 1,
               "about_same_scope": 1
             },
-            "representative_links": [
-              {
-                "label": "supports",
-                "direction": "incoming",
-                "summary_text": "supports/incoming: 体調の話を続ける約束が確認済みである。"
-              }
+            "examples": [
+              ["supports", "incoming", "体調の話を続ける約束が確認済みである。"]
             ]
           }
         }
       ]
     },
     {
-      "section_name": "episodic_evidence",
-      "candidates": [
+      "section": "episodic_evidence",
+      "episode_candidates": [
         {
-          "candidate_ref": "candidate:episodic_evidence:1",
-          "source_kind": "episode",
-          "retrieval_lane": "association",
-          "summary_text": "前回の相談の続きとして様子を確認した。",
-          "primary_scope_type": "relationship",
-          "primary_scope_key": "self|person:external-123",
-          "open_loops": ["体調の変化をまた確認する"],
-          "salience": 0.82
+          "ref": "c2",
+          "summary": "前回の相談の続きとして様子を確認した。",
+          "salience": 0.82,
+          "lane": "association",
+          "primary_scope": ["relationship", "self|person:external-123"],
+          "open_loops": ["体調の変化をまた確認する"]
         }
       ]
     }
   ],
   "conflicts": [
     {
-      "conflict_ref": "conflict:1",
-      "compare_key": {
-        "memory_type": "commitment",
-        "scope_type": "relationship",
-        "scope_key": "self|person:external-123",
-        "subject_ref": "self",
-        "predicate": "talk_again"
-      },
-      "variant_summaries": [
+      "ref": "x1",
+      "compare": ["commitment", "relationship", "self|person:external-123", "self", "talk_again"],
+      "variants": [
         "また体調の話の続きをする流れが残っている。",
         "いったん休んでから改めて話すつもりになっている。"
       ]
@@ -180,15 +166,15 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
 
 入力の原則は次である。
 
-- `candidate_ref` と `conflict_ref` は request-local な参照であり、永続 ID をそのまま渡さない
-- 候補は section ごとに分けて渡す
+- candidate の `ref=c1...` と conflict の `ref=x1...` は source pack 全体で採番する request-local な短い参照であり、永続 ID をそのまま渡さない
+- 候補は section ごと、さらに `memory_candidates / episode_candidates` ごとに分け、各候補で `source_kind` を繰り返さない
 - section 名は canonical なものだけを使う
-- 各 candidate は `summary_text` と意味判断に効く最小の構造化項目に絞る
-- `retrieval_lane` は残し、`association` 候補が補助レーンであることは downstream にも保つ
-- `association_score` や query 種別は、source pack に残すが、本命判断値としては育てない
-- `memory_link_summary` は label count と代表関係だけを持ち、永続 ID を含めない
-- `memory_link_summary` は `supports / contradicts / derived_from / about_same_scope / affects` の関係を選別補助として渡す
-- `conflicts` には compare key と variant の短い summary だけを入れ、memory unit の内部 ID は渡さない
+- 各 candidate は `summary` と意味判断に効く最小の構造化項目に絞り、scope type/key は 2 要素の配列で表す
+- 既定の `structured` lane は省略する。`lane` は非既定値だけを残し、`association` 候補が補助レーンであることは downstream に保つ
+- association の `score` は source pack に残すが、本命判断値としては育てない
+- `links.counts` は label count、`links.examples` は `label / direction / related summary` の短い配列を持ち、永続 ID や重複した合成文を含めない
+- `links` は `supports / contradicts / derived_from / about_same_scope / affects` の関係を選別補助として渡す
+- `conflicts.compare` は `memory_type / scope_type / scope_key / subject_ref / predicate` の順の配列、`variants` は短い summary とし、memory unit の内部 ID は渡さない
 
 ## LLM 出力契約
 
@@ -196,19 +182,10 @@ LLM の出力は JSON object 1 個に固定する。
 
 ```json
 {
-  "section_selection": [
-    {
-      "section_name": "active_commitments",
-      "candidate_refs": ["candidate:active_commitments:1"]
-    },
-    {
-      "section_name": "episodic_evidence",
-      "candidate_refs": ["candidate:episodic_evidence:1"]
-    }
-  ],
+  "selected_candidate_refs": ["c1", "c2"],
   "conflict_summaries": [
     {
-      "conflict_ref": "conflict:1",
+      "conflict_ref": "x1",
       "summary_text": "続けて話す流れと、いったん区切る流れの理解が並んでいる。"
     }
   ]
@@ -217,15 +194,11 @@ LLM の出力は JSON object 1 個に固定する。
 
 契約は次とする。
 
-- 必須キーは `section_selection` と `conflict_summaries` の 2 つ
-- `section_selection` は配列
-- 各要素は `section_name` と `candidate_refs` を持つ
-- `section_name` は `self_model / person_model / relationship_model / active_topics / active_commitments / episodic_evidence` のいずれかで、重複しない
-- `candidate_refs` は source pack 内に存在する ref だけを使う
-- 採らない section は `section_selection` に載せない
-- `candidate_refs` は空配列にしない
-- `candidate_refs` は section をまたいで重複しない
-- candidate は元の所属 section から移動させない
+- 必須キーは `selected_candidate_refs` と `conflict_summaries` の 2 つ
+- `selected_candidate_refs` は RecallPack 全体での優先順を表す配列
+- `selected_candidate_refs` は source pack 内に存在する ref だけを重複なく使う
+- 候補を採らないときは `selected_candidate_refs` を空配列にする
+- candidate の所属 section は source pack の ref からコードが復元し、LLM 出力では指定しない
 - `conflict_summaries` の `conflict_ref` も source pack 内に存在する ref だけを使う
 - `summary_text` は簡潔にし、改行なし、内部識別子なし、固定文の繰り返しではない
 
@@ -237,7 +210,7 @@ system prompt では、少なくとも次を明示する。
 
 - 自律 AI 本体の内部処理 role `recall_pack_selection` として候補選別だけを行う
 - 候補外のものを足さない
-- section 名を発明しない
+- `selected_candidate_refs` は RecallPack 全体で優先する順に並べる
 - `primary_recall_focus` を主軸にし、`secondary_recall_focuses` は軽い補助に留める
 - `risk_flags` があるときは、広く拾うより断定を抑える
 - `association` 候補は使えても、構造候補より無条件に優先しない
@@ -258,7 +231,7 @@ user prompt では、入力文、`RecallHint`、constraint、候補 sections、c
 4. source pack 用に candidate ref / conflict ref を振る
 5. `recall_pack_selection` role を呼ぶ
 6. parse / contract が崩れたときだけ repair prompt で 1 回だけ再試行する
-7. `section_selection` を実 candidate へ戻す
+7. `selected_candidate_refs` を実 candidate と元の section へ戻す
 8. コード側で dedupe / section limit / global limit を強制する
 9. `conflict_summaries` を対応する conflict 候補へ反映する
 10. `selected_memory_ids` / `selected_episode_ids` / `selected_event_ids` を既存どおり計算する

@@ -342,7 +342,9 @@ decision view は少なくとも次を持つ。
 | `fresh_world_state_policy` | 同じ `vision_source_id` の再取得禁止理由 |
 
 decision view には token、credential、内部 URL、`target_client_id`、transport 詳細、raw schema の秘密値を入れない。
-LLM は decision view に基づいて `capability_id` と capability 固有入力を提案する。
+server は decision view から request-local な `CapabilityChoiceView` を作り、`decision_generation` と `autonomous_step_generation` には capability と対象を選ぶための短い説明だけを渡す。
+`CapabilityChoiceView` の capability は canonical な `capability_id` を持ち、MCP tool や vision source の対象だけが `t1` 形式の短い参照を持つ。MCP tool の `input_schema` はこの段階へ渡さない。
+LLM は `CapabilityChoiceView` に基づいて `capability_id` と、対象がある場合の `target_ref` を提案する。
 server は manifest、binding、state、権限で提案を検証する。
 busy、権限不足、動的一時 unavailable は decision view の `available: false` に反映する。
 直近成功、直近失敗は inspection の `CapabilityState` へ残し、明示的な capability 要求まで一律に遮断する理由にはしない。
@@ -352,9 +354,10 @@ busy、権限不足、動的一時 unavailable は decision view の `available:
 `readiness.input_keys` は LLM が capability 固有入力を組み立てる最小 key を表す。
 `readiness.result_summary_keys` と `readiness.result_item_keys` は result が判断・記憶・inspection へ投影される要約 key を表す。
 `required_input` は `input_schema.required` の全 key を順序どおり要約し、件数で省略しない。
-`decision_generation` と `autonomous_step_generation` が `capability_request` を返した場合、server は LLM 出力契約の検証として、`capability_id` が decision view に存在して `available=true` であることと、`input` が manifest の `input_schema` に一致することを確認する。
-`mcp.call_tool` はさらに、`mcp_server_id / tool_name` が同じ decision view の接続中 catalog に存在することと、`arguments` がその tool の `input_schema` に一致することを確認する。
-この検証に失敗した初回出力は既存の structured output repair へ渡し、同じ入力と validator error で 1 回だけ再生成する。repair 後も不正なら LLM contract failure とし、capability request record や外部副作用を作らない。
+`decision_generation` と `autonomous_step_generation` が `capability_request` を返した場合、server は参照を完全な decision view へ戻し、capability と対象が存在して `available=true` であることを確認する。`vision.capture` の `vision_source_id` と `mcp.call_tool` の `mcp_server_id / tool_name` は選択済み対象から server が固定し、LLM に再入力させない。
+次に `capability_input_generation` が、現在の判断、選択済み capability の説明、固定済み対象、選択した 1 tool だけの残余 `input_schema` から request-local input を組み立てる。他 capability、未選択 tool、完全な catalog は渡さない。
+server は固定入力と生成入力を統合し、manifest の `input_schema` へ一致することを確認する。`mcp.call_tool.arguments` は選択した tool の `input_schema` に一致しなければならない。
+選択段と入力生成段はそれぞれ、同じ入力と validator error で 1 回だけ structured output repair する。repair 後も不正なら LLM contract failure とし、capability request record や外部副作用を作らない。別 capability、別 tool、空 input へ切り替えない。
 非視覚 capability を実行する必要性は、foreground `world_state` と capability の対象を合わせて LLM が意味判断する。server は state type の一致だけで capability request を遮断しない。
 `vision.capture` は `visual_context` の state type だけでは判断せず、`vision_source_id` が一致する新鮮な foreground `world_state` を `fresh_world_state_by_vision_source` に入れる。
 `wake / background_thinking` では、同じ cycle の `wake_observations` で成功した `vision.capture` も `fresh_world_state_by_vision_source` に入れる。

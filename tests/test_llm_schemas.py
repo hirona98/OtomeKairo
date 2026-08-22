@@ -6,13 +6,15 @@ from typing import Any
 from otomekairo.llm.contracts import (
     DECISION_COMPARISON_SCOPE_KINDS,
     MEMORY_TYPE_VALUES,
-    RECALL_PACK_SECTION_NAMES,
     SCOPE_TYPE_VALUES,
 )
 from otomekairo.llm.schemas import (
     SCHEMA_DIALECT_KEYS,
     all_response_formats,
+    autonomous_step_choice_response_format,
+    decision_choice_response_format,
     decision_response_format,
+    event_evidence_response_format,
     memory_interpretation_response_format,
     recall_pack_selection_response_format,
 )
@@ -44,12 +46,33 @@ class LLMSchemaTests(unittest.TestCase):
             with self.subTest(name=name):
                 self._assert_closed_objects(_root_schema(response_format), path=name)
 
-    def test_recall_pack_candidate_refs_reject_empty_array(self) -> None:
+    def test_event_evidence_array_has_output_cap(self) -> None:
+        schema = _root_schema(event_evidence_response_format())
+        self.assertEqual(schema["properties"]["evidence"]["maxItems"], 16)
+
+    def test_recall_pack_selection_uses_flat_candidate_refs(self) -> None:
         schema = _root_schema(recall_pack_selection_response_format())
-        candidate_refs = schema["properties"]["section_selection"]["items"]["properties"]["candidate_refs"]
-        self.assertEqual(candidate_refs["minItems"], 1)
-        section_name = schema["properties"]["section_selection"]["items"]["properties"]["section_name"]
-        self.assertEqual(set(section_name["enum"]), set(RECALL_PACK_SECTION_NAMES))
+        properties = schema["properties"]
+        self.assertEqual(
+            set(properties),
+            {"selected_candidate_refs", "conflict_summaries"},
+        )
+        self.assertEqual(properties["selected_candidate_refs"]["type"], "array")
+        self.assertNotIn("minItems", properties["selected_candidate_refs"])
+
+    def test_capability_choice_schemas_use_canonical_capability_id(self) -> None:
+        decision_schema = _root_schema(decision_choice_response_format())
+        decision_choice = decision_schema["properties"]["capability_request"]
+        autonomous_schema = _root_schema(autonomous_step_choice_response_format())
+        autonomous_choice = autonomous_schema["properties"]["action"]["properties"][
+            "capability_request"
+        ]
+
+        for choice in (decision_choice, autonomous_choice):
+            self.assertEqual(
+                set(choice["properties"]),
+                {"capability_id", "target_ref"},
+            )
 
     def test_memory_subject_hint_is_string(self) -> None:
         schema = _root_schema(memory_interpretation_response_format())
@@ -73,6 +96,23 @@ class LLMSchemaTests(unittest.TestCase):
             with self.subTest(scope=scope):
                 schema = _root_schema(decision_response_format(comparison_scope=scope))
                 self.assertEqual(set(schema["properties"]["kind"]["enum"]), set(kinds))
+
+    def test_outward_decision_disallows_self_activity_payloads_in_schema(self) -> None:
+        schema = _root_schema(decision_response_format(comparison_scope="outward_speech"))
+
+        self.assertEqual(schema["properties"]["capability_request"], {"type": "null"})
+        self.assertEqual(schema["properties"]["autonomous_run"], {"type": "null"})
+
+    def test_decision_foreground_refs_use_static_schema(self) -> None:
+        schema = _root_schema(decision_response_format(comparison_scope="outward_speech"))
+        foreground = schema["properties"]["foreground_selection"]["properties"]
+
+        self.assertEqual(foreground["primary_factor_ref"], {"type": ["string", "null"]})
+        self.assertEqual(foreground["supporting_factor_refs"]["items"], {"type": "string"})
+        self.assertEqual(foreground["supporting_factor_refs"]["maxItems"], 3)
+        self.assertEqual(foreground["suppressed_factors"]["maxItems"], 5)
+        suppressed_factor = foreground["suppressed_factors"]["items"]["properties"]["factor_ref"]
+        self.assertEqual(suppressed_factor, {"type": "string"})
 
     def _assert_dialect(self, node: Any, *, path: str) -> None:
         if isinstance(node, list):

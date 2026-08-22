@@ -19,8 +19,10 @@ from otomekairo.defaults import (
 from otomekairo.llm.contexts import CurrentInput
 from otomekairo.llm.contracts import LLMError
 from otomekairo.llm.client import LLMClient
+from otomekairo.llm.transport import CompletionResult
 from otomekairo.llm.prompts import (
     _build_agent_skill_messages,
+    build_agent_skill_material_selection_messages,
     build_agent_skill_selection_messages,
 )
 from otomekairo.service.agent_skills import (
@@ -29,6 +31,12 @@ from otomekairo.service.agent_skills import (
     resolve_agent_skill_host_authorization,
 )
 from otomekairo.service.app import OtomeKairoService
+
+
+def _scoped_llm() -> LLMClient:
+    client = LLMClient()
+    client.push_usage_scope("test")
+    return client
 
 
 def _source_definition(root: Path, *, enabled: bool = True) -> dict:
@@ -327,12 +335,21 @@ class AgentSkillRegistryTests(unittest.TestCase):
             )
             self.assertEqual(second_context["active_skills"][1]["skill_id"], "child-skill")
             self.assertEqual(
-                second_context["allowed_resource_reads"],
                 [
-                    {"skill_id": "root-skill", "path": "references/other.md"},
+                    {
+                        "skill_id": candidate["skill_id"],
+                        "path": candidate["path"],
+                    }
+                    for candidate in second_context["resource_candidates"]
+                ],
+                [
                     {"skill_id": "child-skill", "path": "references/child.md"},
                 ],
             )
+            self.assertNotIn("allowed_resource_reads", second_context)
+            linked_candidate = material_contexts[0]["additional_skill_candidates"][0]
+            self.assertEqual(linked_candidate["skill_id"], "child-skill")
+            self.assertEqual(linked_candidate["linked_from_skill_ids"], ["root-skill"])
 
     def test_empty_material_selection_finishes_normally(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -399,7 +416,6 @@ class AgentSkillRegistryTests(unittest.TestCase):
             ]
         )
         selection_context = {
-            "allowed_skill_ids": ["elyth-observe"],
             "skill_catalog": [
                 {
                     "source_id": "elyth-skills",
@@ -410,8 +426,8 @@ class AgentSkillRegistryTests(unittest.TestCase):
             ]
         }
 
-        with patch("otomekairo.llm.client.complete_text", side_effect=lambda **_kwargs: next(responses)) as complete:
-            result = LLMClient().generate_agent_skill_selection(
+        with patch("otomekairo.llm.client.complete_text", side_effect=lambda **_kwargs: CompletionResult(text=next(responses), usage={})) as complete:
+            result = _scoped_llm().generate_agent_skill_selection(
                 model_config={"model": "real-model"},
                 selection_context=selection_context,
             )
@@ -420,7 +436,7 @@ class AgentSkillRegistryTests(unittest.TestCase):
         self.assertEqual(complete.call_count, 2)
         repair_prompt = complete.call_args_list[1].kwargs["messages"][-1]["content"]
         self.assertIn("catalog にない skill_id", repair_prompt)
-        self.assertIn("allowed_skill_ids の文字列だけ", repair_prompt)
+        self.assertIn("skill_catalog の skill_id だけ", repair_prompt)
 
     def test_material_selection_repairs_linked_skill_returned_as_resource(self) -> None:
         invalid_path = "../elyth-discover/SKILL.md"
@@ -450,14 +466,12 @@ class AgentSkillRegistryTests(unittest.TestCase):
             ]
         )
         selection_context = {
-            "allowed_additional_skill_ids": ["elyth-discover"],
-            "allowed_resource_reads": [],
-            "additional_skill_candidates": ["elyth-discover"],
+            "additional_skill_candidates": [{"skill_id": "elyth-discover"}],
             "resource_candidates": [],
         }
 
-        with patch("otomekairo.llm.client.complete_text", side_effect=lambda **_kwargs: next(responses)) as complete:
-            result = LLMClient().generate_agent_skill_material_selection(
+        with patch("otomekairo.llm.client.complete_text", side_effect=lambda **_kwargs: CompletionResult(text=next(responses), usage={})) as complete:
+            result = _scoped_llm().generate_agent_skill_material_selection(
                 model_config={"model": "real-model"},
                 selection_context=selection_context,
             )
@@ -467,7 +481,7 @@ class AgentSkillRegistryTests(unittest.TestCase):
         self.assertEqual(complete.call_count, 2)
         repair_prompt = complete.call_args_list[1].kwargs["messages"][-1]["content"]
         self.assertIn("候補にない resource", repair_prompt)
-        self.assertIn("allowed_resource_reads にある値だけ", repair_prompt)
+        self.assertIn("resource_candidates にある値だけ", repair_prompt)
 
     def test_material_selection_repairs_unsupported_done_field(self) -> None:
         responses = iter(
@@ -492,12 +506,12 @@ class AgentSkillRegistryTests(unittest.TestCase):
             ]
         )
         selection_context = {
-            "allowed_additional_skill_ids": [],
-            "allowed_resource_reads": [],
+            "additional_skill_candidates": [],
+            "resource_candidates": [],
         }
 
-        with patch("otomekairo.llm.client.complete_text", side_effect=lambda **_kwargs: next(responses)) as complete:
-            result = LLMClient().generate_agent_skill_material_selection(
+        with patch("otomekairo.llm.client.complete_text", side_effect=lambda **_kwargs: CompletionResult(text=next(responses), usage={})) as complete:
+            result = _scoped_llm().generate_agent_skill_material_selection(
                 model_config={"model": "real-model"},
                 selection_context=selection_context,
             )
@@ -508,7 +522,8 @@ class AgentSkillRegistryTests(unittest.TestCase):
         self.assertEqual(complete.call_count, 2)
         repair_prompt = complete.call_args_list[1].kwargs["messages"][-1]["content"]
         self.assertIn("キーが不正", repair_prompt)
-        self.assertIn("3キーだけ", repair_prompt)
+        self.assertIn("resource_candidates にある値だけ", repair_prompt)
+        self.assertNotIn("3キーだけ", repair_prompt)
 
     def test_material_selection_accepts_already_active_skill_id(self) -> None:
         payload = {
@@ -520,9 +535,9 @@ class AgentSkillRegistryTests(unittest.TestCase):
         LLMClient()._validate_agent_skill_material_selection(
             payload,
             selection_context={
-                "allowed_additional_skill_ids": ["elyth-read-thread"],
+                "additional_skill_candidates": [{"skill_id": "elyth-read-thread"}],
                 "active_skills": [{"skill_id": "elyth-handle-inbox"}],
-                "allowed_resource_reads": [],
+                "resource_candidates": [],
             },
         )
 
@@ -592,13 +607,16 @@ class AgentSkillRegistryTests(unittest.TestCase):
             ensure_ascii=False,
         )
         selection_context = {
-            "allowed_additional_skill_ids": ["elyth-discover"],
-            "allowed_resource_reads": [],
+            "additional_skill_candidates": [{"skill_id": "elyth-discover"}],
+            "resource_candidates": [],
         }
 
-        with patch("otomekairo.llm.client.complete_text", return_value=response) as complete:
+        with patch(
+            "otomekairo.llm.client.complete_text",
+            return_value=CompletionResult(text=response, usage={}),
+        ) as complete:
             with self.assertRaisesRegex(LLMError, "候補にない skill_id"):
-                LLMClient().generate_agent_skill_material_selection(
+                _scoped_llm().generate_agent_skill_material_selection(
                     model_config={"model": "real-model"},
                     selection_context=selection_context,
                 )
@@ -614,7 +632,6 @@ class AgentSkillRegistryTests(unittest.TestCase):
             ensure_ascii=False,
         )
         selection_context = {
-            "allowed_skill_ids": ["elyth-observe"],
             "skill_catalog": [
                 {
                     "source_id": "elyth-skills",
@@ -625,9 +642,12 @@ class AgentSkillRegistryTests(unittest.TestCase):
             ]
         }
 
-        with patch("otomekairo.llm.client.complete_text", return_value=response) as complete:
+        with patch(
+            "otomekairo.llm.client.complete_text",
+            return_value=CompletionResult(text=response, usage={}),
+        ) as complete:
             with self.assertRaisesRegex(LLMError, "catalog にない skill_id"):
-                LLMClient().generate_agent_skill_selection(
+                _scoped_llm().generate_agent_skill_selection(
                     model_config={"model": "real-model"},
                     selection_context=selection_context,
                 )
@@ -713,6 +733,8 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
             trigger_kind="user_message",
         )
         self.assertEqual(authorization["kind"], "person_request")
+        self.assertIn("許可が立っている", authorization["summary_text"])
+        self.assertIn("今の向きがその skill の作業であることまでは表さない", authorization["summary_text"])
 
     def test_run_origin_background_thinking_is_current_individual_decision(self) -> None:
         authorization = resolve_agent_skill_host_authorization(
@@ -790,7 +812,33 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
                     text="自己評価。",
                 ),
                 trigger_kind="background_thinking",
-                capability_decision_view=[],
+                capability_decision_view=[
+                    {
+                        "id": "mcp.call_tool",
+                        "kind": "external_service",
+                        "available": True,
+                        "what_it_does": "MCP toolを呼ぶ",
+                        "risk_level": "high",
+                        "unavailable_reason": None,
+                        "when_to_use": ["外部情報が必要"],
+                        "required_input": "mcp_server_id, tool_name, arguments",
+                        "mcp_servers": [
+                            {
+                                "mcp_server_id": "example",
+                                "available": True,
+                                "unavailable_reason": None,
+                                "transport": "streamable_http",
+                                "tools": [
+                                    {
+                                        "name": "observe",
+                                        "description": "現在状態を見る",
+                                        "input_schema": {"type": "object"},
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
                 recent_turns=[{"role": "person", "text": "返信してみたら？"}],
                 work_log=[{"capability_id": "mcp.call_tool", "tool_name": "get_thread"}],
                 orientation_context={
@@ -807,6 +855,13 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
                 selection_contexts[0]["host_authorization"]["kind"],
                 "current_individual_decision",
             )
+            self.assertEqual(selection_contexts[0]["selection_horizon"], "current_decision")
+            capability_summary = selection_contexts[0]["capability_selection_summary"][0]
+            self.assertNotIn("when_to_use", capability_summary)
+            self.assertNotIn("required_input", capability_summary)
+            self.assertNotIn("transport", capability_summary["mcp_servers"][0])
+            tool_summary = capability_summary["mcp_servers"][0]["tools"][0]
+            self.assertEqual(tool_summary, {"name": "observe", "description": "現在状態を見る"})
             self.assertEqual(
                 context["host_authorization"]["kind"],
                 "current_individual_decision",
@@ -845,6 +900,17 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
         self.assertIn("recent_turns", selection[0]["content"])
         self.assertIn("work_log", selection[0]["content"])
         self.assertIn("orientation_context.standing_concerns", selection[0]["content"])
+        self.assertIn("selection_horizon", selection[0]["content"])
+        self.assertIn("capability_selection_summary", selection[0]["content"])
+        self.assertIn("今の向きがその skill の作業であるときだけ", selection[0]["content"])
+        self.assertIn("今の発話がその skill を依頼したことではありません", selection[0]["content"])
+        self.assertIn("直前と別の向きなら", selection[0]["content"])
+        self.assertIn("空選択", selection[0]["content"])
+        self.assertNotIn("capability_decision_view", selection[0]["content"])
+        material = build_agent_skill_material_selection_messages(
+            selection_context={"selection_horizon": "current_autonomous_step"}
+        )
+        self.assertIn("将来の仮想的な step 用", material[0]["content"])
         self.assertIn("実行指示ではありません", selection[0]["content"])
         self.assertIn("current_input をこの cycle の向きの本体", selection[0]["content"])
         self.assertIn("skill 選択を義務づけません", selection[0]["content"])
@@ -852,6 +918,61 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
         self.assertIn("current_individual_decision", applied[0]["content"])
         self.assertIn("trusted host policy", applied[0]["content"])
         self.assertIn("skill_id は capability_id でも MCP tool_name でもありません", applied[0]["content"])
+
+    def test_run_context_uses_current_autonomous_step_horizon(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory) / "skills"
+            root.mkdir()
+            skill_dir = _write_skill(root)
+            references = skill_dir / "references"
+            references.mkdir()
+            (references / "guide.md").write_text("step guide", encoding="utf-8")
+            definition = _source_definition(root, enabled=True)
+            selection_contexts: list[dict] = []
+            material_contexts: list[dict] = []
+
+            class FakeLlm:
+                def generate_agent_skill_selection(self, **kwargs):
+                    selection_contexts.append(kwargs["selection_context"])
+                    return {"selected_skill_ids": ["echo-skill"], "reason_summary": "needed"}
+
+                def generate_agent_skill_material_selection(self, **kwargs):
+                    material_contexts.append(kwargs["selection_context"])
+                    return {
+                        "additional_skill_ids": [],
+                        "resource_reads": [],
+                        "reason_summary": "enough material",
+                    }
+
+            class Subject(ServiceAgentSkillsMixin):
+                def __init__(self):
+                    self._runtime_state_lock = threading.RLock()
+                    self._agent_skill_registry = AgentSkillRegistry.load({"test-source": definition})
+                    self.llm = FakeLlm()
+
+            Subject()._build_agent_skill_context(
+                model_config={"model": "real-model"},
+                current_input=CurrentInput(
+                    sender_kind="system",
+                    sender_ref=None,
+                    source_kind="autonomous_run",
+                    response_target_refs=(),
+                    interaction_context=None,
+                    text="次の一手を判断する。",
+                ),
+                trigger_kind="autonomous_run",
+                capability_decision_view=[],
+                run={"objective_summary": "一つの目的を進める。"},
+            )
+
+            self.assertEqual(
+                selection_contexts[0]["selection_horizon"],
+                "current_autonomous_step",
+            )
+            self.assertEqual(
+                material_contexts[0]["selection_horizon"],
+                "current_autonomous_step",
+            )
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ from dataclasses import replace
 from unittest.mock import patch
 
 from otomekairo.llm.client import LLMClient
+from otomekairo.llm.transport import CompletionResult
 from otomekairo.llm.contexts import AutonomousStepContext, CurrentInput, DecisionContext, PersonaContext
 from otomekairo.llm.contracts import (
     LLMError,
@@ -16,10 +17,21 @@ from otomekairo.llm.prompts import (
     build_autonomous_completion_review_messages,
     build_autonomous_step_messages,
     build_autonomous_step_repair_prompt,
+    build_capability_input_messages,
     build_decision_messages,
     build_decision_repair_prompt,
     _build_decision_trigger_policy,
 )
+
+
+def _llm_client() -> LLMClient:
+    client = LLMClient()
+    client.push_usage_scope("test")
+    return client
+
+
+def _completion(text: str) -> CompletionResult:
+    return CompletionResult(text=text, usage={})
 
 
 def _persona_context() -> PersonaContext:
@@ -122,6 +134,19 @@ def _capability_decision(capability_id: str, input_payload: dict) -> dict:
     }
 
 
+def _capability_choice_decision(capability_id: str, target_ref: str | None) -> dict:
+    payload = _capability_decision("", {})
+    payload["capability_request"] = {
+        "capability_id": capability_id,
+        "target_ref": target_ref,
+    }
+    return payload
+
+
+def _capability_input(input_payload: dict) -> dict:
+    return {"input": input_payload}
+
+
 class DecisionContractTests(unittest.TestCase):
     def test_decision_contract_requires_foreground_selection(self) -> None:
         payload = {
@@ -202,9 +227,9 @@ class DecisionContractTests(unittest.TestCase):
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            return_value=json.dumps(payload),
+            return_value=_completion(json.dumps(payload)),
         ):
-            actual = LLMClient().generate_decision(
+            actual = _llm_client().generate_decision(
                 model_config={"model": "real-model"},
                 persona_context=_persona_context(),
                 context=context,
@@ -248,10 +273,10 @@ class DecisionContractTests(unittest.TestCase):
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            return_value=json.dumps(payload),
+            return_value=_completion(json.dumps(payload)),
         ):
             with self.assertRaisesRegex(LLMError, r"不明な参照=affect_context:recent_episode_affects:0"):
-                LLMClient().generate_decision(
+                _llm_client().generate_decision(
                     model_config={"model": "real-model"},
                     persona_context=_persona_context(),
                     context=context,
@@ -484,7 +509,8 @@ class DecisionContractTests(unittest.TestCase):
             validate_decision_contract(payload, comparison_scope="outward_speech")
 
     def test_decision_repairs_skill_id_used_as_capability_id(self) -> None:
-        invalid = _capability_decision("elyth-check-notifications", {})
+        invalid = _capability_choice_decision("elyth-check-notifications", None)
+        choice = _capability_choice_decision("mcp.call_tool", "t1")
         valid = _capability_decision(
             "mcp.call_tool",
             {
@@ -496,29 +522,189 @@ class DecisionContractTests(unittest.TestCase):
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            side_effect=[json.dumps(invalid), json.dumps(valid)],
+            side_effect=[
+                _completion(json.dumps(invalid)),
+                _completion(json.dumps(choice)),
+                _completion(json.dumps(_capability_input({"arguments": {"limit": 20}}))),
+            ],
         ) as complete:
-            actual = LLMClient().generate_decision(
+            actual = _llm_client().generate_decision(
                 model_config={"model": "real-model"},
                 persona_context=_persona_context(),
                 context=_decision_context(_mcp_capability_view()),
             )
 
         self.assertEqual(actual, valid)
-        self.assertEqual(complete.call_count, 2)
+        self.assertEqual(complete.call_count, 3)
 
-    def test_decision_repairs_unavailable_capability(self) -> None:
-        invalid = _capability_decision(
-            "agent_skill.run_script",
-            {
-                "source_id": "elyth-skills",
-                "skill_id": "elyth-follow",
-                "skill_sha256": "digest",
-                "script_path": "scripts/run.py",
-                "args": [],
-                "stdin_text": None,
+    def test_decision_can_return_capability_choice_without_input(self) -> None:
+        choice = _capability_choice_decision("mcp.call_tool", "t1")
+
+        with patch(
+            "otomekairo.llm.client.complete_text",
+            return_value=_completion(json.dumps(choice)),
+        ) as complete:
+            actual = _llm_client().generate_decision(
+                model_config={"model": "real-model"},
+                persona_context=_persona_context(),
+                context=replace(
+                    _decision_context(_mcp_capability_view()),
+                    materialize_capability_input=False,
+                ),
+            )
+
+        self.assertEqual(actual["capability_request"], {"capability_id": "mcp.call_tool", "target_ref": "t1"})
+        self.assertEqual(complete.call_count, 1)
+
+    def test_decision_request_schema_does_not_embed_workspace_factor_refs(self) -> None:
+        valid = {
+            "kind": "noop",
+            "reason_code": "hold",
+            "reason_summary": "今回は見送る。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+            "capability_request": None,
+            "autonomous_run": None,
+            "foreground_selection": {
+                "primary_factor_ref": "current_input:user_message",
+                "supporting_factor_refs": [],
+                "suppressed_factors": [],
+                "summary_text": "入力を主役にした。",
+            },
+            "target_stances": build_decision_target_stances_for_kind(
+                "noop",
+                required_targets=("outward_speech",),
+                reason_summary="今回は見送る。",
+            ),
+        }
+        context = replace(
+            _decision_context([]),
+            comparison_scope="outward_speech",
+            workspace_context={
+                "workspace_candidates": [
+                    {
+                        "factor_ref": "current_input:user_message",
+                        "kind": "current_input",
+                        "summary_text": "入力。",
+                    }
+                ]
             },
         )
+
+        with patch(
+            "otomekairo.llm.client.complete_text",
+            return_value=_completion(json.dumps(valid)),
+        ) as complete:
+            _llm_client().generate_decision(
+                model_config={"model": "real-model"},
+                persona_context=_persona_context(),
+                context=context,
+            )
+
+        response_format = complete.call_args.kwargs["response_format"]
+        foreground = response_format["json_schema"]["schema"]["properties"][
+            "foreground_selection"
+        ]["properties"]
+        self.assertEqual(
+            foreground["primary_factor_ref"],
+            {"type": ["string", "null"]},
+        )
+        self.assertNotIn("current_input:user_message", json.dumps(response_format))
+        self.assertEqual(
+            response_format["json_schema"]["schema"]["properties"]["capability_request"],
+            {"type": "null"},
+        )
+
+    def test_decision_repairs_missing_primary_for_nonempty_workspace(self) -> None:
+        invalid = {
+            "kind": "noop",
+            "reason_code": "hold",
+            "reason_summary": "今回は見送る。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+            "capability_request": None,
+            "autonomous_run": None,
+            "foreground_selection": {
+                "primary_factor_ref": None,
+                "supporting_factor_refs": [],
+                "suppressed_factors": [],
+                "summary_text": "入力を確認した。",
+            },
+            "target_stances": build_decision_target_stances_for_kind(
+                "noop",
+                required_targets=("outward_speech",),
+                reason_summary="今回は見送る。",
+            ),
+        }
+        valid = json.loads(json.dumps(invalid))
+        valid["foreground_selection"]["primary_factor_ref"] = "current_input:user_message"
+        context = replace(
+            _decision_context([]),
+            workspace_context={
+                "workspace_candidates": [
+                    {
+                        "factor_ref": "current_input:user_message",
+                        "kind": "current_input",
+                        "summary_text": "入力。",
+                    }
+                ]
+            },
+        )
+
+        with patch(
+            "otomekairo.llm.client.complete_text",
+            side_effect=[_completion(json.dumps(invalid)), _completion(json.dumps(valid))],
+        ) as complete:
+            actual = _llm_client().generate_decision(
+                model_config={"model": "real-model"},
+                persona_context=_persona_context(),
+                context=context,
+            )
+
+        self.assertEqual(actual, valid)
+        self.assertEqual(complete.call_count, 2)
+
+    def test_decision_accepts_empty_foreground_for_empty_workspace(self) -> None:
+        valid = {
+            "kind": "noop",
+            "reason_code": "hold",
+            "reason_summary": "判断材料がないため見送る。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+            "capability_request": None,
+            "autonomous_run": None,
+            "foreground_selection": {
+                "primary_factor_ref": None,
+                "supporting_factor_refs": [],
+                "suppressed_factors": [],
+                "summary_text": "選択できる判断材料がない。",
+            },
+            "target_stances": build_decision_target_stances_for_kind(
+                "noop",
+                required_targets=("outward_speech",),
+                reason_summary="判断材料がないため見送る。",
+            ),
+        }
+        context = replace(
+            _decision_context([]),
+            workspace_context={"workspace_candidates": []},
+        )
+
+        with patch(
+            "otomekairo.llm.client.complete_text",
+            return_value=_completion(json.dumps(valid)),
+        ):
+            actual = _llm_client().generate_decision(
+                model_config={"model": "real-model"},
+                persona_context=_persona_context(),
+                context=context,
+            )
+
+        self.assertEqual(actual, valid)
+
+    def test_decision_repairs_unavailable_capability(self) -> None:
+        invalid = _capability_choice_decision("agent_skill.run_script", None)
+        choice = _capability_choice_decision("mcp.call_tool", "t1")
         valid = _capability_decision(
             "mcp.call_tool",
             {
@@ -538,30 +724,31 @@ class DecisionContractTests(unittest.TestCase):
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            side_effect=[json.dumps(invalid), json.dumps(valid)],
+            side_effect=[
+                _completion(json.dumps(invalid)),
+                _completion(json.dumps(choice)),
+                _completion(json.dumps(_capability_input({"arguments": {}}))),
+            ],
         ) as complete:
-            actual = LLMClient().generate_decision(
+            actual = _llm_client().generate_decision(
                 model_config={"model": "real-model"},
                 persona_context=_persona_context(),
                 context=_decision_context(capability_view),
             )
 
         self.assertEqual(actual, valid)
-        self.assertEqual(complete.call_count, 2)
+        self.assertEqual(complete.call_count, 3)
 
     def test_decision_repairs_missing_manifest_input(self) -> None:
-        invalid = _capability_decision(
-            "agent_skill.run_script",
-            {
-                "source_id": "test-source",
-                "skill_id": "echo-skill",
-                "skill_sha256": "digest",
-                "script_path": "scripts/echo.py",
-                "stdin_text": None,
-            },
-        )
+        invalid_input = {
+            "source_id": "test-source",
+            "skill_id": "echo-skill",
+            "skill_sha256": "digest",
+            "script_path": "scripts/echo.py",
+            "stdin_text": None,
+        }
         valid_input = {
-            **invalid["capability_request"]["input"],
+            **invalid_input,
             "args": [],
         }
         valid = _capability_decision("agent_skill.run_script", valid_input)
@@ -575,16 +762,20 @@ class DecisionContractTests(unittest.TestCase):
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            side_effect=[json.dumps(invalid), json.dumps(valid)],
+            side_effect=[
+                _completion(json.dumps(_capability_choice_decision("agent_skill.run_script", None))),
+                _completion(json.dumps(_capability_input(invalid_input))),
+                _completion(json.dumps(_capability_input(valid_input))),
+            ],
         ) as complete:
-            actual = LLMClient().generate_decision(
+            actual = _llm_client().generate_decision(
                 model_config={"model": "real-model"},
                 persona_context=_persona_context(),
                 context=_decision_context(capability_view),
             )
 
         self.assertEqual(actual, valid)
-        self.assertEqual(complete.call_count, 2)
+        self.assertEqual(complete.call_count, 3)
 
     def test_decision_repairs_unknown_mcp_tool_and_invalid_arguments(self) -> None:
         valid = _capability_decision(
@@ -595,34 +786,39 @@ class DecisionContractTests(unittest.TestCase):
                 "arguments": {"limit": 20},
             },
         )
-        invalid_inputs = (
-            {
-                "mcp_server_id": "elyth",
-                "tool_name": "elyth-check-notifications",
-                "arguments": {},
-            },
-            {
-                "mcp_server_id": "elyth",
-                "tool_name": "get_notifications",
-                "arguments": {"limit": 0},
-            },
+        cases = (
+            (
+                "unknown_target",
+                [
+                    _capability_choice_decision("mcp.call_tool", "unknown-target"),
+                    _capability_choice_decision("mcp.call_tool", "t1"),
+                    _capability_input({"arguments": {"limit": 20}}),
+                ],
+            ),
+            (
+                "invalid_arguments",
+                [
+                    _capability_choice_decision("mcp.call_tool", "t1"),
+                    _capability_input({"arguments": {"limit": 0}}),
+                    _capability_input({"arguments": {"limit": 20}}),
+                ],
+            ),
         )
 
-        for invalid_input in invalid_inputs:
-            with self.subTest(invalid_input=invalid_input):
-                invalid = _capability_decision("mcp.call_tool", invalid_input)
+        for label, responses in cases:
+            with self.subTest(label=label):
                 with patch(
                     "otomekairo.llm.client.complete_text",
-                    side_effect=[json.dumps(invalid), json.dumps(valid)],
+                    side_effect=[_completion(json.dumps(item)) for item in responses],
                 ) as complete:
-                    actual = LLMClient().generate_decision(
+                    actual = _llm_client().generate_decision(
                         model_config={"model": "real-model"},
                         persona_context=_persona_context(),
                         context=_decision_context(_mcp_capability_view()),
                     )
 
                 self.assertEqual(actual, valid)
-                self.assertEqual(complete.call_count, 2)
+                self.assertEqual(complete.call_count, 3)
 
     def test_context_validation_rejects_unavailable_vision_target_and_camera_operation(self) -> None:
         client = LLMClient()
@@ -671,8 +867,8 @@ class DecisionContractTests(unittest.TestCase):
             "action": {
                 "kind": "capability_request",
                 "capability_request": {
-                    "capability_id": "elyth-check-notifications",
-                    "input": {},
+                    "capability_ref": "elyth-check-notifications",
+                    "target_ref": None,
                 },
                 "speech": None,
             },
@@ -694,6 +890,17 @@ class DecisionContractTests(unittest.TestCase):
                 "speech": None,
             },
         }
+        choice = {
+            **invalid,
+            "action": {
+                "kind": "capability_request",
+                "capability_request": {
+                    "capability_id": "mcp.call_tool",
+                    "target_ref": "t1",
+                },
+                "speech": None,
+            },
+        }
         context = AutonomousStepContext(
             run={"run_id": "autonomous_run:test"},
             current_input=_current_input(),
@@ -708,26 +915,30 @@ class DecisionContractTests(unittest.TestCase):
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            side_effect=[json.dumps(invalid), json.dumps(valid)],
+            side_effect=[
+                _completion(json.dumps(invalid)),
+                _completion(json.dumps(choice)),
+                _completion(json.dumps(_capability_input({"arguments": {}}))),
+            ],
         ) as complete:
-            actual = LLMClient().generate_autonomous_step(
+            actual = _llm_client().generate_autonomous_step(
                 model_config={"model": "real-model"},
                 persona_context=_persona_context(),
                 context=context,
             )
 
         self.assertEqual(actual, valid)
-        self.assertEqual(complete.call_count, 2)
+        self.assertEqual(complete.call_count, 3)
 
     def test_decision_fails_when_repair_is_still_invalid(self) -> None:
-        invalid = _capability_decision("elyth-check-notifications", {})
+        invalid = _capability_choice_decision("elyth-check-notifications", None)
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            return_value=json.dumps(invalid),
+            return_value=_completion(json.dumps(invalid)),
         ) as complete:
-            with self.assertRaisesRegex(LLMError, "CapabilityDecisionView"):
-                LLMClient().generate_decision(
+            with self.assertRaisesRegex(LLMError, "capability_id"):
+                _llm_client().generate_decision(
                     model_config={"model": "real-model"},
                     persona_context=_persona_context(),
                     context=_decision_context(_mcp_capability_view()),
@@ -766,11 +977,11 @@ class DecisionContractTests(unittest.TestCase):
             patch("otomekairo.llm.client.debug_log", side_effect=capture),
             patch(
                 "otomekairo.llm.client.complete_text",
-                return_value=json.dumps(invalid),
+                return_value=_completion(json.dumps(invalid)),
             ),
         ):
             with self.assertRaisesRegex(LLMError, r"重複=visual_observation:current"):
-                LLMClient().generate_decision(
+                _llm_client().generate_decision(
                     model_config={"model": "real-model"},
                     persona_context=_persona_context(),
                     context=context,
@@ -795,11 +1006,11 @@ class DecisionContractTests(unittest.TestCase):
             patch("otomekairo.llm.client.debug_log", side_effect=capture),
             patch(
                 "otomekairo.llm.client.complete_text",
-                return_value="これは JSON ではありません。",
+                return_value=_completion("これは JSON ではありません。"),
             ),
         ):
             with self.assertRaises(LLMError):
-                LLMClient().generate_decision(
+                _llm_client().generate_decision(
                     model_config={"model": "real-model"},
                     persona_context=_persona_context(),
                     context=_decision_context([]),
@@ -833,6 +1044,114 @@ class DecisionContractTests(unittest.TestCase):
         self.assertNotIn("should-not-appear", compact)
 
 
+class SelfActivityStandingConcernCoverageTests(unittest.TestCase):
+    def _workspace(self) -> dict:
+        return {
+            "workspace_candidates": [
+                {
+                    "factor_ref": "standing_concern:elyth",
+                    "kind": "standing_concern",
+                    "summary_text": "ELYTH。",
+                    "metadata": {"concern_id": "elyth"},
+                },
+                {
+                    "factor_ref": "current_input:background_thinking",
+                    "kind": "current_input",
+                    "summary_text": "自己評価。",
+                },
+            ]
+        }
+
+    def _context(self, *, comparison_scope: str = "self_activity") -> DecisionContext:
+        return replace(
+            _decision_context(_mcp_capability_view()),
+            comparison_scope=comparison_scope,
+            trigger_kind="background_thinking",
+            workspace_context=self._workspace(),
+        )
+
+    def _payload(
+        self,
+        *,
+        kind: str = "capability_request",
+        primary: str,
+        supporting: list[str] | None = None,
+        suppressed: list[dict[str, str]] | None = None,
+    ) -> dict:
+        payload = {
+            "kind": kind,
+            "reason_code": "self_activity:test",
+            "reason_summary": "自身の活動を進める。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+            "capability_request": None,
+            "autonomous_run": None,
+            "foreground_selection": {
+                "primary_factor_ref": primary,
+                "supporting_factor_refs": supporting or [],
+                "suppressed_factors": suppressed or [],
+                "summary_text": "自身の活動を扱う。",
+            },
+            "target_stances": build_decision_target_stances_for_kind(
+                kind,
+                required_targets=("self_activity",),
+                reason_summary="自身の活動を進める。",
+            ),
+        }
+        if kind == "capability_request":
+            payload["capability_request"] = {
+                "capability_id": "mcp.call_tool",
+                "input": {
+                    "mcp_server_id": "elyth",
+                    "tool_name": "get_notifications",
+                    "arguments": {},
+                },
+            }
+        return payload
+
+    def test_advance_without_placing_standing_concern_is_rejected(self) -> None:
+        with self.assertRaisesRegex(LLMError, "standing_concern"):
+            _llm_client()._validate_decision_foreground_selection_refs(
+                payload=self._payload(primary="current_input:background_thinking"),
+                context=self._context(),
+            )
+
+    def test_supporting_placement_is_accepted(self) -> None:
+        _llm_client()._validate_decision_foreground_selection_refs(
+            payload=self._payload(
+                primary="current_input:background_thinking",
+                supporting=["standing_concern:elyth"],
+            ),
+            context=self._context(),
+        )
+
+    def test_suppressed_placement_is_accepted(self) -> None:
+        _llm_client()._validate_decision_foreground_selection_refs(
+            payload=self._payload(
+                primary="current_input:background_thinking",
+                suppressed=[
+                    {
+                        "factor_ref": "standing_concern:elyth",
+                        "reason_summary": "今はその関心に関わらない。",
+                    }
+                ],
+            ),
+            context=self._context(),
+        )
+
+    def test_full_scope_does_not_require_placement(self) -> None:
+        _llm_client()._validate_decision_foreground_selection_refs(
+            payload=self._payload(primary="current_input:background_thinking"),
+            context=self._context(comparison_scope="full"),
+        )
+
+    def test_noop_does_not_require_placement(self) -> None:
+        _llm_client()._validate_decision_foreground_selection_refs(
+            payload=self._payload(kind="noop", primary="current_input:background_thinking"),
+            context=self._context(),
+        )
+
+
 class DecisionPromptScopeTests(unittest.TestCase):
     def _system_prompt(self, comparison_scope: str) -> str:
         context = replace(_decision_context([]), comparison_scope=comparison_scope)
@@ -846,14 +1165,14 @@ class DecisionPromptScopeTests(unittest.TestCase):
         system = self._system_prompt("self_activity")
         self.assertIn("今、気にかけていることや継続中の自身の活動へ関わるか", system)
         self.assertIn("capability_request / autonomous_run / pending_intent / noop", system)
-        self.assertIn("向きと CapabilityDecisionView の catalog から autonomous_run を始めてよい", system)
+        self.assertIn("向きと CapabilityChoiceView の catalog から autonomous_run を始めてよい", system)
         self.assertIn("autonomous_run.objective_summary は向き自身の言葉です", system)
-        self.assertIn("capability_request.input の自然文は、その能力の先の場へ向けた個の表現です", system)
-        self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です", system)
+        self.assertIn("capability_id と、target_required=true のときは同じ候補内の target_ref", system)
         self.assertIn("使わない排他キーもキーとして残し、値は null にします", system)
-        self.assertIn("kind が capability_request のとき capability_request は object、pending_intent と autonomous_run は null です", system)
-        self.assertIn("その関心に関われる手段が CapabilityDecisionView に available=true であるときだけ", system)
+        self.assertNotIn("出力 JSON は structured schema の必須キーと enum に従います", system)
+        self.assertIn("その関心に関われる手段が CapabilityChoiceView に available=true であるときだけ", system)
         self.assertIn("手段が無いときは今は関わらない", system)
+        self.assertIn("WorkspaceContext の各 standing_concern は foreground_selection の primary、supporting、suppressed のいずれか", system)
         self.assertIn("target_stances は self_activity を 1 件だけ持ちます", system)
         self.assertNotIn("伝達、能力実行、保留、見送り、継続目的開始のどれが", system)
         self.assertNotIn("人物発話自体が未来実行", system)
@@ -869,8 +1188,8 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("target_stances は outward_speech を 1 件だけ持ちます", system)
         self.assertIn("AffectContext の affect_states と recent_episode_affects は WorkspaceContext の affect 候補です。", system)
         self.assertNotIn("今見に行く自然さがあれば capability_request", system)
-        self.assertNotIn("向きと CapabilityDecisionView の catalog から autonomous_run", system)
-        self.assertNotIn("有限 MCP セッションは CapabilityDecisionView", system)
+        self.assertNotIn("向きと CapabilityChoiceView の catalog から autonomous_run", system)
+        self.assertNotIn("有限 MCP セッションは CapabilityChoiceView", system)
 
     def test_full_prompt_keeps_combined_question(self) -> None:
         system = self._system_prompt("full")
@@ -879,7 +1198,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("載っている self_activity は hold です。対話の継続は outward_speech です。", system)
         self.assertIn("Agent Skill の skill_id は capability_id でも MCP tool_name でもありません。", system)
         self.assertIn("使わない排他キーもキーとして残し、値は null にします", system)
-        self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です", system)
+        self.assertIn("capability_id と、target_required=true のときは同じ候補内の target_ref", system)
         self.assertIn("AffectContext の affect_states と recent_episode_affects は WorkspaceContext の affect 候補です。", system)
         self.assertIn("同じ作用を複数回行う、または観測のあとに同じ作用を繰り返す依頼は継続実行です", system)
         self.assertIn("複合依頼を単発の capability_request にする理由にはしません", system)
@@ -889,6 +1208,65 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("該当 run が無いなら autonomous_run を始めます", system)
         self.assertIn("その実行列へ新しい capability_request を重ねません", system)
         self.assertIn("別の継続実行を求め、該当 run が無いなら autonomous_run を始めてよい", system)
+        self.assertIn("現在の人物発話が外部サービスや Agent Skill の作業を求めるときだけ capability_request", system)
+        self.assertIn("この応答で完結する会話は speech です", system)
+
+    def test_decision_context_uses_schema_free_capability_choice_view(self) -> None:
+        messages = build_decision_messages(
+            persona_context=_persona_context(),
+            context=_decision_context(_mcp_capability_view()),
+        )
+        serialized_messages = json.dumps(messages, ensure_ascii=False)
+        internal_message = messages[1]["content"]
+
+        self.assertIn("capability_choice_view", serialized_messages)
+        self.assertIn('"capability_id":"mcp.call_tool"', internal_message)
+        self.assertIn("get_notifications", serialized_messages)
+        self.assertNotIn('"capability_ref"', internal_message)
+        self.assertNotIn('"id":"mcp.call_tool"', internal_message)
+        self.assertNotIn('"input_schema"', serialized_messages)
+        self.assertNotIn('"arguments"', serialized_messages)
+
+    def test_decision_context_serializes_candidate_meaning_only_once(self) -> None:
+        marker = "TOKEN_DEDUP_MARKER"
+        context = replace(
+            _decision_context([]),
+            workspace_context={
+                "workspace_candidates": [
+                    {
+                        "factor_ref": "memory:topic:1",
+                        "kind": "memory",
+                        "source": "recall_pack.active_topics",
+                        "summary_text": marker,
+                    }
+                ]
+            },
+            self_state_context={
+                "sensory_confidence": [{"summary_text": marker}],
+                "state_boundary": "現在状態の support。",
+            },
+            recall_pack={
+                "active_topics": [
+                    {
+                        "memory_type": "fact",
+                        "scope_type": "topic",
+                        "scope_key": "topic:test",
+                        "summary_text": marker,
+                    }
+                ],
+                "memory_link_context": {"link_count": 0},
+            },
+        )
+
+        messages = build_decision_messages(
+            persona_context=_persona_context(),
+            context=context,
+        )
+        internal_message = messages[-2]["content"]
+
+        self.assertEqual(internal_message.count(marker), 1)
+        self.assertNotIn('"recall_pack"', internal_message)
+        self.assertIn('"workspace_context"', internal_message)
 
     def test_repair_prompt_follows_comparison_scope(self) -> None:
         self_repair = build_decision_repair_prompt("kind が不正です。", "self_activity")
@@ -896,7 +1274,8 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("capability_request / autonomous_run / pending_intent / noop", self_repair)
         self.assertIn("target_stances は self_activity を 1 件だけ持ちます", self_repair)
         self.assertIn("使わない排他キーもキーとして残し、値は null にします", self_repair)
-        self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です", self_repair)
+        self.assertIn("capability_id と、必要な場合だけ target_ref", self_repair)
+        self.assertIn("各 standing_concern を foreground_selection の primary、supporting、suppressed", self_repair)
         self.assertNotIn("outward_speech は毎回必須です", self_repair)
         self.assertIn("speech / noop / pending_intent", outward_repair)
         self.assertIn("target_stances は outward_speech を 1 件だけ持ちます", outward_repair)
@@ -968,43 +1347,30 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("助言、依頼、支援提案、休息促し、身体注意、評価は本文へ足しません", system)
         self.assertIn("具体的な固有名、表示対象名、作品名、ページ内容は主題化しません", system)
 
-    def test_autonomous_step_prompt_treats_capability_input_as_external_expression(self) -> None:
-        messages = build_autonomous_step_messages(
+    def test_capability_input_prompt_treats_natural_input_as_external_expression(self) -> None:
+        messages = build_capability_input_messages(
             persona_context=_persona_context(),
-            context=AutonomousStepContext(
-                run={"objective_summary": "向きへ関わる。"},
-                current_input=_current_input(),
-                recent_turns=[],
-                time_context={},
-                foreground_world_state=None,
-                activity_context=None,
-                ongoing_action_summary=None,
-                capability_decision_view=[],
-                last_result_context=None,
-            ),
+            materialization_context={
+                "selected_capability": {
+                    "capability_id": "mcp.call_tool",
+                    "fixed_input": {"mcp_server_id": "elyth", "tool_name": "create_post"},
+                    "input_schema": {"type": "object"},
+                }
+            },
+            agent_skill_context=None,
         )
         self.assertIn(
             "capability_request.input の自然文は、その能力の先の場へ向けた個の表現です",
             messages[0]["content"],
         )
-        self.assertIn(
-            "capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です",
-            messages[0]["content"],
-        )
-        self.assertIn(
-            "arguments など入れ子も object のまま書きます",
-            messages[0]["content"],
-        )
+        self.assertIn("fixed_input に無い field だけ", messages[0]["content"])
 
-    def test_autonomous_step_repair_prompt_asks_nested_input_object(self) -> None:
+    def test_autonomous_step_repair_prompt_asks_capability_id_and_target_ref(self) -> None:
         repair = build_autonomous_step_repair_prompt(
             "AutonomousStep action.capability_request.input は object である必要があります。"
         )
-        self.assertIn(
-            "capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です",
-            repair,
-        )
-        self.assertIn("arguments など入れ子も object のまま書きます", repair)
+        self.assertIn("CapabilityChoiceView の capability_id", repair)
+        self.assertIn("必要な場合だけ target_ref", repair)
 
     def test_completed_mcp_tool_followup_rejects_same_tool(self) -> None:
         client = LLMClient()
@@ -1065,6 +1431,23 @@ class DecisionPromptScopeTests(unittest.TestCase):
             },
         )
 
+    def test_disallowed_followup_capability_points_to_autonomous_run(self) -> None:
+        client = LLMClient()
+        with self.assertRaises(LLMError) as raised:
+            client._validate_decision_capability_result_context(
+                payload=_capability_decision("vision.capture", {"vision_source_id": "vision_source:desktop"}),
+                capability_result_context={
+                    "source_capability_id": "mcp.call_tool",
+                    "allowed_followup_capability_ids": ["mcp.call_tool"],
+                },
+            )
+
+        message = str(raised.exception)
+        self.assertIn("allowed_followup_capability_ids", message)
+        self.assertIn("autonomous_run", message)
+        self.assertIn("pending_intent は残作業の置き場ではありません", message)
+        self.assertNotIn("speech / noop / pending_intent を返してください", message)
+
 
 class AutonomousCompletionReviewContractTests(unittest.TestCase):
     def test_contract_accepts_only_completion_review_shape(self) -> None:
@@ -1093,9 +1476,9 @@ class AutonomousCompletionReviewContractTests(unittest.TestCase):
         }
         with patch(
             "otomekairo.llm.client.complete_text",
-            side_effect=[json.dumps(invalid), json.dumps(valid)],
+            side_effect=[_completion(json.dumps(invalid)), _completion(json.dumps(valid))],
         ) as complete:
-            actual = LLMClient().generate_autonomous_completion_review(
+            actual = _llm_client().generate_autonomous_completion_review(
                 model_config={"model": "real-model"},
                 review_context={
                     "run": {"objective_summary": "投稿を1件作成する。"},
@@ -1126,7 +1509,8 @@ class AutonomousCompletionReviewContractTests(unittest.TestCase):
         )
         system = messages[0]["content"]
         self.assertIn("予定、準備、意思表明だけを作用の完了実績にしません", system)
-        self.assertIn("allow_complete または continue_run", system)
+        self.assertIn("allow_complete を選びます", system)
+        self.assertIn("continue_run を選びます", system)
 
     def test_autonomous_step_context_includes_completion_feedback(self) -> None:
         context = AutonomousStepContext(

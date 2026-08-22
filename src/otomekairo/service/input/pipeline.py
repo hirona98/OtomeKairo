@@ -16,6 +16,10 @@ from otomekairo.service.agent_skills import (
     SELF_INITIATED_SOURCE_KINDS,
     origin_source_kind_from_capability_request,
 )
+from otomekairo.service.input.decision_comparison import (
+    SELF_ACTIVITY_BOUNDARY_RECALL_HINT,
+    SELF_ACTIVITY_ORIENTATION_KINDS,
+)
 from otomekairo.service.capability import PreSendCheckWithheldError
 from otomekairo.service.common import debug_log
 from otomekairo.service.standing_concerns import (
@@ -46,7 +50,6 @@ WORKSPACE_MEMORY_SECTIONS = (
     "event_evidence",
     "visual_observations",
 )
-WORKSPACE_MEMORY_ITEMS_PER_SECTION = 6
 DEFAULT_MODE_CANDIDATE_LIMIT = 16
 WORKSPACE_DERIVED_ITEMS_PER_SECTION = 6
 PREDICTION_ERROR_SUMMARY_LIMIT = 4
@@ -107,6 +110,7 @@ class ServiceInputPipelineMixin:
         capability_request_summary: dict[str, Any] | None,
         due_standing_concerns: list[dict[str, Any]],
         ongoing_action_summary: dict[str, Any] | None,
+        autonomous_run_summaries: list[dict[str, Any]] | None = None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: InitiativeContext | None,
         workspace_context: dict[str, Any] | None,
@@ -130,40 +134,26 @@ class ServiceInputPipelineMixin:
             initiative_context=initiative_context,
         ):
             isolated_input = self._self_activity_current_input(current_input, workspace_context)
-            isolated_recall = self._build_pipeline_recall_inputs(
+            isolated_recall = self._build_self_activity_recall_inputs(
                 state=state,
                 started_at=started_at,
-                input_text=isolated_input.text,
-                current_input=isolated_input,
-                recent_turns=[],
-                augmented_query_text=isolated_input.text,
-                visual_observation_context=None,
-                activity_context=None,
+                isolated_input=isolated_input,
+                due_standing_concerns=due_standing_concerns,
+                ongoing_action_summary=ongoing_action_summary,
+                autonomous_run_summaries=autonomous_run_summaries,
+                workspace_context=workspace_context,
                 model_config=model_config,
-                persona_context=self._build_selected_persona_context(
-                    state=state,
-                    role="input_interpretation",
-                ),
-                client_context={},
-                cycle_label=f"{cycle_label} self_activity",
-            )
-            isolated_skills = self._build_agent_skill_context(
-                model_config=model_config,
-                current_input=isolated_input,
-                trigger_kind=trigger_kind,
-                capability_decision_view=self._self_activity_capability_view(capability_decision_view),
-                recent_turns=[],
-                work_log=[],
-                orientation_context=orientation_context,
-                prior_activation=prior_activation,
-                origin_source_kind=origin_source_kind,
+                cycle_label=cycle_label,
             )
             return {
-                "agent_skill_context": isolated_skills,
+                "agent_skill_context": None,
                 "self_activity_current_input": isolated_input,
                 "self_activity_recall_hint": isolated_recall["recall_hint"],
                 "self_activity_recall_pack": isolated_recall["recall_pack"],
-                "self_activity_agent_skill_context": isolated_skills,
+                "self_activity_agent_skill_context": None,
+                "agent_skill_orientation_context": orientation_context,
+                "agent_skill_prior_activation": prior_activation,
+                "agent_skill_origin_source_kind": origin_source_kind,
             }
         agent_skill_context = self._build_agent_skill_context(
             model_config=model_config,
@@ -185,7 +175,116 @@ class ServiceInputPipelineMixin:
             "self_activity_recall_hint": None,
             "self_activity_recall_pack": None,
             "self_activity_agent_skill_context": None,
+            "agent_skill_orientation_context": orientation_context,
+            "agent_skill_prior_activation": prior_activation,
+            "agent_skill_origin_source_kind": origin_source_kind,
         }
+
+    def _self_activity_orientation_items(
+        self,
+        *,
+        due_standing_concerns: list[dict[str, Any]],
+        ongoing_action_summary: dict[str, Any] | None,
+        autonomous_run_summaries: list[dict[str, Any]] | None,
+        workspace_context: dict[str, Any] | None,
+    ) -> list[dict[str, str]]:
+        items: list[dict[str, str]] = []
+        seen: set[str] = set()
+
+        def add(kind: str, summary: Any) -> None:
+            if not isinstance(summary, str):
+                return
+            text = summary.strip()
+            if not text or text in seen:
+                return
+            seen.add(text)
+            items.append({"kind": kind, "summary_text": text})
+
+        for concern in due_standing_concerns:
+            if isinstance(concern, dict):
+                add("standing_concern", concern.get("concern_summary"))
+        add(
+            "ongoing_action",
+            self._self_activity_orientation_summary(
+                ongoing_action_summary,
+                ("goal_summary", "current_step_summary", "summary_text", "reason_summary"),
+            ),
+        )
+        for run in autonomous_run_summaries or []:
+            add(
+                "autonomous_run",
+                self._self_activity_orientation_summary(
+                    run,
+                    ("objective_summary", "current_step_summary", "summary_text"),
+                ),
+            )
+        candidates = (
+            workspace_context.get("workspace_candidates")
+            if isinstance(workspace_context, dict)
+            else None
+        )
+        if isinstance(candidates, list):
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                kind = candidate.get("kind")
+                if kind not in SELF_ACTIVITY_ORIENTATION_KINDS:
+                    continue
+                add(str(kind), candidate.get("summary_text"))
+        return items
+
+    def _self_activity_orientation_summary(
+        self,
+        item: dict[str, Any] | None,
+        keys: tuple[str, ...],
+    ) -> str | None:
+        if not isinstance(item, dict):
+            return None
+        for key in keys:
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
+
+    def _build_self_activity_recall_inputs(
+        self,
+        *,
+        state: dict[str, Any],
+        started_at: str,
+        isolated_input: CurrentInput,
+        due_standing_concerns: list[dict[str, Any]],
+        ongoing_action_summary: dict[str, Any] | None,
+        autonomous_run_summaries: list[dict[str, Any]] | None,
+        workspace_context: dict[str, Any] | None,
+        model_config: dict[str, Any],
+        cycle_label: str,
+    ) -> dict[str, Any]:
+        orientation_items = self._self_activity_orientation_items(
+            due_standing_concerns=due_standing_concerns,
+            ongoing_action_summary=ongoing_action_summary,
+            autonomous_run_summaries=autonomous_run_summaries,
+            workspace_context=workspace_context,
+        )
+        query_text = "\n".join(item["summary_text"] for item in orientation_items)
+        return self._build_pipeline_recall_inputs(
+            state=state,
+            started_at=started_at,
+            input_text=isolated_input.text,
+            current_input=isolated_input,
+            recent_turns=[],
+            augmented_query_text=query_text,
+            visual_observation_context=None,
+            activity_context=None,
+            model_config=model_config,
+            persona_context=self._build_selected_persona_context(
+                state=state,
+                role="input_interpretation",
+            ),
+            client_context={},
+            cycle_label=f"{cycle_label} self_activity",
+            self_activity_orientation=orientation_items or None,
+            use_self_activity_boundary_hint=not orientation_items,
+        )
 
     def _run_input_pipeline(
         self,
@@ -321,6 +420,10 @@ class ServiceInputPipelineMixin:
             model_config=selected_preset,
             persona_context=self._build_selected_persona_context(state=state, role="decision_generation"),
             cycle_label=cycle_label,
+            skill_context_slot=pipeline_contexts,
+            agent_skill_orientation_context=pipeline_contexts.get("agent_skill_orientation_context"),
+            agent_skill_prior_activation=pipeline_contexts.get("agent_skill_prior_activation"),
+            agent_skill_origin_source_kind=pipeline_contexts.get("agent_skill_origin_source_kind"),
         )
 
         # 最初の withhold だけは、候補や reviewer 理由を戻さず同一文脈で一度再判断する。
@@ -412,6 +515,10 @@ class ServiceInputPipelineMixin:
                 persona_context=self._build_selected_persona_context(state=state, role="decision_generation"),
                 cycle_label=f"{cycle_label} pre-send-check-retry",
                 pre_send_check_feedback=PRE_SEND_CHECK_RETRY_FEEDBACK,
+                skill_context_slot=pipeline_contexts,
+                agent_skill_orientation_context=pipeline_contexts.get("agent_skill_orientation_context"),
+                agent_skill_prior_activation=pipeline_contexts.get("agent_skill_prior_activation"),
+                agent_skill_origin_source_kind=pipeline_contexts.get("agent_skill_origin_source_kind"),
             )
             if not self._decision_has_outward_speech(decision) and not self._decision_has_self_activity_result(
                 decision
@@ -477,6 +584,7 @@ class ServiceInputPipelineMixin:
             "augmented_query_text": augmented_query_text,
             "recall_hint": recall_hint,
             "recall_pack": recall_pack,
+            "self_activity_recall_pack": pipeline_contexts.get("self_activity_recall_pack"),
             "answer_contract": answer_contract,
             "evidence_pack": evidence_pack,
             "persona_context_summary": persona_context_summary,
@@ -721,6 +829,8 @@ class ServiceInputPipelineMixin:
         persona_context: Any,
         client_context: dict[str, Any],
         cycle_label: str,
+        self_activity_orientation: list[dict[str, Any]] | None = None,
+        use_self_activity_boundary_hint: bool = False,
     ) -> dict[str, Any]:
         if self._should_skip_recall_interpretation_for_wake_visual_observation(
             state=state,
@@ -733,20 +843,32 @@ class ServiceInputPipelineMixin:
                 current_time=started_at,
             )
 
-        # 入口解釈
-        recall_hint_recent_turns = self._recall_hint_recent_turns(recent_turns)
-        input_interpretation = self.llm.generate_input_interpretation(
-            model_config=model_config,
-            persona_context=persona_context,
-            input_text=input_text,
-            current_input=current_input,
-            recent_turns=recall_hint_recent_turns,
-            current_time=started_at,
-            visual_observation_context=visual_observation_context,
-            activity_context=activity_context,
-        )
-        recall_hint = input_interpretation["recall_hint"]
-        answer_contract = input_interpretation["answer_contract"]
+        if use_self_activity_boundary_hint:
+            recall_hint = dict(SELF_ACTIVITY_BOUNDARY_RECALL_HINT)
+            answer_contract = {
+                "contract": "summary",
+                "reason_codes": ["self_activity_boundary_entry"],
+                "boundary": "none",
+                "target_actor": "any",
+                "query_terms": [],
+                "requires_direct_evidence": False,
+            }
+        else:
+            # 入口解釈
+            recall_hint_recent_turns = self._recall_hint_recent_turns(recent_turns)
+            input_interpretation = self.llm.generate_input_interpretation(
+                model_config=model_config,
+                persona_context=persona_context,
+                input_text=input_text,
+                current_input=current_input,
+                recent_turns=recall_hint_recent_turns,
+                current_time=started_at,
+                visual_observation_context=visual_observation_context,
+                activity_context=activity_context,
+                self_activity_orientation=self_activity_orientation,
+            )
+            recall_hint = input_interpretation["recall_hint"]
+            answer_contract = input_interpretation["answer_contract"]
         debug_log(
             "Pipeline",
             (
@@ -1047,6 +1169,7 @@ class ServiceInputPipelineMixin:
             capability_request_summary=capability_request_summary,
             due_standing_concerns=due_standing_concerns,
             ongoing_action_summary=ongoing_action_summary,
+            autonomous_run_summaries=autonomous_run_summaries,
             capability_decision_view=capability_decision_view,
             initiative_context=initiative_context,
             workspace_context=workspace_context,
@@ -1069,6 +1192,9 @@ class ServiceInputPipelineMixin:
             "self_activity_recall_hint": skill_materials["self_activity_recall_hint"],
             "self_activity_recall_pack": skill_materials["self_activity_recall_pack"],
             "self_activity_agent_skill_context": skill_materials["self_activity_agent_skill_context"],
+            "agent_skill_orientation_context": skill_materials["agent_skill_orientation_context"],
+            "agent_skill_prior_activation": skill_materials["agent_skill_prior_activation"],
+            "agent_skill_origin_source_kind": skill_materials["agent_skill_origin_source_kind"],
             "initiative_context": initiative_context,
             "capability_result_context": capability_result_context,
             "self_state_context": self_state_context,
@@ -1650,7 +1776,12 @@ class ServiceInputPipelineMixin:
             recall_pack=recall_pack,
         )
         limited_candidates = self._limit_workspace_candidates(candidates)
-        return {
+        limited_refs = {
+            candidate["factor_ref"]
+            for candidate in limited_candidates
+            if isinstance(candidate, dict) and isinstance(candidate.get("factor_ref"), str)
+        }
+        payload = {
             "workspace_candidates": limited_candidates,
             "selection_policy": {
                 "primary_factor_count": 1,
@@ -1664,6 +1795,18 @@ class ServiceInputPipelineMixin:
             "source_counts": source_counts,
             "state_boundary": "workspace_context は判断用の派生 view であり、events / episodes / memory_units / affect などの正本を更新しない。",
         }
+        background_candidates = [
+            {
+                key: value
+                for key, value in candidate.items()
+                if key != "factor_ref"
+            }
+            for candidate in candidates
+            if isinstance(candidate, dict) and candidate.get("factor_ref") not in limited_refs
+        ]
+        if background_candidates:
+            payload["background_candidates"] = background_candidates
+        return payload
 
     def _append_workspace_derived_context_candidates(
         self,
@@ -2064,7 +2207,7 @@ class ServiceInputPipelineMixin:
             items = recall_pack.get(section)
             if not isinstance(items, list):
                 continue
-            for index, item in enumerate(items[:WORKSPACE_MEMORY_ITEMS_PER_SECTION]):
+            for index, item in enumerate(items):
                 if not isinstance(item, dict):
                     continue
                 item_ref = self._workspace_item_ref(
@@ -2094,7 +2237,25 @@ class ServiceInputPipelineMixin:
                         "decision_or_result",
                         "tone_or_note",
                     ),
-                    metadata_keys=("memory_type", "scope_type", "scope_key", "primary_scope_type", "primary_scope_key", "retrieval_lane"),
+                    metadata_keys=(
+                        "memory_type",
+                        "scope_type",
+                        "scope_key",
+                        "primary_scope_type",
+                        "primary_scope_key",
+                        "commitment_state",
+                        "valid_to",
+                        "object_ref_or_value",
+                        "qualifiers",
+                        "retrieval_lane",
+                        "memory_link_summary",
+                        "open_loops",
+                        "outcome_text",
+                        "source_kind",
+                        "source_owner",
+                        "change_state",
+                        "change_basis",
+                    ),
                 )
 
     def _limit_workspace_candidates(
@@ -2267,6 +2428,10 @@ class ServiceInputPipelineMixin:
         self_activity_recall_hint: dict[str, Any] | None = None,
         self_activity_recall_pack: dict[str, Any] | None = None,
         self_activity_agent_skill_context: dict[str, Any] | None = None,
+        skill_context_slot: dict[str, Any] | None = None,
+        agent_skill_orientation_context: dict[str, Any] | None = None,
+        agent_skill_prior_activation: dict[str, Any] | None = None,
+        agent_skill_origin_source_kind: str | None = None,
     ) -> dict[str, Any]:
         # decision生成
         if self._should_compare_self_activity_separately(
@@ -2308,6 +2473,10 @@ class ServiceInputPipelineMixin:
                 persona_context=persona_context,
                 cycle_label=cycle_label,
                 pre_send_check_feedback=pre_send_check_feedback,
+                skill_context_slot=skill_context_slot,
+                agent_skill_orientation_context=agent_skill_orientation_context,
+                agent_skill_prior_activation=agent_skill_prior_activation,
+                agent_skill_origin_source_kind=agent_skill_origin_source_kind,
             )
         decision_context = self._build_decision_context(
             input_text=input_text,
@@ -2678,6 +2847,7 @@ class ServiceInputPipelineMixin:
         reference_context: dict[str, Any] | None = None,
         pre_send_check_feedback: str | None = None,
         comparison_scope: str = "full",
+        materialize_capability_input: bool = True,
     ) -> DecisionContext:
         return DecisionContext(
             input_text=input_text,
@@ -2707,6 +2877,7 @@ class ServiceInputPipelineMixin:
             reference_context=reference_context,
             pre_send_check_feedback=pre_send_check_feedback,
             comparison_scope=comparison_scope,
+            materialize_capability_input=materialize_capability_input,
         )
 
     def _build_speech_context(

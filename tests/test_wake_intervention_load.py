@@ -1066,7 +1066,8 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertEqual(context.recall_hint["primary_recall_focus"], "topic")
         self.assertEqual(context.recall_pack["event_evidence"][0]["summary_text"], "向き側の記憶")
         self.assertNotIn("visual_observations", context.recall_pack)
-        self.assertEqual(context.agent_skill_context, {"skills": ["isolated"]})
+        self.assertIsNone(context.agent_skill_context)
+        self.assertFalse(context.materialize_capability_input)
         self.assertIsNone(context.foreground_world_state)
         self.assertIsNone(context.visual_observation_context)
 
@@ -1141,7 +1142,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertNotIn("定期観測では", text)
         self.assertNotIn("視覚観測", text)
 
-    def test_split_skill_selection_uses_isolated_input(self) -> None:
+    def test_split_recall_uses_orientation_text_and_skips_skill_selection(self) -> None:
         class RecordingService(DummyInputService):
             def __init__(self) -> None:
                 super().__init__()
@@ -1205,8 +1206,181 @@ class WakeInterventionLoadTests(unittest.TestCase):
 
         self.assertEqual(len(service.recall_calls), 1)
         self.assertEqual(service.recall_calls[0]["current_input"].text, SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT)
+        self.assertEqual(
+            service.recall_calls[0]["augmented_query_text"],
+            DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+        )
+        self.assertEqual(
+            service.recall_calls[0]["self_activity_orientation"],
+            [{"kind": "standing_concern", "summary_text": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY}],
+        )
+        self.assertFalse(service.recall_calls[0]["use_self_activity_boundary_hint"])
         self.assertIsNone(service.recall_calls[0]["visual_observation_context"])
         self.assertEqual(service.recall_calls[0]["recent_turns"], [])
+        self.assertEqual(len(service.skill_calls), 0)
+        self.assertEqual(materials["self_activity_recall_pack"], {"isolated": True})
+        self.assertIsNone(materials["agent_skill_context"])
+        self.assertIsNone(materials["self_activity_agent_skill_context"])
+
+    def test_split_recall_uses_boundary_hint_without_orientation_text(self) -> None:
+        class RecordingService(DummyInputService):
+            def __init__(self) -> None:
+                super().__init__()
+                self.recall_calls: list[dict] = []
+
+            def _build_pipeline_recall_inputs(self, **kwargs):
+                self.recall_calls.append(kwargs)
+                return {
+                    "recall_hint": {"primary_recall_focus": "self"},
+                    "recall_pack": {"isolated": True},
+                }
+
+            def _build_selected_persona_context(self, **kwargs):
+                _ = kwargs
+                return None
+
+        service = RecordingService()
+        current_input = CurrentInput(
+            sender_kind="system",
+            sender_ref=None,
+            source_kind="background_thinking",
+            response_target_refs=(),
+            interaction_context=None,
+            text="定期思考。",
+        )
+        materials = service._build_pipeline_skill_and_self_activity_materials(
+            state={"model_presets": {}, "selected_model_preset_id": "m", "personas": {}, "selected_persona_id": "p"},
+            started_at="2026-08-16T19:33:00+09:00",
+            current_input=current_input,
+            recent_turns=[],
+            trigger_kind="background_thinking",
+            observation_summary=None,
+            capability_request_summary=None,
+            due_standing_concerns=[],
+            ongoing_action_summary={"action_id": "ongoing:1"},
+            capability_decision_view=[{"id": "mcp.call_tool"}],
+            initiative_context=None,
+            workspace_context={
+                "workspace_candidates": [
+                    {
+                        "factor_ref": "ongoing_action:current",
+                        "kind": "ongoing_action",
+                    }
+                ]
+            },
+            model_config={},
+            cycle_label="cycle:test",
+        )
+
+        self.assertEqual(service.recall_calls[0]["augmented_query_text"], "")
+        self.assertTrue(service.recall_calls[0]["use_self_activity_boundary_hint"])
+        self.assertIsNone(service.recall_calls[0]["self_activity_orientation"])
+        self.assertIsNone(materials["agent_skill_context"])
+
+    def test_separated_capability_request_selects_skills_after_decision(self) -> None:
+        class RecordingLLM:
+            def generate_decision(self, *, model_config, persona_context, context):
+                _ = model_config, persona_context
+                if context.comparison_scope == "self_activity":
+                    return {
+                        "kind": "capability_request",
+                        "reason_code": "look",
+                        "reason_summary": "様子を見る。",
+                        "capability_request": {"capability_id": "mcp.call_tool", "input": {}},
+                        "target_stances": [
+                            {
+                                "target": "self_activity",
+                                "stance": "advance",
+                                "reason_summary": "様子を見る。",
+                            }
+                        ],
+                    }
+                return {
+                    "kind": "noop",
+                    "reason_code": "hold",
+                    "reason_summary": "出さない。",
+                    "target_stances": [
+                        {
+                            "target": "outward_speech",
+                            "stance": "hold",
+                            "reason_summary": "出さない。",
+                        }
+                    ],
+                }
+
+        class RecordingService(DummyInputService):
+            def __init__(self) -> None:
+                super().__init__()
+                self.llm = RecordingLLM()
+                self.skill_calls: list[dict] = []
+
+            def _build_agent_skill_context(self, **kwargs):
+                self.skill_calls.append(kwargs)
+                return {"skills": ["after-decision"]}
+
+            def _build_outward_speech_decision_context(self, **kwargs):
+                from types import SimpleNamespace
+
+                _ = kwargs
+                return SimpleNamespace(comparison_scope="outward_speech")
+
+        service = RecordingService()
+        skill_slot: dict = {"agent_skill_context": None}
+        current_input = CurrentInput(
+            sender_kind="system",
+            sender_ref=None,
+            source_kind="background_thinking",
+            response_target_refs=(),
+            interaction_context=None,
+            text="定期思考。",
+        )
+        composed = service._run_separated_activity_decisions(
+            model_config={},
+            persona_context=None,
+            cycle_label="cycle:test",
+            trigger_kind="background_thinking",
+            capability_decision_view=[{"id": "mcp.call_tool"}, {"id": "vision.capture"}],
+            input_text="定期思考。",
+            current_input=current_input,
+            recent_turns=[{"role": "user", "text": "よろしく"}],
+            time_context={},
+            affect_context={},
+            drive_state_summary=None,
+            foreground_world_state=None,
+            activity_context=None,
+            ongoing_action_summary=None,
+            autonomous_run_summaries=None,
+            agent_skill_context=None,
+            initiative_context=None,
+            capability_result_context=None,
+            visual_observation_context=None,
+            self_state_context=None,
+            people_context=[],
+            relationship_context=None,
+            prediction_error_context=None,
+            default_mode_context=None,
+            workspace_context={
+                "workspace_candidates": [
+                    {
+                        "factor_ref": "standing_concern:elyth",
+                        "kind": "standing_concern",
+                        "summary_text": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+                    }
+                ]
+            },
+            recall_hint={},
+            recall_pack={},
+            skill_context_slot=skill_slot,
+            agent_skill_orientation_context={
+                "standing_concerns": [
+                    {
+                        "factor_ref": "standing_concern:elyth",
+                        "summary_text": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+                    }
+                ]
+            },
+        )
+
         self.assertEqual(len(service.skill_calls), 1)
         self.assertEqual(service.skill_calls[0]["current_input"].text, SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT)
         self.assertEqual(service.skill_calls[0]["recent_turns"], [])
@@ -1215,8 +1389,222 @@ class WakeInterventionLoadTests(unittest.TestCase):
             [item["id"] for item in service.skill_calls[0]["capability_decision_view"]],
             ["mcp.call_tool"],
         )
-        self.assertEqual(materials["self_activity_recall_pack"], {"isolated": True})
-        self.assertEqual(materials["agent_skill_context"], {"skills": ["isolated"]})
+        self.assertEqual(
+            service.skill_calls[0]["orientation_context"]["standing_concerns"][0]["summary_text"],
+            DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+        )
+        self.assertEqual(skill_slot["agent_skill_context"], {"skills": ["after-decision"]})
+        self.assertEqual(
+            composed["separated_comparisons"]["self_activity"]["kind"],
+            "capability_request",
+        )
+
+    def test_separated_capability_choice_materializes_after_skills(self) -> None:
+        class RecordingLLM:
+            def __init__(self) -> None:
+                self.materialize_calls: list[dict] = []
+
+            def generate_decision(self, *, model_config, persona_context, context):
+                _ = model_config, persona_context
+                if context.comparison_scope == "self_activity":
+                    return {
+                        "kind": "capability_request",
+                        "reason_code": "look",
+                        "reason_summary": "様子を見る。",
+                        "capability_request": {
+                            "capability_id": "mcp.call_tool",
+                            "target_ref": "t1",
+                        },
+                        "target_stances": [
+                            {
+                                "target": "self_activity",
+                                "stance": "advance",
+                                "reason_summary": "様子を見る。",
+                            }
+                        ],
+                    }
+                return {
+                    "kind": "noop",
+                    "reason_code": "hold",
+                    "reason_summary": "出さない。",
+                    "target_stances": [
+                        {
+                            "target": "outward_speech",
+                            "stance": "hold",
+                            "reason_summary": "出さない。",
+                        }
+                    ],
+                }
+
+            def materialize_decision_capability_input(self, **kwargs):
+                self.materialize_calls.append(kwargs)
+                payload = dict(kwargs["payload"])
+                payload["capability_request"] = {
+                    "capability_id": "mcp.call_tool",
+                    "input": {"mcp_server_id": "example", "tool_name": "observe"},
+                }
+                return payload
+
+        class RecordingService(DummyInputService):
+            def __init__(self) -> None:
+                super().__init__()
+                self.llm = RecordingLLM()
+                self.skill_calls: list[dict] = []
+
+            def _build_agent_skill_context(self, **kwargs):
+                self.skill_calls.append(kwargs)
+                return {"skills": ["after-decision"]}
+
+            def _build_outward_speech_decision_context(self, **kwargs):
+                from types import SimpleNamespace
+
+                _ = kwargs
+                return SimpleNamespace(comparison_scope="outward_speech")
+
+        service = RecordingService()
+        current_input = CurrentInput(
+            sender_kind="system",
+            sender_ref=None,
+            source_kind="background_thinking",
+            response_target_refs=(),
+            interaction_context=None,
+            text="定期思考。",
+        )
+        composed = service._run_separated_activity_decisions(
+            model_config={"model": "real-model"},
+            persona_context=None,
+            cycle_label="cycle:test",
+            trigger_kind="background_thinking",
+            capability_decision_view=[{"id": "mcp.call_tool"}],
+            input_text="定期思考。",
+            current_input=current_input,
+            recent_turns=[],
+            time_context={},
+            affect_context={},
+            drive_state_summary=None,
+            foreground_world_state=None,
+            activity_context=None,
+            ongoing_action_summary=None,
+            autonomous_run_summaries=None,
+            agent_skill_context=None,
+            initiative_context=None,
+            capability_result_context=None,
+            visual_observation_context=None,
+            self_state_context=None,
+            people_context=[],
+            relationship_context=None,
+            prediction_error_context=None,
+            default_mode_context=None,
+            workspace_context={
+                "workspace_candidates": [
+                    {
+                        "factor_ref": "standing_concern:elyth",
+                        "kind": "standing_concern",
+                        "summary_text": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+                    }
+                ]
+            },
+            recall_hint={},
+            recall_pack={},
+        )
+
+        self.assertEqual(len(service.skill_calls), 1)
+        self.assertEqual(len(service.llm.materialize_calls), 1)
+        self.assertEqual(
+            service.llm.materialize_calls[0]["context"].agent_skill_context,
+            {"skills": ["after-decision"]},
+        )
+        self.assertEqual(
+            composed["separated_comparisons"]["self_activity"]["capability_request"],
+            {"capability_id": "mcp.call_tool", "input": {"mcp_server_id": "example", "tool_name": "observe"}},
+        )
+
+    def test_separated_autonomous_run_does_not_select_skills(self) -> None:
+        class RecordingLLM:
+            def generate_decision(self, *, model_config, persona_context, context):
+                _ = model_config, persona_context
+                if context.comparison_scope == "self_activity":
+                    return {
+                        "kind": "autonomous_run",
+                        "reason_code": "visit",
+                        "reason_summary": "関わる。",
+                        "target_stances": [
+                            {
+                                "target": "self_activity",
+                                "stance": "advance",
+                                "reason_summary": "関わる。",
+                            }
+                        ],
+                    }
+                return {
+                    "kind": "noop",
+                    "reason_code": "hold",
+                    "reason_summary": "出さない。",
+                    "target_stances": [
+                        {
+                            "target": "outward_speech",
+                            "stance": "hold",
+                            "reason_summary": "出さない。",
+                        }
+                    ],
+                }
+
+        class RecordingService(DummyInputService):
+            def __init__(self) -> None:
+                super().__init__()
+                self.llm = RecordingLLM()
+                self.skill_calls: list[dict] = []
+
+            def _build_agent_skill_context(self, **kwargs):
+                self.skill_calls.append(kwargs)
+                return {"skills": ["should-not-run"]}
+
+            def _build_self_activity_decision_context(self, **kwargs):
+                from types import SimpleNamespace
+
+                _ = kwargs
+                return SimpleNamespace(comparison_scope="self_activity")
+
+            def _build_outward_speech_decision_context(self, **kwargs):
+                from types import SimpleNamespace
+
+                _ = kwargs
+                return SimpleNamespace(comparison_scope="outward_speech")
+
+        service = RecordingService()
+        skill_slot: dict = {"agent_skill_context": "keep"}
+        service._run_separated_activity_decisions(
+            model_config={},
+            persona_context=None,
+            cycle_label="cycle:test",
+            trigger_kind="background_thinking",
+            capability_decision_view=None,
+            input_text="定期思考。",
+            current_input=None,
+            recent_turns=[],
+            time_context={},
+            affect_context={},
+            drive_state_summary=None,
+            foreground_world_state=None,
+            activity_context=None,
+            ongoing_action_summary=None,
+            autonomous_run_summaries=None,
+            agent_skill_context=None,
+            initiative_context=None,
+            capability_result_context=None,
+            visual_observation_context=None,
+            self_state_context=None,
+            people_context=[],
+            relationship_context=None,
+            prediction_error_context=None,
+            default_mode_context=None,
+            workspace_context=None,
+            recall_hint={},
+            recall_pack={},
+            skill_context_slot=skill_slot,
+        )
+        self.assertEqual(service.skill_calls, [])
+        self.assertEqual(skill_slot["agent_skill_context"], "keep")
 
     def test_separated_output_starts_run_from_isolated_current_input(self) -> None:
         class OutputService(DummyInputService):

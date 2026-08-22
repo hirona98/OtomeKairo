@@ -6,8 +6,42 @@ from typing import Any, Callable
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
+from dataclasses import dataclass
+
 from otomekairo.llm.contracts import LLMError
 from otomekairo.llm.parsing import extract_embedding_vectors, extract_http_error_detail, extract_response_text
+from otomekairo.llm.usage import extract_usage
+
+
+ROLE_MAX_OUTPUT_TOKENS = {
+    "visual_observation": 1500,
+    "initiative_entry_check": 1200,
+    "pending_intent_selection": 1200,
+    "disclosure_review": 1200,
+    "pre_send_check": 1200,
+    "agent_skill_selection": 1200,
+    "autonomous_completion_review": 1200,
+    "input_interpretation": 2500,
+    "world_state": 2500,
+    "activity_state": 2500,
+    "recall_pack_selection": 4000,
+    "event_evidence": 8000,
+    "memory_reflection_summary": 2500,
+    "agent_skill_material_selection": 4000,
+    "decision": 8000,
+    "decision:self_activity": 8000,
+    "decision:outward_speech": 8000,
+    "autonomous_step": 8000,
+    "capability_input_generation": 8000,
+    "memory_interpretation": 8000,
+    "speech": 4000,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionResult:
+    text: str
+    usage: dict[str, int]
 
 
 # 定数
@@ -36,7 +70,8 @@ def complete_text(
     model_config: dict,
     messages: list[dict[str, Any]],
     response_format: dict[str, Any] | None = None,
-) -> str:
+    operation: str | None = None,
+) -> CompletionResult:
     completion = _load_litellm_completion()
     request_kwargs: dict[str, Any] = {
         "model": _resolve_litellm_model(model_config),
@@ -66,7 +101,7 @@ def complete_text(
             }
     if extra_body:
         request_kwargs["extra_body"] = extra_body
-    max_output_tokens = _resolve_max_output_tokens(model_config)
+    max_output_tokens = _resolve_max_output_tokens(model_config, operation=operation)
     if max_output_tokens is not None:
         request_kwargs["max_tokens"] = max_output_tokens
     web_search_options = _resolve_web_search_options(model_config)
@@ -77,7 +112,7 @@ def complete_text(
         response = completion(**request_kwargs)
     except Exception as exc:  # noqa: BLE001
         raise LLMError(f"LiteLLM の呼び出しに失敗しました: {exc}") from exc
-    return extract_response_text(response)
+    return CompletionResult(text=extract_response_text(response), usage=extract_usage(response))
 
 
 # embedding を model 差分込みで実行する。
@@ -86,14 +121,17 @@ def generate_embeddings(
     model_config: dict,
     texts: list[str],
     expected_dimension: int,
-) -> list[list[float]]:
+) -> tuple[list[list[float]], dict[str, int]]:
     if _is_openrouter_embedding_model_config(model_config):
         response = _request_openrouter_embeddings(model_config=model_config, texts=texts)
-        return extract_embedding_vectors(
-            response,
-            expected_count=len(texts),
-            expected_dimension=expected_dimension,
-            source_label="OpenRouter",
+        return (
+            extract_embedding_vectors(
+                response,
+                expected_count=len(texts),
+                expected_dimension=expected_dimension,
+                source_label="OpenRouter",
+            ),
+            extract_usage(response),
         )
 
     embedding = _load_litellm_embedding()
@@ -112,11 +150,14 @@ def generate_embeddings(
         response = embedding(**request_kwargs)
     except Exception as exc:  # noqa: BLE001
         raise LLMError(f"LiteLLM の embedding 呼び出しに失敗しました: {exc}") from exc
-    return extract_embedding_vectors(
-        response,
-        expected_count=len(texts),
-        expected_dimension=expected_dimension,
-        source_label="LiteLLM",
+    return (
+        extract_embedding_vectors(
+            response,
+            expected_count=len(texts),
+            expected_dimension=expected_dimension,
+            source_label="LiteLLM",
+        ),
+        extract_usage(response),
     )
 
 
@@ -249,11 +290,15 @@ def _resolve_api_key(model_config: dict) -> str | None:
     return None
 
 
-def _resolve_max_output_tokens(model_config: dict) -> int | None:
-    value = model_config.get("max_output_tokens")
-    if isinstance(value, int) and value >= 1:
-        return value
-    return None
+def _resolve_max_output_tokens(model_config: dict, *, operation: str | None = None) -> int | None:
+    preset_value = model_config.get("max_output_tokens")
+    preset_tokens = preset_value if isinstance(preset_value, int) and preset_value >= 1 else None
+    role_tokens = ROLE_MAX_OUTPUT_TOKENS.get(operation) if isinstance(operation, str) else None
+    if role_tokens is not None and preset_tokens is not None:
+        return min(role_tokens, preset_tokens)
+    if role_tokens is not None:
+        return role_tokens
+    return preset_tokens
 
 
 def _resolve_timeout_seconds(model_config: dict, *, default: float) -> float:

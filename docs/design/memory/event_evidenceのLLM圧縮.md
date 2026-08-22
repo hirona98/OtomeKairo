@@ -219,6 +219,7 @@ LLM が失敗したときに、古い `_event_evidence_anchor()` 系ロジック
 - 失敗した event だけ `RecallPack.event_evidence` へ入れない
 - selected `event_id` は trace に残す
 - selected event が全件失敗した場合でも、無言で `event_evidence=[]` にするのではなく、failure を trace と audit event に残す
+- 比較を分けた cycle では、外向きと自身の活動の両方の `event_evidence_generation` を合わせて残す
 - `event_evidence` 生成失敗だけで recall cycle 全体を `internal_failure` にしない
 
 `failure_stage` は少なくとも次を持つ。

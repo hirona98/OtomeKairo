@@ -202,6 +202,53 @@ class OrientationTests(unittest.TestCase):
         self.assertFalse(any("会話を打ち切らない" in item for item in policies))
         self.assertFalse(any("speech / noop / pending_intent で閉じ" in item for item in policies))
 
+    def test_arrival_orientation_followup_uses_autonomous_run_for_remaining_work(self) -> None:
+        arrival = CurrentInput(
+            sender_kind="capability",
+            sender_ref=None,
+            source_kind="capability_result",
+            response_target_refs=(),
+            interaction_context=None,
+            text="capability result を受信。",
+        )
+        context = _CapabilityContextSubject()._build_capability_result_decision_context(
+            trigger_kind="capability_result",
+            observation_summary={
+                "capability_id": "mcp.call_tool",
+                "mcp_server_id": "elyth",
+                "tool_name": "get_notifications",
+                "status": "completed",
+                "is_error": False,
+                "mcp_result_summary": '{"items":[{"type":"post.reply_received"}]}',
+            },
+            capability_request_summary={
+                "capability_id": "mcp.call_tool",
+                "mcp_server_id": "elyth",
+                "tool_name": "get_notifications",
+            },
+            work_log=[{"capability_id": "mcp.call_tool", "tool_name": "get_notifications"}],
+            current_input=arrival,
+        )
+
+        self.assertIsNotNone(context)
+        assert context is not None
+        self.assertEqual(context["orientation_kind"], "arrival")
+        self.assertIn("到着は capability result であり、会話の向きへ引き上げない", context["followup_policy_summary"])
+        self.assertIn("autonomous_run を始める", context["followup_policy_summary"])
+        self.assertIn("pending_intent は残作業の置き場ではない", context["followup_policy_summary"])
+        self.assertIn("今回完了した tool は elyth/get_notifications", context["followup_policy_summary"])
+        self.assertNotIn("speech / noop / pending_intent で閉じ", context["followup_policy_summary"])
+
+        policies = _build_decision_trigger_policy(
+            initiative_context=None,
+            capability_result_context=context,
+        )
+        self.assertTrue(any("会話の向きへ引き上げない" in item for item in policies))
+        self.assertTrue(any("autonomous_run" in item for item in policies))
+        self.assertTrue(any("pending_intent は残作業の置き場ではありません" in item for item in policies))
+        self.assertTrue(any("elyth/get_notifications" in item for item in policies))
+        self.assertFalse(any("speech / noop / pending_intent で閉じ" in item for item in policies))
+
     def test_completed_mcp_tool_is_excluded_from_immediate_followup(self) -> None:
         interaction = _interaction()
         origin = CurrentInput(

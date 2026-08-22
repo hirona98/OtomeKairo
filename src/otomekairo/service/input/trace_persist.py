@@ -46,9 +46,14 @@ class ServiceInputTracePersistMixin:
         followup_capability_request_summary = pipeline.get("capability_request_summary")
         if not isinstance(followup_capability_request_summary, dict):
             followup_capability_request_summary = None
+        dispatched_capability_request_summary = (
+            followup_capability_request_summary
+            if trigger_kind == "capability_result"
+            else capability_request_summary
+        )
         result_kind = self._external_result_kind(
             speech_payload=speech_payload,
-            capability_request_summary=capability_request_summary,
+            capability_request_summary=dispatched_capability_request_summary,
         )
         finished_at = self._now_iso()
         pending_intent_summary = self._apply_pending_intent_candidate(
@@ -71,6 +76,11 @@ class ServiceInputTracePersistMixin:
             interaction_context=interaction_context,
             recall_hint=pipeline["recall_hint"],
             recall_pack=pipeline["recall_pack"],
+            extra_recall_packs=[
+                pack
+                for pack in (pipeline.get("self_activity_recall_pack"),)
+                if isinstance(pack, dict)
+            ],
             time_context=pipeline["time_context"],
             affect_context=pipeline["affect_context"],
             drive_state_summary=pipeline.get("drive_state_summary"),
@@ -157,6 +167,7 @@ class ServiceInputTracePersistMixin:
                 cycle_id=cycle_id,
                 memory_trace=skipped_memory_trace,
             )
+        self._finish_cycle_llm_usage(cycle_id)
 
         # 応答
         return {
@@ -173,7 +184,11 @@ class ServiceInputTracePersistMixin:
                 "persona_id": pipeline["persona_id"],
                 "persona_display_name": pipeline["persona_display_name"],
             } if speech_payload else None,
-            "capability_request": capability_request_summary if isinstance(capability_request_summary, dict) else None,
+            "capability_request": (
+                dispatched_capability_request_summary
+                if isinstance(dispatched_capability_request_summary, dict)
+                else None
+            ),
             "autonomous_run": pipeline.get("autonomous_run_summary")
             if isinstance(pipeline.get("autonomous_run_summary"), dict)
             else None,
@@ -194,6 +209,7 @@ class ServiceInputTracePersistMixin:
         interaction_context: InteractionContext | None,
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
+        extra_recall_packs: list[dict[str, Any]] | None = None,
         time_context: dict[str, Any],
         affect_context: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
@@ -246,12 +262,16 @@ class ServiceInputTracePersistMixin:
             for event in events:
                 if event.get("kind") == "speech":
                     event["display_name"] = persona_display_name
+        evidence_recall_pack = self._recall_pack_with_merged_event_evidence(
+            recall_pack,
+            extra_recall_packs,
+        )
         events.extend(
             self._build_event_evidence_audit_events(
                 cycle_id=cycle_id,
                 memory_set_id=memory_set_id,
                 created_at=finished_at,
-                recall_pack=recall_pack,
+                recall_pack=evidence_recall_pack,
             )
         )
         retrieval_run = self._build_retrieval_run_success(
@@ -260,7 +280,7 @@ class ServiceInputTracePersistMixin:
             started_at=started_at,
             finished_at=finished_at,
             recall_hint=recall_hint,
-            recall_pack=recall_pack,
+            recall_pack=evidence_recall_pack,
         )
         cycle_summary = self._build_cycle_summary(
             cycle_id=cycle_id,
@@ -289,7 +309,7 @@ class ServiceInputTracePersistMixin:
             client_context=client_context,
             runtime_summary=runtime_summary,
             foreground_world_state=foreground_world_state,
-            recall_trace=self._build_success_recall_trace(recall_hint, recall_pack),
+            recall_trace=self._build_success_recall_trace(recall_hint, evidence_recall_pack),
             decision_trace=self._build_success_decision_trace(
                 state=state,
                 input_text=input_text,
@@ -505,6 +525,7 @@ class ServiceInputTracePersistMixin:
             cycle_trace=cycle_trace,
             visual_observation_records=visual_observation_records,
         )
+        self._finish_cycle_llm_usage(cycle_id)
         self._register_interaction_participants(
             memory_set_id=memory_set_id,
             interaction_context=interaction_context,

@@ -169,6 +169,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
         if user_facing_result:
             self._begin_user_response_cycle()
         try:
+            self.llm.push_usage_scope(cycle_id)
             client_context, observation_summary, input_text = self._prepare_capability_result_context(
                 state=state,
                 started_at=started_at,
@@ -388,6 +389,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
         finally:
             if user_facing_result:
                 self._end_user_response_cycle()
+            self._discard_cycle_usage_scope(cycle_id)
 
     def _resolve_capability_result_followup_ongoing_action(
         self,

@@ -5,6 +5,7 @@ from typing import Any
 
 from otomekairo.capabilities import capability_readiness_result_digest
 from otomekairo.llm.client import LLMError
+from otomekairo.llm.images import image_content_hash, prepare_visual_observation_image
 from otomekairo.memory.utils import llm_local_time_text
 from otomekairo.service.common import ServiceError
 from otomekairo.service.input.constants import (
@@ -64,37 +65,51 @@ class ServiceInputVisualMixin:
         if not images:
             return client_context, observation_summary
 
-        # 生成モデル/source pack
-        selected_preset = state["model_presets"][state["selected_model_preset_id"]]
-        persona_context = self._build_selected_persona_context(state=state, role="visual_observation")
-        source_pack = self._build_visual_observation_source_pack(
-            started_at=started_at,
-            input_text=input_text,
-            trigger_kind=trigger_kind,
-            client_context=client_context,
+        content_hash = image_content_hash(images[0])
+        reused_payload = self._reused_visual_observation_payload(
             observation_summary=observation_summary,
-            persona_context=persona_context,
-            visual_observation_change_context=visual_observation_change_context,
+            content_hash=content_hash,
+            change_context=visual_observation_change_context,
         )
-
-        # 実行
-        try:
-            payload = self.llm.generate_visual_observation_summary(
-                model_config=selected_preset,
+        if reused_payload is None:
+            selected_preset = state["model_presets"][state["selected_model_preset_id"]]
+            persona_context = self._build_selected_persona_context(state=state, role="visual_observation")
+            source_pack = self._build_visual_observation_source_pack(
+                started_at=started_at,
+                input_text=input_text,
+                trigger_kind=trigger_kind,
+                client_context=client_context,
+                observation_summary=observation_summary,
                 persona_context=persona_context,
-                source_pack=source_pack,
-                images=images,
+                visual_observation_change_context=visual_observation_change_context,
             )
-        except (LLMError, KeyError, ValueError) as exc:
-            observation_summary["image_interpretation_error"] = str(exc)
-            raise
+            try:
+                prepared_images = [prepare_visual_observation_image(image) for image in images]
+                payload = self.llm.generate_visual_observation_summary(
+                    model_config=selected_preset,
+                    persona_context=persona_context,
+                    source_pack=source_pack,
+                    images=prepared_images,
+                )
+            except (LLMError, KeyError, ValueError) as exc:
+                observation_summary["image_interpretation_error"] = str(exc)
+                raise
+            reused = False
+        else:
+            payload = reused_payload
+            reused = True
 
-        # 反映
         visual_summary_text = str(payload["summary_text"]).strip()
         visual_confidence_hint = str(payload["confidence_hint"]).strip()
         change_state = str(payload["change_state"]).strip()
         change_basis = str(payload["change_basis"]).strip()
         change_reason_summary = str(payload["change_reason_summary"]).strip()
+        self._store_visual_observation_image_cache(
+            observation_summary=observation_summary,
+            content_hash=content_hash,
+            summary_text=visual_summary_text,
+            confidence_hint=visual_confidence_hint,
+        )
         enriched_client_context = {
             **client_context,
             "image_summary_text": visual_summary_text,
@@ -103,6 +118,7 @@ class ServiceInputVisualMixin:
             **observation_summary,
             "visual_observation_id": f"visual_observation:{uuid.uuid4().hex}",
             "image_interpreted": True,
+            "image_interpretation_reused": reused,
             "visual_summary_text": visual_summary_text,
             "visual_confidence_hint": visual_confidence_hint,
             "change_state": change_state,
@@ -332,6 +348,77 @@ class ServiceInputVisualMixin:
         if source in {"vision_capture_result", "wake_reference"}:
             payload["retention_policy"] = "visual_record_candidate"
         return payload
+
+    def _reused_visual_observation_payload(
+        self,
+        *,
+        observation_summary: dict[str, Any],
+        content_hash: str,
+        change_context: dict[str, Any] | None,
+    ) -> dict[str, str] | None:
+        cached = self._visual_image_cache().get(self._visual_image_cache_key(observation_summary))
+        if not isinstance(cached, dict):
+            return None
+        if cached.get("content_hash") != content_hash:
+            return None
+        summary_text = cached.get("summary_text")
+        confidence_hint = cached.get("confidence_hint")
+        if not isinstance(summary_text, str) or not summary_text.strip():
+            return None
+        if not isinstance(confidence_hint, str) or not confidence_hint.strip():
+            return None
+        prompted_summary = None
+        if isinstance(change_context, dict):
+            prompted = change_context.get("last_prompted_observation_context")
+            if isinstance(prompted, dict):
+                raw_prompted = prompted.get("summary_text")
+                if isinstance(raw_prompted, str) and raw_prompted.strip():
+                    prompted_summary = raw_prompted.strip()
+        if prompted_summary == summary_text:
+            return {
+                "summary_text": summary_text,
+                "confidence_hint": confidence_hint,
+                "change_state": "same_as_recent_speech",
+                "change_basis": "recent_speech_repetition",
+                "change_reason_summary": "同じ画像バイトで、直近の外向き発話に使った観測と同じ。",
+            }
+        return {
+            "summary_text": summary_text,
+            "confidence_hint": confidence_hint,
+            "change_state": "stable",
+            "change_basis": "semantic_stability",
+            "change_reason_summary": "同じ画像バイトのため再解釈しない。",
+        }
+
+    def _store_visual_observation_image_cache(
+        self,
+        *,
+        observation_summary: dict[str, Any],
+        content_hash: str,
+        summary_text: str,
+        confidence_hint: str,
+    ) -> None:
+        self._visual_image_cache()[self._visual_image_cache_key(observation_summary)] = {
+            "content_hash": content_hash,
+            "summary_text": summary_text,
+            "confidence_hint": confidence_hint,
+        }
+
+    def _visual_image_cache(self) -> dict[str, dict[str, str]]:
+        cache = getattr(self, "_visual_image_hash_cache", None)
+        if cache is None:
+            cache = {}
+            self._visual_image_hash_cache = cache
+        return cache
+
+    def _visual_image_cache_key(self, observation_summary: dict[str, Any]) -> str:
+        vision_source_id = observation_summary.get("vision_source_id")
+        if isinstance(vision_source_id, str) and vision_source_id.strip():
+            return vision_source_id.strip()
+        image_input_kind = observation_summary.get("image_input_kind")
+        if isinstance(image_input_kind, str) and image_input_kind.strip():
+            return f"kind:{image_input_kind.strip()}"
+        return "kind:unknown"
 
     def _observation_summary_is_vision_capture(
         self,

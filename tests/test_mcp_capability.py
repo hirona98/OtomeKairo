@@ -154,6 +154,26 @@ class McpCapabilityTests(unittest.TestCase):
         self.assertEqual(target["client_id"], "mcp-client-connector-main")
         self.assertEqual(target["tool"]["name"], "get_information")
 
+    def test_mcp_tool_catalog_keeps_input_schema(self) -> None:
+        service = DummyService()
+        input_schema = {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+            "additionalProperties": False,
+        }
+        tools = service._inspection_mcp_tools(
+            [
+                {
+                    "name": "get_information",
+                    "description": "情報を取得する",
+                    "inputSchema": input_schema,
+                }
+            ]
+        )
+        self.assertEqual(tools[0]["name"], "get_information")
+        self.assertEqual(tools[0]["input_schema"], input_schema)
+
     def test_hello_rejects_mcp_servers_without_capability(self) -> None:
         service = DummyService()
         session_id = service.register_event_stream_connection(DummyWebSocket())

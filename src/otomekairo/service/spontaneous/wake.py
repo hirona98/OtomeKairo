@@ -129,6 +129,7 @@ class ServiceSpontaneousWakeMixin:
                 client_context=client_context,
                 selected_candidate=None,
             )
+            self.llm.push_usage_scope(cycle_id)
             try:
                 if trigger_kind == "wake":
                     client_context, observation_summary, reference_context = self._prepare_wake_reference_context(
@@ -366,6 +367,8 @@ class ServiceSpontaneousWakeMixin:
                 )
                 self._broadcast_system_notice(review_notice)
                 return response
+            finally:
+                self._discard_cycle_usage_scope(cycle_id)
 
     def _execute_scheduled_background_thinking(self, *, state: dict[str, Any]) -> None:
         current_time = self._now_iso()

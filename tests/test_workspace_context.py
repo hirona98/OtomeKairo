@@ -248,6 +248,53 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertGreater(payload["total_candidate_count"], WORKSPACE_CANDIDATE_LIMIT)
         self.assertGreater(len(payload["workspace_candidates"]), WORKSPACE_CANDIDATE_LIMIT)
 
+    def test_workspace_context_keeps_overflow_as_non_selectable_background(self) -> None:
+        service = ServiceInputPipelineMixin()
+
+        payload = service._build_workspace_context(
+            current_input=CurrentInput(
+                sender_kind="person",
+                sender_ref="person:test",
+                source_kind="user_message",
+                response_target_refs=("person:test",),
+                interaction_context=None,
+                text="確認して。",
+            ),
+            recall_pack={},
+            drive_state_summary=None,
+            foreground_world_state=None,
+            activity_context=None,
+            ongoing_action_summary=None,
+            autonomous_run_summaries=None,
+            capability_decision_view=[
+                {
+                    "id": f"capability.{index}",
+                    "available": True,
+                    "what_it_does": f"能力{index}",
+                }
+                for index in range(WORKSPACE_CANDIDATE_LIMIT + 2)
+            ],
+            initiative_context=None,
+            capability_result_context=None,
+            visual_observation_context=None,
+            self_state_context=None,
+            relationship_context=None,
+            prediction_error_context=None,
+            default_mode_context=None,
+        )
+
+        background = payload["background_candidates"]
+        self.assertEqual(len(background), 3)
+        self.assertTrue(all("factor_ref" not in candidate for candidate in background))
+        self.assertEqual(
+            [candidate["summary_text"] for candidate in background],
+            [
+                f"能力{WORKSPACE_CANDIDATE_LIMIT - 1}",
+                f"能力{WORKSPACE_CANDIDATE_LIMIT}",
+                f"能力{WORKSPACE_CANDIDATE_LIMIT + 1}",
+            ],
+        )
+
     def test_relationship_context_prompt_omits_item_ref(self) -> None:
         compact = _compact_relationship_context(
             {

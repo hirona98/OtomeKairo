@@ -337,7 +337,7 @@ API起床の自律判断 matrix は次の 16 件に固定する。
 | case | 入力条件 | 期待する構造 |
 | --- | --- | --- |
 | `background-no-context-skip` | interval 初回定期思考で `drive_state / world_state / ongoing_action` が空 | 定期思考 cycle を作り、`initiative_context` なしの `decision.kind=noop` と `memory_trace=skipped` を残す |
-| `background-recent-duplicate-noop` | interval 初回定期思考で視覚観測の `change_state` が `same_as_recent_speech` である | `suppression_level=high`、`decision.kind=noop`、`memory_trace=skipped` |
+| `background-recent-duplicate-noop` | interval 初回定期思考で視覚観測の `change_state` が `same_as_recent_speech` である | `suppression_level=high`、`decision.kind=noop`、`memory_trace=skipped`。同じ cycle で `speech` / `pending_intent` / `capability_request` / `autonomous_run` が進んだ場合は `memory_trace=succeeded` |
 | `background-grounded-speech` | interval 初回定期思考で予定 `world_state` と整合する構造値が強い `drive_state` がある | `background_thinking_scheduler_active=true`、`foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`memory_trace=succeeded` |
 | `background-interval-not-due` | `last_wake_at` 相当の直後に長い interval を設定する | `background_thinking_scheduler_active=true` を観測し、新しい定期思考 cycle を作らない |
 

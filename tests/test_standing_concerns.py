@@ -8,6 +8,8 @@ from otomekairo.defaults import (
     build_default_standing_concerns,
 )
 from otomekairo.llm.contexts import CurrentInput
+from otomekairo.service.app import OtomeKairoService
+from otomekairo.service.common import BACKGROUND_THINKING_POLL_SECONDS
 from otomekairo.service.input.pipeline import ServiceInputPipelineMixin
 from otomekairo.service.standing_concerns import (
     build_standing_concern_orientation_context,
@@ -323,6 +325,85 @@ class StandingConcernAttendanceMixinTests(unittest.TestCase):
         self.assertEqual(
             subject._standing_concern_last_attended_map()["elyth"],
             "2026-08-13T12:00:00+09:00",
+        )
+
+
+class StandingConcernDelayAfterAttendanceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.service = OtomeKairoService(root_dir=Path(self.temp_dir.name))
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_attended_concern_is_not_due_and_waits_regular_interval(self) -> None:
+        last_wake = "2026-08-13T12:00:00+09:00"
+        current_time = "2026-08-13T12:02:00+09:00"
+        state = {
+            "wake_policy": {
+                "mode": "interval",
+                "interval_seconds": 600,
+                "observations": [],
+            },
+            "standing_concerns": [
+                {
+                    "concern_id": "elyth",
+                    "enabled": True,
+                    "min_interval_seconds": 600,
+                    "concern_summary": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+                }
+            ],
+        }
+        self.service._set_last_wake_at(last_wake)
+        marked = self.service._mark_standing_concerns_attended(
+            decision={
+                "kind": "capability_request",
+                "foreground_selection": {
+                    "primary_factor_ref": "standing_concern:elyth",
+                    "supporting_factor_refs": [],
+                },
+            },
+            workspace_context={
+                "workspace_candidates": [
+                    {
+                        "factor_ref": "standing_concern:elyth",
+                        "kind": "standing_concern",
+                        "metadata": {"concern_id": "elyth"},
+                    }
+                ]
+            },
+            current_time=last_wake,
+        )
+        self.assertEqual(marked, ["elyth"])
+        self.assertEqual(
+            self.service._due_standing_concerns(state=state, current_time=current_time),
+            [],
+        )
+        self.assertIsNone(
+            extra_background_thinking_delay_seconds(
+                wake_mode="interval",
+                wake_interval_seconds=600,
+                last_wake_at=last_wake,
+                due_concerns=[],
+                current_time=current_time,
+            )
+        )
+        delay = self.service._background_thinking_delay_seconds(
+            state=state,
+            current_time=current_time,
+        )
+        self.assertGreater(delay, 0.0)
+        self.assertEqual(delay, BACKGROUND_THINKING_POLL_SECONDS)
+
+    def test_extra_thinking_absent_when_no_due_concerns(self) -> None:
+        self.assertIsNone(
+            extra_background_thinking_delay_seconds(
+                wake_mode="interval",
+                wake_interval_seconds=600,
+                last_wake_at="2026-08-13T12:00:00+09:00",
+                due_concerns=[],
+                current_time="2026-08-13T12:02:00+09:00",
+            )
         )
 
 

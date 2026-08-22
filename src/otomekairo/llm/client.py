@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from otomekairo.capabilities import capability_manifests, validate_capability_payload
@@ -13,6 +14,12 @@ from otomekairo.llm.contexts import (
     InitiativeContext,
     PersonaContext,
     SpeechContext,
+    PERSONA_CONTEXT_USE_POLICIES,
+)
+from otomekairo.llm.capability_choice import (
+    CapabilityChoiceError,
+    capability_input_materialization_view,
+    resolve_capability_choice,
 )
 from otomekairo.llm.contracts import (
     LLMContractError,
@@ -29,7 +36,6 @@ from otomekairo.llm.contracts import (
     validate_disclosure_review_contract,
     validate_event_evidence_contract,
     validate_initiative_entry_check_contract,
-
     validate_memory_interpretation_contract,
     validate_memory_reflection_summary_contract,
     validate_pre_send_check_contract,
@@ -46,8 +52,9 @@ from otomekairo.llm.schemas import (
     agent_skill_material_selection_response_format,
     agent_skill_selection_response_format,
     autonomous_completion_review_response_format,
-    autonomous_step_response_format,
-    decision_response_format,
+    autonomous_step_choice_response_format,
+    capability_input_response_format,
+    decision_choice_response_format,
     disclosure_review_response_format,
     event_evidence_response_format,
     initiative_entry_check_response_format,
@@ -72,6 +79,8 @@ from otomekairo.llm.prompts import (
     build_autonomous_completion_review_repair_prompt,
     build_autonomous_step_messages,
     build_autonomous_step_repair_prompt,
+    build_capability_input_messages,
+    build_capability_input_repair_prompt,
     build_decision_messages,
     build_decision_repair_prompt,
     build_disclosure_review_messages,
@@ -100,7 +109,12 @@ from otomekairo.llm.prompts import (
     build_world_state_repair_prompt,
 )
 from otomekairo.world_state.models import WorldStateSourcePack
-from otomekairo.llm.transport import complete_text, generate_embeddings as transport_generate_embeddings
+from otomekairo.llm.transport import (
+    CompletionResult,
+    complete_text,
+    generate_embeddings as transport_generate_embeddings,
+)
+from otomekairo.llm.usage import USAGE_INT_KEYS
 from otomekairo.service.common import debug_log
 
 DEBUG_REJECTED_TEXT_LIMIT = 2000
@@ -132,7 +146,7 @@ DEBUG_REJECTED_PAYLOAD_KEY_ORDER = (
     "pending_intent",
     "action",
     "outcome",
-    "section_selection",
+    "selected_candidate_refs",
     "selected_skill_ids",
 )
 
@@ -140,6 +154,7 @@ DEBUG_REJECTED_PAYLOAD_KEY_ORDER = (
 @dataclass(slots=True)
 class LLMClient:
     mock_client: MockLLMClient = field(default_factory=MockLLMClient)
+    _usage_local: threading.local = field(default_factory=threading.local, repr=False)
 
     def generate_agent_skill_selection(
         self,
@@ -207,19 +222,11 @@ class LLMClient:
 
         if selection_context is None:
             return
-        allowed_values = selection_context.get("allowed_skill_ids")
-        if isinstance(allowed_values, list):
-            allowed_skill_ids = {
-                value
-                for value in allowed_values
-                if isinstance(value, str)
-            }
-        else:
-            catalog = selection_context.get("skill_catalog")
-            allowed_skill_ids = {
-                entry.get("skill_id")
-                for entry in catalog if isinstance(entry, dict)
-            } if isinstance(catalog, list) else set()
+        catalog = selection_context.get("skill_catalog")
+        allowed_skill_ids = {
+            entry.get("skill_id")
+            for entry in catalog if isinstance(entry, dict)
+        } if isinstance(catalog, list) else set()
         unknown_ids = sorted(set(skill_ids) - allowed_skill_ids)
         if unknown_ids:
             raise LLMError(
@@ -260,13 +267,11 @@ class LLMClient:
 
         if selection_context is None:
             return
-        additional_candidates = selection_context.get("allowed_additional_skill_ids")
-        if not isinstance(additional_candidates, list):
-            additional_candidates = selection_context.get("additional_skill_candidates")
+        additional_candidates = selection_context.get("additional_skill_candidates")
         allowed_additional_ids = {
-            value
-            for value in additional_candidates
-            if isinstance(value, str)
+            entry.get("skill_id")
+            for entry in additional_candidates
+            if isinstance(entry, dict)
         } if isinstance(additional_candidates, list) else set()
         active_ids = {
             str(entry.get("skill_id") or "").strip()
@@ -280,9 +285,7 @@ class LLMClient:
                 + ", ".join(invalid_additional)
             )
 
-        resource_candidates = selection_context.get("allowed_resource_reads")
-        if not isinstance(resource_candidates, list):
-            resource_candidates = selection_context.get("resource_candidates")
+        resource_candidates = selection_context.get("resource_candidates")
         candidate_pairs = {
             (entry.get("skill_id"), entry.get("path"))
             for entry in resource_candidates
@@ -306,6 +309,7 @@ class LLMClient:
         current_time: str,
         visual_observation_context: dict[str, Any] | None,
         activity_context: dict[str, Any] | None = None,
+        self_activity_orientation: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         operation = "input_interpretation"
         try:
@@ -347,6 +351,7 @@ class LLMClient:
                 current_time=current_time,
                 visual_observation_context=visual_observation_context,
                 activity_context=activity_context,
+                self_activity_orientation=self_activity_orientation,
             )
             payload = self._generate_structured_payload(
                 model_config=model_config,
@@ -403,10 +408,10 @@ class LLMClient:
                 context=context,
             )
 
-            return self._generate_structured_payload(
+            payload = self._generate_structured_payload(
                 model_config=model_config,
                 messages=messages,
-                validator=lambda payload: self._validate_decision_contract_for_context(
+                validator=lambda payload: self._validate_decision_choice_contract_for_context(
                     payload=payload,
                     context=context,
                 ),
@@ -415,9 +420,21 @@ class LLMClient:
                     context.comparison_scope,
                 ),
                 failure_message="Decision の生成に失敗しました。解析可能な応答が得られませんでした。",
-                response_format=decision_response_format(comparison_scope=context.comparison_scope),
+                response_format=decision_choice_response_format(
+                    comparison_scope=context.comparison_scope,
+                ),
                 operation=operation,
             )
+            if payload.get("kind") == "capability_request" and context.materialize_capability_input:
+                payload = self.materialize_decision_capability_input(
+                    payload=payload,
+                    context=context,
+                    model_config=model_config,
+                    persona_context=persona_context,
+                )
+            if context.materialize_capability_input or payload.get("kind") != "capability_request":
+                self._validate_decision_contract_for_context(payload=payload, context=context)
+            return payload
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
             raise
@@ -465,6 +482,111 @@ class LLMClient:
                 return
             raise
 
+    def _validate_decision_choice_contract_for_context(
+        self,
+        *,
+        payload: dict[str, Any],
+        context: DecisionContext,
+    ) -> None:
+        projected = self._project_decision_capability_choice(
+            payload=payload,
+            capability_decision_view=context.capability_decision_view,
+        )
+        validate_decision_contract(
+            projected,
+            workspace_context=context.workspace_context if isinstance(context.workspace_context, dict) else None,
+            initiative_context=context.initiative_context,
+            comparison_scope=context.comparison_scope,
+        )
+        self._validate_decision_foreground_selection_refs(
+            payload=projected,
+            context=context,
+        )
+        self._validate_decision_autonomous_run_coordination(
+            payload=projected,
+            context=context,
+        )
+        if isinstance(context.capability_result_context, dict):
+            self._validate_decision_capability_result_context(
+                payload=projected,
+                capability_result_context=context.capability_result_context,
+            )
+        try:
+            self._validate_decision_vision_capture_fresh_world_state_reuse(
+                payload=projected,
+                capability_decision_view=context.capability_decision_view,
+                capability_result_context=context.capability_result_context,
+            )
+        except LLMError as exc:
+            if context.trigger_kind != "user_message" and payload.get("kind") == "capability_request":
+                self._coerce_decision_to_noop_for_fresh_visual_context_reuse(payload, exc)
+                return
+            raise
+
+    def _project_decision_capability_choice(
+        self,
+        *,
+        payload: dict[str, Any],
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        projected = dict(payload)
+        if payload.get("kind") != "capability_request":
+            return projected
+        resolved = self._resolve_capability_choice(
+            capability_decision_view=capability_decision_view,
+            choice_payload=payload.get("capability_request"),
+        )
+        projected["capability_request"] = {
+            "capability_id": resolved["capability_id"],
+            "input": dict(resolved["fixed_input"]),
+        }
+        return projected
+
+    def materialize_decision_capability_input(
+        self,
+        *,
+        payload: dict[str, Any],
+        context: DecisionContext,
+        model_config: dict[str, Any],
+        persona_context: PersonaContext,
+    ) -> dict[str, Any]:
+        resolved = self._resolve_capability_choice(
+            capability_decision_view=context.capability_decision_view,
+            choice_payload=payload.get("capability_request"),
+        )
+        selected_factors = self._selected_workspace_factors(
+            workspace_context=context.workspace_context,
+            foreground_selection=payload.get("foreground_selection"),
+        )
+        materialization_context: dict[str, Any] = {
+            "intent": {
+                "reason_code": payload.get("reason_code"),
+                "reason_summary": payload.get("reason_summary"),
+                "target_stances": payload.get("target_stances"),
+            },
+            "current_input": context.current_input.to_prompt_payload(),
+            "recent_turns": context.recent_turns,
+            "selected_factors": selected_factors,
+        }
+        if isinstance(context.capability_result_context, dict):
+            materialization_context["capability_result_context"] = context.capability_result_context
+        final_input = self._generate_capability_input(
+            model_config=model_config,
+            persona_context=persona_context,
+            resolved_choice=resolved,
+            materialization_context=materialization_context,
+            agent_skill_context=context.agent_skill_context,
+            capability_decision_view=context.capability_decision_view,
+            label="Decision capability_request",
+        )
+        hydrated = dict(payload)
+        hydrated["capability_request"] = {
+            "capability_id": resolved["capability_id"],
+            "input": final_input,
+        }
+        self._validate_decision_contract_for_context(payload=hydrated, context=context)
+        return hydrated
+
     def _validate_decision_foreground_selection_refs(
         self,
         *,
@@ -511,6 +633,62 @@ class LLMClient:
             raise LLMError(
                 "WorkspaceContext.workspace_candidates があるときは "
                 "foreground_selection.primary_factor_ref を 1 件指定してください。"
+            )
+        self._validate_self_activity_standing_concern_coverage(
+            payload=payload,
+            context=context,
+        )
+
+    def _validate_self_activity_standing_concern_coverage(
+        self,
+        *,
+        payload: dict[str, Any],
+        context: DecisionContext,
+    ) -> None:
+        if context.comparison_scope != "self_activity":
+            return
+        if payload.get("kind") not in {"capability_request", "autonomous_run"}:
+            return
+        workspace_context = context.workspace_context if isinstance(context.workspace_context, dict) else {}
+        candidates = workspace_context.get("workspace_candidates")
+        if not isinstance(candidates, list):
+            return
+        standing_refs = [
+            candidate["factor_ref"].strip()
+            for candidate in candidates
+            if isinstance(candidate, dict)
+            and candidate.get("kind") == "standing_concern"
+            and isinstance(candidate.get("factor_ref"), str)
+            and candidate["factor_ref"].strip()
+        ]
+        if not standing_refs:
+            return
+        foreground_selection = payload.get("foreground_selection")
+        placed: set[str] = set()
+        if isinstance(foreground_selection, dict):
+            primary_factor_ref = foreground_selection.get("primary_factor_ref")
+            if isinstance(primary_factor_ref, str) and primary_factor_ref.strip():
+                placed.add(primary_factor_ref.strip())
+            supporting_factor_refs = foreground_selection.get("supporting_factor_refs")
+            if isinstance(supporting_factor_refs, list):
+                placed.update(
+                    factor_ref.strip()
+                    for factor_ref in supporting_factor_refs
+                    if isinstance(factor_ref, str) and factor_ref.strip()
+                )
+            suppressed_factors = foreground_selection.get("suppressed_factors")
+            if isinstance(suppressed_factors, list):
+                placed.update(
+                    item.get("factor_ref", "").strip()
+                    for item in suppressed_factors
+                    if isinstance(item, dict) and isinstance(item.get("factor_ref"), str)
+                )
+        missing_refs = [factor_ref for factor_ref in standing_refs if factor_ref not in placed]
+        if missing_refs:
+            raise LLMError(
+                "comparison_scope=self_activity で capability_request または autonomous_run を選ぶときは、"
+                "WorkspaceContext の standing_concern を foreground_selection の primary、supporting、"
+                f"suppressed のいずれかに置いてください。未配置={','.join(missing_refs)}"
             )
 
     def _validate_decision_autonomous_run_coordination(
@@ -576,15 +754,24 @@ class LLMClient:
             payload = self._generate_structured_payload(
                 model_config=model_config,
                 messages=messages,
-                validator=lambda value: self._validate_autonomous_step_contract_for_context(
+                validator=lambda value: self._validate_autonomous_step_choice_for_context(
                     payload=value,
                     context=context,
                 ),
                 repair_prompt_builder=build_autonomous_step_repair_prompt,
                 failure_message="AutonomousStep の生成に失敗しました。解析可能な応答が得られませんでした。",
-                response_format=autonomous_step_response_format(),
+                response_format=autonomous_step_choice_response_format(),
                 operation=operation,
             )
+            action = payload.get("action")
+            if isinstance(action, dict) and action.get("kind") == "capability_request":
+                payload = self._materialize_autonomous_step_capability_input(
+                    payload=payload,
+                    context=context,
+                    model_config=model_config,
+                    persona_context=persona_context,
+                )
+            self._validate_autonomous_step_contract_for_context(payload=payload, context=context)
             return payload
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
@@ -728,6 +915,176 @@ class LLMClient:
             capability_decision_view=context.capability_decision_view,
             label="AutonomousStep action.capability_request",
         )
+
+    def _validate_autonomous_step_choice_for_context(
+        self,
+        *,
+        payload: dict[str, Any],
+        context: AutonomousStepContext,
+    ) -> None:
+        projected = dict(payload)
+        action = payload.get("action")
+        if isinstance(action, dict) and action.get("kind") == "capability_request":
+            resolved = self._resolve_capability_choice(
+                capability_decision_view=context.capability_decision_view,
+                choice_payload=action.get("capability_request"),
+            )
+            projected["action"] = {
+                **action,
+                "capability_request": {
+                    "capability_id": resolved["capability_id"],
+                    "input": dict(resolved["fixed_input"]),
+                },
+            }
+        validate_autonomous_step_contract(projected)
+
+    def _materialize_autonomous_step_capability_input(
+        self,
+        *,
+        payload: dict[str, Any],
+        context: AutonomousStepContext,
+        model_config: dict[str, Any],
+        persona_context: PersonaContext,
+    ) -> dict[str, Any]:
+        action = payload["action"]
+        resolved = self._resolve_capability_choice(
+            capability_decision_view=context.capability_decision_view,
+            choice_payload=action.get("capability_request"),
+        )
+        materialization_context = {
+            "intent": {
+                "run": context.run,
+                "transition": payload.get("transition"),
+                "run_update": payload.get("run_update"),
+            },
+            "current_input": context.current_input.to_prompt_payload(),
+            "recent_turns": context.recent_turns,
+            "last_result_context": context.last_result_context,
+        }
+        final_input = self._generate_capability_input(
+            model_config=model_config,
+            persona_context=persona_context,
+            resolved_choice=resolved,
+            materialization_context=materialization_context,
+            agent_skill_context=context.agent_skill_context,
+            capability_decision_view=context.capability_decision_view,
+            label="AutonomousStep action.capability_request",
+        )
+        hydrated = dict(payload)
+        hydrated["action"] = {
+            **action,
+            "capability_request": {
+                "capability_id": resolved["capability_id"],
+                "input": final_input,
+            },
+        }
+        return hydrated
+
+    def _resolve_capability_choice(
+        self,
+        *,
+        capability_decision_view: list[dict[str, Any]] | None,
+        choice_payload: Any,
+    ) -> dict[str, Any]:
+        try:
+            return resolve_capability_choice(
+                capability_decision_view=capability_decision_view,
+                choice_payload=choice_payload,
+            )
+        except CapabilityChoiceError as exc:
+            raise LLMError(str(exc)) from exc
+
+    def _generate_capability_input(
+        self,
+        *,
+        model_config: dict[str, Any],
+        persona_context: PersonaContext,
+        resolved_choice: dict[str, Any],
+        materialization_context: dict[str, Any],
+        agent_skill_context: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+        label: str,
+    ) -> dict[str, Any]:
+        manifest = capability_manifests().get(resolved_choice["capability_id"])
+        if not isinstance(manifest, dict):
+            raise LLMError(
+                f"capability_id={resolved_choice['capability_id']} の manifest がありません。"
+            )
+        selected_capability = capability_input_materialization_view(
+            resolved_choice=resolved_choice,
+            manifest=manifest,
+        )
+        request_context = {
+            **materialization_context,
+            "selected_capability": selected_capability,
+        }
+        fixed_input = dict(resolved_choice["fixed_input"])
+
+        def validate_generated(value: dict[str, Any]) -> None:
+            _validate_exact_keys(value, {"input"}, "CapabilityInput")
+            generated_input = value.get("input")
+            if not isinstance(generated_input, dict):
+                raise LLMError("CapabilityInput.input は object である必要があります。")
+            duplicate_fixed = sorted(set(generated_input) & set(fixed_input))
+            if duplicate_fixed:
+                raise LLMError(
+                    "CapabilityInput.input に fixed_input の key を含めてはいけません: "
+                    + ", ".join(duplicate_fixed)
+                )
+            merged_input = {**fixed_input, **generated_input}
+            self._validate_capability_request_for_context(
+                request_payload={
+                    "capability_id": resolved_choice["capability_id"],
+                    "input": merged_input,
+                },
+                capability_decision_view=capability_decision_view,
+                label=label,
+            )
+
+        materializer_persona = replace(
+            persona_context,
+            expression_addon=None,
+            use_policy=PERSONA_CONTEXT_USE_POLICIES["capability_input_generation"],
+        )
+        generated = self._generate_structured_payload(
+            model_config=model_config,
+            messages=build_capability_input_messages(
+                persona_context=materializer_persona,
+                materialization_context=request_context,
+                agent_skill_context=agent_skill_context,
+            ),
+            validator=validate_generated,
+            repair_prompt_builder=build_capability_input_repair_prompt,
+            failure_message="Capability input の生成に失敗しました。",
+            response_format=capability_input_response_format(),
+            operation="capability_input_generation",
+        )
+        return {**fixed_input, **generated["input"]}
+
+    def _selected_workspace_factors(
+        self,
+        *,
+        workspace_context: dict[str, Any] | None,
+        foreground_selection: Any,
+    ) -> list[dict[str, Any]]:
+        if not isinstance(workspace_context, dict) or not isinstance(foreground_selection, dict):
+            return []
+        selected_refs: set[str] = set()
+        primary = foreground_selection.get("primary_factor_ref")
+        if isinstance(primary, str) and primary.strip():
+            selected_refs.add(primary.strip())
+        supporting = foreground_selection.get("supporting_factor_refs")
+        if isinstance(supporting, list):
+            selected_refs.update(
+                ref.strip()
+                for ref in supporting
+                if isinstance(ref, str) and ref.strip()
+            )
+        return [
+            item
+            for item in workspace_context.get("workspace_candidates", [])
+            if isinstance(item, dict) and item.get("factor_ref") in selected_refs
+        ]
 
     def _validate_capability_request_for_context(
         self,
@@ -908,7 +1265,8 @@ class LLMClient:
             f"source_capability_id={source_capability_id} の follow-up です。"
             f"allowed_followup_capability_ids={allowed_summary} に含まれない "
             f"{request_capability_id.strip()} の capability_request は不正です。"
-            "受け取った result に基づく speech / noop / pending_intent を返してください。"
+            "受け取った result に基づく speech / noop / autonomous_run を返してください。"
+            "pending_intent は残作業の置き場ではありません。"
         )
 
     def _validate_decision_capability_result_followup_constraints(
@@ -1033,7 +1391,11 @@ class LLMClient:
             )
 
             # 補完
-            content = complete_text(model_config=model_config, messages=messages)
+            content = self._complete_text(
+                model_config=model_config,
+                messages=messages,
+                operation=operation,
+            )
             speech_text = content.strip()
             if not speech_text:
                 raise LLMError("Speech の生成結果が空でした。")
@@ -1458,17 +1820,99 @@ class LLMClient:
             return vectors
 
         # model差分込みの transport へ委譲する。
-        vectors = transport_generate_embeddings(
+        vectors, usage = transport_generate_embeddings(
             model_config=model_config,
             texts=texts,
             expected_dimension=embedding_dimension,
         )
+        self._record_usage(operation="embeddings", usage=usage)
         debug_log(
             "LLM",
-            f"embeddings done model={self._debug_model(model_config)} vectors={len(vectors)}",
+            (
+                f"embeddings done model={self._debug_model(model_config)} "
+                f"vectors={len(vectors)} {self._debug_usage(usage)}"
+            ),
             level="DEBUG",
         )
         return vectors
+
+    def push_usage_scope(self, scope_id: str) -> None:
+        normalized = self._usage_scope_id(scope_id)
+        stack = self._usage_stack()
+        if any(item[0] == normalized for item in stack):
+            raise LLMError(f"usage scope already open: {normalized}")
+        stack.append((normalized, []))
+
+    def consume_usage_scope(self, scope_id: str) -> list[dict[str, Any]]:
+        normalized = self._usage_scope_id(scope_id)
+        stack = self._usage_stack()
+        if not stack:
+            raise LLMError("usage scope is not open.")
+        current_id, events = stack[-1]
+        if current_id != normalized:
+            raise LLMError(f"usage scope mismatch: open={current_id} consume={normalized}")
+        stack.pop()
+        return events
+
+    def has_usage_scope(self, scope_id: str) -> bool:
+        normalized = self._usage_scope_id(scope_id)
+        return any(item[0] == normalized for item in self._usage_stack())
+
+    def has_any_usage_scope(self) -> bool:
+        return bool(self._usage_stack())
+
+    def _usage_scope_id(self, scope_id: str) -> str:
+        if not isinstance(scope_id, str) or not scope_id.strip():
+            raise LLMError("usage scope_id is required.")
+        return scope_id.strip()
+
+    def _usage_stack(self) -> list[tuple[str, list[dict[str, Any]]]]:
+        stack = getattr(self._usage_local, "stack", None)
+        if stack is None:
+            stack = []
+            self._usage_local.stack = stack
+        return stack
+
+    def _complete_text(
+        self,
+        *,
+        model_config: dict[str, Any],
+        messages: list[dict[str, Any]],
+        response_format: dict[str, Any] | None = None,
+        operation: str,
+    ) -> str:
+        result = complete_text(
+            model_config=model_config,
+            messages=messages,
+            response_format=response_format,
+            operation=operation,
+        )
+        if not isinstance(result, CompletionResult):
+            raise LLMError("LiteLLM の応答形式が不正です。")
+        self._record_usage(operation=operation, usage=result.usage)
+        return result.text
+
+    def _record_usage(self, *, operation: str, usage: dict[str, int] | None) -> None:
+        stack = self._usage_stack()
+        if not stack:
+            raise LLMError("usage scope is not open.")
+        event: dict[str, Any] = {"operation": operation}
+        if isinstance(usage, dict):
+            for key in USAGE_INT_KEYS:
+                value = usage.get(key)
+                if isinstance(value, int) and value >= 0:
+                    event[key] = value
+        stack[-1][1].append(event)
+
+    def _debug_usage(self, usage: dict[str, int] | None) -> str:
+        if not isinstance(usage, dict) or not usage:
+            return "usage=-"
+        parts = [
+            f"{key}={usage[key]}"
+            for key in USAGE_INT_KEYS
+            if isinstance(usage.get(key), int)
+        ]
+        return " ".join(parts) if parts else "usage=-"
 
     def _source_pack_with_persona_context(
         self,
@@ -1569,10 +2013,11 @@ class LLMClient:
         attempt_messages = list(messages)
         schema_name = response_format_schema_name(response_format)
         for attempt in range(2):
-            content = complete_text(
+            content = self._complete_text(
                 model_config=model_config,
                 messages=attempt_messages,
                 response_format=response_format,
+                operation=operation,
             )
             try:
                 payload = parse_json_object(content)

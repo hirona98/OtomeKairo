@@ -412,10 +412,21 @@ class ServiceInputCapabilityContextMixin:
                 "camera.ptz result follow-up では同じ vision_source_id の vision.capture だけを追加で出せる。"
                 "それ以外は受け取った result への speech / noop / pending_intent で閉じる。"
             )
-        return (
-            "source capability と異なる capability_request は出さず、"
-            "受け取った result への speech / noop / pending_intent で閉じる。"
+        summary = (
+            "到着は capability result であり、会話の向きへ引き上げない。"
+            "source capability と異なる capability_request は出さない。"
+            "今回の結果でこの到着を閉じられるなら speech または noop で閉じる。"
+            "結果を受けたあとに待機、観測、発話、確認、支援の履行が残るなら autonomous_run を始める。"
+            "pending_intent は残作業の置き場ではない。"
         )
+        completed_label = self._capability_result_completed_mcp_tool_label(completed_mcp_tool)
+        if completed_label is not None:
+            summary += (
+                f"今回完了した tool は {completed_label} である。"
+                "同じ tool を再実行しない。"
+                "残りが同じ作用なら autonomous_run を始める。"
+            )
+        return summary
 
     def _capability_result_completed_mcp_tool(
         self,
