@@ -1025,6 +1025,114 @@ class DecisionContractTests(unittest.TestCase):
         self.assertNotIn("should-not-appear", compact)
 
 
+class SelfActivityStandingConcernCoverageTests(unittest.TestCase):
+    def _workspace(self) -> dict:
+        return {
+            "workspace_candidates": [
+                {
+                    "factor_ref": "standing_concern:elyth",
+                    "kind": "standing_concern",
+                    "summary_text": "ELYTH。",
+                    "metadata": {"concern_id": "elyth"},
+                },
+                {
+                    "factor_ref": "current_input:background_thinking",
+                    "kind": "current_input",
+                    "summary_text": "自己評価。",
+                },
+            ]
+        }
+
+    def _context(self, *, comparison_scope: str = "self_activity") -> DecisionContext:
+        return replace(
+            _decision_context(_mcp_capability_view()),
+            comparison_scope=comparison_scope,
+            trigger_kind="background_thinking",
+            workspace_context=self._workspace(),
+        )
+
+    def _payload(
+        self,
+        *,
+        kind: str = "capability_request",
+        primary: str,
+        supporting: list[str] | None = None,
+        suppressed: list[dict[str, str]] | None = None,
+    ) -> dict:
+        payload = {
+            "kind": kind,
+            "reason_code": "self_activity:test",
+            "reason_summary": "自身の活動を進める。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+            "capability_request": None,
+            "autonomous_run": None,
+            "foreground_selection": {
+                "primary_factor_ref": primary,
+                "supporting_factor_refs": supporting or [],
+                "suppressed_factors": suppressed or [],
+                "summary_text": "自身の活動を扱う。",
+            },
+            "target_stances": build_decision_target_stances_for_kind(
+                kind,
+                required_targets=("self_activity",),
+                reason_summary="自身の活動を進める。",
+            ),
+        }
+        if kind == "capability_request":
+            payload["capability_request"] = {
+                "capability_id": "mcp.call_tool",
+                "input": {
+                    "mcp_server_id": "elyth",
+                    "tool_name": "get_notifications",
+                    "arguments": {},
+                },
+            }
+        return payload
+
+    def test_advance_without_placing_standing_concern_is_rejected(self) -> None:
+        with self.assertRaisesRegex(LLMError, "standing_concern"):
+            _llm_client()._validate_decision_foreground_selection_refs(
+                payload=self._payload(primary="current_input:background_thinking"),
+                context=self._context(),
+            )
+
+    def test_supporting_placement_is_accepted(self) -> None:
+        _llm_client()._validate_decision_foreground_selection_refs(
+            payload=self._payload(
+                primary="current_input:background_thinking",
+                supporting=["standing_concern:elyth"],
+            ),
+            context=self._context(),
+        )
+
+    def test_suppressed_placement_is_accepted(self) -> None:
+        _llm_client()._validate_decision_foreground_selection_refs(
+            payload=self._payload(
+                primary="current_input:background_thinking",
+                suppressed=[
+                    {
+                        "factor_ref": "standing_concern:elyth",
+                        "reason_summary": "今はその関心に関わらない。",
+                    }
+                ],
+            ),
+            context=self._context(),
+        )
+
+    def test_full_scope_does_not_require_placement(self) -> None:
+        _llm_client()._validate_decision_foreground_selection_refs(
+            payload=self._payload(primary="current_input:background_thinking"),
+            context=self._context(comparison_scope="full"),
+        )
+
+    def test_noop_does_not_require_placement(self) -> None:
+        _llm_client()._validate_decision_foreground_selection_refs(
+            payload=self._payload(kind="noop", primary="current_input:background_thinking"),
+            context=self._context(),
+        )
+
+
 class DecisionPromptScopeTests(unittest.TestCase):
     def _system_prompt(self, comparison_scope: str) -> str:
         context = replace(_decision_context([]), comparison_scope=comparison_scope)
@@ -1045,6 +1153,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertNotIn("出力 JSON は structured schema の必須キーと enum に従います", system)
         self.assertIn("その関心に関われる手段が CapabilityChoiceView に available=true であるときだけ", system)
         self.assertIn("手段が無いときは今は関わらない", system)
+        self.assertIn("WorkspaceContext の各 standing_concern は foreground_selection の primary、supporting、suppressed のいずれか", system)
         self.assertIn("target_stances は self_activity を 1 件だけ持ちます", system)
         self.assertNotIn("伝達、能力実行、保留、見送り、継続目的開始のどれが", system)
         self.assertNotIn("人物発話自体が未来実行", system)
@@ -1080,6 +1189,8 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("該当 run が無いなら autonomous_run を始めます", system)
         self.assertIn("その実行列へ新しい capability_request を重ねません", system)
         self.assertIn("別の継続実行を求め、該当 run が無いなら autonomous_run を始めてよい", system)
+        self.assertIn("現在の人物発話が外部サービスや Agent Skill の作業を求めるときだけ capability_request", system)
+        self.assertIn("この応答で完結する会話は speech です", system)
 
     def test_decision_context_uses_schema_free_capability_choice_view(self) -> None:
         messages = build_decision_messages(
@@ -1145,6 +1256,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("target_stances は self_activity を 1 件だけ持ちます", self_repair)
         self.assertIn("使わない排他キーもキーとして残し、値は null にします", self_repair)
         self.assertIn("capability_id と、必要な場合だけ target_ref", self_repair)
+        self.assertIn("各 standing_concern を foreground_selection の primary、supporting、suppressed", self_repair)
         self.assertNotIn("outward_speech は毎回必須です", self_repair)
         self.assertIn("speech / noop / pending_intent", outward_repair)
         self.assertIn("target_stances は outward_speech を 1 件だけ持ちます", outward_repair)

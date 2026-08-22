@@ -30,6 +30,11 @@ skill の適用可否は固定文字列や keyword 表では決めない。通�
 capability selection summary は skill の必要性を比較するための短い view である。capability 共通の識別、種類、利用可否、短い説明、risk と unavailable 理由を持ち、MCP は server の利用可否と tool の `name / description`、vision source は識別、利用可否、対応操作だけを持つ。最終実行用の input schema、manifest 条件、権限列、readiness は載せない。decision または autonomous step も schema を含まない `CapabilityChoiceView` から capability と対象だけを選び、選択後に `capability_input_generation` がその 1 件の schema から input を組み立てる。能力選択と入力生成の正本は [capability manifest](../capability/capability_manifest.md) とする。
 人物発話の向きでは、直近会話と作業記録を見ずに skill を選ばない。向きと到着の分離は [../llm/プロンプト文脈分離方針.md](../llm/プロンプト文脈分離方針.md) を正とする。
 
+`current_input` が向きの本体である。skill は、今の向きがその skill の作業であるときだけ選ぶ。
+`recent_turns` は同じ向きの継続かを見る材料であり、直前が別作業だったこと自体を今の skill 選択理由にしない。
+`capability_selection_summary` は、今の向きに必要な手段があるかを見る材料であり、手段があること自体を選択理由にしない。
+向きがその作業でないときの通常結果は空選択である。
+
 `orientation_context.standing_concerns` は実行指示ではなく、しばらく関わっていない気にかけていることである。current input はこの cycle の向きの本体のままとし、関心があることだけで skill を必須にしない。関心の向き全体に合う workflow があるときは、複合目的を始める判断材料として workflow も比較する。ただし workflow の将来の各手順を現在必要な material として先読みしない。意味境界は [気にかけていること](../runtime/気にかけていること.md) を正とする。
 
 選択文脈は `selection_horizon=current_decision / current_autonomous_step` を持つ。前者は今回の通常判断、後者は run の次の一手を選択範囲にする。選択済み workflow 本文から linked skill や resource を読む場合も、この範囲で現在必要なものだけを選ぶ。将来の step が現在になったときは、その時点の run、作業記録、catalog から改めて選択する。機械的な件数上限は設けず、現在の一手に複数 skill が必要なら同時に選んでよい。
@@ -60,10 +65,14 @@ skill が Human の明示依頼、trusted host policy、trusted workflow を求�
 | kind | 意味 |
 | --- | --- |
 | `current_individual_decision` | いまの個がこの判断で働きかける許可。`wake` / `background_thinking` 起点、またはそこから始まった run / capability result |
-| `person_request` | 人物の明示依頼、またはそこから続く作業 |
+| `person_request` | 人物発話から始まった作業、またはそこから続く作業の許可 |
 | `none` | 上記の許可がこの入力から立っていない |
 
 判定は `sender_kind`、`response_target_refs`、`trigger_kind`、`source_kind`、`run.origin_kind` の閉じた値だけで行う。自然文や skill 名では判定しない。
+
+`host_authorization` は、Human request / trusted host / trusted workflow を求める skill を使ってよいかの許可である。今の向きがその skill の作業であることまでは表さない。skill の適否は向きである `current_input` と skill description の比較で決める。
+
+`person_request` は、人物発話から作業が始まっていること、またはそこから続く作業であることの許可である。今の発話がその skill を依頼したことではない。
 
 `current_individual_decision` は、skill が求める trusted host policy / trusted workflow である。Human の明示依頼が無いことだけを理由に公開や送信を見送らない。送信前チェック、catalog、host の出力契約、秘密情報の境界は上書きしない。公開は今この判断の範囲で一度だけ行う。
 

@@ -733,6 +733,8 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
             trigger_kind="user_message",
         )
         self.assertEqual(authorization["kind"], "person_request")
+        self.assertIn("許可が立っている", authorization["summary_text"])
+        self.assertIn("今の向きがその skill の作業であることまでは表さない", authorization["summary_text"])
 
     def test_run_origin_background_thinking_is_current_individual_decision(self) -> None:
         authorization = resolve_agent_skill_host_authorization(
@@ -900,6 +902,10 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
         self.assertIn("orientation_context.standing_concerns", selection[0]["content"])
         self.assertIn("selection_horizon", selection[0]["content"])
         self.assertIn("capability_selection_summary", selection[0]["content"])
+        self.assertIn("今の向きがその skill の作業であるときだけ", selection[0]["content"])
+        self.assertIn("今の発話がその skill を依頼したことではありません", selection[0]["content"])
+        self.assertIn("直前と別の向きなら", selection[0]["content"])
+        self.assertIn("空選択", selection[0]["content"])
         self.assertNotIn("capability_decision_view", selection[0]["content"])
         material = build_agent_skill_material_selection_messages(
             selection_context={"selection_horizon": "current_autonomous_step"}

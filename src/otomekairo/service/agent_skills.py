@@ -73,12 +73,18 @@ def resolve_agent_skill_host_authorization(
     if current_input.sender_kind == "person" and current_input.response_target_refs:
         return {
             "kind": "person_request",
-            "summary_text": "人物の明示依頼がある。",
+            "summary_text": (
+                "人物発話から始まった作業であり、Human request を求める skill の許可が立っている。"
+                "今の向きがその skill の作業であることまでは表さない。"
+            ),
         }
     if origin in PERSON_ORIGIN_SOURCE_KINDS or current_input.response_target_refs:
         return {
             "kind": "person_request",
-            "summary_text": "人物の依頼から続く作業である。",
+            "summary_text": (
+                "人物発話から続く作業であり、Human request を求める skill の許可が立っている。"
+                "今の向きがその skill の作業であることまでは表さない。"
+            ),
         }
     return {
         "kind": "none",

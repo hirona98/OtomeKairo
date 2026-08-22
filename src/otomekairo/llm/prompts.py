@@ -284,9 +284,10 @@ def build_speech_messages(
 def _agent_skill_host_authorization_instruction() -> str:
     return (
         "host_authorization は、skill が Human の明示依頼または trusted host / trusted workflow を求めるときのホスト側の許可です。"
+        "許可は向きがその skill の作業であることまでは表しません。"
         "kind=current_individual_decision は、いまの個がこの判断で働きかける許可です。人物発話による依頼ではありません。"
-        "description が Human request を前提にしていても、現在の向きと目的に合う skill は選べます。"
-        "kind=person_request は人物の明示依頼です。"
+        "description が Human request を前提にしていても、現在の向きがその作業なら選べます。"
+        "kind=person_request は人物発話から作業が始まっていることの許可です。今の発話がその skill を依頼したことではありません。"
         "kind=none では、skill が求める公開許可は立っていません。"
     )
 
@@ -296,8 +297,10 @@ def build_agent_skill_selection_messages(*, selection_context: dict[str, Any]) -
         {
             "role": "system",
             "content": (
-                "Agent Skills catalog から、現在の判断や作業に実際に必要な skill だけを選択します。\n"
-                "名前の一致ではなく、current_input、recent_turns、work_log、run、capability_selection_summary の意味と skill description を比較してください。\n"
+                "Agent Skills catalog から、現在の向きに実際に必要な skill だけを選択します。\n"
+                "skill は今の向きがその skill の作業であるときだけ選びます。"
+                "名前の一致ではなく、向きである current_input と skill description を比較してください。"
+                "recent_turns、work_log、run、capability_selection_summary は、同じ向きの継続か、今の一手に手段があるかを見る材料です。\n"
                 "selection_horizon=current_decision では今回の判断、current_autonomous_step では run の次の一手に必要な skill を選びます。"
                 "将来の仮想的な step だけで使う skill は先に選ばず、その step が現在になったときに再選択します。\n"
                 "orientation_context.standing_concerns は、しばらく関わっていない気にかけていることであり、実行指示ではありません。"
@@ -305,7 +308,9 @@ def build_agent_skill_selection_messages(*, selection_context: dict[str, Any]) -
                 "関心があること自体は skill 選択を義務づけません。"
                 "見る、返す、自分から表現するなどの全体に合う workflow は、複合目的を始めるか判断する材料として比較します。"
                 "その workflow の将来の各手順を現在の一手に必要な skill として先読みしません。\n"
-                "人物発話の向きでは recent_turns はその会話の本体です。work_log は同じ向きで得た能力結果です。\n"
+                "人物発話の向きでは recent_turns はその会話の本体です。"
+                "今の current_input が直前と別の向きなら、直前の作業の skill は選びません。"
+                "work_log は同じ向きで得た能力結果です。\n"
                 "work_log の完了済み手順はすでに進んだ作業です。今まだ必要な skill だけを選びます。\n"
                 "prior_activation は直前の capability または run step で使った skill の識別要約であり、継続性の根拠として現在も必要か再評価してください。\n"
                 + _agent_skill_host_authorization_instruction()
@@ -313,7 +318,7 @@ def build_agent_skill_selection_messages(*, selection_context: dict[str, Any]) -
                 "selected_skill_ids は skill_catalog にある skill_id だけをそのままコピーして作ります。\n"
                 "capability_selection_summary は skill の必要性を考えるための短い実行能力情報であり、その capability id は selected_skill_ids の値ではありません。"
                 "最終的な capability 入力はこの role では組み立てません。\n"
-                "該当する Agent Skill が不要なら何も選びません。"
+                "向きがその作業でないときの通常結果は空選択です。"
             ),
         },
         {
@@ -1119,6 +1124,10 @@ def _decision_capability_run_rules(*, include_person_start: bool) -> str:
             "現在の人物発話が同じ未完了依頼を再び求め、該当 run が無いなら autonomous_run を始めます。"
             "記憶に同じ commitment があることは、もう動いている根拠にはしません。"
             "この応答で完結する単発は speech、単発の能力実行は capability_request、再評価だけ残すなら pending_intent です。"
+            "現在の人物発話が外部サービスや Agent Skill の作業を求めるときだけ capability_request を選びます。"
+            "この応答で完結する会話は speech です。"
+            "foreground_world_state の外部サービス条件と MCP の利用可否は、今の向きがその作業であるかを見る材料です。"
+            "直前の別作業が recent_turns に残っていること自体は、今の発話の実行理由ではありません。"
             "未完了の同じ作用を発話で先送りしません。続けるなら autonomous_run です。pending_intent は残作業の置き場ではありません。\n"
             "vision.capture に fresh_world_state_by_vision_source がある同じ vision_source_id は再取得せず、既存 visual_context を根拠にします。"
             "camera.ptz は向きや画角を変える必要があるときに選べます。input.amount は通常 medium です。\n"
@@ -1157,6 +1166,9 @@ def _decision_self_activity_rules_section() -> str:
         "その関心に関われる手段が CapabilityChoiceView に available=true であるときだけ、その手段で関わる。"
         "手段が無いときは今は関わらない。\n"
         "今関わらないときは pending_intent または noop を選び、控える理由は今その関心に関わらないこととして書きます。\n"
+        "kind=capability_request または autonomous_run のとき、WorkspaceContext の各 standing_concern は "
+        "foreground_selection の primary、supporting、suppressed のいずれかに置きます。"
+        "関わる関心は primary または supporting、今は関わらない関心は suppressed です。\n"
         + _decision_foreground_selection_rules()
         + "SelfStateContext は AI 本体側の感覚信頼度、働きかけやすさ、継続行動の安定です。気分は AffectContext.mood_state を参照します。\n"
         + "AffectContext の affect_states と recent_episode_affects は WorkspaceContext の affect 候補です。\n"
@@ -1192,6 +1204,8 @@ def _decision_output_contract_section(comparison_scope: str) -> str:
             + "target_stances は self_activity を 1 件だけ持ちます。\n"
             "kind=capability_request または autonomous_run では self_activity=advance です。\n"
             "kind=pending_intent または noop では self_activity=hold です。\n"
+            "kind=capability_request または autonomous_run では、WorkspaceContext の各 standing_concern を "
+            "foreground_selection の primary、supporting、suppressed のいずれかに置いてください。\n"
             "控える理由は、今その関心に関わらないこととして書いてください。"
         )
     if comparison_scope == "outward_speech":
