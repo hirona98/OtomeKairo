@@ -146,7 +146,7 @@ DEBUG_REJECTED_PAYLOAD_KEY_ORDER = (
     "pending_intent",
     "action",
     "outcome",
-    "section_selection",
+    "selected_candidate_refs",
     "selected_skill_ids",
 )
 

@@ -19,7 +19,6 @@ from otomekairo.llm.contracts import (
     MEMORY_TYPE_VALUES,
     PRE_SEND_CHECK_OUTCOMES,
     RECALL_FOCUS_VALUES,
-    RECALL_PACK_SECTION_NAMES,
     RISK_FLAG_VALUES,
     SCOPE_TYPE_VALUES,
     TIME_REFERENCE_VALUES,
@@ -160,7 +159,7 @@ def decision_choice_response_format(
         comparison_scope=comparison_scope,
         capability_request_object=closed_object(
             {
-                "capability_ref": {"type": "string"},
+                "capability_id": {"type": "string"},
                 "target_ref": nullable({"type": "string"}),
             }
         ),
@@ -275,7 +274,7 @@ def autonomous_step_choice_response_format() -> dict[str, Any]:
     return _autonomous_step_response_format(
         capability_request_object=closed_object(
             {
-                "capability_ref": {"type": "string"},
+                "capability_id": {"type": "string"},
                 "target_ref": nullable({"type": "string"}),
             }
         ),
@@ -504,16 +503,7 @@ def recall_pack_selection_response_format() -> dict[str, Any]:
         "recall_pack_selection",
         closed_object(
             {
-                "section_selection": {
-                    "type": "array",
-                    "description": "採らない section は載せない。candidate_refs は空配列にしない。",
-                    "items": closed_object(
-                        {
-                            "section_name": string_enum(RECALL_PACK_SECTION_NAMES),
-                            "candidate_refs": string_array(min_items=1),
-                        }
-                    ),
-                },
+                "selected_candidate_refs": string_array(),
                 "conflict_summaries": {
                     "type": "array",
                     "items": closed_object(

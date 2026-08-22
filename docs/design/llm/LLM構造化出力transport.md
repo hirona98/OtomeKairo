@@ -59,7 +59,7 @@ schema は request ごとの動的 enum を持たない。
 任意に見える欄もキーは常に出し、値を `null` または空配列にする。
 開いた map は最終 `capability_request.input`、`capability_input_generation.input` と `qualifiers_hint` だけである。これらは `additionalProperties: true` の object とし、JSON 文字列へはしない。
 
-能力実行では、`decision_generation` / `autonomous_step_generation` の choice schema と `capability_input_generation` の input schema を別 request にする。前段は短い capability / target ref だけを返し、後段だけが選択済み 1 件の入力 schema を受ける。どちらかが失敗しても単段生成や別対象へ切り替えない。
+能力実行では、`decision_generation` / `autonomous_step_generation` の choice schema と `capability_input_generation` の input schema を別 request にする。前段は canonical な `capability_id` と短い `target_ref` だけを返し、後段だけが選択済み 1 件の入力 schema を受ける。どちらかが失敗しても単段生成や別対象へ切り替えない。
 
 `pattern`、`if` / `then`、ルートの巨大な `anyOf`、`$ref` は使わない。
 

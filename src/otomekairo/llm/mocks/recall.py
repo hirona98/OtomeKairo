@@ -317,13 +317,13 @@ class LLMMockRecallMixin:
         conflicts = source_pack.get("conflicts", [])
         ordered_section_names = self._mock_recall_pack_section_order(recall_hint, candidate_sections)
 
-        # section selection
+        # candidate selection
         section_lookup = {
             section["section"]: section
             for section in candidate_sections
             if isinstance(section, dict) and isinstance(section.get("section"), str)
         }
-        section_selection: list[dict[str, Any]] = []
+        selected_candidate_refs: list[str] = []
         used_candidate_refs: set[str] = set()
         for section_name in ordered_section_names:
             section = section_lookup.get(section_name)
@@ -340,7 +340,6 @@ class LLMMockRecallMixin:
                 key=lambda candidate: self._mock_recall_pack_candidate_score(candidate, recall_hint),
                 reverse=True,
             )
-            candidate_refs: list[str] = []
             for candidate in ordered_candidates:
                 candidate_ref = candidate.get("ref")
                 if not isinstance(candidate_ref, str) or not candidate_ref.strip():
@@ -348,15 +347,8 @@ class LLMMockRecallMixin:
                 normalized_ref = candidate_ref.strip()
                 if normalized_ref in used_candidate_refs:
                     continue
-                candidate_refs.append(normalized_ref)
+                selected_candidate_refs.append(normalized_ref)
                 used_candidate_refs.add(normalized_ref)
-            if candidate_refs:
-                section_selection.append(
-                    {
-                        "section_name": section_name,
-                        "candidate_refs": candidate_refs,
-                    }
-                )
 
         # conflict summaries
         conflict_summaries = [
@@ -371,7 +363,7 @@ class LLMMockRecallMixin:
 
         # payload
         payload = {
-            "section_selection": section_selection,
+            "selected_candidate_refs": selected_candidate_refs,
             "conflict_summaries": conflict_summaries,
         }
         validate_recall_pack_selection_contract(payload, source_pack=source_pack)

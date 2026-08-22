@@ -134,10 +134,10 @@ def _capability_decision(capability_id: str, input_payload: dict) -> dict:
     }
 
 
-def _capability_choice_decision(capability_ref: str, target_ref: str | None) -> dict:
+def _capability_choice_decision(capability_id: str, target_ref: str | None) -> dict:
     payload = _capability_decision("", {})
     payload["capability_request"] = {
-        "capability_ref": capability_ref,
+        "capability_id": capability_id,
         "target_ref": target_ref,
     }
     return payload
@@ -510,7 +510,7 @@ class DecisionContractTests(unittest.TestCase):
 
     def test_decision_repairs_skill_id_used_as_capability_id(self) -> None:
         invalid = _capability_choice_decision("elyth-check-notifications", None)
-        choice = _capability_choice_decision("c1", "t1")
+        choice = _capability_choice_decision("mcp.call_tool", "t1")
         valid = _capability_decision(
             "mcp.call_tool",
             {
@@ -684,8 +684,8 @@ class DecisionContractTests(unittest.TestCase):
         self.assertEqual(actual, valid)
 
     def test_decision_repairs_unavailable_capability(self) -> None:
-        invalid = _capability_choice_decision("c1", None)
-        choice = _capability_choice_decision("c2", "t1")
+        invalid = _capability_choice_decision("agent_skill.run_script", None)
+        choice = _capability_choice_decision("mcp.call_tool", "t1")
         valid = _capability_decision(
             "mcp.call_tool",
             {
@@ -744,7 +744,7 @@ class DecisionContractTests(unittest.TestCase):
         with patch(
             "otomekairo.llm.client.complete_text",
             side_effect=[
-                _completion(json.dumps(_capability_choice_decision("c1", None))),
+                _completion(json.dumps(_capability_choice_decision("agent_skill.run_script", None))),
                 _completion(json.dumps(_capability_input(invalid_input))),
                 _completion(json.dumps(_capability_input(valid_input))),
             ],
@@ -771,15 +771,15 @@ class DecisionContractTests(unittest.TestCase):
             (
                 "unknown_target",
                 [
-                    _capability_choice_decision("c1", "unknown-target"),
-                    _capability_choice_decision("c1", "t1"),
+                    _capability_choice_decision("mcp.call_tool", "unknown-target"),
+                    _capability_choice_decision("mcp.call_tool", "t1"),
                     _capability_input({"arguments": {"limit": 20}}),
                 ],
             ),
             (
                 "invalid_arguments",
                 [
-                    _capability_choice_decision("c1", "t1"),
+                    _capability_choice_decision("mcp.call_tool", "t1"),
                     _capability_input({"arguments": {"limit": 0}}),
                     _capability_input({"arguments": {"limit": 20}}),
                 ],
@@ -876,7 +876,7 @@ class DecisionContractTests(unittest.TestCase):
             "action": {
                 "kind": "capability_request",
                 "capability_request": {
-                    "capability_ref": "c1",
+                    "capability_id": "mcp.call_tool",
                     "target_ref": "t1",
                 },
                 "speech": None,
@@ -918,7 +918,7 @@ class DecisionContractTests(unittest.TestCase):
             "otomekairo.llm.client.complete_text",
             return_value=_completion(json.dumps(invalid)),
         ) as complete:
-            with self.assertRaisesRegex(LLMError, "capability_ref"):
+            with self.assertRaisesRegex(LLMError, "capability_id"):
                 _llm_client().generate_decision(
                     model_config={"model": "real-model"},
                     persona_context=_persona_context(),
@@ -1040,7 +1040,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("capability_request / autonomous_run / pending_intent / noop", system)
         self.assertIn("向きと CapabilityChoiceView の catalog から autonomous_run を始めてよい", system)
         self.assertIn("autonomous_run.objective_summary は向き自身の言葉です", system)
-        self.assertIn("capability_ref と、target_required=true のときは同じ候補内の target_ref", system)
+        self.assertIn("capability_id と、target_required=true のときは同じ候補内の target_ref", system)
         self.assertIn("使わない排他キーもキーとして残し、値は null にします", system)
         self.assertNotIn("出力 JSON は structured schema の必須キーと enum に従います", system)
         self.assertIn("その関心に関われる手段が CapabilityChoiceView に available=true であるときだけ", system)
@@ -1070,7 +1070,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("載っている self_activity は hold です。対話の継続は outward_speech です。", system)
         self.assertIn("Agent Skill の skill_id は capability_id でも MCP tool_name でもありません。", system)
         self.assertIn("使わない排他キーもキーとして残し、値は null にします", system)
-        self.assertIn("capability_ref と、target_required=true のときは同じ候補内の target_ref", system)
+        self.assertIn("capability_id と、target_required=true のときは同じ候補内の target_ref", system)
         self.assertIn("AffectContext の affect_states と recent_episode_affects は WorkspaceContext の affect 候補です。", system)
         self.assertIn("同じ作用を複数回行う、または観測のあとに同じ作用を繰り返す依頼は継続実行です", system)
         self.assertIn("複合依頼を単発の capability_request にする理由にはしません", system)
@@ -1087,9 +1087,13 @@ class DecisionPromptScopeTests(unittest.TestCase):
             context=_decision_context(_mcp_capability_view()),
         )
         serialized_messages = json.dumps(messages, ensure_ascii=False)
+        internal_message = messages[1]["content"]
 
         self.assertIn("capability_choice_view", serialized_messages)
+        self.assertIn('"capability_id":"mcp.call_tool"', internal_message)
         self.assertIn("get_notifications", serialized_messages)
+        self.assertNotIn('"capability_ref"', internal_message)
+        self.assertNotIn('"id":"mcp.call_tool"', internal_message)
         self.assertNotIn('"input_schema"', serialized_messages)
         self.assertNotIn('"arguments"', serialized_messages)
 
@@ -1140,7 +1144,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("capability_request / autonomous_run / pending_intent / noop", self_repair)
         self.assertIn("target_stances は self_activity を 1 件だけ持ちます", self_repair)
         self.assertIn("使わない排他キーもキーとして残し、値は null にします", self_repair)
-        self.assertIn("capability_ref と、必要な場合だけ target_ref", self_repair)
+        self.assertIn("capability_id と、必要な場合だけ target_ref", self_repair)
         self.assertNotIn("outward_speech は毎回必須です", self_repair)
         self.assertIn("speech / noop / pending_intent", outward_repair)
         self.assertIn("target_stances は outward_speech を 1 件だけ持ちます", outward_repair)
@@ -1230,11 +1234,11 @@ class DecisionPromptScopeTests(unittest.TestCase):
         )
         self.assertIn("fixed_input に無い field だけ", messages[0]["content"])
 
-    def test_autonomous_step_repair_prompt_asks_capability_refs(self) -> None:
+    def test_autonomous_step_repair_prompt_asks_capability_id_and_target_ref(self) -> None:
         repair = build_autonomous_step_repair_prompt(
             "AutonomousStep action.capability_request.input は object である必要があります。"
         )
-        self.assertIn("CapabilityChoiceView の capability_ref", repair)
+        self.assertIn("CapabilityChoiceView の capability_id", repair)
         self.assertIn("必要な場合だけ target_ref", repair)
 
     def test_completed_mcp_tool_followup_rejects_same_tool(self) -> None:

@@ -343,8 +343,8 @@ decision view は少なくとも次を持つ。
 
 decision view には token、credential、内部 URL、`target_client_id`、transport 詳細、raw schema の秘密値を入れない。
 server は decision view から request-local な `CapabilityChoiceView` を作り、`decision_generation` と `autonomous_step_generation` には capability と対象を選ぶための短い説明だけを渡す。
-`CapabilityChoiceView` の capability は `c1` 形式、MCP tool や vision source の対象は `t1` 形式の短い参照を持つ。MCP tool の `input_schema` はこの段階へ渡さない。
-LLM は `CapabilityChoiceView` に基づいて `capability_ref` と、対象がある場合の `target_ref` を提案する。
+`CapabilityChoiceView` の capability は canonical な `capability_id` を持ち、MCP tool や vision source の対象だけが `t1` 形式の短い参照を持つ。MCP tool の `input_schema` はこの段階へ渡さない。
+LLM は `CapabilityChoiceView` に基づいて `capability_id` と、対象がある場合の `target_ref` を提案する。
 server は manifest、binding、state、権限で提案を検証する。
 busy、権限不足、動的一時 unavailable は decision view の `available: false` に反映する。
 直近成功、直近失敗は inspection の `CapabilityState` へ残し、明示的な capability 要求まで一律に遮断する理由にはしない。

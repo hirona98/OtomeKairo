@@ -414,27 +414,31 @@ class RecallSelectionMixin:
         used_record_ids: set[str] = set()
         remaining = GLOBAL_RECALL_LIMIT - len(selected_sections["conflicts"])
 
-        # section ごと反映
-        for section_payload in payload["section_selection"]:
-            section_name = section_payload["section_name"]
-            selected_section_order.append(section_name)
+        # 優先順に反映
+        seen_sections: set[str] = set()
+        for raw_candidate_ref in payload["selected_candidate_refs"]:
+            candidate_ref = raw_candidate_ref.strip()
+            candidate_entry = candidate_lookup[candidate_ref]
+            section_name = candidate_entry["section_name"]
+            if section_name not in seen_sections:
+                selected_section_order.append(section_name)
+                seen_sections.add(section_name)
             section_items = selected_sections[section_name]
-            for candidate_ref in section_payload["candidate_refs"]:
-                selected_candidate_refs.append(candidate_ref)
-                item = candidate_lookup[candidate_ref]["item"]
-                record_id = self._record_id(item)
-                if remaining <= 0:
-                    dropped_candidate_refs.append(candidate_ref)
-                    continue
-                if len(section_items) >= SECTION_LIMITS[section_name]:
-                    dropped_candidate_refs.append(candidate_ref)
-                    continue
-                if record_id in used_record_ids:
-                    dropped_candidate_refs.append(candidate_ref)
-                    continue
-                section_items.append(item)
-                used_record_ids.add(record_id)
-                remaining -= 1
+            selected_candidate_refs.append(candidate_ref)
+            item = candidate_entry["item"]
+            record_id = self._record_id(item)
+            if remaining <= 0:
+                dropped_candidate_refs.append(candidate_ref)
+                continue
+            if len(section_items) >= SECTION_LIMITS[section_name]:
+                dropped_candidate_refs.append(candidate_ref)
+                continue
+            if record_id in used_record_ids:
+                dropped_candidate_refs.append(candidate_ref)
+                continue
+            section_items.append(item)
+            used_record_ids.add(record_id)
+            remaining -= 1
 
         # 結果
         return {

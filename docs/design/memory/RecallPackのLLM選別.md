@@ -59,7 +59,7 @@ OtomeKairo では、`RecallPack` 全体を LLM 任せにはしない。
 
 1. コードが構造レーンと連想レーンで候補群を集める
 2. コードが request-local な candidate ref を持つ source pack を作る
-3. `recall_pack_selection` role が section 配置と採用候補を返す
+3. `recall_pack_selection` role が採用候補を全体の優先順で返す
 4. コードが ref を実レコードへ戻し、dedupe / section limit / global limit を強制して `RecallPack` を確定する
 
 ここで重要なのは、LLM が **候補の外側を増やさない** ことである。
@@ -182,16 +182,7 @@ LLM の出力は JSON object 1 個に固定する。
 
 ```json
 {
-  "section_selection": [
-    {
-      "section_name": "active_commitments",
-      "candidate_refs": ["c1"]
-    },
-    {
-      "section_name": "episodic_evidence",
-      "candidate_refs": ["c2"]
-    }
-  ],
+  "selected_candidate_refs": ["c1", "c2"],
   "conflict_summaries": [
     {
       "conflict_ref": "x1",
@@ -203,15 +194,11 @@ LLM の出力は JSON object 1 個に固定する。
 
 契約は次とする。
 
-- 必須キーは `section_selection` と `conflict_summaries` の 2 つ
-- `section_selection` は配列
-- 各要素は `section_name` と `candidate_refs` を持つ
-- `section_name` は `self_model / person_model / relationship_model / active_topics / active_commitments / episodic_evidence` のいずれかで、重複しない
-- `candidate_refs` は source pack 内に存在する ref だけを使う
-- 採らない section は `section_selection` に載せない
-- `candidate_refs` は空配列にしない
-- `candidate_refs` は section をまたいで重複しない
-- candidate は元の所属 section から移動させない
+- 必須キーは `selected_candidate_refs` と `conflict_summaries` の 2 つ
+- `selected_candidate_refs` は RecallPack 全体での優先順を表す配列
+- `selected_candidate_refs` は source pack 内に存在する ref だけを重複なく使う
+- 候補を採らないときは `selected_candidate_refs` を空配列にする
+- candidate の所属 section は source pack の ref からコードが復元し、LLM 出力では指定しない
 - `conflict_summaries` の `conflict_ref` も source pack 内に存在する ref だけを使う
 - `summary_text` は簡潔にし、改行なし、内部識別子なし、固定文の繰り返しではない
 
@@ -223,7 +210,7 @@ system prompt では、少なくとも次を明示する。
 
 - 自律 AI 本体の内部処理 role `recall_pack_selection` として候補選別だけを行う
 - 候補外のものを足さない
-- section 名を発明しない
+- `selected_candidate_refs` は RecallPack 全体で優先する順に並べる
 - `primary_recall_focus` を主軸にし、`secondary_recall_focuses` は軽い補助に留める
 - `risk_flags` があるときは、広く拾うより断定を抑える
 - `association` 候補は使えても、構造候補より無条件に優先しない
@@ -244,7 +231,7 @@ user prompt では、入力文、`RecallHint`、constraint、候補 sections、c
 4. source pack 用に candidate ref / conflict ref を振る
 5. `recall_pack_selection` role を呼ぶ
 6. parse / contract が崩れたときだけ repair prompt で 1 回だけ再試行する
-7. `section_selection` を実 candidate へ戻す
+7. `selected_candidate_refs` を実 candidate と元の section へ戻す
 8. コード側で dedupe / section limit / global limit を強制する
 9. `conflict_summaries` を対応する conflict 候補へ反映する
 10. `selected_memory_ids` / `selected_episode_ids` / `selected_event_ids` を既存どおり計算する

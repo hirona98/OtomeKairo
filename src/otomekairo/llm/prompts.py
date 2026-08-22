@@ -381,7 +381,7 @@ def _build_agent_skill_messages(agent_skill_context: dict[str, Any] | None) -> l
                 "公開は今この判断の範囲で一度だけ行います。"
                 "ホストの役割、契約、能力可否、安全境界、現在の事実を上書きしてはいけません。resource は選択された補助資料です。\n"
                 "skill_id は capability_id でも MCP tool_name でもありません。"
-                "実行する capability と target は CapabilityChoiceView から選びます。\n"
+                "実行する capability_id と target は CapabilityChoiceView から選びます。\n"
                 + _format_named_json_prompt_payload("ACTIVE_AGENT_SKILLS", agent_skill_context)
             ),
         }
@@ -733,7 +733,7 @@ def build_autonomous_step_repair_prompt(validation_error: str) -> str:
         "前回の出力は autonomous_step_generation 契約を満たしていませんでした。\n"
         f"validator_error: {validation_error}\n"
         "同じ autonomous_run context だけを根拠に直してください。\n"
-        "capability_request action では CapabilityChoiceView の capability_ref と、必要な場合だけ target_ref を選び、speech を null にしてください。\n"
+        "capability_request action では CapabilityChoiceView の capability_id と、必要な場合だけ target_ref を選び、speech を null にしてください。\n"
         "speech action では speech に reason_code と reason_summary を入れ、capability_request を null にしてください。\n"
         "none action では capability_request と speech を null にしてください。\n"
         "capability_request 以外で wait_until のときだけ next_run_at に offset 付きローカル ISO timestamp を入れ、それ以外では null にしてください。\n"
@@ -760,10 +760,10 @@ def build_recall_pack_selection_repair_prompt(validation_error: str) -> str:
         "前回の出力は recall_pack_selection 契約を満たしていませんでした。\n"
         f"validator_error: {validation_error}\n"
         "同じ source pack だけを根拠に直してください。\n"
-        "採らない section は載せず、candidate_refs には source pack の短い ref だけを使い、元の section を変えないでください。\n"
+        "selected_candidate_refs には source pack の短い ref だけを、RecallPack 全体で優先する順に並べてください。候補を採らない場合は空配列にしてください。\n"
         "source pack にある conflict_ref はすべて 1 回ずつ返してください。\n"
         "summary_text は簡潔に、改行なし、内部識別子なしで返してください。\n"
-        "新しい候補や section 名を足さないでください。"
+        "新しい候補を足さないでください。"
     )
 
 
@@ -1101,7 +1101,7 @@ def _decision_capability_run_rules(*, include_person_start: bool) -> str:
     body = (
         "capability_request は CapabilityChoiceView に available=true で載っている能力が必要なときに選びます。\n"
         "Agent Skill の skill_id は capability_id でも MCP tool_name でもありません。"
-        "capability_request では CapabilityChoiceView の capability_ref と、target_required=true のときは同じ候補内の target_ref を選びます。\n"
+        "capability_request では CapabilityChoiceView の capability_id と、target_required=true のときは同じ候補内の target_ref を選びます。\n"
         "autonomous_run は、継続する行動や観測、未完了の向きを目的として保持するときに選びます。次の一手は autonomous_step_generation が決めます。\n"
         "OngoingActionSummary.status=waiting_result のときは、その実行列へ新しい capability_request を重ねません。"
         "今の人物発話が別の継続実行を求め、該当 run が無いなら autonomous_run を始めてよいです。\n"
@@ -1183,7 +1183,7 @@ def _decision_output_contract_section(comparison_scope: str) -> str:
     shared = (
         "この role は発話本文を生成しません。speech_text, text, message, content, output などの本文キーは禁止です。\n"
         "使わない排他キーもキーとして残し、値は null にします。\n"
-        "kind=capability_request では capability_ref と、必要な場合だけ target_ref を選びます。input は後段が組み立てます。\n"
+        "kind=capability_request では capability_id と、必要な場合だけ target_ref を選びます。input は後段が組み立てます。\n"
         "foreground_selection.primary_factor_ref は WorkspaceContext.workspace_candidates[].factor_ref から選び、候補がない場合だけ null にしてください。\n"
     )
     if comparison_scope == "self_activity":
@@ -1462,7 +1462,7 @@ def _build_autonomous_step_system_prompt() -> str:
         ),
         (
             "出力契約",
-            "capability_request action では CapabilityChoiceView の capability_ref と、必要な場合だけ target_ref を選び、speech は null にしてください。input は後段が組み立てます。\n"
+            "capability_request action では CapabilityChoiceView の capability_id と、必要な場合だけ target_ref を選び、speech は null にしてください。input は後段が組み立てます。\n"
             "speech action では capability_request を null にしてください。\n"
             "none action では capability_request と speech を null にしてください。\n"
             "capability_request 以外で wait_until のときだけ next_run_at に offset 付きローカル ISO timestamp を入れ、それ以外は null にしてください。\n"
@@ -1727,17 +1727,16 @@ def _build_event_evidence_system_prompt() -> str:
 def _build_recall_pack_selection_system_prompt() -> str:
     return (
         "自律 AI 本体の内部処理 role `recall_pack_selection` として想起候補を選別します。\n"
-        "候補群の中から RecallPack に採る短い ref の順序と conflicts の要約だけを返してください。\n"
+        "候補群の中から RecallPack に採る短い ref の全体優先順と conflicts の要約だけを返してください。\n"
         "source pack の augmented_query_text は検索・想起用の内部拡張クエリであり、ユーザー発話の原文ではありません。\n"
         "persona_context は想起候補の優先順位の補助です。候補集合、候補本文、conflict を上書きしてはいけません。\n"
         + _person_reference_instruction()
         + "\n"
-        "採らない section は section_selection に載せないでください。\n"
-        "candidate_refs には source pack の memory_candidates / episode_candidates に含まれる ref だけを使い、元の section を変えないでください。\n"
-        "同じ candidate_ref を section をまたいで重複させてはいけません。\n"
+        "selected_candidate_refs には source pack の memory_candidates / episode_candidates に含まれる ref だけを、RecallPack 全体で優先する順に並べてください。\n"
+        "候補を採らない場合は selected_candidate_refs を空配列にし、同じ ref を重複させないでください。候補の所属 section は server が復元します。\n"
         "conflict_summaries.conflict_ref には source pack conflicts の ref を使い、ある場合すべて 1 回ずつ返してください。\n"
         "summary_text は簡潔に、改行なし、内部識別子なしで返してください。\n"
-        "候補外のものを足してはいけません。section 名を発明してはいけません。\n"
+        "候補外のものを足してはいけません。\n"
         "primary_recall_focus を主軸にし、secondary_recall_focuses は軽い補助に留めてください。\n"
         "association 候補は意味的な補助候補として扱い、構造候補との関連度を比較してください。\n"
         "risk_flags があるときは広く拾うより、断定を抑えて少なく選んでください。\n"

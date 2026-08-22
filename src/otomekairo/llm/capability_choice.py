@@ -13,15 +13,14 @@ def build_capability_choice_view(
 ) -> list[dict[str, Any]]:
     choices: list[dict[str, Any]] = []
     target_index = 0
-    for capability_index, source in enumerate(capability_decision_view or [], start=1):
+    for source in capability_decision_view or []:
         if not isinstance(source, dict):
             continue
         capability_id = source.get("id")
         if not isinstance(capability_id, str) or not capability_id.strip():
             continue
         choice: dict[str, Any] = {
-            "capability_ref": f"c{capability_index}",
-            "id": capability_id.strip(),
+            "capability_id": capability_id.strip(),
             "kind": source.get("kind"),
             "available": source.get("available") is True,
             "what_it_does": source.get("what_it_does"),
@@ -104,32 +103,32 @@ def resolve_capability_choice(
     capability_decision_view: list[dict[str, Any]] | None,
     choice_payload: Any,
 ) -> dict[str, Any]:
-    if not isinstance(choice_payload, dict) or set(choice_payload) != {"capability_ref", "target_ref"}:
-        raise CapabilityChoiceError("capability choice は capability_ref / target_ref を持つ object です。")
-    capability_ref = choice_payload.get("capability_ref")
+    if not isinstance(choice_payload, dict) or set(choice_payload) != {"capability_id", "target_ref"}:
+        raise CapabilityChoiceError("capability choice は capability_id / target_ref を持つ object です。")
+    capability_id = choice_payload.get("capability_id")
     target_ref = choice_payload.get("target_ref")
-    if not isinstance(capability_ref, str) or not capability_ref.strip():
-        raise CapabilityChoiceError("capability choice.capability_ref が不正です。")
+    if not isinstance(capability_id, str) or not capability_id.strip():
+        raise CapabilityChoiceError("capability choice.capability_id が不正です。")
     if target_ref is not None and (not isinstance(target_ref, str) or not target_ref.strip()):
         raise CapabilityChoiceError("capability choice.target_ref が不正です。")
 
     choices = build_capability_choice_view(capability_decision_view)
     choice = next(
-        (item for item in choices if item.get("capability_ref") == capability_ref.strip()),
+        (item for item in choices if item.get("capability_id") == capability_id.strip()),
         None,
     )
     if choice is None:
-        raise CapabilityChoiceError(f"未知の capability_ref={capability_ref.strip()} です。")
+        raise CapabilityChoiceError(f"未知の capability_id={capability_id.strip()} です。")
     if choice.get("available") is not True:
         raise CapabilityChoiceError(
-            f"capability_ref={capability_ref.strip()} は現在利用できません。"
+            f"capability_id={capability_id.strip()} は現在利用できません。"
         )
     targets = choice.get("targets") if isinstance(choice.get("targets"), list) else []
     target = None
     if targets:
         if not isinstance(target_ref, str):
             raise CapabilityChoiceError(
-                f"capability_ref={capability_ref.strip()} には target_ref が必要です。"
+                f"capability_id={capability_id.strip()} には target_ref が必要です。"
             )
         target = next(
             (item for item in targets if item.get("target_ref") == target_ref.strip()),
@@ -141,10 +140,10 @@ def resolve_capability_choice(
             raise CapabilityChoiceError(f"target_ref={target_ref.strip()} は現在利用できません。")
     elif target_ref is not None:
         raise CapabilityChoiceError(
-            f"capability_ref={capability_ref.strip()} は target_ref を取りません。"
+            f"capability_id={capability_id.strip()} は target_ref を取りません。"
         )
 
-    capability_id = str(choice["id"])
+    capability_id = str(choice["capability_id"])
     source_entry = next(
         (
             item
