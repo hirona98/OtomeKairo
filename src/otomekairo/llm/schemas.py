@@ -137,9 +137,6 @@ def decision_response_format(
     *,
     comparison_scope: str = "full",
 ) -> dict[str, Any]:
-    if comparison_scope not in DECISION_COMPARISON_SCOPE_KINDS:
-        raise ValueError(f"unsupported comparison_scope: {comparison_scope}")
-    kind_values = DECISION_COMPARISON_SCOPE_KINDS[comparison_scope]
     capability_request_object = closed_object(
         {
             "capability_id": {"type": "string"},
@@ -148,6 +145,38 @@ def decision_response_format(
             ),
         }
     )
+    return _decision_response_format(
+        comparison_scope=comparison_scope,
+        capability_request_object=capability_request_object,
+        name_suffix="",
+    )
+
+
+def decision_choice_response_format(
+    *,
+    comparison_scope: str = "full",
+) -> dict[str, Any]:
+    return _decision_response_format(
+        comparison_scope=comparison_scope,
+        capability_request_object=closed_object(
+            {
+                "capability_ref": {"type": "string"},
+                "target_ref": nullable({"type": "string"}),
+            }
+        ),
+        name_suffix="_choice",
+    )
+
+
+def _decision_response_format(
+    *,
+    comparison_scope: str,
+    capability_request_object: dict[str, Any],
+    name_suffix: str,
+) -> dict[str, Any]:
+    if comparison_scope not in DECISION_COMPARISON_SCOPE_KINDS:
+        raise ValueError(f"unsupported comparison_scope: {comparison_scope}")
+    kind_values = DECISION_COMPARISON_SCOPE_KINDS[comparison_scope]
     capability_request = (
         nullable(capability_request_object)
         if "capability_request" in kind_values
@@ -171,8 +200,9 @@ def decision_response_format(
         if "autonomous_run" in kind_values
         else {"type": "null"}
     )
+    schema_name = f"decision_{comparison_scope}" if comparison_scope != "full" else "decision"
     return structured_response_format(
-        f"decision_{comparison_scope}" if comparison_scope != "full" else "decision",
+        schema_name + name_suffix,
         closed_object(
             {
                 "kind": string_enum(kind_values),
@@ -225,26 +255,47 @@ def decision_response_format(
 
 
 def autonomous_step_response_format() -> dict[str, Any]:
+    return _autonomous_step_response_format(
+        capability_request_object=closed_object(
+            {
+                "capability_id": {"type": "string"},
+                "input": open_object(
+                    description=(
+                        "capability の request-local input。"
+                        "object であり、JSON 文字列ではない。"
+                    )
+                ),
+            }
+        ),
+        name="autonomous_step",
+    )
+
+
+def autonomous_step_choice_response_format() -> dict[str, Any]:
+    return _autonomous_step_response_format(
+        capability_request_object=closed_object(
+            {
+                "capability_ref": {"type": "string"},
+                "target_ref": nullable({"type": "string"}),
+            }
+        ),
+        name="autonomous_step_choice",
+    )
+
+
+def _autonomous_step_response_format(
+    *,
+    capability_request_object: dict[str, Any],
+    name: str,
+) -> dict[str, Any]:
     return structured_response_format(
-        "autonomous_step",
+        name,
         closed_object(
             {
                 "action": closed_object(
                     {
                         "kind": string_enum({"capability_request", "speech", "none"}),
-                        "capability_request": nullable(
-                            closed_object(
-                                {
-                                    "capability_id": {"type": "string"},
-                                    "input": open_object(
-                                        description=(
-                                            "capability の request-local input。"
-                                            "object であり、JSON 文字列ではない。"
-                                        )
-                                    ),
-                                }
-                            )
-                        ),
+                        "capability_request": nullable(capability_request_object),
                         "speech": nullable(
                             closed_object(
                                 {
@@ -267,6 +318,19 @@ def autonomous_step_response_format() -> dict[str, Any]:
                         "history_summary": {"type": "string"},
                     }
                 ),
+            }
+        ),
+    )
+
+
+def capability_input_response_format() -> dict[str, Any]:
+    return structured_response_format(
+        "capability_input",
+        closed_object(
+            {
+                "input": open_object(
+                    description="選択済み capability の未固定 request-local input。"
+                )
             }
         ),
     )
@@ -562,9 +626,18 @@ def all_response_formats() -> dict[str, dict[str, Any]]:
         "agent_skill_material_selection": agent_skill_material_selection_response_format(),
         "input_interpretation": input_interpretation_response_format(),
         "decision": decision_response_format(comparison_scope="full"),
+        "decision_choice": decision_choice_response_format(comparison_scope="full"),
         "decision_self_activity": decision_response_format(comparison_scope="self_activity"),
+        "decision_self_activity_choice": decision_choice_response_format(
+            comparison_scope="self_activity"
+        ),
         "decision_outward_speech": decision_response_format(comparison_scope="outward_speech"),
+        "decision_outward_speech_choice": decision_choice_response_format(
+            comparison_scope="outward_speech"
+        ),
         "autonomous_step": autonomous_step_response_format(),
+        "autonomous_step_choice": autonomous_step_choice_response_format(),
+        "capability_input": capability_input_response_format(),
         "disclosure_review": disclosure_review_response_format(),
         "pre_send_check": pre_send_check_response_format(),
         "autonomous_completion_review": autonomous_completion_review_response_format(),

@@ -319,9 +319,9 @@ class LLMMockRecallMixin:
 
         # section selection
         section_lookup = {
-            section["section_name"]: section
+            section["section"]: section
             for section in candidate_sections
-            if isinstance(section, dict) and isinstance(section.get("section_name"), str)
+            if isinstance(section, dict) and isinstance(section.get("section"), str)
         }
         section_selection: list[dict[str, Any]] = []
         used_candidate_refs: set[str] = set()
@@ -329,17 +329,20 @@ class LLMMockRecallMixin:
             section = section_lookup.get(section_name)
             if not isinstance(section, dict):
                 continue
-            candidates = section.get("candidates", [])
-            if not isinstance(candidates, list):
-                continue
+            candidates = [
+                candidate
+                for key in ("memory_candidates", "episode_candidates")
+                for candidate in section.get(key, [])
+                if isinstance(candidate, dict)
+            ]
             ordered_candidates = sorted(
-                (candidate for candidate in candidates if isinstance(candidate, dict)),
+                candidates,
                 key=lambda candidate: self._mock_recall_pack_candidate_score(candidate, recall_hint),
                 reverse=True,
             )
             candidate_refs: list[str] = []
             for candidate in ordered_candidates:
-                candidate_ref = candidate.get("candidate_ref")
+                candidate_ref = candidate.get("ref")
                 if not isinstance(candidate_ref, str) or not candidate_ref.strip():
                     continue
                 normalized_ref = candidate_ref.strip()
@@ -358,12 +361,12 @@ class LLMMockRecallMixin:
         # conflict summaries
         conflict_summaries = [
             {
-                "conflict_ref": conflict["conflict_ref"],
+                "conflict_ref": conflict["ref"],
                 "summary_text": self._mock_recall_pack_conflict_summary(conflict),
             }
             for conflict in conflicts
             if isinstance(conflict, dict)
-            and isinstance(conflict.get("conflict_ref"), str)
+            and isinstance(conflict.get("ref"), str)
         ]
 
         # payload
@@ -477,9 +480,9 @@ class LLMMockRecallMixin:
     ) -> list[str]:
         # 利用可能 section 群
         available_sections = [
-            section.get("section_name")
+            section.get("section")
             for section in candidate_sections
-            if isinstance(section, dict) and section.get("section_name") in RECALL_PACK_SECTION_NAMES
+            if isinstance(section, dict) and section.get("section") in RECALL_PACK_SECTION_NAMES
         ]
 
         # 主順序
@@ -565,14 +568,14 @@ class LLMMockRecallMixin:
     ) -> float:
         # 基底
         score = float(candidate.get("salience", 0.0))
-        if candidate.get("retrieval_lane") == "structured":
+        if candidate.get("lane", "structured") == "structured":
             score += 0.04
-        association_score = candidate.get("association_score")
+        association_score = candidate.get("score")
         if isinstance(association_score, (int, float)):
             score += float(association_score) * 0.03
-        memory_link_summary = candidate.get("memory_link_summary")
+        memory_link_summary = candidate.get("links")
         if isinstance(memory_link_summary, dict):
-            label_counts = memory_link_summary.get("label_counts", {})
+            label_counts = memory_link_summary.get("counts", {})
             if isinstance(label_counts, dict):
                 if int(label_counts.get("contradicts", 0) or 0) > 0:
                     score += 0.04
@@ -588,8 +591,9 @@ class LLMMockRecallMixin:
         # 文脈補正
         primary_recall_focus = str(recall_hint.get("primary_recall_focus") or "person")
         time_reference = str(recall_hint.get("time_reference") or "none")
-        source_kind = str(candidate.get("source_kind") or "")
-        scope_type = str(candidate.get("scope_type") or candidate.get("primary_scope_type") or "")
+        source_kind = "episode" if "primary_scope" in candidate else "memory_unit"
+        scope = candidate.get("scope") or candidate.get("primary_scope") or []
+        scope_type = str(scope[0]) if isinstance(scope, list) and scope else ""
         if primary_recall_focus == "commitment":
             if candidate.get("memory_type") == "commitment":
                 score += 0.12
@@ -612,7 +616,7 @@ class LLMMockRecallMixin:
     def _mock_recall_pack_conflict_summary(self, conflict: dict[str, Any]) -> str:
         # variant summary 群
         compact_summaries: list[str] = []
-        for value in conflict.get("variant_summaries", []):
+        for value in conflict.get("variants", []):
             compact_value = self._mock_event_evidence_text(value)
             if compact_value is None:
                 continue
@@ -622,8 +626,12 @@ class LLMMockRecallMixin:
         elif compact_summaries:
             summary_text = f"{compact_summaries[0]} をめぐる理解が揺れている。"
         else:
-            compare_key = conflict.get("compare_key", {})
-            predicate = str(compare_key.get("predicate") or "").strip()
+            compare_key = conflict.get("compare", [])
+            predicate = (
+                str(compare_key[4] or "").strip()
+                if isinstance(compare_key, list) and len(compare_key) >= 5
+                else ""
+            )
             if predicate == "talk_again":
                 summary_text = "続きをどう扱うかについて異なる理解が並んでいる。"
             elif predicate == "likes":

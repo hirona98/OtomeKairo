@@ -335,12 +335,21 @@ class AgentSkillRegistryTests(unittest.TestCase):
             )
             self.assertEqual(second_context["active_skills"][1]["skill_id"], "child-skill")
             self.assertEqual(
-                second_context["allowed_resource_reads"],
                 [
-                    {"skill_id": "root-skill", "path": "references/other.md"},
+                    {
+                        "skill_id": candidate["skill_id"],
+                        "path": candidate["path"],
+                    }
+                    for candidate in second_context["resource_candidates"]
+                ],
+                [
                     {"skill_id": "child-skill", "path": "references/child.md"},
                 ],
             )
+            self.assertNotIn("allowed_resource_reads", second_context)
+            linked_candidate = material_contexts[0]["additional_skill_candidates"][0]
+            self.assertEqual(linked_candidate["skill_id"], "child-skill")
+            self.assertEqual(linked_candidate["linked_from_skill_ids"], ["root-skill"])
 
     def test_empty_material_selection_finishes_normally(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -407,7 +416,6 @@ class AgentSkillRegistryTests(unittest.TestCase):
             ]
         )
         selection_context = {
-            "allowed_skill_ids": ["elyth-observe"],
             "skill_catalog": [
                 {
                     "source_id": "elyth-skills",
@@ -428,7 +436,7 @@ class AgentSkillRegistryTests(unittest.TestCase):
         self.assertEqual(complete.call_count, 2)
         repair_prompt = complete.call_args_list[1].kwargs["messages"][-1]["content"]
         self.assertIn("catalog にない skill_id", repair_prompt)
-        self.assertIn("allowed_skill_ids の文字列だけ", repair_prompt)
+        self.assertIn("skill_catalog の skill_id だけ", repair_prompt)
 
     def test_material_selection_repairs_linked_skill_returned_as_resource(self) -> None:
         invalid_path = "../elyth-discover/SKILL.md"
@@ -458,9 +466,7 @@ class AgentSkillRegistryTests(unittest.TestCase):
             ]
         )
         selection_context = {
-            "allowed_additional_skill_ids": ["elyth-discover"],
-            "allowed_resource_reads": [],
-            "additional_skill_candidates": ["elyth-discover"],
+            "additional_skill_candidates": [{"skill_id": "elyth-discover"}],
             "resource_candidates": [],
         }
 
@@ -475,7 +481,7 @@ class AgentSkillRegistryTests(unittest.TestCase):
         self.assertEqual(complete.call_count, 2)
         repair_prompt = complete.call_args_list[1].kwargs["messages"][-1]["content"]
         self.assertIn("候補にない resource", repair_prompt)
-        self.assertIn("allowed_resource_reads にある値だけ", repair_prompt)
+        self.assertIn("resource_candidates にある値だけ", repair_prompt)
 
     def test_material_selection_repairs_unsupported_done_field(self) -> None:
         responses = iter(
@@ -500,8 +506,8 @@ class AgentSkillRegistryTests(unittest.TestCase):
             ]
         )
         selection_context = {
-            "allowed_additional_skill_ids": [],
-            "allowed_resource_reads": [],
+            "additional_skill_candidates": [],
+            "resource_candidates": [],
         }
 
         with patch("otomekairo.llm.client.complete_text", side_effect=lambda **_kwargs: CompletionResult(text=next(responses), usage={})) as complete:
@@ -516,7 +522,8 @@ class AgentSkillRegistryTests(unittest.TestCase):
         self.assertEqual(complete.call_count, 2)
         repair_prompt = complete.call_args_list[1].kwargs["messages"][-1]["content"]
         self.assertIn("キーが不正", repair_prompt)
-        self.assertIn("3キーだけ", repair_prompt)
+        self.assertIn("resource_candidates にある値だけ", repair_prompt)
+        self.assertNotIn("3キーだけ", repair_prompt)
 
     def test_material_selection_accepts_already_active_skill_id(self) -> None:
         payload = {
@@ -528,9 +535,9 @@ class AgentSkillRegistryTests(unittest.TestCase):
         LLMClient()._validate_agent_skill_material_selection(
             payload,
             selection_context={
-                "allowed_additional_skill_ids": ["elyth-read-thread"],
+                "additional_skill_candidates": [{"skill_id": "elyth-read-thread"}],
                 "active_skills": [{"skill_id": "elyth-handle-inbox"}],
-                "allowed_resource_reads": [],
+                "resource_candidates": [],
             },
         )
 
@@ -600,8 +607,8 @@ class AgentSkillRegistryTests(unittest.TestCase):
             ensure_ascii=False,
         )
         selection_context = {
-            "allowed_additional_skill_ids": ["elyth-discover"],
-            "allowed_resource_reads": [],
+            "additional_skill_candidates": [{"skill_id": "elyth-discover"}],
+            "resource_candidates": [],
         }
 
         with patch(
@@ -625,7 +632,6 @@ class AgentSkillRegistryTests(unittest.TestCase):
             ensure_ascii=False,
         )
         selection_context = {
-            "allowed_skill_ids": ["elyth-observe"],
             "skill_catalog": [
                 {
                     "source_id": "elyth-skills",

@@ -27,7 +27,7 @@ server 起動時と設定全体置換時に immutable registry snapshot を作�
 ## LLM による選択と progressive disclosure
 
 skill の適用可否は固定文字列や keyword 表では決めない。通常判断と各 autonomous run step の前に、LLM が向きである current input、直近会話、作業記録、run 目的、capability selection summary と `name / description` catalog を比較して必要な skill を選ぶ。`wake / background_thinking` の通常判断で due な気にかけていることがあるときは、`concern_summary` そのものを `orientation_context.standing_concerns[].summary_text` として追加の向きの材料にする。`factor_ref` と `summary_text` 以外の workspace 判断盤面は Skill 選択へ渡さない。
-capability selection summary は skill の必要性を比較するための短い view である。capability 共通の識別、種類、利用可否、短い説明、risk と unavailable 理由を持ち、MCP は server の利用可否と tool の `name / description`、vision source は識別、利用可否、対応操作だけを持つ。最終実行用の input schema、manifest 条件、権限列、readiness は載せない。最終的な capability request は完全な capability decision view を受ける decision または autonomous step が組み立て、server が従来どおり検証する。
+capability selection summary は skill の必要性を比較するための短い view である。capability 共通の識別、種類、利用可否、短い説明、risk と unavailable 理由を持ち、MCP は server の利用可否と tool の `name / description`、vision source は識別、利用可否、対応操作だけを持つ。最終実行用の input schema、manifest 条件、権限列、readiness は載せない。decision または autonomous step も schema を含まない `CapabilityChoiceView` から capability と対象だけを選び、選択後に `capability_input_generation` がその 1 件の schema から input を組み立てる。能力選択と入力生成の正本は [capability manifest](../capability/capability_manifest.md) とする。
 人物発話の向きでは、直近会話と作業記録を見ずに skill を選ばない。向きと到着の分離は [../llm/プロンプト文脈分離方針.md](../llm/プロンプト文脈分離方針.md) を正とする。
 
 `orientation_context.standing_concerns` は実行指示ではなく、しばらく関わっていない気にかけていることである。current input はこの cycle の向きの本体のままとし、関心があることだけで skill を必須にしない。関心の向き全体に合う workflow があるときは、複合目的を始める判断材料として workflow も比較する。ただし workflow の将来の各手順を現在必要な material として先読みしない。意味境界は [気にかけていること](../runtime/気にかけていること.md) を正とする。
@@ -38,14 +38,14 @@ capability selection summary は skill の必要性を比較するための短�
 
 選択は次の順で行う。
 
-1. 全 skill の `name / description / source_id / digest` と、その catalog から作った `allowed_skill_ids` から、`selection_horizon` の現在の一手に必要な skill を選ぶ。capability selection summary は必要性の判断材料とし、capability id を skill id として返さない
+1. 全 skill の `name / description / source_id / digest` を持つ `skill_catalog` から、`selection_horizon` の現在の一手に必要な skill を選ぶ。候補 ID の重複配列は渡さない。capability selection summary は必要性の判断材料とし、capability id を skill id として返さない
 2. 選択した `SKILL.md` 本文と resource catalog、本文から直接参照された sibling skill 候補を提示する
-3. LLM が `allowed_additional_skill_ids` と `allowed_resource_reads` から現在の一手に必要な追加 skill と UTF-8 text resource だけを選ぶ。すでに `active_skills` にある skill_id を `additional_skill_ids` に含めた場合は追加済みとして扱い、候補外とはしない。選択した resource 本文と追加 skill 本文を次の選択へ渡し、両方の選択結果が空になるまで段階的に読む。sibling `SKILL.md` へのリンクは追加 skill 候補であり resource path として扱わず、script と binary resource は本文読込候補に含めない
+3. LLM が `additional_skill_candidates` と `resource_candidates` から現在の一手に必要な追加 skill と UTF-8 text resource だけを選ぶ。追加 skill 候補は `skill_id / description / linked_from_skill_ids` を持ち、現在必要な候補が複数あれば同じ応答でまとめて選ぶ。すでに `active_skills` にある skill_id を `additional_skill_ids` に含めた場合は追加済みとして扱い、候補外とはしない。提示した候補は応答後に消費し、選ばれなかった候補を別候補の読込後に再提示しない。追加した skill の本文から新しく見つかる sibling skill と、その skill の未提示 resource だけを次の選択へ渡し、両方の選択結果が空になるまで段階的に読む。sibling `SKILL.md` へのリンクは追加 skill 候補であり resource path として扱わず、script と binary resource は本文読込候補に含めない
 4. 選択済み instructions と resource を trusted Agent Skill system context として decision、expression、autonomous step に渡す
 
 capability request と autonomous run の起点には instructions 本文ではなく `source_id / skill_id / digest` の activation summary を残す。result follow-up と次 run step の選択 LLM へこの summary を前回文脈として渡し、現在の catalog と目的を基に再選択させる。古い本文を暗黙再利用しない。
 
-material 選択の出力は `additional_skill_ids / resource_reads / reason_summary` とし、終了状態を別 field で返させない。追加 skill と resource の選択が両方空なら読込完了、どちらかが選ばれた場合は候補を消費して次の選択へ進む。候補は有限であり、未読候補がなくなれば選択を終了する。
+material 選択の出力は `additional_skill_ids / resource_reads / reason_summary` とし、終了状態を別 field で返させない。追加 skill と resource の選択が両方空なら読込完了、どちらかが選ばれた場合は提示済み候補をすべて消費し、新しく active になった skill から見つかる次の候補へ進む。候補は有限であり、未提示候補がなくなれば選択を終了する。
 
 選択結果が catalog 外の skill id または提示した候補外の skill/resource path を含む場合は、同じ source pack と validator error を使って 1 回だけ repair する。repair 後も契約違反や候補違反が残る場合は判断サイクルを失敗させる。暗黙に skill なしへ戻さない。
 

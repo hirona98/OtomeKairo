@@ -1477,30 +1477,37 @@ def _recall_pack_candidate_refs_by_section(source_pack: dict[str, Any]) -> dict[
     for section in candidate_sections:
         _validate_exact_keys(
             section,
-            {"section_name", "candidates"},
+            {"section"},
             "RecallPackSelection source_pack candidate_section",
+            optional_keys={"memory_candidates", "episode_candidates"},
         )
-        section_name = section["section_name"]
+        section_name = section["section"]
         if section_name not in refs_by_section:
             raise LLMError("RecallPackSelection source_pack section_name が不正です。")
         if section_name in seen_sections:
             raise LLMError("RecallPackSelection source_pack section_name は重複してはいけません。")
         seen_sections.add(section_name)
 
-        candidates = section["candidates"]
-        if not isinstance(candidates, list):
-            raise LLMError("RecallPackSelection source_pack candidates は配列である必要があります。")
-        for candidate in candidates:
-            if not isinstance(candidate, dict):
-                raise LLMError("RecallPackSelection source_pack candidate はオブジェクトである必要があります。")
-            candidate_ref = candidate.get("candidate_ref")
-            if not isinstance(candidate_ref, str) or not candidate_ref.strip():
-                raise LLMError("RecallPackSelection source_pack candidate_ref が不正です。")
-            normalized_ref = candidate_ref.strip()
-            if normalized_ref in seen_candidate_refs:
-                raise LLMError("RecallPackSelection source_pack candidate_ref は一意である必要があります。")
-            refs_by_section[section_name].add(normalized_ref)
-            seen_candidate_refs.add(normalized_ref)
+        candidate_groups = [
+            section.get(key, [])
+            for key in ("memory_candidates", "episode_candidates")
+        ]
+        if not any(candidate_groups):
+            raise LLMError("RecallPackSelection source_pack section に候補がありません。")
+        for candidates in candidate_groups:
+            if not isinstance(candidates, list):
+                raise LLMError("RecallPackSelection source_pack candidates は配列である必要があります。")
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    raise LLMError("RecallPackSelection source_pack candidate はオブジェクトである必要があります。")
+                candidate_ref = candidate.get("ref")
+                if not isinstance(candidate_ref, str) or not candidate_ref.strip():
+                    raise LLMError("RecallPackSelection source_pack ref が不正です。")
+                normalized_ref = candidate_ref.strip()
+                if normalized_ref in seen_candidate_refs:
+                    raise LLMError("RecallPackSelection source_pack ref は一意である必要があります。")
+                refs_by_section[section_name].add(normalized_ref)
+                seen_candidate_refs.add(normalized_ref)
 
     # 結果
     return refs_by_section
@@ -1517,7 +1524,7 @@ def _recall_pack_conflict_refs(source_pack: dict[str, Any]) -> set[str]:
     for conflict in conflicts:
         if not isinstance(conflict, dict):
             raise LLMError("RecallPackSelection source_pack conflict はオブジェクトである必要があります。")
-        conflict_ref = conflict.get("conflict_ref")
+        conflict_ref = conflict.get("ref")
         if not isinstance(conflict_ref, str) or not conflict_ref.strip():
             raise LLMError("RecallPackSelection source_pack conflict_ref が不正です。")
         normalized_ref = conflict_ref.strip()

@@ -46,7 +46,6 @@ WORKSPACE_MEMORY_SECTIONS = (
     "event_evidence",
     "visual_observations",
 )
-WORKSPACE_MEMORY_ITEMS_PER_SECTION = 6
 DEFAULT_MODE_CANDIDATE_LIMIT = 16
 WORKSPACE_DERIVED_ITEMS_PER_SECTION = 6
 PREDICTION_ERROR_SUMMARY_LIMIT = 4
@@ -1651,7 +1650,12 @@ class ServiceInputPipelineMixin:
             recall_pack=recall_pack,
         )
         limited_candidates = self._limit_workspace_candidates(candidates)
-        return {
+        limited_refs = {
+            candidate["factor_ref"]
+            for candidate in limited_candidates
+            if isinstance(candidate, dict) and isinstance(candidate.get("factor_ref"), str)
+        }
+        payload = {
             "workspace_candidates": limited_candidates,
             "selection_policy": {
                 "primary_factor_count": 1,
@@ -1665,6 +1669,18 @@ class ServiceInputPipelineMixin:
             "source_counts": source_counts,
             "state_boundary": "workspace_context は判断用の派生 view であり、events / episodes / memory_units / affect などの正本を更新しない。",
         }
+        background_candidates = [
+            {
+                key: value
+                for key, value in candidate.items()
+                if key != "factor_ref"
+            }
+            for candidate in candidates
+            if isinstance(candidate, dict) and candidate.get("factor_ref") not in limited_refs
+        ]
+        if background_candidates:
+            payload["background_candidates"] = background_candidates
+        return payload
 
     def _append_workspace_derived_context_candidates(
         self,
@@ -2065,7 +2081,7 @@ class ServiceInputPipelineMixin:
             items = recall_pack.get(section)
             if not isinstance(items, list):
                 continue
-            for index, item in enumerate(items[:WORKSPACE_MEMORY_ITEMS_PER_SECTION]):
+            for index, item in enumerate(items):
                 if not isinstance(item, dict):
                     continue
                 item_ref = self._workspace_item_ref(
@@ -2095,7 +2111,25 @@ class ServiceInputPipelineMixin:
                         "decision_or_result",
                         "tone_or_note",
                     ),
-                    metadata_keys=("memory_type", "scope_type", "scope_key", "primary_scope_type", "primary_scope_key", "retrieval_lane"),
+                    metadata_keys=(
+                        "memory_type",
+                        "scope_type",
+                        "scope_key",
+                        "primary_scope_type",
+                        "primary_scope_key",
+                        "commitment_state",
+                        "valid_to",
+                        "object_ref_or_value",
+                        "qualifiers",
+                        "retrieval_lane",
+                        "memory_link_summary",
+                        "open_loops",
+                        "outcome_text",
+                        "source_kind",
+                        "source_owner",
+                        "change_state",
+                        "change_basis",
+                    ),
                 )
 
     def _limit_workspace_candidates(

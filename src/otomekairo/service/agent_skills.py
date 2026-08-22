@@ -195,7 +195,6 @@ class ServiceAgentSkillsMixin:
                 "capability_selection_summary": self._agent_skill_capability_selection_summary(
                     capability_decision_view
                 ),
-                "allowed_skill_ids": [entry["skill_id"] for entry in catalog],
                 "skill_catalog": catalog,
             },
         )
@@ -211,17 +210,24 @@ class ServiceAgentSkillsMixin:
 
         active_ids = list(selected_ids)
         active_set = set(active_ids)
+        considered_linked_ids = set(active_ids)
+        considered_resource_pairs: set[tuple[str, str]] = set()
         selected_resources: dict[str, dict[str, dict[str, Any]]] = {}
         material_reasons: list[str] = []
         while True:
-            linked_candidates = sorted(
+            linked_from: dict[str, list[str]] = {}
+            for skill_id in active_ids:
+                for linked_id in registry.require_skill(skill_id).linked_skill_names:
+                    if linked_id not in registry.skills or linked_id in considered_linked_ids:
+                        continue
+                    linked_from.setdefault(linked_id, []).append(skill_id)
+            linked_candidates = [
                 {
-                    linked_id
-                    for skill_id in active_ids
-                    for linked_id in registry.require_skill(skill_id).linked_skill_names
-                    if linked_id in registry.skills and linked_id not in active_set
+                    **registry.require_skill(skill_id).catalog_entry(),
+                    "linked_from_skill_ids": sorted(linked_from[skill_id]),
                 }
-            )
+                for skill_id in sorted(linked_from)
+            ]
             resource_candidates = [
                 {
                     "skill_id": skill_id,
@@ -236,6 +242,7 @@ class ServiceAgentSkillsMixin:
                     resource.kind == "resource"
                     and resource.text_content is not None
                     and resource.relative_path not in selected_resources.get(skill_id, {})
+                    and (skill_id, resource.relative_path) not in considered_resource_pairs
                 )
             ]
             if not linked_candidates and not resource_candidates:
@@ -258,20 +265,16 @@ class ServiceAgentSkillsMixin:
                     "host_authorization": host_authorization,
                     "selection_horizon": selection_horizon,
                     "active_skills": active_skills,
-                    "allowed_additional_skill_ids": linked_candidates,
-                    "allowed_resource_reads": [
-                        {
-                            "skill_id": candidate["skill_id"],
-                            "path": candidate["path"],
-                        }
-                        for candidate in resource_candidates
-                    ],
                     "additional_skill_candidates": linked_candidates,
                     "resource_candidates": resource_candidates,
                 },
             )
             additional_ids = list(material["additional_skill_ids"])
-            invalid_additional = sorted(set(additional_ids) - set(linked_candidates) - active_set)
+            candidate_skill_ids = {
+                candidate["skill_id"]
+                for candidate in linked_candidates
+            }
+            invalid_additional = sorted(set(additional_ids) - candidate_skill_ids - active_set)
             if invalid_additional:
                 raise LLMError(
                     "AgentSkillMaterialSelection が候補にない skill_id を返しました: "
@@ -291,6 +294,9 @@ class ServiceAgentSkillsMixin:
                     "AgentSkillMaterialSelection が候補にない resource を返しました: "
                     + ", ".join(f"{skill_id}/{path}" for skill_id, path in invalid_pairs)
                 )
+
+            considered_linked_ids.update(candidate_skill_ids)
+            considered_resource_pairs.update(candidate_pairs)
 
             progressed = False
             for skill_id in additional_ids:

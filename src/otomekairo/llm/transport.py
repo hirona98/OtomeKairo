@@ -32,6 +32,7 @@ ROLE_MAX_OUTPUT_TOKENS = {
     "decision:self_activity": 8000,
     "decision:outward_speech": 8000,
     "autonomous_step": 8000,
+    "capability_input_generation": 8000,
     "memory_interpretation": 8000,
     "speech": 4000,
 }

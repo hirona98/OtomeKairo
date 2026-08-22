@@ -223,27 +223,35 @@ class RecallSelectionMixin:
     ) -> dict[str, Any]:
         # section 群
         source_sections: list[dict[str, Any]] = []
+        candidate_index = 0
         for section_name in RECALL_PACK_SECTION_NAMES:
             items = candidate_sections.get(section_name, [])
             if not items:
                 continue
-            source_sections.append(
-                {
-                    "section_name": section_name,
-                    "candidates": [
+            section_payload: dict[str, Any] = {"section": section_name}
+            for source_kind, key in (
+                ("memory_unit", "memory_candidates"),
+                ("episode", "episode_candidates"),
+            ):
+                compact_items: list[dict[str, Any]] = []
+                for item in items:
+                    if item.get("source_kind") != source_kind:
+                        continue
+                    candidate_index += 1
+                    compact_items.append(
                         self._recall_pack_selection_candidate_source_item(
-                            candidate_ref=f"candidate:{section_name}:{index}",
+                            candidate_ref=f"c{candidate_index}",
                             item=item,
                         )
-                        for index, item in enumerate(items, start=1)
-                    ],
-                }
-            )
+                    )
+                if compact_items:
+                    section_payload[key] = compact_items
+            source_sections.append(section_payload)
 
         # conflict 群
         source_conflicts = [
             self._recall_pack_selection_conflict_source_item(
-                conflict_ref=f"conflict:{index}",
+                conflict_ref=f"x{index}",
                 item=item,
             )
             for index, item in enumerate(conflicts, start=1)
@@ -270,44 +278,68 @@ class RecallSelectionMixin:
     ) -> dict[str, Any]:
         # 共通項目
         payload = {
-            "candidate_ref": candidate_ref,
-            "source_kind": item["source_kind"],
-            "retrieval_lane": item.get("retrieval_lane", "structured"),
-            "summary_text": item["summary_text"],
+            "ref": candidate_ref,
+            "summary": item["summary_text"],
             "salience": item["salience"],
         }
+        retrieval_lane = item.get("retrieval_lane", "structured")
+        if retrieval_lane != "structured":
+            payload["lane"] = retrieval_lane
         if item.get("association_score") is not None:
-            payload["association_score"] = round(float(item["association_score"]), 4)
+            payload["score"] = round(float(item["association_score"]), 4)
         if item.get("retrieval_lane") == "relation_index":
-            payload["relation_evidence"] = {
-                "derived_status": item.get("relation_derived_status"),
-                "source_ref": item.get("relation_source_ref"),
-                "target_ref": item.get("relation_target_ref"),
-                "predicate": item.get("relation_predicate"),
-            }
+            payload["relation"] = [
+                item.get("relation_derived_status"),
+                item.get("relation_source_ref"),
+                item.get("relation_target_ref"),
+                item.get("relation_predicate"),
+            ]
 
         # 記憶単位
         if item["source_kind"] == "memory_unit":
             payload["memory_type"] = item["memory_type"]
-            payload["scope_type"] = item["scope_type"]
-            payload["scope_key"] = item["scope_key"]
+            payload["scope"] = [item["scope_type"], item["scope_key"]]
             payload["status"] = item["status"]
             if item.get("commitment_state") is not None:
                 payload["commitment_state"] = item["commitment_state"]
             if isinstance(item.get("memory_link_summary"), dict):
-                payload["memory_link_summary"] = item["memory_link_summary"]
+                payload["links"] = self._recall_pack_selection_link_summary(
+                    item["memory_link_summary"]
+                )
             return payload
 
         # Episode要約
         if item["source_kind"] == "episode":
-            payload["primary_scope_type"] = item["primary_scope_type"]
-            payload["primary_scope_key"] = item["primary_scope_key"]
+            payload["primary_scope"] = [
+                item["primary_scope_type"],
+                item["primary_scope_key"],
+            ]
             payload["open_loops"] = item.get("open_loops", [])
             if item.get("outcome_text") is not None:
                 payload["outcome_text"] = item["outcome_text"]
             return payload
 
         raise ValueError(f"unsupported candidate source_kind: {item['source_kind']}")
+
+    def _recall_pack_selection_link_summary(
+        self,
+        memory_link_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        examples = [
+            [
+                item.get("label"),
+                item.get("direction"),
+                item.get("related_summary_text") or item.get("summary_text"),
+            ]
+            for item in memory_link_summary.get("representative_links", [])
+            if isinstance(item, dict)
+        ]
+        payload: dict[str, Any] = {
+            "counts": memory_link_summary.get("label_counts", {}),
+        }
+        if examples:
+            payload["examples"] = examples
+        return payload
 
     def _recall_pack_selection_conflict_source_item(
         self,
@@ -324,10 +356,17 @@ class RecallSelectionMixin:
             raise ValueError("conflict source requires variant_summaries.")
 
         # 結果
+        compare_key = item["compare_key"]
         return {
-            "conflict_ref": conflict_ref,
-            "compare_key": item["compare_key"],
-            "variant_summaries": variant_summaries,
+            "ref": conflict_ref,
+            "compare": [
+                compare_key["memory_type"],
+                compare_key["scope_type"],
+                compare_key["scope_key"],
+                compare_key["subject_ref"],
+                compare_key["predicate"],
+            ],
+            "variants": variant_summaries,
         }
 
     def _apply_recall_pack_selection(
@@ -341,18 +380,26 @@ class RecallSelectionMixin:
         # candidate lookup
         candidate_lookup: dict[str, dict[str, Any]] = {}
         for section in source_pack["candidate_sections"]:
-            section_name = section["section_name"]
+            section_name = section["section"]
             items = candidate_sections[section_name]
-            for candidate_source, item in zip(section["candidates"], items, strict=True):
-                candidate_lookup[candidate_source["candidate_ref"]] = {
-                    "section_name": section_name,
-                    "item": item,
-                }
+            for source_kind, key in (
+                ("memory_unit", "memory_candidates"),
+                ("episode", "episode_candidates"),
+            ):
+                source_items = section.get(key, [])
+                original_items = [
+                    item for item in items if item.get("source_kind") == source_kind
+                ]
+                for candidate_source, item in zip(source_items, original_items, strict=True):
+                    candidate_lookup[candidate_source["ref"]] = {
+                        "section_name": section_name,
+                        "item": item,
+                    }
 
         # conflict lookup
         conflict_lookup: dict[str, dict[str, Any]] = {}
         for conflict_source, conflict in zip(source_pack["conflicts"], conflicts, strict=True):
-            conflict_lookup[conflict_source["conflict_ref"]] = conflict
+            conflict_lookup[conflict_source["ref"]] = conflict
 
         # 初期状態
         selected_sections = self._empty_selected_sections(

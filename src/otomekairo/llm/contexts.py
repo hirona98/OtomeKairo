@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from otomekairo.interaction import InteractionContext
+from otomekairo.llm.capability_choice import build_capability_choice_view
 
 
 PERSONA_PROMPT_EXCERPT_LIMIT = 240
@@ -12,6 +13,7 @@ PERSONA_PROMPT_EXCERPT_LIMIT = 240
 PERSONA_CONTEXT_USE_POLICIES = {
     "decision_generation": "行動選択、見送り、能力実行、保留、継続目的の基底として使う。記憶、観測、候補集合を上書きしない。",
     "autonomous_step_generation": "autonomous_run の次 step と継続境界の基底として使う。run 目的、能力可否、観測事実を上書きしない。",
+    "capability_input_generation": "選択済み能力の request-local input を現在の判断と対象に沿って組み立てる。能力選択や対象を変更しない。",
     "expression_generation": "外向き本文の立ち位置、距離感、言い回し、注目点に使う。判断結果と根拠文脈の外を補わない。",
     "disclosure_review": "書き換えの距離感と言い回しの補助に使う。開示可否と候補集合を変えない。",
     "pending_intent_selection": "今前へ出る自然さ、関心の強さ、距離感の判断に使う。候補外の意図を作らない。",
@@ -331,7 +333,9 @@ class AutonomousStepContext:
             "foreground_world_state": self.foreground_world_state,
             "activity_context": self.activity_context,
             "ongoing_action_summary": self.ongoing_action_summary,
-            "capability_decision_view": self.capability_decision_view,
+            "capability_choice_view": build_capability_choice_view(
+                self.capability_decision_view
+            ),
             "last_result_context": self.last_result_context,
             "people_context": self.people_context or [],
         }

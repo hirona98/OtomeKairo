@@ -112,61 +112,47 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
   },
   "candidate_sections": [
     {
-      "section_name": "active_commitments",
-      "candidates": [
+      "section": "active_commitments",
+      "memory_candidates": [
         {
-          "candidate_ref": "candidate:active_commitments:1",
-          "source_kind": "memory_unit",
-          "retrieval_lane": "structured",
-          "summary_text": "また体調の話の続きをする流れが残っている。",
-          "memory_type": "commitment",
-          "scope_type": "relationship",
-          "scope_key": "self|person:external-123",
-          "commitment_state": "open",
+          "ref": "c1",
+          "summary": "また体調の話の続きをする流れが残っている。",
           "salience": 0.88,
-          "memory_link_summary": {
-            "label_counts": {
+          "memory_type": "commitment",
+          "scope": ["relationship", "self|person:external-123"],
+          "status": "active",
+          "commitment_state": "open",
+          "links": {
+            "counts": {
               "supports": 1,
               "about_same_scope": 1
             },
-            "representative_links": [
-              {
-                "label": "supports",
-                "direction": "incoming",
-                "summary_text": "supports/incoming: 体調の話を続ける約束が確認済みである。"
-              }
+            "examples": [
+              ["supports", "incoming", "体調の話を続ける約束が確認済みである。"]
             ]
           }
         }
       ]
     },
     {
-      "section_name": "episodic_evidence",
-      "candidates": [
+      "section": "episodic_evidence",
+      "episode_candidates": [
         {
-          "candidate_ref": "candidate:episodic_evidence:1",
-          "source_kind": "episode",
-          "retrieval_lane": "association",
-          "summary_text": "前回の相談の続きとして様子を確認した。",
-          "primary_scope_type": "relationship",
-          "primary_scope_key": "self|person:external-123",
-          "open_loops": ["体調の変化をまた確認する"],
-          "salience": 0.82
+          "ref": "c2",
+          "summary": "前回の相談の続きとして様子を確認した。",
+          "salience": 0.82,
+          "lane": "association",
+          "primary_scope": ["relationship", "self|person:external-123"],
+          "open_loops": ["体調の変化をまた確認する"]
         }
       ]
     }
   ],
   "conflicts": [
     {
-      "conflict_ref": "conflict:1",
-      "compare_key": {
-        "memory_type": "commitment",
-        "scope_type": "relationship",
-        "scope_key": "self|person:external-123",
-        "subject_ref": "self",
-        "predicate": "talk_again"
-      },
-      "variant_summaries": [
+      "ref": "x1",
+      "compare": ["commitment", "relationship", "self|person:external-123", "self", "talk_again"],
+      "variants": [
         "また体調の話の続きをする流れが残っている。",
         "いったん休んでから改めて話すつもりになっている。"
       ]
@@ -180,15 +166,15 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
 
 入力の原則は次である。
 
-- `candidate_ref` と `conflict_ref` は request-local な参照であり、永続 ID をそのまま渡さない
-- 候補は section ごとに分けて渡す
+- candidate の `ref=c1...` と conflict の `ref=x1...` は source pack 全体で採番する request-local な短い参照であり、永続 ID をそのまま渡さない
+- 候補は section ごと、さらに `memory_candidates / episode_candidates` ごとに分け、各候補で `source_kind` を繰り返さない
 - section 名は canonical なものだけを使う
-- 各 candidate は `summary_text` と意味判断に効く最小の構造化項目に絞る
-- `retrieval_lane` は残し、`association` 候補が補助レーンであることは downstream にも保つ
-- `association_score` や query 種別は、source pack に残すが、本命判断値としては育てない
-- `memory_link_summary` は label count と代表関係だけを持ち、永続 ID を含めない
-- `memory_link_summary` は `supports / contradicts / derived_from / about_same_scope / affects` の関係を選別補助として渡す
-- `conflicts` には compare key と variant の短い summary だけを入れ、memory unit の内部 ID は渡さない
+- 各 candidate は `summary` と意味判断に効く最小の構造化項目に絞り、scope type/key は 2 要素の配列で表す
+- 既定の `structured` lane は省略する。`lane` は非既定値だけを残し、`association` 候補が補助レーンであることは downstream に保つ
+- association の `score` は source pack に残すが、本命判断値としては育てない
+- `links.counts` は label count、`links.examples` は `label / direction / related summary` の短い配列を持ち、永続 ID や重複した合成文を含めない
+- `links` は `supports / contradicts / derived_from / about_same_scope / affects` の関係を選別補助として渡す
+- `conflicts.compare` は `memory_type / scope_type / scope_key / subject_ref / predicate` の順の配列、`variants` は短い summary とし、memory unit の内部 ID は渡さない
 
 ## LLM 出力契約
 
@@ -199,16 +185,16 @@ LLM の出力は JSON object 1 個に固定する。
   "section_selection": [
     {
       "section_name": "active_commitments",
-      "candidate_refs": ["candidate:active_commitments:1"]
+      "candidate_refs": ["c1"]
     },
     {
       "section_name": "episodic_evidence",
-      "candidate_refs": ["candidate:episodic_evidence:1"]
+      "candidate_refs": ["c2"]
     }
   ],
   "conflict_summaries": [
     {
-      "conflict_ref": "conflict:1",
+      "conflict_ref": "x1",
       "summary_text": "続けて話す流れと、いったん区切る流れの理解が並んでいる。"
     }
   ]
