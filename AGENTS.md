@@ -36,7 +36,8 @@
 - Gitのユーザ名とメールアドレスを変更しない
 
 
-## 関連プロジェクトの場所（一部環境のみ）
+## 関連ファイル
+- ログや設定DB: `var/otomekairo/`
 - CocoroConsole（優先）: `/mnt/d/AliceEncoder/PartnerAI/CocoroAI/CocoroConsole/`
 - CocoroConsole（ビルド不可）: `../CocoroConsole/`
 - CocoroShell（環境による）: `/mnt/d/AliceEncoder/PartnerAI/CocoroAI/CocoroShell/`
