@@ -1181,6 +1181,9 @@ def _decision_capability_run_rules(*, include_person_start: bool) -> str:
         "既存 run に目的が含まれ、結果待ちやタイマー待機をそのまま維持する場合は noop を選びます。"
         "noop でも既存 run は存続し、結果到着や時刻到来時に server が再開します。"
         "create_new は独立した追加目的の開始、replace_existing は中核目的の変更です。\n"
+        "関心は関わる向きとして持ち続け、そこから始める run の objective_summary には今回達成する範囲と完了条件を書きます。"
+        "状況把握なら、今回の情報を確認し、応じるか・表現するかを判断して、必要な関与を終えるまでを一単位にします。"
+        "継続観測を選ぶ場合は、その必要性と終了条件または継続の必要性を再評価する条件を objective_summary に明示します。\n"
     )
     if include_person_start:
         body += (
@@ -1563,6 +1566,8 @@ def _build_autonomous_step_system_prompt() -> str:
             "due 後に目的の声かけ、確認、支援が必要なら speech action を選び、その目的が満たされたら complete を選んでください。\n"
             "speech と complete を組み合わせるのは、今回の発話自体が伝達目的を果たす場合、または既に得られた実績を報告して閉じる場合です。"
             "次の外界作用が目的に残る場合は、その作用を capability_request として実行するか、適切な時刻まで wait_until で run を維持してください。\n"
+            "今回の関与と判断が完了したら、関心自体が続いていても run は complete にします。"
+            "継続観測は目的に記された必要性と終了・再評価条件に照らして続けるかを判断します。\n"
             "目的が満たされたら transition.kind=complete を選んでください。\n"
             "目的が不成立、危険、文脈不整合、ユーザー停止指示がある場合は transition.kind=cancel を選んでください。",
         ),
