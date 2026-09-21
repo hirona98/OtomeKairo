@@ -109,7 +109,7 @@ class StandingConcernLogicTests(unittest.TestCase):
         delay = extra_background_thinking_delay_seconds(
             wake_mode="interval",
             wake_interval_seconds=300,
-            last_wake_at="2026-08-13T11:59:00+09:00",
+            interval_started_at="2026-08-13T11:59:00+09:00",
             due_concerns=[{"min_interval_seconds": 3600}],
             current_time="2026-08-13T12:00:00+09:00",
         )
@@ -119,7 +119,7 @@ class StandingConcernLogicTests(unittest.TestCase):
         delay = extra_background_thinking_delay_seconds(
             wake_mode="disabled",
             wake_interval_seconds=300,
-            last_wake_at=None,
+            interval_started_at="2026-08-13T11:55:00+09:00",
             due_concerns=[{"min_interval_seconds": 3600}],
             current_time="2026-08-13T12:00:00+09:00",
         )
@@ -129,7 +129,7 @@ class StandingConcernLogicTests(unittest.TestCase):
         delay = extra_background_thinking_delay_seconds(
             wake_mode="disabled",
             wake_interval_seconds=300,
-            last_wake_at="2026-08-13T11:58:00+09:00",
+            interval_started_at="2026-08-13T11:58:00+09:00",
             due_concerns=[{"min_interval_seconds": 3600}],
             current_time="2026-08-13T12:00:00+09:00",
         )
@@ -139,7 +139,7 @@ class StandingConcernLogicTests(unittest.TestCase):
         delay = extra_background_thinking_delay_seconds(
             wake_mode="interval",
             wake_interval_seconds=86400,
-            last_wake_at="2026-08-13T00:00:00+09:00",
+            interval_started_at="2026-08-13T00:00:00+09:00",
             due_concerns=[{"min_interval_seconds": 3600}],
             current_time="2026-08-13T12:00:00+09:00",
         )

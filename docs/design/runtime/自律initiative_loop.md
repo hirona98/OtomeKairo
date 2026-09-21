@@ -220,7 +220,7 @@ LLM の自由文をそのまま状態遷移へ使わない。
 `wake_policy.observations` は 定期思考 の判断前に enabled 項目だけを順番に取得する。
 visual capture の source、result、保存、inspection の詳細は [../capability/視覚機能.md](../capability/視覚機能.md) を正とする。
 思考前観測 の運用時刻は `wake_policy` と process-local runtime で扱い、成功結果は内部観測と自律判断の材料として扱う。
-visual capture を含む enabled observation の無効→有効直後の初回 5 秒待機と、対象 vision source がこの process で未登録のあいだ due にしないことと、その後の初回 due は [../api/状態と設定.md](../api/状態と設定.md) を正とする。
+定期思考の間隔の起点と、対象 vision source がこの process で未登録のあいだ due にしない条件は [../api/状態と設定.md](../api/状態と設定.md) を正とする。
 思考前観測 として同期取得する capability result は、`ongoing_action` 外の内部観測として扱う。
 会話入力、手動 wake、capability result handling は FIFO で直列化する。
 これらのサイクルが実行中または待機中なら、server はその周期の due autonomous run と `background_thinking` を開始しない。
@@ -336,10 +336,10 @@ API起床の自律判断 matrix は次の 16 件に固定する。
 
 | case | 入力条件 | 期待する構造 |
 | --- | --- | --- |
-| `background-no-context-skip` | interval 初回定期思考で `drive_state / world_state / ongoing_action` が空 | 定期思考 cycle を作り、`initiative_context` なしの `decision.kind=noop` と `memory_trace=skipped` を残す |
-| `background-recent-duplicate-noop` | interval 初回定期思考で視覚観測の `change_state` が `same_as_recent_speech` である | `suppression_level=high`、`decision.kind=noop`、`memory_trace=skipped` |
-| `background-grounded-speech` | interval 初回定期思考で予定 `world_state` と整合する構造値が強い `drive_state` がある | `background_thinking_scheduler_active=true`、`foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`memory_trace=succeeded` |
-| `background-interval-not-due` | `last_wake_at` 相当の直後に長い interval を設定する | `background_thinking_scheduler_active=true` を観測し、新しい定期思考 cycle を作らない |
+| `background-no-context-skip` | interval 経過後の定期思考で `drive_state / world_state / ongoing_action` が空 | 定期思考 cycle を作り、`initiative_context` なしの `decision.kind=noop` と `memory_trace=skipped` を残す |
+| `background-recent-duplicate-noop` | interval 経過後の定期思考で視覚観測の `change_state` が `same_as_recent_speech` である | `suppression_level=high`、`decision.kind=noop`、`memory_trace=skipped` |
+| `background-grounded-speech` | interval 経過後の定期思考で予定 `world_state` と整合する構造値が強い `drive_state` がある | `background_thinking_scheduler_active=true`、`foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`memory_trace=succeeded` |
+| `background-interval-not-due` | `interval_started_at` 相当の直後に長い interval を設定する | `background_thinking_scheduler_active=true` を観測し、新しい定期思考 cycle を作らない |
 
 matrix の共通判定境界は前述の `initiative_context`、LLM とコードの責務、自発発話抑制に従う。
 `visual_context` だけの前景は thin foreground として扱う。due な気にかけていることがあるときは、薄い視覚前景だけで `noop` を期待しない。

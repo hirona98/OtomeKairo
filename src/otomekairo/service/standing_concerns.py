@@ -67,7 +67,7 @@ def extra_background_thinking_delay_seconds(
     *,
     wake_mode: Any,
     wake_interval_seconds: int,
-    last_wake_at: Any,
+    interval_started_at: str,
     due_concerns: list[dict[str, Any]],
     current_time: str,
 ) -> float | None:
@@ -77,17 +77,13 @@ def extra_background_thinking_delay_seconds(
     if current_dt is None:
         return None
     shortest_interval = min(int(concern["min_interval_seconds"]) for concern in due_concerns)
-    last_wake_dt = parse_standing_concern_timestamp(last_wake_at)
+    interval_start_dt = datetime.fromisoformat(interval_started_at)
     if wake_mode == "interval":
-        if last_wake_dt is None:
-            return None
-        time_until_regular = (last_wake_dt + timedelta(seconds=int(wake_interval_seconds)) - current_dt).total_seconds()
+        time_until_regular = (interval_start_dt + timedelta(seconds=int(wake_interval_seconds)) - current_dt).total_seconds()
         if time_until_regular <= shortest_interval:
             return None
     extra_cadence = min(int(wake_interval_seconds), shortest_interval)
-    if last_wake_dt is None:
-        return 0.0
-    remaining = (last_wake_dt + timedelta(seconds=extra_cadence) - current_dt).total_seconds()
+    remaining = (interval_start_dt + timedelta(seconds=extra_cadence) - current_dt).total_seconds()
     if remaining <= 0:
         return 0.0
     return remaining

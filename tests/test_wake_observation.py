@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from otomekairo.event_stream import EventStreamRegistry
 from otomekairo.service.app import OtomeKairoService
@@ -68,7 +69,8 @@ class SeenVisionSourceRegistryTests(unittest.TestCase):
 class WakeObservationSourceReadyTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.service = OtomeKairoService(root_dir=Path(self.temp_dir.name))
+        with patch.object(OtomeKairoService, "_now_iso", return_value="2026-08-14T11:55:00+09:00"):
+            self.service = OtomeKairoService(root_dir=Path(self.temp_dir.name))
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -91,7 +93,7 @@ class WakeObservationSourceReadyTests(unittest.TestCase):
         )
         return session_id
 
-    def test_no_observations_first_thinking_is_due(self) -> None:
+    def test_no_observations_first_thinking_is_due_after_interval(self) -> None:
         state = _interval_state(wake_policy={"mode": "interval", "interval_seconds": 300})
         due = self.service._wake_is_due(state=state, current_time=NOW)
 
@@ -100,6 +102,68 @@ class WakeObservationSourceReadyTests(unittest.TestCase):
             self.service._background_thinking_delay_seconds(state=state, current_time=NOW),
             0.0,
         )
+
+    def test_first_thinking_waits_full_interval(self) -> None:
+        state = _interval_state(wake_policy={"mode": "interval", "interval_seconds": 300})
+        for current_time in ("2026-08-14T11:55:00+09:00", "2026-08-14T11:59:59+09:00"):
+            with self.subTest(current_time=current_time):
+                self.assertTrue(self.service._wake_is_due(state=state, current_time=current_time)["should_skip"])
+                self.assertGreater(
+                    self.service._background_thinking_delay_seconds(state=state, current_time=current_time),
+                    0.0,
+                )
+        self.assertIsNone(self.service._wake_runtime_state["last_wake_at"])
+
+    def test_due_concern_uses_interval_origin_before_first_thinking(self) -> None:
+        state = _interval_state(
+            wake_policy={"mode": "interval", "interval_seconds": 3600},
+            standing_concerns=[{
+                "concern_id": "elyth",
+                "enabled": True,
+                "min_interval_seconds": 300,
+                "concern_summary": "ELYTH",
+            }],
+        )
+        self.assertEqual(
+            self.service._extra_standing_concern_thinking_delay_seconds(
+                state=state, current_time="2026-08-14T11:59:59+09:00",
+            ),
+            1.0,
+        )
+        self.assertEqual(self.service._background_thinking_delay_seconds(state=state, current_time=NOW), 0.0)
+
+    def test_enabling_periodic_thinking_starts_full_interval(self) -> None:
+        state = _interval_state(wake_policy={"mode": "interval", "interval_seconds": 300})
+        self.service._set_last_wake_at("2026-08-14T10:00:00+09:00")
+        self.service._sync_wake_policy_runtime_state(
+            previous_wake_policy={"mode": "disabled"},
+            next_wake_policy=state["wake_policy"],
+            current_time=NOW,
+        )
+        self.assertTrue(self.service._wake_is_due(state=state, current_time="2026-08-14T12:04:59+09:00")["should_skip"])
+        self.assertFalse(self.service._wake_is_due(state=state, current_time="2026-08-14T12:05:00+09:00")["should_skip"])
+        self.assertEqual(self.service._wake_runtime_state["last_wake_at"], "2026-08-14T10:00:00+09:00")
+
+    def test_enabling_observation_preserves_interval(self) -> None:
+        state = _interval_state()
+        self._register_source(vision_source_id="vision_source:console-x:desktop", kind="desktop", client_id="console-x")
+        self.service._sync_wake_policy_runtime_state(
+            previous_wake_policy={"mode": "interval", "interval_seconds": 300},
+            next_wake_policy=state["wake_policy"],
+            current_time="2026-08-14T11:56:00+09:00",
+        )
+        self.assertTrue(self.service._wake_is_due(state=state, current_time="2026-08-14T11:56:05+09:00")["should_skip"])
+        self.assertFalse(self.service._wake_is_due(state=state, current_time=NOW)["should_skip"])
+
+    def test_consuming_interval_and_reset_start_new_interval(self) -> None:
+        state = _interval_state(wake_policy={"mode": "interval", "interval_seconds": 300})
+        self.service._set_last_wake_at(NOW)
+        self.assertEqual(self.service._wake_runtime_state["interval_started_at"], NOW)
+        self.assertTrue(self.service._wake_is_due(state=state, current_time=NOW)["should_skip"])
+        with patch.object(self.service, "_now_iso", return_value="2026-08-14T12:10:00+09:00"):
+            self.service._clear_pending_intent_candidates()
+        self.assertTrue(self.service._wake_is_due(state=state, current_time="2026-08-14T12:14:59+09:00")["should_skip"])
+        self.assertFalse(self.service._wake_is_due(state=state, current_time="2026-08-14T12:15:00+09:00")["should_skip"])
 
     def test_enabled_observation_without_hello_is_not_due(self) -> None:
         state = _interval_state()

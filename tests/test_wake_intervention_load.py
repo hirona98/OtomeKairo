@@ -49,7 +49,7 @@ class DummyWakeService(ServiceSpontaneousWakeMixin):
         self._wake_runtime_state = {
             "last_wake_at": None,
             "last_spontaneous_at": None,
-            "initial_delay_until": None,
+            "interval_started_at": "2026-06-21T15:52:00+09:00",
             "retry_after": None,
             "speech_history_by_dedupe": {},
         }

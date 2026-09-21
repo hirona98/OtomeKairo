@@ -580,7 +580,7 @@ class ServiceSpontaneousPendingIntentMixin:
             self._wake_runtime_state = {
                 "last_wake_at": None,
                 "last_spontaneous_at": None,
-                "initial_delay_until": None,
+                "interval_started_at": self._now_iso(),
                 "retry_after": None,
                 "speech_history_by_dedupe": {},
                 "active_user_response_cycle_count": 0,

@@ -61,11 +61,11 @@ class ServiceInputStandingConcernMixin:
     ) -> float | None:
         wake_policy = state.get("wake_policy") if isinstance(state.get("wake_policy"), dict) else {}
         with self._runtime_state_lock:
-            last_wake_at = self._wake_runtime_state.get("last_wake_at")
+            interval_started_at = self._wake_runtime_state["interval_started_at"]
         return extra_background_thinking_delay_seconds(
             wake_mode=wake_policy.get("mode"),
             wake_interval_seconds=int(wake_policy.get("interval_seconds") or 1),
-            last_wake_at=last_wake_at,
+            interval_started_at=interval_started_at,
             due_concerns=self._due_standing_concerns(state=state, current_time=current_time),
             current_time=current_time,
         )
