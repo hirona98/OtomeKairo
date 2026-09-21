@@ -492,7 +492,7 @@ class SQLiteMemoryStore(
         *,
         memory_set_id: str,
         statuses: list[str] | None = None,
-        limit: int = 50,
+        limit: int | None = 50,
     ) -> list[dict[str, Any]]:
         # Query部品群
         clauses = ["memory_set_id = ?"]
@@ -512,9 +512,10 @@ class SQLiteMemoryStore(
             FROM autonomous_runs
             WHERE {" AND ".join(clauses)}
             ORDER BY updated_at DESC, rowid DESC
-            LIMIT ?
         """
-        params.append(max(int(limit), 1))
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(max(int(limit), 1))
 
         # クエリ
         with self._memory_db() as conn:

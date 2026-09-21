@@ -1152,3 +1152,20 @@ class AutonomousCompletionReviewContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AutonomousStartReviewTests(unittest.TestCase):
+    def test_start_review_uses_structured_transport_and_repairs_invalid_outcome(self) -> None:
+        valid = {"outcome": "reject_start", "reason_summary": "既存実行で満たされる。"}
+        with patch("otomekairo.llm.client.complete_text", side_effect=[
+            json.dumps({"outcome": "allow", "reason_summary": "invalid"}), json.dumps(valid)
+        ]) as complete:
+            result = LLMClient().generate_autonomous_start_review(
+                model_config={"model": "real-model"}, review_context={"existing_runs": [], "decision": {}}
+            )
+        self.assertEqual(result, valid)
+        self.assertEqual(complete.call_count, 2)
+
+    def test_mock_start_review_requires_explicit_test_double(self) -> None:
+        with self.assertRaises(LLMError):
+            LLMClient().generate_autonomous_start_review(model_config={"model": "mock-test"}, review_context={})

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from otomekairo.llm.contexts import CurrentInput
+from otomekairo.llm.contracts import LLMError
 from otomekairo.service.app import OtomeKairoService
 from otomekairo.service.autonomous_run import AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK
 from otomekairo.service.autonomous_run import AUTONOMOUS_COMPLETION_REVIEW_RETRY_FEEDBACK
@@ -17,6 +18,56 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
         state["model_presets"][preset_id]["model"] = "mock-test"
         service.store.write_state(state)
         return service.store.read_state()
+
+    def test_start_review_blocks_creation_and_replacement_before_side_effects(self) -> None:
+        for mode in ("create_new", "replace_existing"):
+            for response in ({"outcome": "reject_start"}, {"outcome": "invalid"}, LLMError("failed")):
+                with self.subTest(mode=mode, response=response), tempfile.TemporaryDirectory() as temp_dir:
+                    service = OtomeKairoService(Path(temp_dir))
+                    state = service.store.read_state()
+                    run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
+                    service.store.upsert_autonomous_run(autonomous_run=run)
+                    review = Mock(side_effect=response) if isinstance(response, Exception) else Mock(return_value=response)
+                    service.llm = SimpleNamespace(generate_autonomous_start_review=review)
+                    service._execute_autonomous_run_step = Mock()
+                    with self.assertRaises(LLMError):
+                        service._start_autonomous_run_from_decision(
+                            state=state, current_time=run["created_at"],
+                            decision={"kind": "autonomous_run", "reason_summary": "既存の待機を維持する。",
+                                "autonomous_run": {"objective_summary": "交流機会を確認する。",
+                                    "initial_step_summary": "待つ。", "coordination": {
+                                        "mode": mode,
+                                        "target_run_ids": [run["run_id"]] if mode == "replace_existing" else [],
+                                        "reason_summary": "既存の待機を維持する。"}}},
+                            source_current_input=run["source_current_input"],
+                            source_cycle_id="cycle:test-review", assistant_message_target_client_id=None,
+                        )
+                    self.assertEqual(service.store.get_autonomous_run(run_id=run["run_id"]), run)
+                    self.assertEqual(len(service.store.list_autonomous_runs(memory_set_id=run["memory_set_id"])), 1)
+                    service._execute_autonomous_run_step.assert_not_called()
+                    self.assertEqual(review.call_args.kwargs["review_context"]["existing_runs"][0]["run_id"], run["run_id"])
+
+    def test_allowed_start_review_creates_run_and_includes_all_existing_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
+            for index in range(21):
+                service.store.upsert_autonomous_run(autonomous_run={**run, "run_id": f"autonomous_run:{index}"})
+            review = Mock(return_value={"outcome": "allow_start", "reason_summary": "独立した追加目的。"})
+            service.llm = SimpleNamespace(generate_autonomous_start_review=review)
+            service._execute_autonomous_run_step = Mock(return_value={"status": "active"})
+            result = service._start_autonomous_run_from_decision(
+                state=state, current_time=run["created_at"],
+                decision={"kind": "autonomous_run", "autonomous_run": {
+                    "objective_summary": "指定時刻に声をかけて完了する。", "initial_step_summary": "時刻を確認する。",
+                    "coordination": {"mode": "create_new", "target_run_ids": [], "reason_summary": "独立した依頼。"}}},
+                source_current_input=run["source_current_input"], source_cycle_id="cycle:test-review",
+                assistant_message_target_client_id=None,
+            )
+            self.assertEqual(len(review.call_args.kwargs["review_context"]["existing_runs"]), 21)
+            self.assertEqual(result["autonomous_run"]["status"], "active")
+            service._execute_autonomous_run_step.assert_called_once()
 
     def test_pre_send_check_withhold_regenerates_autonomous_step_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
