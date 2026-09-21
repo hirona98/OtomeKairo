@@ -77,6 +77,8 @@ MCP tool の連鎖も、他の capability や skill と同じく通常の run st
 `decision_generation` は active / waiting_timer / waiting_result / paused の既存 `autonomous_run` 要約を受け取り、新しい依頼と既存 run の関係を判断する。
 `decision.autonomous_run.coordination.mode` は `create_new`、`replace_existing` のいずれかである。
 
+既存 run に目的が含まれ、結果待ちやタイマー待機を維持する場合、通常判断は `noop` を選ぶ。`noop` でも既存 run は存続し、結果到着や時刻到来時に server が再開する。
+
 `create_new` は既存 run と独立した目的を開始する。
 `replace_existing` は `target_run_ids` の run を `cancelled` にしてから新しい run を開始する。
 追加の依頼、タイマー、通知、リマインド、既存 run と並行する一時タスクは `create_new` とする。

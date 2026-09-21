@@ -1172,12 +1172,15 @@ def _decision_capability_run_rules(*, include_person_start: bool) -> str:
         "capability_request は CapabilityDecisionView に available=true で載っている能力が必要なときに選びます。\n"
         "Agent Skill の skill_id は capability_id でも MCP tool_name でもありません。"
         "mcp.call_tool の tool_name は CapabilityDecisionView の mcp_servers[].tools[].name から選びます。\n"
-        "autonomous_run は、継続する行動や観測、未完了の向きを目的として保持するときに選びます。次の一手は autonomous_step_generation が決めます。\n"
+        "autonomous_run は、新しい目的の実行を開始するときに選びます。次の一手は autonomous_step_generation が決めます。\n"
         + _capability_request_input_shape_instruction()
         + "target_client_id や資格情報は入れません。\n"
         "OngoingActionSummary.status=waiting_result のときは、その実行列へ新しい capability_request を重ねません。"
         "今の人物発話が別の継続実行を求め、該当 run が無いなら autonomous_run を始めてよいです。\n"
         "既存 run と並行する追加目的なら coordination.mode=create_new、中核目的の置換なら replace_existing です。\n"
+        "既存 run に目的が含まれ、結果待ちやタイマー待機をそのまま維持する場合は noop を選びます。"
+        "noop でも既存 run は存続し、結果到着や時刻到来時に server が再開します。"
+        "create_new は独立した追加目的の開始、replace_existing は中核目的の変更です。\n"
     )
     if include_person_start:
         body += (
