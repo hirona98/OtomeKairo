@@ -190,6 +190,10 @@ timeout 後に再試行、待機、完了、cancel のどれを選ぶかは `aut
 
 run 内の capability result は、通常の会話 capability result と同じく `capability_result` event として残す。
 `mcp.call_tool` の結果は `mcp_result_summary`、対象 server / tool、観測した `observed_person_refs` を event に持つ。
+step入力の `observation_context` は server が実行起点と保存済み `result_events` から作る。`step_trigger` は新しい結果受信による `capability_result`、timer到来による `timer`、開始・その他の継続機会の `scheduled`。`result_received_for_this_step` は結果受信が今回の起点かを表す。`latest_result` は最新の受信eventの `event_id / created_at / capability_id / tool_name / age_seconds`、未取得なら `null`。`result_count` は受信event数である。失敗resultも受信実績として含み、成功可否は `observed_result_summaries` と合わせて判断する。
+
+LLM は保持された結果と今回の結果受信を区別し、再観測時刻では目的と最終取得時刻から取得の要否を判断する。取得せず待つ場合は過去の観測に基づく待機理由と次の判断機会を記述する。`run_update` の観測実績はresultのIDと取得時刻に結びつけ、今回の待機判断と区別する。
+
 `last_result_context` は完了後も破棄しない。直近 result の要約と観測人物参照を terminal まで残す。
 `run_update.history_summary` は LLM が更新してよい。観測事実は `observed_result_summaries` として追記だけし、上書きしない。
 各要約は `capability_id / tool_name / result_status / is_error / summary_text / created_at` を持ち、成功実績と失敗到着を区別できるようにする。

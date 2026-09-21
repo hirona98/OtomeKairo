@@ -317,6 +317,7 @@ class AutonomousStepContext:
     ongoing_action_summary: dict[str, Any] | None
     capability_decision_view: list[dict[str, Any]] | None
     last_result_context: dict[str, Any] | None
+    observation_context: dict[str, Any] | None = None
     people_context: list[dict[str, str]] | None = None
     pre_send_check_feedback: str | None = None
     completion_review_feedback: str | None = None
@@ -333,6 +334,7 @@ class AutonomousStepContext:
             "ongoing_action_summary": self.ongoing_action_summary,
             "capability_decision_view": self.capability_decision_view,
             "last_result_context": self.last_result_context,
+            "observation_context": self.observation_context,
             "people_context": self.people_context or [],
         }
         if self.pre_send_check_feedback is not None:

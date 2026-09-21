@@ -19,6 +19,70 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
         service.store.write_state(state)
         return service.store.read_state()
 
+    def test_step_execution_distinguishes_retained_result_from_new_arrival(self) -> None:
+        for status, incoming, expected in (
+            ("waiting_timer", None, "timer"),
+            ("active", None, "scheduled"),
+            ("active", {"source_capability_id": "mcp.call_tool"}, "capability_result"),
+        ):
+            with self.subTest(trigger=expected), tempfile.TemporaryDirectory() as temp_dir:
+                service = OtomeKairoService(Path(temp_dir))
+                state = service.store.read_state()
+                retained = {"source_capability_id": "mcp.call_tool"}
+                run = {**self._commitment_run_record(memory_set_id=state["selected_memory_set_id"]),
+                    "status": status, "last_result_context": retained}
+                service.store.upsert_autonomous_run(autonomous_run=run)
+                service._autonomous_run_step_guard = Mock(return_value=None)
+                service._now_iso = Mock(return_value="2026-09-21T10:00:00+09:00")
+                generate = Mock(return_value=(None, {
+                    "action": {"kind": "none", "capability_request": None, "speech": None},
+                    "transition": {"kind": "wait_until", "next_run_at": "2026-09-21T11:00:00+09:00"},
+                    "run_update": {"current_step_summary": "以前の結果に基づき待つ。", "history_summary": "追加取得なし。"},
+                }, None))
+                service._generate_reviewed_autonomous_step_candidate = generate
+                result = service._execute_autonomous_run_step_locked(
+                    state=state, run_id=run["run_id"], started_at="2026-09-21T10:00:00+09:00",
+                    last_result_context=incoming, emit_speech_event=False, allow_during_user_response=True,
+                )
+                self.assertEqual(result["status"], "waiting_timer")
+                self.assertEqual(generate.call_args.kwargs["step_trigger"], expected)
+                self.assertEqual(generate.call_args.kwargs["last_result_context"], retained)
+                stored = service.store.get_autonomous_run(run_id=run["run_id"])
+                self.assertEqual(stored.get("result_events"), run.get("result_events"))
+                self.assertEqual(stored.get("observed_result_summaries"), run.get("observed_result_summaries"))
+
+    def test_timer_keeps_observation_age_and_id_without_claiming_new_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            run = {"result_events": [{
+                "event_id": "event:observed", "created_at": "2026-09-21T09:00:00+09:00",
+                "capability_id": "mcp.call_tool", "tool_name": "get_notifications",
+            }]}
+            received = service._autonomous_step_observation_context(
+                run=run, current_time="2026-09-21T09:00:01+09:00", step_trigger="capability_result",
+            )
+            timer = service._autonomous_step_observation_context(
+                run=run, current_time="2026-09-21T10:00:00+09:00", step_trigger="timer",
+            )
+            resumed = service._autonomous_step_observation_context(
+                run=run, current_time="2026-09-21T10:01:00+09:00", step_trigger="scheduled",
+            )
+            self.assertTrue(received["result_received_for_this_step"])
+            self.assertFalse(timer["result_received_for_this_step"])
+            self.assertFalse(resumed["result_received_for_this_step"])
+            self.assertEqual(timer["latest_result"]["event_id"], received["latest_result"]["event_id"])
+            self.assertEqual(timer["latest_result"]["age_seconds"], 3600)
+            self.assertEqual(timer["result_count"], 1)
+            empty = service._autonomous_step_observation_context(
+                run={}, current_time="2026-09-21T10:00:00+09:00", step_trigger="scheduled",
+            )
+            self.assertIsNone(empty["latest_result"])
+            self.assertEqual(empty["result_count"], 0)
+            with self.assertRaises(ValueError):
+                service._autonomous_step_observation_context(
+                    run=run, current_time="2026-09-21T10:00:00+09:00", step_trigger="invalid",
+                )
+
     def test_start_review_blocks_creation_and_replacement_before_side_effects(self) -> None:
         for mode in ("create_new", "replace_existing"):
             for response in ({"outcome": "reject_start"}, {"outcome": "invalid"}, LLMError("failed")):
@@ -130,6 +194,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
 
             self.assertEqual(result["status"], "cancelled")
             self.assertEqual(generate_autonomous_step.call_count, 2)
+            self.assertEqual(service._build_autonomous_step_context.call_args.kwargs["step_trigger"], "scheduled")
             self.assertEqual(
                 service._build_autonomous_step_context.call_args.kwargs[
                     "pre_send_check_feedback"
@@ -923,8 +988,13 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 current_time="2026-08-16T19:33:00+09:00",
                 source_current_input=run["source_current_input"],
                 last_result_context=None,
+                step_trigger="timer",
             )
 
+            self.assertEqual(context.to_prompt_payload()["observation_context"], {
+                "step_trigger": "timer", "result_received_for_this_step": False,
+                "latest_result": None, "result_count": 0,
+            })
             self.assertEqual(
                 context.foreground_world_state,
                 [{"state_type": "external_service", "summary_text": "ELYTHの通知は空"}],

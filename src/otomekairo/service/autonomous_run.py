@@ -844,12 +844,18 @@ class ServiceAutonomousRunMixin:
             )
             current_time = started_at
             selected_preset = state["model_presets"][state["selected_model_preset_id"]]
+            step_trigger = (
+                "capability_result" if last_result_context is not None
+                else "timer" if run.get("status") == "waiting_timer"
+                else "scheduled"
+            )
             step_context, step, speech_payload = self._generate_reviewed_autonomous_step_candidate(
                 state=state,
                 run=run,
                 selected_preset=selected_preset,
                 source_current_input=source_current_input,
                 last_result_context=last_result_context or run.get("last_result_context"),
+                step_trigger=step_trigger,
             )
             action = step["action"]
             transition = step["transition"]
@@ -935,6 +941,7 @@ class ServiceAutonomousRunMixin:
                         selected_preset=selected_preset,
                         source_current_input=source_current_input,
                         last_result_context=last_result_context or run.get("last_result_context"),
+                        step_trigger=step_trigger,
                         pre_send_check_feedback=AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK,
                     )
                     action = step["action"]
@@ -1209,6 +1216,7 @@ class ServiceAutonomousRunMixin:
         selected_preset: dict[str, Any],
         source_current_input: dict[str, Any] | None,
         last_result_context: dict[str, Any] | None,
+        step_trigger: str = "scheduled",
         pre_send_check_feedback: str | None = None,
     ) -> tuple[AutonomousStepContext, dict[str, Any], dict[str, Any] | None]:
         completion_review_feedback: str | None = None
@@ -1219,6 +1227,7 @@ class ServiceAutonomousRunMixin:
                 current_time=self._now_iso(),
                 source_current_input=source_current_input,
                 last_result_context=last_result_context,
+                step_trigger=step_trigger,
                 pre_send_check_feedback=pre_send_check_feedback,
                 completion_review_feedback=completion_review_feedback,
             )
@@ -1383,6 +1392,29 @@ class ServiceAutonomousRunMixin:
             ]
         )
 
+    def _autonomous_step_observation_context(
+        self, *, run: dict[str, Any], current_time: str, step_trigger: str,
+    ) -> dict[str, Any]:
+        if step_trigger not in {"capability_result", "timer", "scheduled"}:
+            raise ValueError("autonomous step trigger is invalid.")
+        events = run.get("result_events") or []
+        latest = events[-1] if events else None
+        latest_result = None
+        if latest is not None:
+            latest_result = {
+                key: latest.get(key)
+                for key in ("event_id", "created_at", "capability_id", "tool_name")
+            }
+            latest_result["age_seconds"] = (
+                self._parse_iso(current_time) - self._parse_iso(latest["created_at"])
+            ).total_seconds()
+        return {
+            "step_trigger": step_trigger,
+            "result_received_for_this_step": step_trigger == "capability_result",
+            "latest_result": latest_result,
+            "result_count": len(events),
+        }
+
     def _build_autonomous_step_context(
         self,
         *,
@@ -1391,6 +1423,7 @@ class ServiceAutonomousRunMixin:
         current_time: str,
         source_current_input: dict[str, Any] | None,
         last_result_context: dict[str, Any] | None,
+        step_trigger: str = "scheduled",
         pre_send_check_feedback: str | None = None,
         completion_review_feedback: str | None = None,
     ) -> AutonomousStepContext:
@@ -1464,6 +1497,9 @@ class ServiceAutonomousRunMixin:
         )
         return AutonomousStepContext(
             run=self._autonomous_run_prompt_summary(run),
+            observation_context=self._autonomous_step_observation_context(
+                run=run, current_time=current_time, step_trigger=step_trigger,
+            ),
             current_input=current_input,
             recent_turns=recent_turns,
             time_context=self._build_time_context(current_time=current_time),
