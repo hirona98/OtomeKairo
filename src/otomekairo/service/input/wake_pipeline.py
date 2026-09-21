@@ -23,6 +23,7 @@ class ServiceInputWakePipelineMixin:
         cycle_id: str | None = None,
         observation_summary: dict[str, Any] | None = None,
         reference_context: dict[str, Any] | None = None,
+        recent_interactions: list[dict[str, Any]] | None = None,
     ) -> tuple[dict[str, Any], str, dict[str, Any]]:
         cycle_label = self._debug_cycle_label(cycle_id)
         # 入力テキスト
@@ -191,6 +192,7 @@ class ServiceInputWakePipelineMixin:
             started_at=started_at,
             input_text=input_text,
             recent_turns=recent_turns,
+            recent_interactions=recent_interactions,
             cycle_id=cycle_id,
             trigger_kind=trigger_kind,
             client_context=client_context,

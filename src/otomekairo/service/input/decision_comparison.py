@@ -227,6 +227,7 @@ class ServiceInputDecisionComparisonMixin:
             text="自己評価。いま短い見方として外へ出るかを見る。",
         )
         return self._build_decision_context(
+            recent_interactions=kwargs.get("recent_interactions"),
             input_text=isolated_input.text,
             current_input=isolated_input,
             trigger_kind=kwargs["trigger_kind"],

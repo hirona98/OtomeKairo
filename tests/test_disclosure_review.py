@@ -29,6 +29,55 @@ class DisclosureService(ServiceInputDecisionComparisonMixin, ServiceInputPipelin
 
 
 class DisclosureReviewTests(unittest.TestCase):
+    def test_decision_only_conversation_is_reviewed_without_recalled_memory(self) -> None:
+        llm = ReviewLLM({
+            "outcome": "rewrite", "speech_text": "雨が上がりました。",
+            "reason_code": "removed_other_conversation",
+        })
+        service = DisclosureService(llm)
+        groups = [{
+            "interaction_ref": "interaction:other",
+            "turns": [{
+                "event_id": "event:private", "role": "person",
+                "speaker_ref": "person:other", "participant_refs": ["person:other"],
+                "text": "他の場で交わした非公開の話。", "created_at": "2026-09-21T16:14:00+09:00",
+            }],
+        }]
+        for current_input in (
+            self._current_input("person:current"),
+            CurrentInput(sender_kind="system", sender_ref=None, source_kind="background_thinking",
+                         response_target_refs=(), interaction_context=None, text="自己評価。"),
+        ):
+            with self.subTest(sender_kind=current_input.sender_kind):
+                result = service._apply_disclosure_review(
+                    model_config={}, persona_context=self._persona_context(), current_input=current_input,
+                    recall_pack={}, recent_interactions=groups,
+                    speech_payload={"speech_text": "判断理由を経由して他の会話に触れた候補。"},
+                    decision={"kind": "speech"},
+                )
+                self.assertEqual(result["speech_text"], "雨が上がりました。")
+                self.assertEqual(result["disclosure_review"]["reviewed_source_refs"], ["event:private"])
+                self.assertNotIn("非公開", str(result["disclosure_review"]))
+                source = llm.calls[-1]["review_context"]["other_person_sources"][0]
+                self.assertEqual(source["interaction_ref"], "interaction:other")
+                self.assertEqual(source["text"], groups[0]["turns"][0]["text"])
+
+    def test_grouped_conversation_review_failure_propagates(self) -> None:
+        class FailingReview(ReviewLLM):
+            def generate_disclosure_review(self, **kwargs):
+                raise RuntimeError("review unavailable")
+
+        service = DisclosureService(FailingReview({}))
+        with self.assertRaisesRegex(RuntimeError, "review unavailable"):
+            service._apply_disclosure_review(
+                model_config={}, persona_context=self._persona_context(),
+                current_input=self._current_input("person:current"), recall_pack={},
+                recent_interactions=[{"interaction_ref": "interaction:other", "turns": [{
+                    "event_id": "event:private", "participant_refs": ["person:other"],
+                }]}],
+                speech_payload={"speech_text": "候補。"}, decision={"kind": "speech"},
+            )
+
     def test_other_person_provenance_triggers_rewrite_and_minimal_audit(self) -> None:
         llm = ReviewLLM(
             {
@@ -86,6 +135,10 @@ class DisclosureReviewTests(unittest.TestCase):
             model_config={},
             persona_context=self._persona_context(),
             current_input=self._current_input("person:current"),
+            recent_interactions=[{
+                "interaction_ref": "interaction:current",
+                "turns": [{"event_id": "event:current", "participant_refs": ["person:current"]}],
+            }],
             recall_pack={
                 "person_model": [
                     {

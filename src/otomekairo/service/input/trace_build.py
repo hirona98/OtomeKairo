@@ -613,6 +613,7 @@ class ServiceInputTraceBuildMixin:
         recall_pack: dict[str, Any],
         decision: dict[str, Any],
         pending_intent_summary: dict[str, Any] | None,
+        recent_interaction_summary: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         trace = {
             "reason_summary": decision["reason_summary"],
@@ -620,6 +621,7 @@ class ServiceInputTraceBuildMixin:
             "memory_summary": state["memory_sets"][state["selected_memory_set_id"]]["display_name"],
             "current_context_summary": self._clamp(input_text),
             "internal_context_summary": {
+                "recent_interaction_summary": recent_interaction_summary or [],
                 "time_context": time_context,
                 "affect_context_summary": self._summarize_affect_context(affect_context),
                 "drive_state_summary": drive_state_summary,

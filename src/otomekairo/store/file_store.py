@@ -784,6 +784,51 @@ class SQLiteMemoryStore(
         ]
         return turns
 
+    def load_recent_interactions(
+        self,
+        *,
+        memory_set_id: str,
+        since_iso: str,
+        limit_per_interaction: int,
+    ) -> list[dict[str, Any]]:
+        # 各場の取得枠を分け、発話の多い場が他の会話を押し出さないようにする。
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                """
+                WITH ranked AS (
+                    SELECT event_id, role, text, interaction_ref, speaker_ref,
+                           participant_refs_json, created_at, rowid AS event_order,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY interaction_ref
+                               ORDER BY created_at DESC, rowid DESC
+                           ) AS turn_rank
+                    FROM events
+                    WHERE memory_set_id = ?
+                      AND kind IN ('conversation_input', 'speech')
+                      AND text IS NOT NULL
+                      AND created_at >= ?
+                )
+                SELECT * FROM ranked WHERE turn_rank <= ?
+                ORDER BY created_at, event_order
+                """,
+                (memory_set_id, since_iso, limit_per_interaction),
+            ).fetchall()
+        groups: dict[str | None, dict[str, Any]] = {}
+        for row in rows:
+            group = groups.setdefault(row["interaction_ref"], {
+                "interaction_ref": row["interaction_ref"],
+                "turns": [],
+            })
+            group["turns"].append({
+                "event_id": row["event_id"],
+                "role": row["role"],
+                "text": row["text"],
+                "speaker_ref": row["speaker_ref"],
+                "participant_refs": json.loads(row["participant_refs_json"]),
+                "created_at": row["created_at"],
+            })
+        return list(groups.values())
+
     def load_conversation_history(
         self,
         *,

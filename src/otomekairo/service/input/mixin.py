@@ -614,6 +614,19 @@ class ServiceInputMixin(
             limit=turn_limit,
         )
 
+    def _load_recent_interactions(
+        self,
+        state: dict,
+    ) -> list[dict]:
+        selected_preset = state["model_presets"][state["selected_model_preset_id"]]
+        prompt_window = selected_preset["prompt_window"]
+        threshold = local_now() - timedelta(minutes=prompt_window["recent_turn_minutes"])
+        return self.store.load_recent_interactions(
+            memory_set_id=state["selected_memory_set_id"],
+            since_iso=threshold.isoformat(),
+            limit_per_interaction=prompt_window["recent_turn_limit"],
+        )
+
     def _recall_hint_recent_turns(self, recent_turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
         # RecallHint は入口判断なので prompt_window 候補をさらに軽くする。
         return recent_turns[-RECALL_HINT_RECENT_TURN_LIMIT:]
@@ -649,7 +662,15 @@ class ServiceInputMixin(
         interaction_context: Any = None,
     ) -> bool:
         # wake 開始後に会話 turn が追加された場合、開始時 snapshot は古い。
-        for turn in self._load_recent_turns(state, interaction_context):
+        if interaction_context is None:
+            turns = [
+                turn
+                for group in self._load_recent_interactions(state)
+                for turn in group["turns"]
+            ]
+        else:
+            turns = self._load_recent_turns(state, interaction_context)
+        for turn in turns:
             created_at = turn.get("created_at") if isinstance(turn, dict) else None
             if isinstance(created_at, str) and created_at > started_at:
                 return True

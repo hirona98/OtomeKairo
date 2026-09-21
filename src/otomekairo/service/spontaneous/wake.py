@@ -119,6 +119,7 @@ class ServiceSpontaneousWakeMixin:
             cycle_id = self._new_cycle_id()
             started_at = self._now_iso()
             recent_turns = self._load_recent_turns(state, interaction_context)
+            recent_interactions = self._load_recent_interactions(state)
             runtime_summary = self._build_runtime_summary(state)
             pending_intent_selection = self._empty_pending_intent_selection_trace()
             observation_summary: dict[str, Any] | None = None
@@ -198,6 +199,7 @@ class ServiceSpontaneousWakeMixin:
                     client_context=client_context,
                     interaction_context=interaction_context,
                     recent_turns=recent_turns,
+                    recent_interactions=recent_interactions,
                     selected_candidate=selected_candidate,
                     pending_intent_selection=pending_intent_selection,
                     cycle_id=cycle_id,

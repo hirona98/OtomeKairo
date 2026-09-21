@@ -304,6 +304,7 @@ class DecisionContext:
     pre_send_check_feedback: str | None = None
     agent_skill_context: dict[str, Any] | None = None
     comparison_scope: str = "full"
+    recent_interactions: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
