@@ -597,7 +597,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertIn("mcp.call_tool", [item["id"] for item in isolated.capability_summary.get("unavailable_items", [])])
         self.assertIsNotNone(family)
         self.assertTrue(family.available)
-        self.assertIn("気にかけていること 1 件", family.reason_summary)
+        self.assertIn("設定された活動 1 件", family.reason_summary)
         self.assertNotIn("現在観測候補", family.reason_summary)
         self.assertNotIn("available capability", family.reason_summary)
         self.assertIsNone(family.preferred_capability_id)
@@ -635,7 +635,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertFalse(family.available)
         self.assertFalse(family.selected)
         self.assertIsNone(isolated.selected_candidate_family)
-        self.assertEqual(family.blocking_reason_summary, "気にかけていることも前景の drive_state も無い。")
+        self.assertEqual(family.blocking_reason_summary, "設定された活動も前景の drive_state も無い。")
 
     def test_outward_speech_workspace_drops_self_activity_means(self) -> None:
         service = DummyInputService()

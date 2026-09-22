@@ -145,7 +145,7 @@ class ServiceInputInitiativeContextMixin:
         if isinstance(selected_candidate, dict):
             return "自律判断の評価機会があり、保留候補をいま扱うか、保留を続けるか、見送るかを選ぶ。"
         if due_standing_concerns:
-            return "気にかけていることがしばらく前景に出ていない。"
+            return "設定された活動が、今回の自己評価の候補にある。"
         if (
             isinstance(initiative_entry_summary, dict)
             and initiative_entry_summary.get("entry_kind") == "enter"

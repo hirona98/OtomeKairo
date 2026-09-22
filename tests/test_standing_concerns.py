@@ -9,10 +9,12 @@ from otomekairo.defaults import (
 )
 from otomekairo.llm.contexts import CurrentInput
 from otomekairo.service.input.pipeline import ServiceInputPipelineMixin
+from otomekairo.service.app import OtomeKairoService
 from otomekairo.service.standing_concerns import (
     build_standing_concern_orientation_context,
     list_due_standing_concerns,
     selected_standing_concern_ids,
+    standing_concern_ids_from_runs,
     standing_concern_is_due,
 )
 from otomekairo.store.file_store import FileStore
@@ -103,6 +105,34 @@ class StandingConcernLogicTests(unittest.TestCase):
             current_time="2026-08-13T12:00:00+09:00",
         )
         self.assertEqual([item["concern_id"] for item in due], ["elyth"])
+
+    def test_active_run_hides_elapsed_concern(self) -> None:
+        due = list_due_standing_concerns(
+            concerns=[
+                {
+                    "concern_id": "elyth",
+                    "enabled": True,
+                    "min_interval_seconds": 60,
+                    "concern_summary": "ELYTH",
+                }
+            ],
+            last_attended_at_by_id={"elyth": "2026-08-13T10:00:00+09:00"},
+            current_time="2026-08-13T12:00:00+09:00",
+            active_concern_ids={"elyth"},
+        )
+        self.assertEqual(due, [])
+
+    def test_ids_from_runs_keep_non_empty_strings(self) -> None:
+        self.assertEqual(
+            standing_concern_ids_from_runs(
+                [
+                    {"standing_concern_ids": [" elyth ", ""]},
+                    {"standing_concern_ids": "elyth"},
+                    {},
+                ]
+            ),
+            {"elyth"},
+        )
 
     def test_attendance_requires_action_and_factor_selection(self) -> None:
         workspace = {
@@ -242,6 +272,50 @@ class StandingConcernWorkspaceTests(unittest.TestCase):
 
 
 class StandingConcernStoreTests(unittest.TestCase):
+    def test_active_run_removes_concern_from_due_list(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            state["standing_concerns"] = [
+                {
+                    "concern_id": "elyth",
+                    "enabled": True,
+                    "min_interval_seconds": 60,
+                    "concern_summary": "ELYTH",
+                }
+            ]
+            current_time = "2026-08-13T12:00:00+09:00"
+            self.assertEqual(
+                [item["concern_id"] for item in service._due_standing_concerns(state=state, current_time=current_time)],
+                ["elyth"],
+            )
+            service.store.upsert_autonomous_run(
+                autonomous_run={
+                    "run_id": "autonomous_run:elyth-open",
+                    "memory_set_id": state["selected_memory_set_id"],
+                    "status": "active",
+                    "standing_concern_ids": ["elyth"],
+                    "created_at": current_time,
+                    "updated_at": current_time,
+                }
+            )
+            self.assertEqual(service._due_standing_concerns(state=state, current_time=current_time), [])
+            service.store.upsert_autonomous_run(
+                autonomous_run={
+                    "run_id": "autonomous_run:elyth-open",
+                    "memory_set_id": state["selected_memory_set_id"],
+                    "status": "completed",
+                    "standing_concern_ids": ["elyth"],
+                    "created_at": current_time,
+                    "updated_at": current_time,
+                    "completed_at": current_time,
+                }
+            )
+            self.assertEqual(
+                [item["concern_id"] for item in service._due_standing_concerns(state=state, current_time=current_time)],
+                ["elyth"],
+            )
+
     def test_new_store_has_default_standing_concerns(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = FileStore(Path(temp_dir))

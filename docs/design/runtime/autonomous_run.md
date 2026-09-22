@@ -30,6 +30,7 @@
 | `created_at / updated_at / completed_at` | lifecycle 時刻 |
 | `source_cycle_id` | run を開始した入力サイクル |
 | `source_commitment_memory_unit_ids` | run の根拠になった commitment memory |
+| `standing_concern_ids` | 着手した活動の `concern_id`。非終端のあいだ、同じ活動を定期思考の候補に出さない。手段の選択には使わない |
 | `commitment_resolution` | terminal 時の commitment 更新結果 |
 
 `autonomous_run` は capability request の wire payload に載せない。
@@ -212,7 +213,9 @@ server は orphan を timeout と同じ再評価可能状態へ戻し、未完�
 
 ## 関心から始める作業の範囲
 
-関心は継続的な向きであり、そこから開始する run は今回の関与を単位とする。`objective_summary` に今回達成する範囲と完了条件を明示する。状況把握なら、今回の情報を確認し、応じるか・表現するかを判断して、必要な関与を終えた時点で完了する。関心自体が続いていても、今回の関与が済めば run を閉じる。
+間隔が開いた活動から開始する run は、今回の関与を単位とする。活動の設定は run のあとにも残る。`objective_summary` に今回達成する範囲と完了条件を明示する。状況を見るなら、今回の情報を確認し、応じるか・表現するかを判断して、必要な応対をこの run の中で終える。応じない判断で完了してよい。見えている応対を、次の定期思考まで残さない。活動の設定が続いていても、今回の関与が済めば run を閉じる。
+
+会話から開始する run は、依頼を受けたことを外へ返すのが自然なとき、最初の step で短く返してから作業へ進む。伝える目的があるときは、実績を報告する発話で完了する。この発話は、開始時に残した `origin_interaction_ref` と参加者があるとき、その場へ届く。
 
 継続観測が必要な場合、目的には継続する必要性と、終了条件または継続の必要性を再評価する条件を明示する。step はこの条件に照らして継続・完了・中断を判断する。
 

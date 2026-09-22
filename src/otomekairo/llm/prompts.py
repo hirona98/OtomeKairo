@@ -276,9 +276,9 @@ def build_agent_skill_selection_messages(*, selection_context: dict[str, Any]) -
             "content": (
                 "Agent Skills catalog から、現在の判断や作業に実際に必要な skill だけを選択します。\n"
                 "名前の一致ではなく、current_input、recent_turns、work_log、run、capability の意味と skill description を比較してください。\n"
-                "orientation_context.standing_concerns は、しばらく関わっていない気にかけていることであり、実行指示ではありません。"
+                "orientation_context.standing_concerns は、今回の判断で検討できる活動であり、実行指示ではありません。"
                 "current_input をこの cycle の向きの本体とし、standing_concerns は自発的な判断の追加材料として扱います。"
-                "関心があること自体は skill 選択を義務づけません。"
+                "候補に出ていること自体は skill 選択を義務づけません。"
                 "見る、返す、自分から表現するなどの全体に合う workflow が必要な場合は、最初の観測だけに縮めずその workflow を比較します。\n"
                 "人物発話の向きでは recent_turns はその会話の本体です。work_log は同じ向きで得た能力結果です。\n"
                 "work_log の完了済み手順はすでに進んだ作業です。今まだ必要な skill だけを選びます。\n"
@@ -435,7 +435,7 @@ def build_autonomous_start_review_messages(*, review_context: dict[str, Any]) ->
             "既存実行の維持、結果待ち、タイマー待機の継続だけなら reject_start とします。"
             "理由が維持・静観なのに作成や置換を行うなど、操作と理由が不整合な場合も reject_start です。"
             "言い換えも含め目的の意味と実行範囲を比較し、同じ場での独立した追加作業は許可します。"
-            "関心から始める作業には今回の範囲と完了条件が必要です。継続観測には必要性と終了または再評価条件が必要です。"
+            "候補に出ている活動から始める作業には、今回の範囲と完了条件が必要です。継続観測には必要性と終了または再評価条件が必要です。"
             "条件を欠く候補は reject_start とします。"
             "JSONの outcome, reason_summary だけを返します。outcome は allow_start または reject_start、"
             "reason_summary は原文を引用せず短い判定理由とします。"
@@ -471,6 +471,8 @@ def build_autonomous_completion_review_messages(
                 "外界への作用が目的である run では、予定、準備、意思表明だけを作用の完了実績にしません。\n"
                 "目的達成にまだ外界作用、観測、待機が必要な場合、または候補 speech が未実行の次行動を"
                 "現在 run の続きとして表す場合は continue_run を選びます。\n"
+                "目的が、見えている働きかけへ必要なら応じることを含み、その応対が実績に無い場合は continue_run を選びます。"
+                "応じないと判断して目的を終えている場合は allow_complete にできます。\n"
                 "一般的な将来の可能性ではなく、現在 run が次に履行する具体的な行動かを文脈で判断します。\n"
                 "JSON オブジェクト1個だけを返します。キーは outcome, reason_summary の2個です。"
                 "outcome は allow_complete または continue_run です。"
@@ -1114,7 +1116,7 @@ def _decision_role_section(comparison_scope: str) -> str:
     if comparison_scope == "self_activity":
         return (
             "自律 AI 本体の内部処理 role `decision_generation` として、自身の活動を判断します。\n"
-            "この比較は、今、気にかけていることや継続中の自身の活動へ関わるかを決めます。\n"
+            "この比較は、今、候補に出ている活動や継続中の自身の活動へ関わるかを決めます。\n"
             f"人格設定、記憶、向き、能力を踏まえて、{kinds} のいずれかを決め、JSON オブジェクト 1 個だけを返してください。\n"
             "人格本文と利用境界は internal context の persona_context に入ります。"
         )
@@ -1223,8 +1225,9 @@ def _decision_capability_run_rules(*, include_person_start: bool) -> str:
         "既存 run に目的が含まれ、結果待ちやタイマー待機をそのまま維持する場合は noop を選びます。"
         "noop でも既存 run は存続し、結果到着や時刻到来時に server が再開します。"
         "create_new は独立した追加目的の開始、replace_existing は中核目的の変更です。\n"
-        "関心は関わる向きとして持ち続け、そこから始める run の objective_summary には今回達成する範囲と完了条件を書きます。"
-        "状況把握なら、今回の情報を確認し、応じるか・表現するかを判断して、必要な関与を終えるまでを一単位にします。"
+        "候補に出ている活動から run を始めるとき、objective_summary には今回の範囲と完了条件を書きます。"
+        "状況を見るなら、今回の情報を確認し、応じるか・表現するかを判断して、必要な応対をこの run の中で終えます。"
+        "応じない判断でこの関与を終えてよいです。"
         "継続観測を選ぶ場合は、その必要性と終了条件または継続の必要性を再評価する条件を objective_summary に明示します。\n"
     )
     if include_person_start:
@@ -1252,8 +1255,8 @@ def _decision_full_rules_section() -> str:
         + _decision_recall_evidence_rules()
         + "RecallPack.visual_observations は過去画像の詳細な視覚説明、visual_daily_digests は日単位の整理です。特定物体の有無は visual_observations を優先します。\n"
         "自律判断時だけ InitiativeContext、capability_result 時だけ CapabilityResultContext が入ります。trigger 固有の差分は trigger_policy です。\n"
-        "WorkspaceContext は同じ盤面の前景候補です。standing_concern は気にかけていることであり、実行指示ではありません。"
-        "視覚観測は感覚、standing_concern は向きです。人物側の状況は outward_speech の hold にだけ使えます。"
+        "WorkspaceContext は同じ盤面の前景候補です。standing_concern は、今回の候補に出ている活動であり、実行指示ではありません。"
+        "視覚観測は感覚です。standing_concern は候補の活動です。人物側の状況は outward_speech の hold にだけ使えます。"
         "今関わる自然さがあれば capability_request または autonomous_run を比べます。\n"
         + _decision_foreground_selection_rules()
         + _decision_context_view_rules()
@@ -1269,16 +1272,16 @@ def _decision_self_activity_rules_section() -> str:
     return (
         _decision_recall_evidence_rules()
         + "自律判断時だけ InitiativeContext が入ります。trigger 固有の差分は trigger_policy です。\n"
-        "WorkspaceContext は向き、継続行動、能力候補の前景です。standing_concern は気にかけていることであり、実行指示ではありません。\n"
+        "WorkspaceContext は活動、継続行動、能力候補の前景です。standing_concern は、今回の候補に出ている活動であり、実行指示ではありません。\n"
         "今関わる自然さがあれば capability_request または autonomous_run を選びます。"
         "関わり方は、見る、返す、自分から書くを同じ盤面で比べます。"
-        "今その向きに立つ言葉があれば自分から書いてよいです。"
-        "向きと CapabilityDecisionView の catalog から autonomous_run を始めてよいです。人物発話による依頼はこの比較の前提ではありません。"
-        "autonomous_run.objective_summary は向き自身の言葉です。人物側の観測成果を称賛したり報告したりする目的にはしません。"
+        "今その活動に立つ言葉があれば自分から書いてよいです。"
+        "活動と CapabilityDecisionView の catalog から autonomous_run を始めてよいです。人物発話による依頼はこの比較の前提ではありません。"
+        "autonomous_run.objective_summary は今回の関与の範囲と完了条件を、個の言葉で書きます。設定文のコピーや、人物側の観測成果の報告を目的にしません。"
         + _external_write_address_instruction()
-        + "その関心に関われる手段が CapabilityDecisionView に available=true であるときだけ、その手段で関わる。"
+        + "その活動に関われる手段が CapabilityDecisionView に available=true であるときだけ、その手段で関わる。"
         "手段が無いときは今は関わらない。\n"
-        "今関わらないときは pending_intent または noop を選び、控える理由は今その関心に関わらないこととして書きます。\n"
+        "今関わらないときは pending_intent または noop を選び、控える理由は今その活動に関わらないこととして書きます。\n"
         + _decision_foreground_selection_rules(comparison_scope="self_activity")
         + "SelfStateContext は AI 本体側の感覚信頼度、働きかけやすさ、継続行動の安定です。気分は AffectContext.mood_state を参照します。\n"
         + "AffectContext の affect_states と recent_episode_affects は WorkspaceContext の affect 候補です。\n"
@@ -1360,7 +1363,7 @@ def _decision_output_contract_section(comparison_scope: str) -> str:
             + "target_stances は self_activity を 1 件だけ持ちます。\n"
             "kind=capability_request または autonomous_run では self_activity=advance です。\n"
             "kind=pending_intent または noop では self_activity=hold です。\n"
-            "控える理由は、今その関心に関わらないこととして書いてください。"
+            "控える理由は、今その活動に関わらないこととして書いてください。"
         )
     if comparison_scope == "outward_speech":
         return (
@@ -1376,7 +1379,7 @@ def _decision_output_contract_section(comparison_scope: str) -> str:
         "kind=speech では outward_speech=advance、載っている self_activity は hold です。対話の継続は outward_speech です。\n"
         "kind=capability_request または autonomous_run では self_activity=advance、outward_speech は hold です。\n"
         "kind=noop は載っている対象をすべて hold したときだけです。外向きだけ控える判断を noop にしないでください。\n"
-        "人物側の状況は outward_speech の hold 理由にだけ使い、self_activity の hold は向き自身の理由で書いてください。"
+        "人物側の状況は outward_speech の hold 理由にだけ使い、self_activity の hold はその活動自身の理由で書いてください。"
     )
 
 
@@ -1591,7 +1594,7 @@ def _build_decision_trigger_policy(
         policies.extend(_capability_result_trigger_policies(capability_result_context))
     if initiative_context is not None:
         policies.append(
-            "この trigger は自己評価です。感覚と向きを同じ盤面で比べます。standing_concern は実行指示ではありません。"
+            "この trigger は自己評価です。感覚と、候補に出ている活動を同じ盤面で比べます。standing_concern は実行指示ではありません。"
         )
         policies.append(_speech_frequency_policy(initiative_context.speech_frequency_level))
         policies.extend(_initiative_field_guide())
@@ -1651,7 +1654,8 @@ def _build_autonomous_step_system_prompt() -> str:
             "due 後に目的の声かけ、確認、支援が必要なら speech action を選び、その目的が満たされたら complete を選んでください。\n"
             "speech と complete を組み合わせるのは、今回の発話自体が伝達目的を果たす場合、または既に得られた実績を報告して閉じる場合です。"
             "次の外界作用が目的に残る場合は、その作用を capability_request として実行するか、適切な時刻まで wait_until で run を維持してください。\n"
-            "今回の関与と判断が完了したら、関心自体が続いていても run は complete にします。"
+            "今回の関与が済んだら、この活動の説明がこれからも残っていても run は complete にします。"
+            "見えている応対は、この run のうちに扱います。必要なら次の手で応じ、必要が無ければ complete にします。"
             "継続観測は目的に記された必要性と終了・再評価条件に照らして続けるかを判断します。\n"
             "目的が満たされたら transition.kind=complete を選んでください。\n"
             "目的が不成立、危険、文脈不整合、ユーザー停止指示がある場合は transition.kind=cancel を選んでください。",

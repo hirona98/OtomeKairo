@@ -16,6 +16,7 @@ from otomekairo.service.capability import (
     PreSendCheckWithheldError,
 )
 from otomekairo.service.common import ServiceError, debug_log
+from otomekairo.service.standing_concerns import selected_standing_concern_ids
 
 
 AUTONOMOUS_RUN_POLL_SECONDS = 1.0
@@ -627,6 +628,7 @@ class ServiceAutonomousRunMixin:
         source_current_input: dict[str, Any],
         source_cycle_id: str | None,
         assistant_message_target_client_id: str | None,
+        workspace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         run_payload = decision.get("autonomous_run")
         if not isinstance(run_payload, dict):
@@ -705,6 +707,12 @@ class ServiceAutonomousRunMixin:
                 ]
         if isinstance(source_cycle_id, str) and source_cycle_id.strip():
             run["source_cycle_id"] = source_cycle_id.strip()
+        concern_ids = selected_standing_concern_ids(
+            decision=decision,
+            workspace_context=workspace_context,
+        )
+        if concern_ids:
+            run["standing_concern_ids"] = concern_ids
         normalized_target = self._normalize_capability_client_id(assistant_message_target_client_id)
         if normalized_target is not None:
             run["assistant_message_target_client_id"] = normalized_target

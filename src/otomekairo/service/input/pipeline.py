@@ -2461,6 +2461,7 @@ class ServiceInputPipelineMixin:
                 source_current_input=source_current_input,
                 source_cycle_id=cycle_id,
                 assistant_message_target_client_id=assistant_message_target_client_id,
+                workspace_context=workspace_context,
             )
             run_payload = start_result.get("autonomous_run")
             if isinstance(run_payload, dict):

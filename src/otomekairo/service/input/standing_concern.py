@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from otomekairo.service.autonomous_run import AUTONOMOUS_RUN_ACTIVE_STATUSES
 from otomekairo.service.standing_concerns import (
     list_due_standing_concerns,
     selected_standing_concern_ids,
+    standing_concern_ids_from_runs,
 )
 
 
@@ -17,11 +19,23 @@ class ServiceInputStandingConcernMixin:
                 self._wake_runtime_state["standing_concern_last_attended_at"] = stored
             return stored
 
+    def _active_standing_concern_ids(self, *, state: dict[str, Any]) -> set[str]:
+        memory_set_id = state.get("selected_memory_set_id")
+        if not isinstance(memory_set_id, str) or not memory_set_id.strip():
+            return set()
+        runs = self.store.list_autonomous_runs(
+            memory_set_id=memory_set_id,
+            statuses=sorted(AUTONOMOUS_RUN_ACTIVE_STATUSES),
+            limit=None,
+        )
+        return standing_concern_ids_from_runs(runs)
+
     def _due_standing_concerns(self, *, state: dict[str, Any], current_time: str) -> list[dict[str, Any]]:
         return list_due_standing_concerns(
             concerns=state.get("standing_concerns"),
             last_attended_at_by_id=self._standing_concern_last_attended_map(),
             current_time=current_time,
+            active_concern_ids=self._active_standing_concern_ids(state=state),
         )
 
     def _standing_concern_runtime_snapshot(

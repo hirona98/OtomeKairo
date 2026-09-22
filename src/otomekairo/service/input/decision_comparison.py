@@ -16,8 +16,8 @@ SELF_ACTIVITY_EXECUTE_KINDS = frozenset({"capability_request", "autonomous_run"}
 SELF_ACTIVITY_EXCLUDED_CAPABILITY_IDS = frozenset({"vision.capture", "camera.ptz"})
 SELF_ACTIVITY_INPUT_TEXT = "自己評価。今、自身の活動へ関わるかを見る。"
 SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT = (
-    "自己評価。しばらく関わっていない気にかけていることがある。"
-    "今それに関わるか、関わるなら見る、返す、自分から書くのどれが今の向きとして自然かを見る。"
+    "自己評価。設定された活動が候補にある。"
+    "今それに関わるか、関わるなら見る、返す、自分から書くのどれが自然かを見る。"
 )
 
 
@@ -495,13 +495,13 @@ class ServiceInputDecisionComparisonMixin:
                     preferred_result_reason_summary=None,
                     preferred_capability_id=None,
                     preferred_capability_input=None,
-                    blocking_reason_summary="気にかけていることも前景の drive_state も無い。",
+                    blocking_reason_summary="設定された活動も前景の drive_state も無い。",
                 )
             )
         return replace(
             initiative_context,
             opportunity_summary=(
-                "気にかけていることがしばらく前景に出ていない。"
+                "設定された活動が、今回の自己評価の候補にある。"
                 if due_standing_concerns
                 else "今、自身の活動へ関わるかを見る。"
             ),

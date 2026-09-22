@@ -39,13 +39,29 @@ def standing_concern_is_due(
     return current_dt >= last_attended_dt + timedelta(seconds=int(min_interval_seconds))
 
 
+def standing_concern_ids_from_runs(runs: list[dict[str, Any]] | None) -> set[str]:
+    found: set[str] = set()
+    for run in runs or []:
+        if not isinstance(run, dict):
+            continue
+        raw_ids = run.get("standing_concern_ids")
+        if not isinstance(raw_ids, list):
+            continue
+        for concern_id in raw_ids:
+            if isinstance(concern_id, str) and concern_id.strip():
+                found.add(concern_id.strip())
+    return found
+
+
 def list_due_standing_concerns(
     *,
     concerns: list[dict[str, Any]] | None,
     last_attended_at_by_id: dict[str, str] | None,
     current_time: str,
+    active_concern_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     attended = last_attended_at_by_id if isinstance(last_attended_at_by_id, dict) else {}
+    active = active_concern_ids if isinstance(active_concern_ids, set) else set()
     due: list[dict[str, Any]] = []
     for concern in concerns or []:
         if not isinstance(concern, dict):
@@ -53,10 +69,13 @@ def list_due_standing_concerns(
         concern_id = concern.get("concern_id")
         if not isinstance(concern_id, str) or not concern_id.strip():
             continue
+        normalized_id = concern_id.strip()
+        if normalized_id in active:
+            continue
         if standing_concern_is_due(
             enabled=concern.get("enabled") is True,
             min_interval_seconds=int(concern.get("min_interval_seconds") or 0),
-            last_attended_at=attended.get(concern_id.strip()),
+            last_attended_at=attended.get(normalized_id),
             current_time=current_time,
         ):
             due.append(concern)

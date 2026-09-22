@@ -844,15 +844,15 @@ class DecisionPromptScopeTests(unittest.TestCase):
 
     def test_self_activity_prompt_asks_orientation_not_reply(self) -> None:
         system = self._system_prompt("self_activity")
-        self.assertIn("今、気にかけていることや継続中の自身の活動へ関わるか", system)
+        self.assertIn("今、候補に出ている活動や継続中の自身の活動へ関わるか", system)
         self.assertIn("capability_request / autonomous_run / pending_intent / noop", system)
-        self.assertIn("向きと CapabilityDecisionView の catalog から autonomous_run を始めてよい", system)
-        self.assertIn("autonomous_run.objective_summary は向き自身の言葉です", system)
+        self.assertIn("活動と CapabilityDecisionView の catalog から autonomous_run を始めてよい", system)
+        self.assertIn("autonomous_run.objective_summary は今回の関与の範囲と完了条件を、個の言葉で書きます", system)
         self.assertIn("capability_request.input の自然文は、その能力の先の場へ向けた個の表現です", system)
         self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です", system)
         self.assertIn("使わない排他キーもキーとして残し、値は null にします", system)
         self.assertIn("kind が capability_request のとき capability_request は object、pending_intent と autonomous_run は null です", system)
-        self.assertIn("その関心に関われる手段が CapabilityDecisionView に available=true であるときだけ", system)
+        self.assertIn("その活動に関われる手段が CapabilityDecisionView に available=true であるときだけ", system)
         self.assertIn("手段が無いときは今は関わらない", system)
         self.assertIn("target_stances は self_activity を 1 件だけ持ちます", system)
         self.assertIn("控える理由を説明できる候補を primary factor に選んでください", system)
@@ -873,7 +873,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("構造化済み抑制は suppression、会話の間合いは conversation_context 候補を使えます", system)
         self.assertIn("AffectContext の affect_states と recent_episode_affects は WorkspaceContext の affect 候補です。", system)
         self.assertNotIn("今見に行く自然さがあれば capability_request", system)
-        self.assertNotIn("向きと CapabilityDecisionView の catalog から autonomous_run", system)
+        self.assertNotIn("活動と CapabilityDecisionView の catalog から autonomous_run", system)
         self.assertNotIn("有限 MCP セッションは CapabilityDecisionView", system)
 
     def test_full_prompt_keeps_combined_question(self) -> None:
