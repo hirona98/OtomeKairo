@@ -57,10 +57,17 @@ class ServiceInputWakeObservationMixin:
         debug_log("Wake", f"{cycle_label} observations done summary={self._clamp(summary_text)}")
         next_context = {
             **client_context,
-            "wake_observations": summaries,
-            "wake_observation_summary": summary_text,
+            "wake_observation_trace": {
+                "wake_observations": summaries,
+                "wake_observation_summary": summary_text,
+            },
         }
-        visual_signals = self._wake_policy_visual_observation_signals(summaries)
+        # 取得の運用記録と判断材料を分ける。正常な見送りは観測 OFF と同じ入力にする。
+        decision_summaries = [summary for summary in summaries if summary.get("status") != "skipped"]
+        if decision_summaries:
+            next_context["wake_observations"] = decision_summaries
+            next_context["wake_observation_summary"] = self._wake_policy_observation_summary_text(decision_summaries)
+        visual_signals = self._wake_policy_visual_observation_signals(decision_summaries)
         if visual_signals:
             next_context["visual_observation_signals"] = visual_signals
         return next_context
