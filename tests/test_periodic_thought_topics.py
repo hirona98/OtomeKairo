@@ -225,12 +225,41 @@ class PeriodicThoughtTopicWorkspaceTests(unittest.TestCase):
         )
 
     def test_workspace_includes_due_periodic_thought_topic(self) -> None:
+        for source_kind in ("wake", "background_thinking"):
+            with self.subTest(source_kind=source_kind):
+                payload = self._workspace_with_due_topic("system", source_kind)
+                topics = [
+                    candidate for candidate in payload["workspace_candidates"]
+                    if candidate["kind"] == "periodic_thought_topic"
+                ]
+                self.assertEqual(len(topics), 1)
+                self.assertEqual(topics[0]["factor_ref"], "periodic_thought_topic:elyth")
+                self.assertEqual(topics[0]["summary_text"], DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_SUMMARY)
+
+    def test_conversation_and_results_do_not_foreground_due_topics(self) -> None:
+        for sender_kind, source_kind in (
+            ("person", "user_message"),
+            ("capability", "capability_result"),
+            ("capability", "background_thinking"),
+        ):
+            with self.subTest(sender_kind=sender_kind, source_kind=source_kind):
+                payload = self._workspace_with_due_topic(sender_kind, source_kind)
+                self.assertFalse(any(
+                    candidate["kind"] == "periodic_thought_topic"
+                    for candidate in payload["workspace_candidates"]
+                ))
+                self.assertTrue(any(
+                    candidate["kind"] == "current_input"
+                    for candidate in payload["workspace_candidates"]
+                ))
+
+    def _workspace_with_due_topic(self, sender_kind, source_kind):
         service = ServiceInputPipelineMixin()
-        payload = service._build_workspace_context(
+        return service._build_workspace_context(
             current_input=CurrentInput(
-                sender_kind="system",
+                sender_kind=sender_kind,
                 sender_ref=None,
-                source_kind="background_thinking",
+                source_kind=source_kind,
                 response_target_refs=(),
                 interaction_context=None,
                 text="定期思考。",
@@ -258,17 +287,6 @@ class PeriodicThoughtTopicWorkspaceTests(unittest.TestCase):
             prediction_error_context=None,
             default_mode_context=None,
         )
-        kinds = {candidate["kind"] for candidate in payload["workspace_candidates"]}
-        self.assertIn("periodic_thought_topic", kinds)
-        topic = next(
-            candidate
-            for candidate in payload["workspace_candidates"]
-            if candidate["kind"] == "periodic_thought_topic"
-        )
-        self.assertEqual(topic["factor_ref"], "periodic_thought_topic:elyth")
-        self.assertIn("自分から投稿する", topic["summary_text"])
-        self.assertNotIn("確認せよ", topic["summary_text"])
-        self.assertNotIn("定時", topic["summary_text"])
 
 
 class PeriodicThoughtTopicStoreTests(unittest.TestCase):

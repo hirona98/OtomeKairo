@@ -288,6 +288,9 @@ def build_agent_skill_selection_messages(*, selection_context: dict[str, Any]) -
                 "selected_skill_ids は allowed_skill_ids に並ぶ文字列だけをそのままコピーして作ります。\n"
                 "capability_decision_view は skill の必要性を考えるための実行能力情報であり、その capability id は selected_skill_ids の値ではありません。\n"
                 "該当する Agent Skill が不要なら selected_skill_ids は空配列にします。\n"
+                "まず現在入力や作業目的から必要な行為を判断し、その行為を助ける skill を選びます。"
+                "外部サービスの起動時手順は、そのサービスを利用する目的がある場合に適用します。"
+                "会話の開始や履歴が空であることは、外部サービスの利用開始とは別です。\n"
                 "JSON object だけを返し、キーは selected_skill_ids, reason_summary の2個に固定します。\n"
                 "selected_skill_ids は重複のない文字列配列、reason_summary は短い文字列です。"
             ),
@@ -1256,6 +1259,7 @@ def _decision_full_rules_section() -> str:
         + "RecallPack.visual_observations は過去画像の詳細な視覚説明、visual_daily_digests は日単位の整理です。特定物体の有無は visual_observations を優先します。\n"
         "自律判断時だけ InitiativeContext、capability_result 時だけ CapabilityResultContext が入ります。trigger 固有の差分は trigger_policy です。\n"
         "WorkspaceContext は同じ盤面の前景候補です。periodic_thought_topic は、今回の候補に出ている活動であり、実行指示ではありません。"
+        "外部サービスはそのサービスで活動する場です。現在の会話の場と自身の存在環境は、現在入力と人格の根拠に従って扱います。"
         "視覚観測は感覚です。periodic_thought_topic は候補の活動です。人物側の状況は outward_speech の hold にだけ使えます。"
         "今関わる自然さがあれば capability_request または autonomous_run を比べます。\n"
         + _decision_foreground_selection_rules()

@@ -26,6 +26,8 @@ server 起動時と設定全体置換時に immutable registry snapshot を作�
 
 ## LLM による選択と progressive disclosure
 
+必要な行為は現在入力や作業目的から判断し、その行為を助ける skill を選ぶ。外部サービスの起動時手順は、そのサービスを利用する目的がある場合に適用する。会話の開始や空の履歴は、外部サービスの利用開始とは別である。
+
 skill の適用可否は固定文字列や keyword 表では決めない。通常判断と各 autonomous run step の前に、LLM が向きである current input、直近会話、作業記録、run 目的、capability decision view と `name / description` catalog を比較して必要な skill を選ぶ。`wake / background_thinking` の通常判断で due な定期思考トピックがあるときは、`topic_summary` そのものを `orientation_context.periodic_thought_topics[].summary_text` として追加の向きの材料にする。`factor_ref` と `summary_text` 以外の workspace 判断盤面は Skill 選択へ渡さない。
 人物発話の向きでは、直近会話と作業記録を見ずに skill を選ばない。向きと到着の分離は [../llm/プロンプト文脈分離方針.md](../llm/プロンプト文脈分離方針.md) を正とする。
 

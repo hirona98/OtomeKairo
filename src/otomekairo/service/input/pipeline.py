@@ -1539,7 +1539,13 @@ class ServiceInputPipelineMixin:
             summary_keys=("status_text", "result_summary_text", "summary_text", "error"),
             metadata_keys=("capability_id", "request_id", "result_status", "response_target_refs"),
         )
-        for topic in due_periodic_thought_topics or []:
+        activity_topics = (
+            due_periodic_thought_topics or []
+            if current_input.sender_kind == "system"
+            and current_input.source_kind in SELF_INITIATED_SOURCE_KINDS
+            else []
+        )
+        for topic in activity_topics:
             topic_id = str(topic.get("topic_id") or "").strip()
             if not topic_id:
                 continue
