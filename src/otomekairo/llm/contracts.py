@@ -85,7 +85,7 @@ DECISION_TARGET_STANCE_VALUES = {
     "hold",
 }
 SELF_ACTIVITY_WORKSPACE_KINDS = {
-    "standing_concern",
+    "periodic_thought_topic",
     "ongoing_action",
     "autonomous_run",
 }

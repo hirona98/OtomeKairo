@@ -15,7 +15,7 @@ SELF_ACTIVITY_ADVANCE_KINDS = frozenset({"capability_request", "autonomous_run",
 SELF_ACTIVITY_EXECUTE_KINDS = frozenset({"capability_request", "autonomous_run"})
 SELF_ACTIVITY_EXCLUDED_CAPABILITY_IDS = frozenset({"vision.capture", "camera.ptz"})
 SELF_ACTIVITY_INPUT_TEXT = "自己評価。今、自身の活動へ関わるかを見る。"
-SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT = (
+SELF_ACTIVITY_PERIODIC_THOUGHT_TOPIC_INPUT_TEXT = (
     "自己評価。設定された活動が候補にある。"
     "今それに関わるか、関わるなら見る、返す、自分から書くのどれが自然かを見る。"
 )
@@ -71,7 +71,7 @@ class ServiceInputDecisionComparisonMixin:
         current_input: CurrentInput,
         workspace_context: dict[str, Any] | None,
     ) -> CurrentInput:
-        has_standing_concern = bool(self._workspace_standing_concerns(workspace_context))
+        has_periodic_thought_topic = bool(self._workspace_periodic_thought_topics(workspace_context))
         return CurrentInput(
             sender_kind="system",
             sender_ref=None,
@@ -79,8 +79,8 @@ class ServiceInputDecisionComparisonMixin:
             response_target_refs=(),
             interaction_context=None,
             text=(
-                SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT
-                if has_standing_concern
+                SELF_ACTIVITY_PERIODIC_THOUGHT_TOPIC_INPUT_TEXT
+                if has_periodic_thought_topic
                 else SELF_ACTIVITY_INPUT_TEXT
             ),
         )
@@ -190,7 +190,7 @@ class ServiceInputDecisionComparisonMixin:
                 kept.append(rewritten)
                 continue
             if kind in {
-                "standing_concern",
+                "periodic_thought_topic",
                 "ongoing_action",
                 "autonomous_run",
                 "drive_state",
@@ -272,7 +272,7 @@ class ServiceInputDecisionComparisonMixin:
         if not isinstance(candidates, list):
             return workspace_context
         dropped_kinds = {
-            "standing_concern",
+            "periodic_thought_topic",
             "ongoing_action",
             "autonomous_run",
             "capability",
@@ -356,7 +356,7 @@ class ServiceInputDecisionComparisonMixin:
         rewritten["metadata"] = metadata
         return rewritten
 
-    def _workspace_standing_concerns(
+    def _workspace_periodic_thought_topics(
         self,
         workspace_context: dict[str, Any] | None,
     ) -> list[dict[str, Any]]:
@@ -368,7 +368,7 @@ class ServiceInputDecisionComparisonMixin:
         return [
             candidate
             for candidate in candidates
-            if isinstance(candidate, dict) and candidate.get("kind") == "standing_concern"
+            if isinstance(candidate, dict) and candidate.get("kind") == "periodic_thought_topic"
         ]
 
     def _self_activity_capability_summary(
@@ -440,13 +440,13 @@ class ServiceInputDecisionComparisonMixin:
             for item in initiative_context.world_state_summary
             if isinstance(item, dict) and item.get("state_type") != "visual_context"
         ]
-        due_standing_concerns = self._workspace_standing_concerns(workspace_context)
+        due_periodic_thought_topics = self._workspace_periodic_thought_topics(workspace_context)
         capability_summary = self._self_activity_capability_summary(
             initiative_context.capability_summary
         )
         drive_summaries = initiative_context.drive_summaries
         foreground_drives = self._initiative_foreground_drive_summaries(drive_summaries)
-        orientation_available = bool(due_standing_concerns or foreground_drives)
+        orientation_available = bool(due_periodic_thought_topics or foreground_drives)
         families = []
         selected_family = None
         for family in initiative_context.candidate_families:
@@ -475,7 +475,7 @@ class ServiceInputDecisionComparisonMixin:
                             visual_signals=[],
                             suppression_summary={},
                             capability_summary=capability_summary,
-                            due_standing_concerns=due_standing_concerns,
+                            due_periodic_thought_topics=due_periodic_thought_topics,
                         ),
                         preferred_result_kind=None,
                         preferred_result_reason_summary=None,
@@ -502,7 +502,7 @@ class ServiceInputDecisionComparisonMixin:
             initiative_context,
             opportunity_summary=(
                 "設定された活動が、今回の自己評価の候補にある。"
-                if due_standing_concerns
+                if due_periodic_thought_topics
                 else "今、自身の活動へ関わるかを見る。"
             ),
             initiative_entry_summary=None,

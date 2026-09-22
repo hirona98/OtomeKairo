@@ -352,12 +352,12 @@ class DecisionContractTests(unittest.TestCase):
         with self.assertRaises(LLMError):
             validate_decision_contract(payload)
 
-    def test_noop_with_standing_concern_requires_self_activity_hold(self) -> None:
+    def test_noop_with_periodic_thought_topic_requires_self_activity_hold(self) -> None:
         workspace = {
             "workspace_candidates": [
                 {
-                    "factor_ref": "standing_concern:elyth",
-                    "kind": "standing_concern",
+                    "factor_ref": "periodic_thought_topic:elyth",
+                    "kind": "periodic_thought_topic",
                     "summary_text": "ELYTH。",
                 }
             ]
@@ -371,7 +371,7 @@ class DecisionContractTests(unittest.TestCase):
             "capability_request": None,
             "autonomous_run": None,
             "foreground_selection": {
-                "primary_factor_ref": "standing_concern:elyth",
+                "primary_factor_ref": "periodic_thought_topic:elyth",
                 "supporting_factor_refs": [],
                 "suppressed_factors": [],
                 "summary_text": "外向きだけ控えた。",
@@ -435,7 +435,7 @@ class DecisionContractTests(unittest.TestCase):
             "capability_request": None,
             "autonomous_run": None,
             "foreground_selection": {
-                "primary_factor_ref": "standing_concern:elyth",
+                "primary_factor_ref": "periodic_thought_topic:elyth",
                 "supporting_factor_refs": [],
                 "suppressed_factors": [],
                 "summary_text": "関心を主役にした。",
@@ -468,7 +468,7 @@ class DecisionContractTests(unittest.TestCase):
                 },
             },
             "foreground_selection": {
-                "primary_factor_ref": "standing_concern:elyth",
+                "primary_factor_ref": "periodic_thought_topic:elyth",
                 "supporting_factor_refs": [],
                 "suppressed_factors": [],
                 "summary_text": "関心を主役にした。",
@@ -913,7 +913,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
 
         initiative = InitiativeContext(
             trigger_kind="background_thinking",
-            opportunity_summary="気にかけていることがしばらく前景に出ていない。",
+            opportunity_summary="定期思考トピックがしばらく前景に出ていない。",
             initiative_entry_summary=None,
             time_context_summary={},
             foreground_signal_summary={},
@@ -948,7 +948,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
         outward_text = "\n".join(outward_policies)
         self.assertIn("InitiativeContext は今回の自律判断機会の材料", self_text)
         self.assertIn("preferred_capability_id がある candidate_family は capability_request の提案", self_text)
-        self.assertNotIn("standing_concern は実行指示ではありません", self_text)
+        self.assertNotIn("periodic_thought_topic は実行指示ではありません", self_text)
         self.assertNotIn("向きと catalog から autonomous_run を始めてよい", self_text)
         self.assertNotIn("短い独り言", self_text)
         self.assertIn("speech は短い独り言", outward_text)

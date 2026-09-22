@@ -27,9 +27,9 @@ DEFAULT_PERSONA_INITIATIVE_BASELINE = "medium"
 DEFAULT_CONVERSATION_DISPLAY_NAME_ID = "conversation_display_name:default"
 DEFAULT_CONVERSATION_DISPLAY_NAME = "マスター"
 DEFAULT_ELYTH_MCP_SERVER_ID = "elyth"
-DEFAULT_ELYTH_STANDING_CONCERN_ID = "elyth"
-DEFAULT_STANDING_CONCERN_INTERVAL_SECONDS = 3600
-DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY = (
+DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_ID = "elyth"
+DEFAULT_MIN_PERIODIC_THINKING_INTERVAL_SECONDS = 3600
+DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_SUMMARY = (
     "ELYTHで他の個との関係を育て、自分の関心や考えを表現する。"
     "届いた反応や会話には文脈を踏まえて応じ、共感や興味が動いたときは返信やリアクションを返す。"
     "話したいことがあれば自分から投稿する。"
@@ -178,17 +178,17 @@ def build_default_console_client_settings(
 
 
 # 構築
-def build_default_elyth_standing_concern() -> dict:
+def build_default_elyth_periodic_thought_topic() -> dict:
     return {
-        "concern_id": DEFAULT_ELYTH_STANDING_CONCERN_ID,
+        "topic_id": DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_ID,
         "enabled": False,
-        "min_interval_seconds": DEFAULT_STANDING_CONCERN_INTERVAL_SECONDS,
-        "concern_summary": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+        "min_periodic_thinking_interval_seconds": DEFAULT_MIN_PERIODIC_THINKING_INTERVAL_SECONDS,
+        "topic_summary": DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_SUMMARY,
     }
 
 
-def build_default_standing_concerns() -> list[dict]:
-    return [build_default_elyth_standing_concern()]
+def build_default_periodic_thought_topics() -> list[dict]:
+    return [build_default_elyth_periodic_thought_topic()]
 
 
 def build_default_state() -> dict:
@@ -223,7 +223,7 @@ def build_default_state() -> dict:
             "mode": "disabled",
             "interval_seconds": DEFAULT_WAKE_INTERVAL_SECONDS,
         },
-        "standing_concerns": build_default_standing_concerns(),
+        "periodic_thought_topics": build_default_periodic_thought_topics(),
         "personas": {
             DEFAULT_PERSONA_ID: {
                 "persona_id": DEFAULT_PERSONA_ID,

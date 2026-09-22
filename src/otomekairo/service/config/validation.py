@@ -856,69 +856,69 @@ class ServiceConfigValidationMixin:
                 "thinking_speech_level must be an integer from 1 to 10.",
             )
 
-    def _validate_standing_concerns(self, standing_concerns: Any) -> None:
-        if not isinstance(standing_concerns, list):
-            raise ServiceError(400, "invalid_standing_concerns", "standing_concerns must be an array.")
+    def _validate_periodic_thought_topics(self, periodic_thought_topics: Any) -> None:
+        if not isinstance(periodic_thought_topics, list):
+            raise ServiceError(400, "invalid_periodic_thought_topics", "periodic_thought_topics must be an array.")
         seen_ids: set[str] = set()
-        for index, concern in enumerate(standing_concerns):
-            label = f"standing_concerns[{index}]"
-            if not isinstance(concern, dict):
-                raise ServiceError(400, "invalid_standing_concern", f"{label} must be an object.")
-            extra_fields = sorted(set(concern.keys()) - {
-                "concern_id",
+        for index, topic in enumerate(periodic_thought_topics):
+            label = f"periodic_thought_topics[{index}]"
+            if not isinstance(topic, dict):
+                raise ServiceError(400, "invalid_periodic_thought_topic", f"{label} must be an object.")
+            extra_fields = sorted(set(topic.keys()) - {
+                "topic_id",
                 "enabled",
-                "min_interval_seconds",
-                "concern_summary",
+                "min_periodic_thinking_interval_seconds",
+                "topic_summary",
             })
             if extra_fields:
                 raise ServiceError(
                     400,
-                    "unsupported_standing_concern_fields",
+                    "unsupported_periodic_thought_topic_fields",
                     f"{label} has unsupported fields: {', '.join(extra_fields)}.",
                 )
-            concern_id = concern.get("concern_id")
-            if not isinstance(concern_id, str) or not concern_id.strip() or len(concern_id.strip()) > 64:
+            topic_id = topic.get("topic_id")
+            if not isinstance(topic_id, str) or not topic_id.strip() or len(topic_id.strip()) > 64:
                 raise ServiceError(
                     400,
-                    "invalid_standing_concern",
-                    f"{label}.concern_id must be a non-empty string of at most 64 characters.",
+                    "invalid_periodic_thought_topic",
+                    f"{label}.topic_id must be a non-empty string of at most 64 characters.",
                 )
-            normalized_id = concern_id.strip()
+            normalized_id = topic_id.strip()
             if any(character.isspace() for character in normalized_id) or "/" in normalized_id:
                 raise ServiceError(
                     400,
-                    "invalid_standing_concern",
-                    f"{label}.concern_id must not contain whitespace or '/'.",
+                    "invalid_periodic_thought_topic",
+                    f"{label}.topic_id must not contain whitespace or '/'.",
                 )
             if normalized_id in seen_ids:
                 raise ServiceError(
                     400,
-                    "duplicate_standing_concern_id",
-                    f"{label}.concern_id is duplicated.",
+                    "duplicate_periodic_thought_topic_id",
+                    f"{label}.topic_id is duplicated.",
                 )
             seen_ids.add(normalized_id)
-            if concern.get("enabled") is not True and concern.get("enabled") is not False:
-                raise ServiceError(400, "invalid_standing_concern", f"{label}.enabled must be a boolean.")
-            min_interval_seconds = concern.get("min_interval_seconds")
+            if topic.get("enabled") is not True and topic.get("enabled") is not False:
+                raise ServiceError(400, "invalid_periodic_thought_topic", f"{label}.enabled must be a boolean.")
+            min_periodic_thinking_interval_seconds = topic.get("min_periodic_thinking_interval_seconds")
             if (
-                not isinstance(min_interval_seconds, int)
-                or isinstance(min_interval_seconds, bool)
-                or min_interval_seconds < 1
+                not isinstance(min_periodic_thinking_interval_seconds, int)
+                or isinstance(min_periodic_thinking_interval_seconds, bool)
+                or min_periodic_thinking_interval_seconds < 1
             ):
                 raise ServiceError(
                     400,
-                    "invalid_standing_concern",
-                    f"{label}.min_interval_seconds must be an integer >= 1.",
+                    "invalid_periodic_thought_topic",
+                    f"{label}.min_periodic_thinking_interval_seconds must be an integer >= 1.",
                 )
-            concern_summary = concern.get("concern_summary")
-            if not isinstance(concern_summary, str) or not concern_summary.strip():
+            topic_summary = topic.get("topic_summary")
+            if not isinstance(topic_summary, str) or not topic_summary.strip():
                 raise ServiceError(
                     400,
-                    "invalid_standing_concern",
-                    f"{label}.concern_summary must be a non-empty string.",
+                    "invalid_periodic_thought_topic",
+                    f"{label}.topic_summary must be a non-empty string.",
                 )
-            concern["concern_id"] = normalized_id
-            concern["concern_summary"] = concern_summary.strip()
+            topic["topic_id"] = normalized_id
+            topic["topic_summary"] = topic_summary.strip()
 
     def _validate_wake_policy(self, wake_policy: dict[str, Any]) -> None:
         if not isinstance(wake_policy, dict):

@@ -18,9 +18,9 @@ from otomekairo.service.agent_skills import (
 )
 from otomekairo.service.capability import PreSendCheckWithheldError
 from otomekairo.service.common import debug_log
-from otomekairo.service.standing_concerns import (
-    build_standing_concern_orientation_context,
-    standing_concern_factor_ref,
+from otomekairo.service.periodic_thought_topics import (
+    build_periodic_thought_topic_orientation_context,
+    periodic_thought_topic_factor_ref,
 )
 
 
@@ -82,18 +82,18 @@ PRE_SEND_CHECK_WITHHELD_NOTICE = (
 
 
 class ServiceInputPipelineMixin:
-    def _mark_standing_concerns_attended(self, **_kwargs) -> list[str]:
+    def _mark_periodic_thought_topics_attended(self, **_kwargs) -> list[str]:
         return []
 
     def _build_agent_skill_orientation_context(
         self,
         *,
         trigger_kind: str,
-        due_standing_concerns: list[dict[str, Any]],
+        due_periodic_thought_topics: list[dict[str, Any]],
     ) -> dict[str, list[dict[str, str]]]:
         if trigger_kind not in SELF_INITIATED_SOURCE_KINDS:
-            return {"standing_concerns": []}
-        return build_standing_concern_orientation_context(due_standing_concerns)
+            return {"periodic_thought_topics": []}
+        return build_periodic_thought_topic_orientation_context(due_periodic_thought_topics)
 
     def _build_pipeline_skill_and_self_activity_materials(
         self,
@@ -105,7 +105,7 @@ class ServiceInputPipelineMixin:
         trigger_kind: str,
         observation_summary: dict[str, Any] | None,
         capability_request_summary: dict[str, Any] | None,
-        due_standing_concerns: list[dict[str, Any]],
+        due_periodic_thought_topics: list[dict[str, Any]],
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: InitiativeContext | None,
@@ -115,7 +115,7 @@ class ServiceInputPipelineMixin:
     ) -> dict[str, Any]:
         orientation_context = self._build_agent_skill_orientation_context(
             trigger_kind=trigger_kind,
-            due_standing_concerns=due_standing_concerns,
+            due_periodic_thought_topics=due_periodic_thought_topics,
         )
         prior_activation = (
             capability_request_summary.get("source_current_input", {}).get("agent_skill_activation")
@@ -469,7 +469,7 @@ class ServiceInputPipelineMixin:
                         output_result = self._empty_pipeline_output_result()
                         system_notice = self._pre_send_check_withheld_notice(current_input=current_input)
 
-        self._mark_standing_concerns_attended(
+        self._mark_periodic_thought_topics_attended(
             decision=decision,
             workspace_context=pipeline_contexts.get("workspace_context"),
             current_time=started_at,
@@ -824,7 +824,7 @@ class ServiceInputPipelineMixin:
             or client_context.get("autonomous_visual_observation_direct_entry") is not True
         ):
             return False
-        return not bool(self._due_standing_concerns(state=state, current_time=current_time))
+        return not bool(self._due_periodic_thought_topics(state=state, current_time=current_time))
 
     def _build_visual_observation_direct_recall_inputs(
         self,
@@ -951,7 +951,7 @@ class ServiceInputPipelineMixin:
             trigger_kind=trigger_kind,
             client_context=client_context,
         )
-        due_standing_concerns = self._due_standing_concerns(
+        due_periodic_thought_topics = self._due_periodic_thought_topics(
             state=state,
             current_time=started_at,
         )
@@ -1034,7 +1034,7 @@ class ServiceInputPipelineMixin:
         workspace_context = self._build_workspace_context(
             recent_interactions=recent_interactions,
             current_input=current_input,
-            due_standing_concerns=due_standing_concerns,
+            due_periodic_thought_topics=due_periodic_thought_topics,
             recall_pack=recall_pack,
             drive_state_summary=drive_state_summary,
             foreground_world_state=foreground_world_state,
@@ -1059,7 +1059,7 @@ class ServiceInputPipelineMixin:
             trigger_kind=trigger_kind,
             observation_summary=observation_summary,
             capability_request_summary=capability_request_summary,
-            due_standing_concerns=due_standing_concerns,
+            due_periodic_thought_topics=due_periodic_thought_topics,
             ongoing_action_summary=ongoing_action_summary,
             capability_decision_view=capability_decision_view,
             initiative_context=initiative_context,
@@ -1475,7 +1475,7 @@ class ServiceInputPipelineMixin:
         self,
         *,
         current_input: CurrentInput,
-        due_standing_concerns: list[dict[str, Any]] | None = None,
+        due_periodic_thought_topics: list[dict[str, Any]] | None = None,
         recall_pack: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
         foreground_world_state: list[dict[str, Any]] | None,
@@ -1539,19 +1539,19 @@ class ServiceInputPipelineMixin:
             summary_keys=("status_text", "result_summary_text", "summary_text", "error"),
             metadata_keys=("capability_id", "request_id", "result_status", "response_target_refs"),
         )
-        for concern in due_standing_concerns or []:
-            concern_id = str(concern.get("concern_id") or "").strip()
-            if not concern_id:
+        for topic in due_periodic_thought_topics or []:
+            topic_id = str(topic.get("topic_id") or "").strip()
+            if not topic_id:
                 continue
             self._append_workspace_candidate(
                 candidates=candidates,
                 used_refs=used_refs,
                 source_counts=source_counts,
-                factor_ref=standing_concern_factor_ref(concern_id),
-                kind="standing_concern",
-                source="standing_concerns",
-                summary_text=str(concern.get("concern_summary") or "").strip() or None,
-                metadata={"concern_id": concern_id},
+                factor_ref=periodic_thought_topic_factor_ref(topic_id),
+                kind="periodic_thought_topic",
+                source="periodic_thought_topics",
+                summary_text=str(topic.get("topic_summary") or "").strip() or None,
+                metadata={"topic_id": topic_id},
             )
         self._append_workspace_initiative_candidates(
             candidates=candidates,

@@ -35,7 +35,7 @@ def _interval_state(**overrides) -> dict:
             "observations": [_desktop_observation()],
         },
         "camera_sources": {},
-        "standing_concerns": [],
+        "periodic_thought_topics": [],
     }
     state.update(overrides)
     return state
@@ -114,17 +114,17 @@ class WakeObservationSourceReadyTests(unittest.TestCase):
                 )
         self.assertIsNone(self.service._wake_runtime_state["last_wake_at"])
 
-    def test_due_concern_does_not_shorten_periodic_thinking(self) -> None:
+    def test_due_topic_does_not_shorten_periodic_thinking(self) -> None:
         state = _interval_state(
             wake_policy={"mode": "interval", "interval_seconds": 3600, "observations": []},
-            standing_concerns=[{
-                "concern_id": "elyth",
+            periodic_thought_topics=[{
+                "topic_id": "elyth",
                 "enabled": True,
-                "min_interval_seconds": 300,
-                "concern_summary": "ELYTH",
+                "min_periodic_thinking_interval_seconds": 300,
+                "topic_summary": "ELYTH",
             }],
         )
-        self.assertTrue(self.service._due_standing_concerns(state=state, current_time=NOW))
+        self.assertTrue(self.service._due_periodic_thought_topics(state=state, current_time=NOW))
         self.assertTrue(self.service._wake_is_due(state=state, current_time=NOW)["should_skip"])
         self.assertEqual(
             self.service._background_thinking_delay_seconds(state=state, current_time=NOW),
@@ -260,14 +260,14 @@ class WakeObservationSourceReadyTests(unittest.TestCase):
         due = self.service._wake_is_due(state=state, current_time=NOW)
         self.assertTrue(due["should_skip"])
 
-    def test_standing_due_does_not_start_cycle_while_unseen(self) -> None:
+    def test_periodic_thought_topic_due_does_not_start_cycle_while_unseen(self) -> None:
         state = _interval_state(
-            standing_concerns=[
+            periodic_thought_topics=[
                 {
-                    "concern_id": "elyth",
+                    "topic_id": "elyth",
                     "enabled": True,
-                    "min_interval_seconds": 1,
-                    "concern_summary": "ELYTH",
+                    "min_periodic_thinking_interval_seconds": 1,
+                    "topic_summary": "ELYTH",
                 }
             ]
         )

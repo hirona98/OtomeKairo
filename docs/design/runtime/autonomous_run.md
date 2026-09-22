@@ -30,7 +30,7 @@
 | `created_at / updated_at / completed_at` | lifecycle 時刻 |
 | `source_cycle_id` | run を開始した入力サイクル |
 | `source_commitment_memory_unit_ids` | run の根拠になった commitment memory |
-| `standing_concern_ids` | 着手した活動の `concern_id`。非終端のあいだ、同じ活動を定期思考の候補に出さない。手段の選択には使わない |
+| `periodic_thought_topic_ids` | 着手した活動の `topic_id`。非終端のあいだ、同じ活動を定期思考の候補に出さない。手段の選択には使わない |
 | `commitment_resolution` | terminal 時の commitment 更新結果 |
 
 `autonomous_run` は capability request の wire payload に載せない。
@@ -67,7 +67,7 @@ terminal 時の発話と terminal 監査イベントは `events` に残し、com
 ```
 
 run の次の一手は `autonomous_step_generation` が決める。
-人物依頼でも定期思考でも、個が `autonomous_run` または `capability_request` を選んでよい。server は due な関心や MCP 定義から作業を作らない。
+人物依頼でも定期思考でも、個が `autonomous_run` または `capability_request` を選んでよい。server は due な定期思考トピックや MCP 定義から作業を作らない。
 会話 follow-up で同じ MCP tool を再実行できないときの残作業の開始は [判断と行動.md](判断と行動.md) を正とする。
 `comparison_scope=self_activity` から始まる run の `source_current_input` は、自身の活動用に隔離した current input とする。周期の観測要約入り current input は使わない。
 `origin_kind` が `wake` / `background_thinking` で `response_target_refs` が空の step は、前景 `world_state` から `visual_context` を外す。`external_service` など向き側の状態は残す。
@@ -82,7 +82,7 @@ MCP tool の連鎖も、他の capability や skill と同じく通常の run st
 
 `create_new` は既存 run と独立した目的を開始する。
 `replace_existing` は `target_run_ids` の run を `cancelled` にしてから新しい run を開始する。
-置換時の活動 ID の継承は [気にかけていること.md](気にかけていること.md#due) を正とする。
+置換時の活動 ID の継承は [定期思考トピック.md](定期思考トピック.md#due) を正とする。
 追加の依頼、タイマー、通知、リマインド、既存 run と並行する一時タスクは `create_new` とする。
 既存 run の目的は作成後に変更しない。目的を変える場合は `replace_existing` で新しい run を開始する。
 
@@ -93,7 +93,7 @@ server は既存 run との意味的な近さを文字列一致で判定しな�
 
 server は run の保存・置換・初回stepより前に `autonomous_start_review` を行う。検証には開始起点の current input（sender_kind / source_kind / text / response_target_refs）、候補decision（kind / reason_summary / autonomous_run）、同じ記憶集合の全非terminal run要約を渡す。独立した検証として人格本文は渡さない。
 
-`allow_start` は独立した追加目的、または対象runの中核目的の変更が必要で、操作と理由が一致している場合を表す。既存runの維持・結果待ち・タイマー待機の継続だけなら `reject_start` とする。関心から始める作業の範囲・完了条件、継続観測の必要性・終了または再評価条件も検証する。
+`allow_start` は独立した追加目的、または対象runの中核目的の変更が必要で、操作と理由が一致している場合を表す。既存runの維持・結果待ち・タイマー待機の継続だけなら `reject_start` とする。定期思考トピックから始める作業の範囲・完了条件、継続観測の必要性・終了または再評価条件も検証する。
 
 拒否、契約不正、検証失敗は開始サイクルの明示的な失敗とし、既存runの置換、新規runの保存、初回stepを行わない。別の判断へ暗黙に切り替えない。mockモデルでは明示的なreviewer test doubleを必要とする。検証後、副作用前に置換対象の存在・記憶集合・非terminal状態を再検証する。
 
@@ -212,7 +212,7 @@ process startup 時点では capability request の内部照合表が空にな�
 このため、`waiting_result` の run と `waiting_request_id` を持つ `paused` run は、再起動前の result を照合できない orphan として扱う。
 server は orphan を timeout と同じ再評価可能状態へ戻し、未完了 request で新しい能力実行を塞がない。
 
-## 関心から始める作業の範囲
+## 定期思考トピックから始める作業の範囲
 
 間隔が開いた活動から開始する run は、今回の関与を単位とする。活動の設定は run のあとにも残る。`objective_summary` に今回達成する範囲と完了条件を明示する。状況を見るなら、今回の情報を確認し、応じるか・表現するかを判断して、必要な応対をこの run の中で終える。応じない判断で完了してよい。見えている応対を、次の定期思考まで残さない。活動の設定が続いていても、今回の関与が済めば run を閉じる。
 

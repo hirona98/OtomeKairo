@@ -26,10 +26,10 @@ server 起動時と設定全体置換時に immutable registry snapshot を作�
 
 ## LLM による選択と progressive disclosure
 
-skill の適用可否は固定文字列や keyword 表では決めない。通常判断と各 autonomous run step の前に、LLM が向きである current input、直近会話、作業記録、run 目的、capability decision view と `name / description` catalog を比較して必要な skill を選ぶ。`wake / background_thinking` の通常判断で due な気にかけていることがあるときは、`concern_summary` そのものを `orientation_context.standing_concerns[].summary_text` として追加の向きの材料にする。`factor_ref` と `summary_text` 以外の workspace 判断盤面は Skill 選択へ渡さない。
+skill の適用可否は固定文字列や keyword 表では決めない。通常判断と各 autonomous run step の前に、LLM が向きである current input、直近会話、作業記録、run 目的、capability decision view と `name / description` catalog を比較して必要な skill を選ぶ。`wake / background_thinking` の通常判断で due な定期思考トピックがあるときは、`topic_summary` そのものを `orientation_context.periodic_thought_topics[].summary_text` として追加の向きの材料にする。`factor_ref` と `summary_text` 以外の workspace 判断盤面は Skill 選択へ渡さない。
 人物発話の向きでは、直近会話と作業記録を見ずに skill を選ばない。向きと到着の分離は [../llm/プロンプト文脈分離方針.md](../llm/プロンプト文脈分離方針.md) を正とする。
 
-`orientation_context.standing_concerns` は実行指示ではなく、今回の判断で検討できる活動である。current input はこの cycle の向きの本体のままとし、候補に出ていることだけで skill を必須にしない。活動の範囲に合う workflow があるときは、観測の一手だけに縮めずその workflow も比較する。意味境界は [気にかけていること](../runtime/気にかけていること.md) を正とする。
+`orientation_context.periodic_thought_topics` は実行指示ではなく、今回の判断で検討できる活動である。current input はこの cycle の向きの本体のままとし、候補に出ていることだけで skill を必須にしない。活動の範囲に合う workflow があるときは、観測の一手だけに縮めずその workflow も比較する。意味境界は [定期思考トピック](../runtime/定期思考トピック.md) を正とする。
 
 比較を分けた `wake / background_thinking` では、自身の活動の Skill 選択は隔離済み current input と `orientation_context` で行う。人物側の視覚観測、直近会話、観測 work_log は渡さない。外向き比較には Agent Skill context を渡さない。比較の材料境界は [../runtime/判断と行動.md](../runtime/判断と行動.md) を正とする。
 

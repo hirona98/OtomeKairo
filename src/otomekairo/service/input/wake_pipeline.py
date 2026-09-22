@@ -253,7 +253,7 @@ class ServiceInputWakePipelineMixin:
         )
         if isinstance(ongoing_action_summary, dict):
             return True
-        return bool(self._due_standing_concerns(state=state, current_time=current_time))
+        return bool(self._due_periodic_thought_topics(state=state, current_time=current_time))
 
     def _run_autonomous_initiative_entry_check(
         self,

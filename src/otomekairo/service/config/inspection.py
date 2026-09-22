@@ -194,7 +194,7 @@ class ServiceConfigInspectionMixin:
                 state=state,
                 current_time=current_time,
             ),
-            "standing_concerns": self._standing_concern_runtime_snapshot(
+            "periodic_thought_topics": self._periodic_thought_topic_runtime_snapshot(
                 state=state,
                 current_time=current_time,
             ),

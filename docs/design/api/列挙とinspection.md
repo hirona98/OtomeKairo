@@ -101,9 +101,9 @@ response:
     "runtime_summary": {},
     "runtime_detail": {
       "wake_runtime_state": {},
-      "standing_concerns": [
+      "periodic_thought_topics": [
         {
-          "concern_id": "elyth",
+          "topic_id": "elyth",
           "enabled": true,
           "due": true,
           "last_attended_at": null
@@ -233,7 +233,7 @@ response:
 過去の発話結果一覧は返さない。
 `runtime_detail.autonomous_runs` と `current_state.autonomous_runs` は `run_id / status / objective_summary / current_step_summary / history_summary / next_run_at / waiting_request_id / pause_reason / consecutive_step_count / cooldown_until / created_at / updated_at / completed_at` の要約を返す。
 `current_state.pending_intent_candidates` は候補の短い意味要約と時刻に加え、`consecutive_evaluation_count / cooldown_until` を返す。各値の意味は [../runtime/判断と行動.md](../runtime/判断と行動.md#保留意図) を正とする。
-`runtime_detail.standing_concerns` は due 判定と最後に関わった時刻の process-local snapshot である。意味境界は [../runtime/気にかけていること.md](../runtime/気にかけていること.md) を正とする。
+`runtime_detail.periodic_thought_topics` は due 判定と最後に関わった時刻の process-local snapshot である。意味境界は [../runtime/定期思考トピック.md](../runtime/定期思考トピック.md) を正とする。
 `runtime_detail.wake_policy_observations` は現在設定されている `wake_policy.observations` と process-local の直近実行結果を照合した snapshot である。
 `runtime_detail.wake_runtime_state.interval_started_at` は定期思考の間隔の起点、`last_wake_at` は直近実行時刻を返す。更新条件は [状態と設定.md](状態と設定.md) を正とする。
 `runtime_detail.wake_runtime_state.retry_after` は、思考前観測 の一時失敗後に interval を消費せず短く再試行する時刻を表す。

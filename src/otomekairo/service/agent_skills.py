@@ -130,7 +130,7 @@ class ServiceAgentSkillsMixin:
                 "trigger_kind": trigger_kind,
                 "recent_turns": recent_turns or [],
                 "work_log": work_log or [],
-                "orientation_context": orientation_context or {"standing_concerns": []},
+                "orientation_context": orientation_context or {"periodic_thought_topics": []},
                 "run": run,
                 "prior_activation": prior_activation,
                 "host_authorization": host_authorization,
@@ -192,7 +192,7 @@ class ServiceAgentSkillsMixin:
                 selection_context={
                     "current_input": current_input.to_prompt_payload(),
                     "trigger_kind": trigger_kind,
-                    "orientation_context": orientation_context or {"standing_concerns": []},
+                    "orientation_context": orientation_context or {"periodic_thought_topics": []},
                     "run": run,
                     "prior_activation": prior_activation,
                     "host_authorization": host_authorization,

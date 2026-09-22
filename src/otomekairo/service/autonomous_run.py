@@ -16,9 +16,9 @@ from otomekairo.service.capability import (
     PreSendCheckWithheldError,
 )
 from otomekairo.service.common import ServiceError, debug_log
-from otomekairo.service.standing_concerns import (
-    selected_standing_concern_ids,
-    standing_concern_ids_from_runs,
+from otomekairo.service.periodic_thought_topics import (
+    selected_periodic_thought_topic_ids,
+    periodic_thought_topic_ids_from_runs,
 )
 
 
@@ -710,14 +710,14 @@ class ServiceAutonomousRunMixin:
                 ]
         if isinstance(source_cycle_id, str) and source_cycle_id.strip():
             run["source_cycle_id"] = source_cycle_id.strip()
-        concern_ids = set(selected_standing_concern_ids(
+        topic_ids = set(selected_periodic_thought_topic_ids(
             decision=decision,
             workspace_context=workspace_context,
         ))
         if coordination["mode"] == "replace_existing":
-            concern_ids.update(standing_concern_ids_from_runs(coordination["target_runs"]))
-        if concern_ids:
-            run["standing_concern_ids"] = sorted(concern_ids)
+            topic_ids.update(periodic_thought_topic_ids_from_runs(coordination["target_runs"]))
+        if topic_ids:
+            run["periodic_thought_topic_ids"] = sorted(topic_ids)
         normalized_target = self._normalize_capability_client_id(assistant_message_target_client_id)
         if normalized_target is not None:
             run["assistant_message_target_client_id"] = normalized_target

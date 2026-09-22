@@ -294,9 +294,9 @@ class AgentSkillRegistryTests(unittest.TestCase):
                 trigger_kind="user_message",
                 capability_decision_view=[],
                 orientation_context={
-                    "standing_concerns": [
+                    "periodic_thought_topics": [
                         {
-                            "factor_ref": "standing_concern:test",
+                            "factor_ref": "periodic_thought_topic:test",
                             "summary_text": "対象との関係を育てる。",
                         }
                     ]
@@ -312,9 +312,9 @@ class AgentSkillRegistryTests(unittest.TestCase):
             self.assertEqual(
                 material_contexts[0]["orientation_context"],
                 {
-                    "standing_concerns": [
+                    "periodic_thought_topics": [
                         {
-                            "factor_ref": "standing_concern:test",
+                            "factor_ref": "periodic_thought_topic:test",
                             "summary_text": "対象との関係を育てる。",
                         }
                     ]
@@ -794,9 +794,9 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
                 recent_turns=[{"role": "person", "text": "返信してみたら？"}],
                 work_log=[{"capability_id": "mcp.call_tool", "tool_name": "get_thread"}],
                 orientation_context={
-                    "standing_concerns": [
+                    "periodic_thought_topics": [
                         {
-                            "factor_ref": "standing_concern:elyth",
+                            "factor_ref": "periodic_thought_topic:elyth",
                             "summary_text": "ELYTHで他の個との関係を育てる。",
                         }
                     ]
@@ -822,9 +822,9 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
             self.assertEqual(
                 selection_contexts[0]["orientation_context"],
                 {
-                    "standing_concerns": [
+                    "periodic_thought_topics": [
                         {
-                            "factor_ref": "standing_concern:elyth",
+                            "factor_ref": "periodic_thought_topic:elyth",
                             "summary_text": "ELYTHで他の個との関係を育てる。",
                         }
                     ]
@@ -844,7 +844,7 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
         self.assertIn("trusted host", selection[0]["content"])
         self.assertIn("recent_turns", selection[0]["content"])
         self.assertIn("work_log", selection[0]["content"])
-        self.assertIn("orientation_context.standing_concerns", selection[0]["content"])
+        self.assertIn("orientation_context.periodic_thought_topics", selection[0]["content"])
         self.assertIn("実行指示ではありません", selection[0]["content"])
         self.assertIn("current_input をこの cycle の向きの本体", selection[0]["content"])
         self.assertIn("skill 選択を義務づけません", selection[0]["content"])

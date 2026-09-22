@@ -133,24 +133,24 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             self.assertEqual(result["autonomous_run"]["status"], "active")
             service._execute_autonomous_run_step.assert_called_once()
 
-    def test_run_coordination_preserves_concern_suppression_only_for_replaced_runs(self) -> None:
+    def test_run_coordination_preserves_topic_suppression_only_for_replaced_runs(self) -> None:
         for mode in ("replace_existing", "create_new"):
-            for select_new_concern in (False, True):
-                with self.subTest(mode=mode, select_new=select_new_concern), tempfile.TemporaryDirectory() as temp_dir:
+            for select_new_topic in (False, True):
+                with self.subTest(mode=mode, select_new=select_new_topic), tempfile.TemporaryDirectory() as temp_dir:
                     service = OtomeKairoService(Path(temp_dir))
                     state = service.store.read_state()
-                    state["standing_concerns"] = [
-                        {"concern_id": concern_id, "enabled": True, "min_interval_seconds": 60,
-                         "concern_summary": "公開の会話を読み、必要なら応じる。"}
-                        for concern_id in ("first", "second", "new")
+                    state["periodic_thought_topics"] = [
+                        {"topic_id": topic_id, "enabled": True, "min_periodic_thinking_interval_seconds": 60,
+                         "topic_summary": "公開の会話を読み、必要なら応じる。"}
+                        for topic_id in ("first", "second", "new")
                     ]
                     run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
                     target_ids = []
-                    for index, concern_ids in enumerate((["first"], ["first", "second"])):
-                        target_id = f"autonomous_run:concern-{index}"
+                    for index, topic_ids in enumerate((["first"], ["first", "second"])):
+                        target_id = f"autonomous_run:topic-{index}"
                         target_ids.append(target_id)
                         service.store.upsert_autonomous_run(autonomous_run={
-                            **run, "run_id": target_id, "standing_concern_ids": concern_ids,
+                            **run, "run_id": target_id, "periodic_thought_topic_ids": topic_ids,
                         })
                     service.llm = SimpleNamespace(generate_autonomous_start_review=Mock(return_value={
                         "outcome": "allow_start", "reason_summary": "今回の目的と操作が一致している。",
@@ -160,13 +160,13 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                     service._finalize_autonomous_run_commitments = Mock(side_effect=lambda **kwargs: kwargs["run"])
                     now = "2026-09-22T12:00:00+09:00"
                     workspace = {"workspace_candidates": ([{
-                        "kind": "standing_concern", "factor_ref": "standing_concern:new",
-                        "metadata": {"concern_id": "new"},
-                    }] if select_new_concern else [])}
+                        "kind": "periodic_thought_topic", "factor_ref": "periodic_thought_topic:new",
+                        "metadata": {"topic_id": "new"},
+                    }] if select_new_topic else [])}
                     result = service._start_autonomous_run_from_decision(
                         state=state, current_time=now,
                         decision={"kind": "autonomous_run", "foreground_selection": {
-                            "primary_factor_ref": "standing_concern:new" if select_new_concern else None,
+                            "primary_factor_ref": "periodic_thought_topic:new" if select_new_topic else None,
                             "supporting_factor_refs": [],
                         }, "autonomous_run": {
                             "objective_summary": "公開の会話を確認し、必要な訂正を投稿して終える。",
@@ -180,18 +180,18 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                     )
                     replacement = result["autonomous_run"]
                     expected = {"first", "second"} if mode == "replace_existing" else set()
-                    if select_new_concern:
+                    if select_new_topic:
                         expected.add("new")
-                    self.assertEqual(replacement.get("standing_concern_ids", []), sorted(expected))
+                    self.assertEqual(replacement.get("periodic_thought_topic_ids", []), sorted(expected))
                     self.assertEqual(
-                        [item["concern_id"] for item in service._due_standing_concerns(state=state, current_time=now)],
-                        [] if select_new_concern else ["new"],
+                        [item["topic_id"] for item in service._due_periodic_thought_topics(state=state, current_time=now)],
+                        [] if select_new_topic else ["new"],
                     )
                     if mode == "replace_existing":
                         for target_id in target_ids:
                             self.assertEqual(service.store.get_autonomous_run(run_id=target_id)["status"], "cancelled")
                         service.store.upsert_autonomous_run(autonomous_run={**replacement, "status": "completed"})
-                        self.assertEqual(len(service._due_standing_concerns(state=state, current_time=now)), 3)
+                        self.assertEqual(len(service._due_periodic_thought_topics(state=state, current_time=now)), 3)
 
     def test_pre_send_check_withhold_regenerates_autonomous_step_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1021,7 +1021,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 "sender_ref": None,
                 "source_kind": "background_thinking",
                 "response_target_refs": [],
-                "text": "自己評価。しばらく関わっていない気にかけていることがある。",
+                "text": "自己評価。しばらく関わっていない定期思考トピックがある。",
             }
             service._list_current_world_states = Mock(
                 return_value=[

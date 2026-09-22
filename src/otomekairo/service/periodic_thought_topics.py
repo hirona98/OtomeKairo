@@ -4,15 +4,15 @@ from datetime import datetime, timedelta
 from typing import Any
 
 
-STANDING_CONCERN_FIELDS = {
-    "concern_id",
+PERIODIC_THOUGHT_TOPIC_FIELDS = {
+    "topic_id",
     "enabled",
-    "min_interval_seconds",
-    "concern_summary",
+    "min_periodic_thinking_interval_seconds",
+    "topic_summary",
 }
 
 
-def parse_standing_concern_timestamp(value: Any) -> datetime | None:
+def parse_periodic_thought_topic_timestamp(value: Any) -> datetime | None:
     if not isinstance(value, str) or not value.strip():
         return None
     try:
@@ -21,97 +21,99 @@ def parse_standing_concern_timestamp(value: Any) -> datetime | None:
         return None
 
 
-def standing_concern_is_due(
+def periodic_thought_topic_is_due(
     *,
     enabled: bool,
-    min_interval_seconds: int,
+    min_periodic_thinking_interval_seconds: int,
     last_attended_at: Any,
     current_time: str,
 ) -> bool:
     if enabled is not True:
         return False
-    current_dt = parse_standing_concern_timestamp(current_time)
+    current_dt = parse_periodic_thought_topic_timestamp(current_time)
     if current_dt is None:
         return False
-    last_attended_dt = parse_standing_concern_timestamp(last_attended_at)
+    last_attended_dt = parse_periodic_thought_topic_timestamp(last_attended_at)
     if last_attended_dt is None:
         return True
-    return current_dt >= last_attended_dt + timedelta(seconds=int(min_interval_seconds))
+    return current_dt >= last_attended_dt + timedelta(seconds=int(min_periodic_thinking_interval_seconds))
 
 
-def standing_concern_ids_from_runs(runs: list[dict[str, Any]] | None) -> set[str]:
+def periodic_thought_topic_ids_from_runs(runs: list[dict[str, Any]] | None) -> set[str]:
     found: set[str] = set()
     for run in runs or []:
         if not isinstance(run, dict):
             continue
-        raw_ids = run.get("standing_concern_ids")
+        raw_ids = run.get("periodic_thought_topic_ids")
         if not isinstance(raw_ids, list):
             continue
-        for concern_id in raw_ids:
-            if isinstance(concern_id, str) and concern_id.strip():
-                found.add(concern_id.strip())
+        for topic_id in raw_ids:
+            if isinstance(topic_id, str) and topic_id.strip():
+                found.add(topic_id.strip())
     return found
 
 
-def list_due_standing_concerns(
+def list_due_periodic_thought_topics(
     *,
-    concerns: list[dict[str, Any]] | None,
+    topics: list[dict[str, Any]] | None,
     last_attended_at_by_id: dict[str, str] | None,
     current_time: str,
-    active_concern_ids: set[str] | None = None,
+    active_topic_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     attended = last_attended_at_by_id if isinstance(last_attended_at_by_id, dict) else {}
-    active = active_concern_ids if isinstance(active_concern_ids, set) else set()
+    active = active_topic_ids if isinstance(active_topic_ids, set) else set()
     due: list[dict[str, Any]] = []
-    for concern in concerns or []:
-        if not isinstance(concern, dict):
+    for topic in topics or []:
+        if not isinstance(topic, dict):
             continue
-        concern_id = concern.get("concern_id")
-        if not isinstance(concern_id, str) or not concern_id.strip():
+        topic_id = topic.get("topic_id")
+        if not isinstance(topic_id, str) or not topic_id.strip():
             continue
-        normalized_id = concern_id.strip()
+        normalized_id = topic_id.strip()
         if normalized_id in active:
             continue
-        if standing_concern_is_due(
-            enabled=concern.get("enabled") is True,
-            min_interval_seconds=int(concern.get("min_interval_seconds") or 0),
+        if periodic_thought_topic_is_due(
+            enabled=topic.get("enabled") is True,
+            min_periodic_thinking_interval_seconds=int(
+                topic.get("min_periodic_thinking_interval_seconds") or 0
+            ),
             last_attended_at=attended.get(normalized_id),
             current_time=current_time,
         ):
-            due.append(concern)
+            due.append(topic)
     return due
 
 
-def standing_concern_factor_ref(concern_id: str) -> str:
-    return f"standing_concern:{concern_id}"
+def periodic_thought_topic_factor_ref(topic_id: str) -> str:
+    return f"periodic_thought_topic:{topic_id}"
 
 
-def build_standing_concern_orientation_context(
-    concerns: list[dict[str, Any]] | None,
+def build_periodic_thought_topic_orientation_context(
+    topics: list[dict[str, Any]] | None,
 ) -> dict[str, list[dict[str, str]]]:
     entries: list[dict[str, str]] = []
-    for concern in concerns or []:
-        if not isinstance(concern, dict):
+    for topic in topics or []:
+        if not isinstance(topic, dict):
             continue
-        concern_id = concern.get("concern_id")
-        summary_text = concern.get("concern_summary")
+        topic_id = topic.get("topic_id")
+        summary_text = topic.get("topic_summary")
         if (
-            not isinstance(concern_id, str)
-            or not concern_id.strip()
+            not isinstance(topic_id, str)
+            or not topic_id.strip()
             or not isinstance(summary_text, str)
             or not summary_text.strip()
         ):
             continue
         entries.append(
             {
-                "factor_ref": standing_concern_factor_ref(concern_id.strip()),
+                "factor_ref": periodic_thought_topic_factor_ref(topic_id.strip()),
                 "summary_text": summary_text.strip(),
             }
         )
-    return {"standing_concerns": entries}
+    return {"periodic_thought_topics": entries}
 
 
-def selected_standing_concern_ids(
+def selected_periodic_thought_topic_ids(
     *,
     decision: dict[str, Any] | None,
     workspace_context: dict[str, Any] | None,
@@ -145,13 +147,13 @@ def selected_standing_concern_ids(
         return []
     selected_ids: list[str] = []
     for candidate in candidates:
-        if not isinstance(candidate, dict) or candidate.get("kind") != "standing_concern":
+        if not isinstance(candidate, dict) or candidate.get("kind") != "periodic_thought_topic":
             continue
         factor_ref = candidate.get("factor_ref")
         if not isinstance(factor_ref, str) or factor_ref not in selected_refs:
             continue
         metadata = candidate.get("metadata")
-        concern_id = metadata.get("concern_id") if isinstance(metadata, dict) else None
-        if isinstance(concern_id, str) and concern_id.strip() and concern_id.strip() not in selected_ids:
-            selected_ids.append(concern_id.strip())
+        topic_id = metadata.get("topic_id") if isinstance(metadata, dict) else None
+        if isinstance(topic_id, str) and topic_id.strip() and topic_id.strip() not in selected_ids:
+            selected_ids.append(topic_id.strip())
     return selected_ids

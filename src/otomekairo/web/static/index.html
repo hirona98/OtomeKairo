@@ -63,7 +63,7 @@
           </details>
 
           <details class="dashboard-section dashboard-section-wide" open>
-            <summary>いま気にかけていること</summary>
+            <summary>いまの定期思考トピック</summary>
             <div class="dashboard-list" id="dashboard-inner"></div>
           </details>
 
@@ -196,7 +196,7 @@
         </optgroup>
         <optgroup label="自律動作">
           <option value="system">定期思考</option>
-          <option value="standing-concerns">気にかけていること</option>
+          <option value="periodic-thought-topics">定期思考トピック</option>
           <option value="watcher">Watcher</option>
         </optgroup>
         <optgroup label="情報">
@@ -223,7 +223,7 @@
         <button type="button" class="settings-nav-button" data-tab="agent-skills">Agent Skills</button>
         <div class="settings-navigation-category">自律動作</div>
         <button type="button" class="settings-nav-button" data-tab="system">定期思考</button>
-        <button type="button" class="settings-nav-button" data-tab="standing-concerns">気にかけていること</button>
+        <button type="button" class="settings-nav-button" data-tab="periodic-thought-topics">定期思考トピック</button>
         <button type="button" class="settings-nav-button" data-tab="watcher">Watcher</button>
         <div class="settings-navigation-category">情報</div>
         <button type="button" class="settings-nav-button" data-tab="api">API説明</button>
@@ -860,10 +860,10 @@
           </section>
 
           <section class="tab-page" data-page="system">
+            <p class="field-hint">OtomeKairoサーバー内部のスケジュールで発生する定期思考を設定します。外部Watcherからのwakeには適用されません。</p>
             <fieldset class="settings-group">
               <legend>定期思考</legend>
               <div class="settings-list">
-                <p class="field-hint">OtomeKairoサーバー内部のスケジュールで発生する定期思考を設定します。外部Watcherからのwakeには適用されません。</p>
                 <label class="checkbox-field">定期思考を有効にする
                   <input id="current-wake-enabled" type="checkbox">
                 </label>
@@ -902,38 +902,38 @@
             </fieldset>
           </section>
 
-          <section class="tab-page" data-page="standing-concerns">
+          <section class="tab-page" data-page="periodic-thought-topics">
+            <p class="field-hint">定期思考で検討するトピックを設定します。最小定期思考間隔が過ぎたトピックが定期思考対象になります。</p>
             <div class="selector-row">
-              <select id="standing-concern-select"></select>
-              <button type="button" data-action="add-standing-concern">追加</button>
-              <button type="button" class="danger-button" data-action="delete-standing-concern">削除</button>
+              <select id="periodic-thought-topic-select"></select>
+              <button type="button" data-action="add-periodic-thought-topic">追加</button>
+              <button type="button" class="danger-button" data-action="delete-periodic-thought-topic">削除</button>
             </div>
             <fieldset class="settings-group capability-group" data-collection-editor>
-              <legend>気にかけていること</legend>
+              <legend>定期思考トピック</legend>
               <div class="settings-list">
-                <p class="field-hint">しばらく見ていない関心を、定期思考のときに思い出します。作業を自動では始めません。見に行くかどうかは、そのときの判断です。</p>
                 <label class="checkbox-field">有効
-                  <input id="standing-concern-enabled" type="checkbox">
+                  <input id="periodic-thought-topic-enabled" type="checkbox">
                 </label>
                 <div class="setting-row">
-                  <label for="standing-concern-id">名前:</label>
-                  <input id="standing-concern-id" class="field-width-medium">
+                  <label for="periodic-thought-topic-id">名前:</label>
+                  <input id="periodic-thought-topic-id" class="field-width-medium">
                 </div>
-                <div class="setting-row setting-row-top">
-                  <label for="standing-concern-interval">思い出す間隔:</label>
+                <div class="setting-row">
+                  <label for="periodic-thought-topic-min-periodic-thinking-interval">最小定期思考間隔:</label>
                   <div class="console-control-with-hint">
                     <div class="inline-suffix-control">
-                      <input id="standing-concern-interval" class="field-width-short" type="number" min="1">
+                      <input id="periodic-thought-topic-min-periodic-thinking-interval" class="field-width-short"
+                        type="number" min="1">
                       <span>秒</span>
                     </div>
-                    <span class="field-hint">これより頻繁には前景に出しません。到来しても実行はしません。</span>
                   </div>
                 </div>
                 <div class="setting-row setting-row-top">
-                  <label for="standing-concern-summary">関心:</label>
+                  <label for="periodic-thought-topic-summary">トピック:</label>
                   <div class="console-control-with-hint">
-                    <textarea id="standing-concern-summary" rows="4" spellcheck="true"></textarea>
-                    <span class="field-hint">気にかける向きの全体を書きます。受信の確認だけに閉じません。実行手順や tool 名は書きません。</span>
+                    <textarea id="periodic-thought-topic-summary" rows="4" spellcheck="true"></textarea>
+                    <span class="field-hint">定期思考で検討する内容と、取りうる関わり方の範囲を書きます。実行手順や tool 名は書きません。</span>
                   </div>
                 </div>
               </div>

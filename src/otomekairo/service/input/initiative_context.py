@@ -63,11 +63,11 @@ class ServiceInputInitiativeContextMixin:
             speech_timing_state=speech_timing_state,
             speech_timing_summary=speech_timing_summary,
         )
-        due_standing_concerns = self._due_standing_concerns(state=state, current_time=current_time)
+        due_periodic_thought_topics = self._due_periodic_thought_topics(state=state, current_time=current_time)
         candidate_families = self._initiative_candidate_families(
             trigger_kind=trigger_kind,
             drive_summaries=drive_summaries,
-            due_standing_concerns=due_standing_concerns,
+            due_periodic_thought_topics=due_periodic_thought_topics,
             world_state_summary=world_state_summary,
             recent_turn_summary=recent_turn_summary,
             foreground_signal_summary=foreground_signal_summary,
@@ -109,7 +109,7 @@ class ServiceInputInitiativeContextMixin:
                 client_context=client_context,
                 selected_candidate=selected_candidate,
                 initiative_entry_summary=initiative_entry_summary,
-                due_standing_concerns=due_standing_concerns,
+                due_periodic_thought_topics=due_periodic_thought_topics,
             ),
             initiative_entry_summary=initiative_entry_summary,
             time_context_summary=self._initiative_time_context_summary(time_context=time_context),
@@ -139,12 +139,12 @@ class ServiceInputInitiativeContextMixin:
         client_context: dict[str, Any],
         selected_candidate: dict[str, Any] | None,
         initiative_entry_summary: dict[str, Any] | None,
-        due_standing_concerns: list[dict[str, Any]] | None = None,
+        due_periodic_thought_topics: list[dict[str, Any]] | None = None,
     ) -> str:
         _ = trigger_kind, client_context
         if isinstance(selected_candidate, dict):
             return "自律判断の評価機会があり、保留候補をいま扱うか、保留を続けるか、見送るかを選ぶ。"
-        if due_standing_concerns:
+        if due_periodic_thought_topics:
             return "設定された活動が、今回の自己評価の候補にある。"
         if (
             isinstance(initiative_entry_summary, dict)

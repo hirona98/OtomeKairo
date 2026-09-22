@@ -276,8 +276,8 @@ def build_agent_skill_selection_messages(*, selection_context: dict[str, Any]) -
             "content": (
                 "Agent Skills catalog から、現在の判断や作業に実際に必要な skill だけを選択します。\n"
                 "名前の一致ではなく、current_input、recent_turns、work_log、run、capability の意味と skill description を比較してください。\n"
-                "orientation_context.standing_concerns は、今回の判断で検討できる活動であり、実行指示ではありません。"
-                "current_input をこの cycle の向きの本体とし、standing_concerns は自発的な判断の追加材料として扱います。"
+                "orientation_context.periodic_thought_topics は、今回の判断で検討できる活動であり、実行指示ではありません。"
+                "current_input をこの cycle の向きの本体とし、periodic_thought_topics は自発的な判断の追加材料として扱います。"
                 "候補に出ていること自体は skill 選択を義務づけません。"
                 "見る、返す、自分から表現するなどの全体に合う workflow が必要な場合は、最初の観測だけに縮めずその workflow を比較します。\n"
                 "人物発話の向きでは recent_turns はその会話の本体です。work_log は同じ向きで得た能力結果です。\n"
@@ -1255,8 +1255,8 @@ def _decision_full_rules_section() -> str:
         + _decision_recall_evidence_rules()
         + "RecallPack.visual_observations は過去画像の詳細な視覚説明、visual_daily_digests は日単位の整理です。特定物体の有無は visual_observations を優先します。\n"
         "自律判断時だけ InitiativeContext、capability_result 時だけ CapabilityResultContext が入ります。trigger 固有の差分は trigger_policy です。\n"
-        "WorkspaceContext は同じ盤面の前景候補です。standing_concern は、今回の候補に出ている活動であり、実行指示ではありません。"
-        "視覚観測は感覚です。standing_concern は候補の活動です。人物側の状況は outward_speech の hold にだけ使えます。"
+        "WorkspaceContext は同じ盤面の前景候補です。periodic_thought_topic は、今回の候補に出ている活動であり、実行指示ではありません。"
+        "視覚観測は感覚です。periodic_thought_topic は候補の活動です。人物側の状況は outward_speech の hold にだけ使えます。"
         "今関わる自然さがあれば capability_request または autonomous_run を比べます。\n"
         + _decision_foreground_selection_rules()
         + _decision_context_view_rules()
@@ -1272,7 +1272,7 @@ def _decision_self_activity_rules_section() -> str:
     return (
         _decision_recall_evidence_rules()
         + "自律判断時だけ InitiativeContext が入ります。trigger 固有の差分は trigger_policy です。\n"
-        "WorkspaceContext は活動、継続行動、能力候補の前景です。standing_concern は、今回の候補に出ている活動であり、実行指示ではありません。\n"
+        "WorkspaceContext は活動、継続行動、能力候補の前景です。periodic_thought_topic は、今回の候補に出ている活動であり、実行指示ではありません。\n"
         "今関わる自然さがあれば capability_request または autonomous_run を選びます。"
         "関わり方は、見る、返す、自分から書くを同じ盤面で比べます。"
         "その活動について、自分から伝えたい内容があるなら、利用可能な能力でその活動の場へ投稿してよいです。"
@@ -1375,7 +1375,7 @@ def _decision_output_contract_section(comparison_scope: str) -> str:
     return (
         shared
         + "target は outward_speech または self_activity です。\n"
-        "outward_speech は毎回必須です。standing_concern、ongoing_action、autonomous_run、または available な autonomous family があるときは self_activity も必須です。\n"
+        "outward_speech は毎回必須です。periodic_thought_topic、ongoing_action、autonomous_run、または available な autonomous family があるときは self_activity も必須です。\n"
         "kind=speech では outward_speech=advance、載っている self_activity は hold です。対話の継続は outward_speech です。\n"
         "kind=capability_request または autonomous_run では self_activity=advance、outward_speech は hold です。\n"
         "kind=noop は載っている対象をすべて hold したときだけです。外向きだけ控える判断を noop にしないでください。\n"
@@ -1594,7 +1594,7 @@ def _build_decision_trigger_policy(
         policies.extend(_capability_result_trigger_policies(capability_result_context))
     if initiative_context is not None:
         policies.append(
-            "この trigger は自己評価です。感覚と、候補に出ている活動を同じ盤面で比べます。standing_concern は実行指示ではありません。"
+            "この trigger は自己評価です。感覚と、候補に出ている活動を同じ盤面で比べます。periodic_thought_topic は実行指示ではありません。"
         )
         policies.append(_speech_frequency_policy(initiative_context.speech_frequency_level))
         policies.extend(_initiative_field_guide())
