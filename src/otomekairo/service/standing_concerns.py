@@ -63,32 +63,6 @@ def list_due_standing_concerns(
     return due
 
 
-def extra_background_thinking_delay_seconds(
-    *,
-    wake_mode: Any,
-    wake_interval_seconds: int,
-    interval_started_at: str,
-    due_concerns: list[dict[str, Any]],
-    current_time: str,
-) -> float | None:
-    if not due_concerns:
-        return None
-    current_dt = parse_standing_concern_timestamp(current_time)
-    if current_dt is None:
-        return None
-    shortest_interval = min(int(concern["min_interval_seconds"]) for concern in due_concerns)
-    interval_start_dt = datetime.fromisoformat(interval_started_at)
-    if wake_mode == "interval":
-        time_until_regular = (interval_start_dt + timedelta(seconds=int(wake_interval_seconds)) - current_dt).total_seconds()
-        if time_until_regular <= shortest_interval:
-            return None
-    extra_cadence = min(int(wake_interval_seconds), shortest_interval)
-    remaining = (interval_start_dt + timedelta(seconds=extra_cadence) - current_dt).total_seconds()
-    if remaining <= 0:
-        return 0.0
-    return remaining
-
-
 def standing_concern_factor_ref(concern_id: str) -> str:
     return f"standing_concern:{concern_id}"
 

@@ -11,7 +11,6 @@ from otomekairo.llm.contexts import CurrentInput
 from otomekairo.service.input.pipeline import ServiceInputPipelineMixin
 from otomekairo.service.standing_concerns import (
     build_standing_concern_orientation_context,
-    extra_background_thinking_delay_seconds,
     list_due_standing_concerns,
     selected_standing_concern_ids,
     standing_concern_is_due,
@@ -104,46 +103,6 @@ class StandingConcernLogicTests(unittest.TestCase):
             current_time="2026-08-13T12:00:00+09:00",
         )
         self.assertEqual([item["concern_id"] for item in due], ["elyth"])
-
-    def test_extra_thinking_waits_for_near_regular_wake(self) -> None:
-        delay = extra_background_thinking_delay_seconds(
-            wake_mode="interval",
-            wake_interval_seconds=300,
-            interval_started_at="2026-08-13T11:59:00+09:00",
-            due_concerns=[{"min_interval_seconds": 3600}],
-            current_time="2026-08-13T12:00:00+09:00",
-        )
-        self.assertIsNone(delay)
-
-    def test_extra_thinking_when_wake_disabled(self) -> None:
-        delay = extra_background_thinking_delay_seconds(
-            wake_mode="disabled",
-            wake_interval_seconds=300,
-            interval_started_at="2026-08-13T11:55:00+09:00",
-            due_concerns=[{"min_interval_seconds": 3600}],
-            current_time="2026-08-13T12:00:00+09:00",
-        )
-        self.assertEqual(delay, 0.0)
-
-    def test_extra_thinking_respects_cadence_after_recent_thinking(self) -> None:
-        delay = extra_background_thinking_delay_seconds(
-            wake_mode="disabled",
-            wake_interval_seconds=300,
-            interval_started_at="2026-08-13T11:58:00+09:00",
-            due_concerns=[{"min_interval_seconds": 3600}],
-            current_time="2026-08-13T12:00:00+09:00",
-        )
-        self.assertEqual(delay, 180.0)
-
-    def test_extra_thinking_when_regular_wake_is_far(self) -> None:
-        delay = extra_background_thinking_delay_seconds(
-            wake_mode="interval",
-            wake_interval_seconds=86400,
-            interval_started_at="2026-08-13T00:00:00+09:00",
-            due_concerns=[{"min_interval_seconds": 3600}],
-            current_time="2026-08-13T12:00:00+09:00",
-        )
-        self.assertEqual(delay, 0.0)
 
     def test_attendance_requires_action_and_factor_selection(self) -> None:
         workspace = {

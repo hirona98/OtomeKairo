@@ -114,9 +114,9 @@ class WakeObservationSourceReadyTests(unittest.TestCase):
                 )
         self.assertIsNone(self.service._wake_runtime_state["last_wake_at"])
 
-    def test_due_concern_uses_interval_origin_before_first_thinking(self) -> None:
+    def test_due_concern_does_not_shorten_periodic_thinking(self) -> None:
         state = _interval_state(
-            wake_policy={"mode": "interval", "interval_seconds": 3600},
+            wake_policy={"mode": "interval", "interval_seconds": 3600, "observations": []},
             standing_concerns=[{
                 "concern_id": "elyth",
                 "enabled": True,
@@ -124,13 +124,17 @@ class WakeObservationSourceReadyTests(unittest.TestCase):
                 "concern_summary": "ELYTH",
             }],
         )
+        self.assertTrue(self.service._due_standing_concerns(state=state, current_time=NOW))
+        self.assertTrue(self.service._wake_is_due(state=state, current_time=NOW)["should_skip"])
         self.assertEqual(
-            self.service._extra_standing_concern_thinking_delay_seconds(
-                state=state, current_time="2026-08-14T11:59:59+09:00",
-            ),
-            1.0,
+            self.service._background_thinking_delay_seconds(state=state, current_time=NOW),
+            BACKGROUND_THINKING_POLL_SECONDS,
         )
-        self.assertEqual(self.service._background_thinking_delay_seconds(state=state, current_time=NOW), 0.0)
+        started: list[dict] = []
+        self.service._execute_wake_cycle = lambda **kwargs: started.append(kwargs)
+        with patch.object(self.service, "_now_iso", return_value=NOW):
+            self.service._execute_scheduled_background_thinking(state=state)
+        self.assertEqual(started, [])
 
     def test_enabling_periodic_thinking_starts_full_interval(self) -> None:
         state = _interval_state(wake_policy={"mode": "interval", "interval_seconds": 300})

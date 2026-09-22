@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.service.standing_concerns import (
-    extra_background_thinking_delay_seconds,
     list_due_standing_concerns,
     selected_standing_concern_ids,
 )
@@ -52,23 +51,6 @@ class ServiceInputStandingConcernMixin:
                 }
             )
         return snapshot
-
-    def _extra_standing_concern_thinking_delay_seconds(
-        self,
-        *,
-        state: dict[str, Any],
-        current_time: str,
-    ) -> float | None:
-        wake_policy = state.get("wake_policy") if isinstance(state.get("wake_policy"), dict) else {}
-        with self._runtime_state_lock:
-            interval_started_at = self._wake_runtime_state["interval_started_at"]
-        return extra_background_thinking_delay_seconds(
-            wake_mode=wake_policy.get("mode"),
-            wake_interval_seconds=int(wake_policy.get("interval_seconds") or 1),
-            interval_started_at=interval_started_at,
-            due_concerns=self._due_standing_concerns(state=state, current_time=current_time),
-            current_time=current_time,
-        )
 
     def _mark_standing_concerns_attended(
         self,

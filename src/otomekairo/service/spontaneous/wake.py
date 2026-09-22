@@ -373,9 +373,7 @@ class ServiceSpontaneousWakeMixin:
         unseen_sources = self._unseen_wake_observation_sources(state)
         if unseen_sources:
             return
-        regular_due = self._wake_is_due(state=state, current_time=current_time)["should_skip"] is not True
-        standing_due = bool(self._due_standing_concerns(state=state, current_time=current_time))
-        if not (regular_due or standing_due):
+        if self._wake_is_due(state=state, current_time=current_time)["should_skip"] is True:
             return
         client_context: dict[str, Any] = {"source": "background_thinking_scheduler"}
         self._execute_wake_cycle(
@@ -410,15 +408,8 @@ class ServiceSpontaneousWakeMixin:
     def _background_thinking_delay_seconds(self, *, state: dict[str, Any], current_time: str) -> float:
         # 無効時
         wake_policy = state.get("wake_policy", {})
-        extra_delay_seconds = self._extra_standing_concern_thinking_delay_seconds(
-            state=state,
-            current_time=current_time,
-        )
         if wake_policy.get("mode") != "interval":
-            delay_seconds = BACKGROUND_THINKING_POLL_SECONDS
-            if extra_delay_seconds is not None:
-                delay_seconds = min(extra_delay_seconds, delay_seconds)
-            return delay_seconds
+            return BACKGROUND_THINKING_POLL_SECONDS
 
         # 一時失敗後の再試行待ち
         retry_delay_seconds = self._wake_retry_delay_remaining_seconds(current_time=current_time)
@@ -439,8 +430,6 @@ class ServiceSpontaneousWakeMixin:
         remaining_seconds = (due_at - current_dt).total_seconds()
         if remaining_seconds <= 0:
             return 0.0
-        if extra_delay_seconds is not None:
-            remaining_seconds = min(remaining_seconds, extra_delay_seconds)
 
         # ポーリング上限
         return min(remaining_seconds, BACKGROUND_THINKING_POLL_SECONDS)

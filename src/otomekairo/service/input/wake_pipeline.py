@@ -213,9 +213,6 @@ class ServiceInputWakePipelineMixin:
     ) -> bool:
         if self._unseen_wake_observation_sources(state):
             return False
-        due_concerns = getattr(self, "_due_standing_concerns", None)
-        if callable(due_concerns) and due_concerns(state=state, current_time=current_time):
-            return True
         return self._wake_is_due(state=state, current_time=current_time)["should_skip"] is not True
 
     def _consume_background_thinking_interval(
