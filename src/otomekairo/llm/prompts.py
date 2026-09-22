@@ -1275,7 +1275,7 @@ def _decision_self_activity_rules_section() -> str:
         "WorkspaceContext は活動、継続行動、能力候補の前景です。standing_concern は、今回の候補に出ている活動であり、実行指示ではありません。\n"
         "今関わる自然さがあれば capability_request または autonomous_run を選びます。"
         "関わり方は、見る、返す、自分から書くを同じ盤面で比べます。"
-        "今その活動に立つ言葉があれば自分から書いてよいです。"
+        "その活動について、自分から伝えたい内容があるなら、利用可能な能力でその活動の場へ投稿してよいです。"
         "活動と CapabilityDecisionView の catalog から autonomous_run を始めてよいです。人物発話による依頼はこの比較の前提ではありません。"
         "autonomous_run.objective_summary は今回の関与の範囲と完了条件を、個の言葉で書きます。設定文のコピーや、人物側の観測成果の報告を目的にしません。"
         + _external_write_address_instruction()
@@ -1655,7 +1655,8 @@ def _build_autonomous_step_system_prompt() -> str:
             "speech と complete を組み合わせるのは、今回の発話自体が伝達目的を果たす場合、または既に得られた実績を報告して閉じる場合です。"
             "次の外界作用が目的に残る場合は、その作用を capability_request として実行するか、適切な時刻まで wait_until で run を維持してください。\n"
             "今回の関与が済んだら、この活動の説明がこれからも残っていても run は complete にします。"
-            "見えている応対は、この run のうちに扱います。必要なら次の手で応じ、必要が無ければ complete にします。"
+            "取得済みの情報に返信・対応を検討すべき働きかけがある場合は、今回の目的の範囲で対応要否を判断します。"
+            "対応が必要ならこの run の次の手で実行し、対応不要と判断して今回の目的を満たした場合は complete にします。"
             "継続観測は目的に記された必要性と終了・再評価条件に照らして続けるかを判断します。\n"
             "目的が満たされたら transition.kind=complete を選んでください。\n"
             "目的が不成立、危険、文脈不整合、ユーザー停止指示がある場合は transition.kind=cancel を選んでください。",

@@ -82,6 +82,7 @@ MCP tool の連鎖も、他の capability や skill と同じく通常の run st
 
 `create_new` は既存 run と独立した目的を開始する。
 `replace_existing` は `target_run_ids` の run を `cancelled` にしてから新しい run を開始する。
+置換時の活動 ID の継承は [気にかけていること.md](気にかけていること.md#due) を正とする。
 追加の依頼、タイマー、通知、リマインド、既存 run と並行する一時タスクは `create_new` とする。
 既存 run の目的は作成後に変更しない。目的を変える場合は `replace_existing` で新しい run を開始する。
 
