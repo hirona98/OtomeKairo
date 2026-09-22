@@ -74,9 +74,8 @@ class ServiceInputWakeObservationMixin:
 
     def _enabled_wake_policy_observations(self, state: dict[str, Any]) -> list[dict[str, Any]]:
         wake_policy = state.get("wake_policy")
-        if not isinstance(wake_policy, dict) or wake_policy.get("mode") != "interval":
-            return []
-        observations = wake_policy.get("observations")
+        # 観測の有効状態は定期思考のスケジュールとは独立。会話でも同じ対象を使う。
+        observations = wake_policy.get("observations") if isinstance(wake_policy, dict) else None
         if not isinstance(observations, list):
             observations = []
         enabled_observations = [
