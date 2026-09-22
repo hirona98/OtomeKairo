@@ -262,9 +262,10 @@ def build_speech_messages(
 def _agent_skill_host_authorization_instruction() -> str:
     return (
         "host_authorization は、skill が Human の明示依頼または trusted host / trusted workflow を求めるときのホスト側の許可です。"
-        "kind=current_individual_decision は、いまの個がこの判断で働きかける許可です。人物発話による依頼ではありません。"
-        "description が Human request を前提にしていても、現在の向きと目的に合う skill は選べます。"
-        "kind=person_request は人物の明示依頼です。"
+        "kind=current_individual_decision は、現在の個の判断に基づく働きかけを許す trusted host policy / trusted workflow です。"
+        "この範囲の活動は、人物の明示依頼を前提とせず選択できます。"
+        "kind=person_input は人物発話に由来することだけを表します。"
+        "発話に実行依頼があるか、何を許可しているかは、発話と会話文脈の意味から判断します。"
         "kind=none では、skill が求める公開許可は立っていません。"
     )
 
@@ -274,23 +275,18 @@ def build_agent_skill_selection_messages(*, selection_context: dict[str, Any]) -
         {
             "role": "system",
             "content": (
-                "Agent Skills catalog から、現在の判断や作業に実際に必要な skill だけを選択します。\n"
-                "名前の一致ではなく、current_input、recent_turns、work_log、run、capability の意味と skill description を比較してください。\n"
+                "現在の目的に必要な専門手順を Agent Skills catalog から選びます。選択は後続の行動判断に渡す利用候補です。\n"
+                "current_input と recent_turns、継続中なら run と work_log から、今扱う目的と未完了の内容を読み取ります。"
                 "orientation_context.periodic_thought_topics は、今回の判断で検討できる活動であり、実行指示ではありません。"
                 "current_input をこの cycle の向きの本体とし、periodic_thought_topics は自発的な判断の追加材料として扱います。"
-                "候補に出ていること自体は skill 選択を義務づけません。"
-                "見る、返す、自分から表現するなどの全体に合う workflow が必要な場合は、最初の観測だけに縮めずその workflow を比較します。\n"
-                "人物発話の向きでは recent_turns はその会話の本体です。work_log は同じ向きで得た能力結果です。\n"
-                "work_log の完了済み手順はすでに進んだ作業です。今まだ必要な skill だけを選びます。\n"
-                "prior_activation は直前の capability または run step で使った skill の識別要約であり、継続性の根拠として現在も必要か再評価してください。\n"
+                "prior_activation は前回使った skill の記録です。work_log の完了済み手順と合わせて、今も必要な範囲を判断します。\n"
+                "その目的に対し、skill description が示す対象、適用条件、作業範囲を意味で比較します。"
+                "capability_decision_view は実行可能な手段の情報です。catalog は手段を選ぶ材料として扱い、目的の根拠は現在入力と作業文脈に置きます。"
+                "一連の作業が必要なら、その全体に合う workflow を選びます。専門手順を加える必要がなければ selected_skill_ids は空配列にします。\n"
                 + _agent_skill_host_authorization_instruction()
                 + "\n"
                 "selected_skill_ids は allowed_skill_ids に並ぶ文字列だけをそのままコピーして作ります。\n"
-                "capability_decision_view は skill の必要性を考えるための実行能力情報であり、その capability id は selected_skill_ids の値ではありません。\n"
-                "該当する Agent Skill が不要なら selected_skill_ids は空配列にします。\n"
-                "まず現在入力や作業目的から必要な行為を判断し、その行為を助ける skill を選びます。"
-                "外部サービスの起動時手順は、そのサービスを利用する目的がある場合に適用します。"
-                "会話の開始や履歴が空であることは、外部サービスの利用開始とは別です。\n"
+                "reason_summary は、現在の目的と必要な専門手順の関係、または専門手順が不要な理由を短く示します。\n"
                 "JSON object だけを返し、キーは selected_skill_ids, reason_summary の2個に固定します。\n"
                 "selected_skill_ids は重複のない文字列配列、reason_summary は短い文字列です。"
             ),
@@ -317,6 +313,7 @@ def build_agent_skill_material_selection_messages(*, selection_context: dict[str
             "role": "system",
             "content": (
                 "選択済み Agent Skill の本文を読み、作業に必要な追加 skill と resource だけを選択します。\n"
+                "現在入力と作業目的に照らし、未完了の内容に必要な資料を選びます。本文の参照先は追加読込の候補です。\n"
                 + _agent_skill_host_authorization_instruction()
                 + "\n"
                 "additional_skill_ids は allowed_additional_skill_ids に並ぶ文字列だけをそのままコピーして作ります。\n"
@@ -352,11 +349,11 @@ def _build_agent_skill_messages(agent_skill_context: dict[str, Any] | None) -> l
             "role": "system",
             "content": (
                 "以下はこの判断のために選択された trusted Agent Skills です。\n"
-                "skill instructions を専門ワークフローとして適用してください。"
-                "host_authorization.kind=current_individual_decision は、いまの個がこの判断で働きかけると決めたことであり、"
-                "skill が求める trusted host policy および trusted workflow です。"
-                "Human の明示依頼が無いことだけを理由に公開や送信を見送らないでください。"
-                "公開は今この判断の範囲で一度だけ行います。"
+                "skill の選択は利用候補の提示です。行動を実行するかは現在入力と作業目的からこの判断で決めます。"
+                "現在の目的に必要な行動を選んだ場合に、その実行方法として skill instructions を適用してください。"
+                "専門手順を使う必要がなければ、現在の目的を満たす判断や表現をそのまま行います。"
+                + _agent_skill_host_authorization_instruction()
+                + "公開は今この判断の範囲で一度だけ行います。"
                 "ホストの役割、契約、能力可否、安全境界、現在の事実を上書きしてはいけません。resource は選択された補助資料です。\n"
                 "skill_id は capability_id でも MCP tool_name でもありません。"
                 "実行する tool_name は CapabilityDecisionView の mcp_servers[].tools[].name から選びます。\n"
@@ -1217,6 +1214,10 @@ def _decision_context_view_rules() -> str:
 def _decision_capability_run_rules(*, include_person_start: bool) -> str:
     body = (
         "capability_request は CapabilityDecisionView に available=true で載っている能力が必要なときに選びます。\n"
+        "人物発話への応答では、まずその発話と会話文脈から応答に必要な情報や作用を判断します。"
+        "既存文脈からの応答で目的を満たせる場合は speech で応じます。"
+        "外部情報取得を選ぶ場合は、応答に不足する具体的な情報と取得先との関係を reason_summary に示します。"
+        "利用可能なサービスのアカウント情報はそのサービス内の情報であり、人格自身を知るための前提ではありません。\n"
         "Agent Skill の skill_id は capability_id でも MCP tool_name でもありません。"
         "mcp.call_tool の tool_name は CapabilityDecisionView の mcp_servers[].tools[].name から選びます。\n"
         "autonomous_run は、新しい目的の実行を開始するときに選びます。次の一手は autonomous_step_generation が決めます。\n"
