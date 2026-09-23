@@ -70,6 +70,7 @@ class ServiceSpontaneousWakeMixin:
         interaction_context: InteractionContext | None = None,
         trigger_kind: str,
         reference_payload: Any = None,
+        bypass_schedule: bool = False,
     ) -> dict[str, Any]:
         is_background = trigger_kind == "background_thinking"
         entered = (
@@ -97,6 +98,7 @@ class ServiceSpontaneousWakeMixin:
                 interaction_context=interaction_context,
                 trigger_kind=trigger_kind,
                 reference_payload=reference_payload,
+                bypass_schedule=bypass_schedule,
             )
         finally:
             if is_background:
@@ -112,6 +114,7 @@ class ServiceSpontaneousWakeMixin:
         interaction_context: InteractionContext | None = None,
         trigger_kind: str,
         reference_payload: Any = None,
+        bypass_schedule: bool = False,
     ) -> dict[str, Any]:
         # 直列化実行
         with self._wake_execution_lock:
@@ -147,6 +150,7 @@ class ServiceSpontaneousWakeMixin:
                         state=state,
                         current_time=started_at,
                         client_context=client_context,
+                        bypass_schedule=bypass_schedule,
                     ):
                         due = self._wake_is_due(state=state, current_time=started_at)
                         debug_log("Wake", f"{self._short_cycle_id(cycle_id)} skip due reason={self._clamp(due['reason_summary'])}")
@@ -203,6 +207,7 @@ class ServiceSpontaneousWakeMixin:
                     cycle_id=cycle_id,
                     observation_summary=observation_summary,
                     reference_context=reference_context,
+                    bypass_schedule=bypass_schedule,
                 )
 
                 # 成功
@@ -651,6 +656,8 @@ class ServiceSpontaneousWakeMixin:
         if include_source and isinstance(source, str):
             if source == "background_thinking_scheduler":
                 parts.append("入力源は定期思考スケジューラ。")
+            elif source == "background_thinking_manual":
+                parts.append("入力源はWebUIの単発実行。")
             else:
                 parts.append(f"入力源は {source}。")
         wake_reference = client_context.get("wake_reference")

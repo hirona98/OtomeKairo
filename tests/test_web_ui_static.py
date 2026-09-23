@@ -4,6 +4,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from otomekairo.http_server import OtomeKairoHttpServer
 from otomekairo.service.app import OtomeKairoService
@@ -30,6 +31,20 @@ class WebUiHttpBoundaryTests(unittest.TestCase):
             connection.request("GET", path)
             response = connection.getresponse()
             return response.status, dict(response.getheaders()), response.read()
+        finally:
+            connection.close()
+
+    def post_json(self, path: str, body: dict) -> tuple[int, dict]:
+        connection = http.client.HTTPConnection(self.host, self.port, timeout=5)
+        try:
+            connection.request(
+                "POST",
+                path,
+                body=json.dumps(body),
+                headers={"Content-Type": "application/json"},
+            )
+            response = connection.getresponse()
+            return response.status, json.loads(response.read().decode("utf-8"))
         finally:
             connection.close()
 
@@ -66,6 +81,26 @@ class WebUiHttpBoundaryTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("application/json", headers["Content-Type"])
         self.assertTrue(payload["ok"])
+
+    def test_web_ui_manual_background_thinking_route(self) -> None:
+        result = {"cycle_id": "cycle:test", "result_kind": "noop"}
+        with patch.object(
+            self.service,
+            "trigger_background_thinking_once",
+            return_value=result,
+        ) as trigger:
+            status, payload = self.post_json("/ui/api/background-thinking/run-once", {})
+            self.assertEqual(status, 200)
+            self.assertEqual(payload, {"ok": True, "data": result})
+            trigger.assert_called_once_with(self.service.store.read_state()["console_access_token"])
+
+            status, payload = self.post_json(
+                "/ui/api/background-thinking/run-once",
+                {"unexpected": True},
+            )
+            self.assertEqual(status, 400)
+            self.assertEqual(payload["error"]["code"], "unsupported_background_thinking_run_fields")
+            trigger.assert_called_once()
 
     def test_web_ui_loads_last_thirty_messages_for_interaction(self) -> None:
         state = self.service.store.read_state()

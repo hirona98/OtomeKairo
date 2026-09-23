@@ -457,10 +457,14 @@ capability 実行を開始した場合は、`POST /api/conversation` と同じ `
 server 内の定期思考スケジューラも、同じ wake 1 サイクルを内部的に使う。
 ただし次の点で API起床と分ける。
 
-- 定期思考だけが `wake_policy.mode`、`wake_policy.interval_seconds`、`wake_policy.observations` を使う
+- スケジューラは `wake_policy.mode / interval_seconds` で開始時刻を決め、定期思考は `wake_policy.observations` を思考前観測に使う
 - 定期思考は `current_input.sender_kind=system`、`source_kind=background_thinking`、空の `response_target_refs` として shared pipeline に渡す
 - 思考前観測、interval 消費、再試行待ちの正本は [状態と設定.md](状態と設定.md) の `wake_policy` と [../runtime/自律initiative_loop.md](../runtime/自律initiative_loop.md) とする
 - visual observation の判断への渡し方の詳細は [../runtime/判断と行動.md](../runtime/判断と行動.md) と [../capability/視覚機能.md](../capability/視覚機能.md) を正とする
+
+#### WebUI からの単発定期思考
+
+`POST /ui/api/background-thinking/run-once` はブラウザ UI 専用の内部 endpoint である。server が保持する `console_access_token` で認可し、ブラウザへ token を渡さない。request body は空の JSON object `{}` とし、余分な field は `400 unsupported_background_thinking_run_fields` で拒否する。成功時は `200` と共通 envelope で定期思考1サイクルの結果を返す。会話サイクルと競合した場合は `result_kind=skipped`、`reason_code=foreground_cycle_active` を返す。開始条件と間隔の意味は [状態と設定.md](状態と設定.md) を正とする。
 
 主な失敗:
 

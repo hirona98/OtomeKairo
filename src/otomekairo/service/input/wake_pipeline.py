@@ -24,6 +24,7 @@ class ServiceInputWakePipelineMixin:
         observation_summary: dict[str, Any] | None = None,
         reference_context: dict[str, Any] | None = None,
         recent_interactions: list[dict[str, Any]] | None = None,
+        bypass_schedule: bool = False,
     ) -> tuple[dict[str, Any], str, dict[str, Any]]:
         cycle_label = self._debug_cycle_label(cycle_id)
         # 入力テキスト
@@ -37,6 +38,7 @@ class ServiceInputWakePipelineMixin:
                 state=state,
                 current_time=started_at,
                 client_context=client_context,
+                bypass_schedule=bypass_schedule,
             ):
                 due = self._wake_is_due(state=state, current_time=started_at)
                 debug_log("Wake", f"{cycle_label} skipped reason={self._clamp(due['reason_summary'])}")
@@ -208,7 +210,10 @@ class ServiceInputWakePipelineMixin:
         state: dict[str, Any],
         current_time: str,
         client_context: dict[str, Any] | None,
+        bypass_schedule: bool = False,
     ) -> bool:
+        if bypass_schedule:
+            return True
         return self._wake_is_due(state=state, current_time=current_time)["should_skip"] is not True
 
     def _consume_background_thinking_interval(

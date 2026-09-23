@@ -16,6 +16,15 @@ class ServiceSpontaneousMixin(
     ServiceSpontaneousWakeMixin,
     ServiceSpontaneousPendingIntentMixin,
 ):
+    def trigger_background_thinking_once(self, token: str | None) -> dict[str, Any]:
+        state = self._require_token(token)
+        return self._execute_wake_cycle(
+            state=state,
+            client_context={"source": "background_thinking_manual"},
+            trigger_kind="background_thinking",
+            bypass_schedule=True,
+        )
+
     def trigger_wake(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)

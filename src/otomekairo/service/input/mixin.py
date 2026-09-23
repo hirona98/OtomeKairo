@@ -163,27 +163,27 @@ class ServiceInputMixin(
     def _noop_pipeline(
         self,
         *,
-        state: dict[str, Any] | None,
+        state: dict[str, Any],
         started_at: str,
         reason_summary: str,
     ) -> dict[str, Any]:
         # world_state
-        foreground_world_state: list[dict[str, Any]] = []
-        if isinstance(state, dict):
-            foreground_world_state = (
-                self._summarize_foreground_world_states(
-                    self._list_current_world_states(
-                        state=state,
-                        current_time=started_at,
-                        limit=WORLD_STATE_FOREGROUND_LIMIT,
-                    ),
+        foreground_world_state: list[dict[str, Any]] = (
+            self._summarize_foreground_world_states(
+                self._list_current_world_states(
+                    state=state,
                     current_time=started_at,
-                )
-                or []
+                    limit=WORLD_STATE_FOREGROUND_LIMIT,
+                ),
+                current_time=started_at,
             )
+            or []
+        )
 
         # 結果
         return {
+            "persona_id": state["selected_persona_id"],
+            "persona_display_name": state["personas"][state["selected_persona_id"]]["display_name"],
             "recall_hint": self._empty_recall_hint(),
             "recall_pack": self._empty_recall_pack(),
             "time_context": self._build_time_context(current_time=started_at),

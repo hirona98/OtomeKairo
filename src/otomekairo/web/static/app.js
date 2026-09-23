@@ -33,6 +33,10 @@ const state = {
   attachment: null,
   settingsOpen: false,
   sending: false,
+  singleBackgroundThinking: {
+    pending: false,
+    countdownTimer: null,
+  },
   pendingConversationInputs: new Map(),
   dashboard: {
     currentState: null,
@@ -2263,6 +2267,54 @@ function closeSettings() {
   element("settings-backdrop").hidden = true;
   element("settings-panel").classList.remove("open");
   element("settings-panel").setAttribute("aria-hidden", "true");
+}
+
+function runBackgroundThinkingOnce() {
+  const run = state.singleBackgroundThinking;
+  if (run.pending) {
+    return;
+  }
+  run.pending = true;
+  const button = element("run-once-background-thinking");
+  button.disabled = true;
+  const deadline = performance.now() + 3000;
+  const countDown = () => {
+    const remaining = deadline - performance.now();
+    if (remaining > 0) {
+      const label = `${Math.ceil(remaining / 1000)}秒後に実行`;
+      if (button.textContent !== label) {
+        button.textContent = label;
+      }
+      return;
+    }
+    window.clearInterval(run.countdownTimer);
+    run.countdownTimer = null;
+    button.textContent = "実行中...";
+    void (async () => {
+      try {
+        const result = await apiRequest("/ui/api/background-thinking/run-once", {
+          method: "POST",
+          body: JSON.stringify({}),
+        });
+        if (result.result_kind === "internal_failure") {
+          showNotice("定期思考の単発実行に失敗しました。", true);
+        } else if (result.result_kind === "skipped") {
+          showNotice("今回の定期思考は見送りました。");
+        } else {
+          showNotice(`定期思考の単発実行が完了しました（${RESULT_KIND_LABELS[result.result_kind]}）。`);
+        }
+        await refreshDashboard({ silent: true });
+      } catch (error) {
+        showNotice(`定期思考の単発実行に失敗しました: ${error.message}`, true);
+      } finally {
+        run.pending = false;
+        button.disabled = false;
+        button.textContent = "単発実行";
+      }
+    })();
+  };
+  countDown();
+  run.countdownTimer = window.setInterval(countDown, 100);
 }
 
 async function loadSettingsDrafts() {
@@ -4594,6 +4646,7 @@ function bindEvents() {
   element("cancel-settings").addEventListener("click", closeSettings);
   element("apply-settings").addEventListener("click", () => saveSettings({ closeAfterSave: false }));
   element("ok-settings").addEventListener("click", () => saveSettings({ closeAfterSave: true }));
+  element("run-once-background-thinking").addEventListener("click", runBackgroundThinkingOnce);
   document.querySelectorAll(".settings-nav-button").forEach((button) => {
     button.addEventListener("click", () => switchTab(button.dataset.tab));
   });
@@ -4779,6 +4832,7 @@ function bindEvents() {
     window.clearInterval(state.dashboardTimer);
     window.clearTimeout(state.eventReconnectTimer);
     window.clearTimeout(state.audioMeters.speakerResetTimer);
+    window.clearInterval(state.singleBackgroundThinking.countdownTimer);
     stopWebMicrophone();
     state.eventSocket?.close();
   });

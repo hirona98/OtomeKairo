@@ -1320,6 +1320,18 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             payload = self._read_json_body()
             self._write_success(HTTPStatus.OK, self.server.service.handle_conversation(token, payload))
             return
+        if method == "POST" and path == "/ui/api/background-thinking/run-once":
+            if self._read_json_body():
+                raise ServiceError(
+                    400,
+                    "unsupported_background_thinking_run_fields",
+                    "The request body must be an empty object.",
+                )
+            self._write_success(
+                HTTPStatus.OK,
+                self.server.service.trigger_background_thinking_once(token),
+            )
+            return
         if method == "GET" and path == "/ui/api/config/editor-state":
             self._write_success(HTTPStatus.OK, self.server.service.get_editor_state(token))
             return
