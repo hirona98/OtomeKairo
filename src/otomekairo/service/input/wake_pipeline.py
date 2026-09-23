@@ -66,6 +66,7 @@ class ServiceInputWakePipelineMixin:
                 started_at=started_at,
                 client_context=client_context,
                 cycle_id=cycle_id,
+                for_background_thinking=True,
             )
             if isinstance(pre_observation_activity_context, dict):
                 client_context = {
@@ -208,8 +209,6 @@ class ServiceInputWakePipelineMixin:
         current_time: str,
         client_context: dict[str, Any] | None,
     ) -> bool:
-        if self._unseen_wake_observation_sources(state):
-            return False
         return self._wake_is_due(state=state, current_time=current_time)["should_skip"] is not True
 
     def _consume_background_thinking_interval(

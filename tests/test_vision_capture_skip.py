@@ -225,6 +225,7 @@ class VisionCaptureSkipResultTests(unittest.TestCase):
             return self.service._run_wake_policy_observations(
                 state={}, started_at="2026-08-14T12:00:00+09:00",
                 client_context={"source": "background_thinking_scheduler"}, cycle_id=None,
+                for_background_thinking=False,
             )
 
     def test_skipped_observations_match_off_for_thinking_but_remain_in_trace(self) -> None:

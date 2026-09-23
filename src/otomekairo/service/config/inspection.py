@@ -407,7 +407,6 @@ class ServiceConfigInspectionMixin:
 
     def _snapshot_wake_runtime_state(self, *, state: dict[str, Any], current_time: str) -> dict[str, Any]:
         self._prune_pending_intent_candidates(current_time=current_time)
-        waiting_for_vision_source_ids = self._unseen_wake_observation_sources(state)
         with self._runtime_state_lock:
             speech_history = self._wake_runtime_state.get("speech_history_by_dedupe", {})
             snapshot = {
@@ -417,8 +416,6 @@ class ServiceConfigInspectionMixin:
                 "retry_after": self._wake_runtime_state.get("retry_after"),
                 "speech_history_count": len(speech_history) if isinstance(speech_history, dict) else 0,
             }
-        if waiting_for_vision_source_ids:
-            snapshot["waiting_for_vision_source_ids"] = waiting_for_vision_source_ids
         return snapshot
 
     def _snapshot_memory_postprocess_runtime_state(self) -> dict[str, Any]:

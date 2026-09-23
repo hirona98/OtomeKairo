@@ -237,7 +237,6 @@ response:
 `runtime_detail.wake_policy_observations` は現在設定されている `wake_policy.observations` と process-local の直近実行結果を照合した snapshot である。
 `runtime_detail.wake_runtime_state.interval_started_at` は定期思考の間隔の起点、`last_wake_at` は直近実行時刻を返す。更新条件は [状態と設定.md](状態と設定.md) を正とする。
 `runtime_detail.wake_runtime_state.retry_after` は、思考前観測 の一時失敗後に interval を消費せず短く再試行する時刻を表す。
-`runtime_detail.wake_runtime_state.waiting_for_vision_source_ids` は、思考前観測の対象 vision source がこの process で未登録のため定期思考を待っている間だけ入る。意味は [状態と設定.md](状態と設定.md) を正とする。
 各項目は `enabled / vision_source_id / interval_seconds / last_run_at / last_status / last_summary / last_error` を返す。
 `last_status` は `succeeded` / `skipped` / `failed` のいずれかである。意味は [../capability/視覚機能.md](../capability/視覚機能.md) を正とする。
 `last_status=skipped` では `last_error` は `null` とし、見送り理由は `last_summary` に入れる。

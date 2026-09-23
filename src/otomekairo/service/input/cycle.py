@@ -147,6 +147,7 @@ class ServiceInputCycleMixin:
                 started_at=started_at,
                 client_context=current_client_context,
                 cycle_id=cycle_id,
+                for_background_thinking=False,
             )
             # 会話添付画像は capability 実行ではなく、会話入力の補助要約として扱う。
             if input_images:

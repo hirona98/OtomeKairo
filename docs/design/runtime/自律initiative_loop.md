@@ -215,10 +215,10 @@ LLM の自由文をそのまま状態遷移へ使わない。
 `wake / background_thinking` の入力文は、観測、`drive_state`、直近文脈、候補を合わせて、関わる、保留する、見送る、能力を使うのどれが自然かを評価する自律判断機会を表す。
 身体状態は body context、body capability result、明示的な身体状態 source を根拠にする。
 予定状態は schedule context、schedule capability result、明示的な予定 source を根拠にする。
-`wake_policy.observations` は 定期思考 の判断前に enabled 項目だけを順番に取得する。
+`wake_policy.observations` は 定期思考 の判断前に enabled かつ接続中の項目を順番に取得する。
 visual capture の source、result、保存、inspection の詳細は [../capability/視覚機能.md](../capability/視覚機能.md) を正とする。
 思考前観測 の運用時刻は `wake_policy` と process-local runtime で扱い、成功結果は内部観測と自律判断の材料として扱う。
-定期思考の間隔の起点と、対象 vision source がこの process で未登録のあいだ due にしない条件は [../api/状態と設定.md](../api/状態と設定.md) を正とする。
+定期思考の間隔の起点と、対象 vision source が未接続のときの扱いは [../api/状態と設定.md](../api/状態と設定.md) を正とする。
 思考前観測 として同期取得する capability result は、`ongoing_action` 外の内部観測として扱う。
 会話入力、手動 wake、capability result handling は FIFO で直列化する。
 これらのサイクルが実行中または待機中なら、server はその周期の due autonomous run と `background_thinking` を開始しない。

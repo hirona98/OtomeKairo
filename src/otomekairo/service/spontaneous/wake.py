@@ -368,9 +368,6 @@ class ServiceSpontaneousWakeMixin:
 
     def _execute_scheduled_background_thinking(self, *, state: dict[str, Any]) -> None:
         current_time = self._now_iso()
-        unseen_sources = self._unseen_wake_observation_sources(state)
-        if unseen_sources:
-            return
         if self._wake_is_due(state=state, current_time=current_time)["should_skip"] is True:
             return
         client_context: dict[str, Any] = {"source": "background_thinking_scheduler"}
@@ -413,10 +410,6 @@ class ServiceSpontaneousWakeMixin:
         retry_delay_seconds = self._wake_retry_delay_remaining_seconds(current_time=current_time)
         if retry_delay_seconds is not None:
             return min(retry_delay_seconds, BACKGROUND_THINKING_POLL_SECONDS)
-
-        # 対象 vision source がこの process で未登録
-        if self._unseen_wake_observation_sources(state):
-            return BACKGROUND_THINKING_POLL_SECONDS
 
         with self._runtime_state_lock:
             interval_started_at = self._wake_runtime_state["interval_started_at"]
@@ -579,13 +572,6 @@ class ServiceSpontaneousWakeMixin:
             return {
                 "should_skip": True,
                 "reason_summary": "思考前観測 の一時失敗後の再試行待機中。",
-            }
-
-        # 対象 vision source がこの process で未登録
-        if self._unseen_wake_observation_sources(state):
-            return {
-                "should_skip": True,
-                "reason_summary": "思考前観測の対象 vision source が、この process でまだ一度も登録されていない。",
             }
 
         with self._runtime_state_lock:

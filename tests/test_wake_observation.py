@@ -3,9 +3,8 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from otomekairo.event_stream import EventStreamRegistry
 from otomekairo.service.app import OtomeKairoService
 from otomekairo.service.common import BACKGROUND_THINKING_POLL_SECONDS
 
@@ -41,31 +40,6 @@ def _interval_state(**overrides) -> dict:
     return state
 
 
-class SeenVisionSourceRegistryTests(unittest.TestCase):
-    def test_hello_remembers_source_after_disconnect(self) -> None:
-        registry = EventStreamRegistry()
-        session_id = registry.add_connection(_ClosedSocket())
-        registry.register_hello(
-            session_id,
-            client_id="console-1",
-            client_kind="cocoro_console",
-            capabilities={"vision.capture": "1"},
-            rejected_bindings=[],
-            vision_sources=[
-                {
-                    "vision_source_id": "vision_source:console-1:desktop",
-                    "kind": "desktop",
-                    "default_for": ["desktop"],
-                }
-            ],
-        )
-        registry.remove_connection(session_id)
-
-        self.assertTrue(registry.has_seen_vision_source("vision_source:console-1:desktop"))
-        self.assertTrue(registry.has_seen_vision_source_kind("desktop"))
-        self.assertIsNone(registry.get_vision_source("vision_source:console-1:desktop"))
-
-
 class WakeObservationSourceReadyTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -86,12 +60,22 @@ class WakeObservationSourceReadyTests(unittest.TestCase):
             vision_sources=[
                 {
                     "vision_source_id": vision_source_id,
+                    "capability_id": "vision.capture",
                     "kind": kind,
                     "default_for": [kind],
                 }
             ],
         )
         return session_id
+
+    def _run_periodic_observations(self, state: dict) -> dict:
+        return self.service._run_wake_policy_observations(
+            state=state,
+            started_at=NOW,
+            client_context={"source": "background_thinking_scheduler"},
+            cycle_id=None,
+            for_background_thinking=True,
+        )
 
     def test_no_observations_first_thinking_is_due_after_interval(self) -> None:
         state = _interval_state(wake_policy={"mode": "interval", "interval_seconds": 300})
@@ -169,20 +153,25 @@ class WakeObservationSourceReadyTests(unittest.TestCase):
         self.assertTrue(self.service._wake_is_due(state=state, current_time="2026-08-14T12:14:59+09:00")["should_skip"])
         self.assertFalse(self.service._wake_is_due(state=state, current_time="2026-08-14T12:15:00+09:00")["should_skip"])
 
-    def test_enabled_observation_without_hello_is_not_due(self) -> None:
+    def test_enabled_observation_without_hello_is_due_and_not_recorded(self) -> None:
         state = _interval_state()
         due = self.service._wake_is_due(state=state, current_time=NOW)
 
-        self.assertTrue(due["should_skip"])
-        self.assertIn("一度も登録されていない", due["reason_summary"] or "")
+        self.assertFalse(due["should_skip"])
         self.assertEqual(
             self.service._background_thinking_delay_seconds(state=state, current_time=NOW),
-            BACKGROUND_THINKING_POLL_SECONDS,
+            0.0,
         )
-        self.assertEqual(
-            self.service._unseen_wake_observation_sources(state),
-            ["vision_source:console-x:desktop"],
-        )
+        observe = Mock()
+        with patch.object(self.service, "_run_wake_policy_observation", observe):
+            context = self._run_periodic_observations(state)
+        observe.assert_not_called()
+        self.assertEqual(context, {"source": "background_thinking_scheduler"})
+        self.assertEqual(self.service._wake_observation_runtime_state, {})
+        self.assertFalse(self.service._client_context_has_retryable_wake_observation_failure(context))
+        self.service._consume_background_thinking_interval(trigger_kind="background_thinking", current_time=NOW)
+        self.assertEqual(self.service._wake_runtime_state["last_wake_at"], NOW)
+        self.assertIsNone(self.service._wake_runtime_state["retry_after"])
 
     def test_hello_desktop_makes_stale_desktop_id_due(self) -> None:
         state = _interval_state()
@@ -194,7 +183,7 @@ class WakeObservationSourceReadyTests(unittest.TestCase):
 
         due = self.service._wake_is_due(state=state, current_time=NOW)
         self.assertFalse(due["should_skip"])
-        self.assertEqual(self.service._unseen_wake_observation_sources(state), [])
+        self.assertFalse(self.service._wake_observation_source_is_disconnected(_desktop_observation()))
 
     def test_hello_camera_makes_dynamic_camera_observation_due(self) -> None:
         state = _interval_state(
@@ -207,20 +196,18 @@ class WakeObservationSourceReadyTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(
-            self.service._unseen_wake_observation_sources(state),
-            ["vision_source:対面カメラ"],
-        )
+        observation = self.service._enabled_wake_policy_observations(state)[0]
+        self.assertTrue(self.service._wake_observation_source_is_disconnected(observation))
         self._register_source(
             vision_source_id="vision_source:対面カメラ",
             kind="camera",
             client_id="tapo-c220-connector-main",
         )
-        self.assertEqual(self.service._unseen_wake_observation_sources(state), [])
+        self.assertFalse(self.service._wake_observation_source_is_disconnected(observation))
         due = self.service._wake_is_due(state=state, current_time=NOW)
         self.assertFalse(due["should_skip"])
 
-    def test_seen_then_disconnect_is_due_and_observation_unresolvable(self) -> None:
+    def test_seen_then_disconnect_is_due_and_not_recorded(self) -> None:
         state = _interval_state()
         session_id = self._register_source(
             vision_source_id="vision_source:console-x:desktop",
@@ -231,14 +218,134 @@ class WakeObservationSourceReadyTests(unittest.TestCase):
 
         due = self.service._wake_is_due(state=state, current_time=NOW)
         self.assertFalse(due["should_skip"])
-        self.assertIsNone(
-            self.service._resolve_wake_policy_observation_input(
-                capability_id="vision.capture",
-                input_payload={"vision_source_id": "vision_source:console-x:desktop", "mode": "still"},
-            )
+        observe = Mock()
+        with patch.object(self.service, "_run_wake_policy_observation", observe):
+            context = self._run_periodic_observations(state)
+        observe.assert_not_called()
+        self.assertEqual(context, {"source": "background_thinking_scheduler"})
+        self.assertEqual(self.service._wake_observation_runtime_state, {})
+
+    def test_camera_without_hello_is_not_recorded(self) -> None:
+        state = _interval_state(
+            wake_policy={"mode": "interval", "interval_seconds": 300, "observations": []},
+            camera_sources={
+                "vision_source:対面カメラ": {
+                    "vision_source_id": "vision_source:対面カメラ",
+                    "enabled": True,
+                }
+            },
+        )
+        observe = Mock()
+        with patch.object(self.service, "_run_wake_policy_observation", observe):
+            context = self._run_periodic_observations(state)
+        observe.assert_not_called()
+        self.assertEqual(context, {"source": "background_thinking_scheduler"})
+        self.assertFalse(self.service._wake_is_due(state=state, current_time=NOW)["should_skip"])
+
+    def test_connected_camera_is_observed_when_desktop_is_disconnected(self) -> None:
+        state = _interval_state(
+            camera_sources={
+                "vision_source:対面カメラ": {
+                    "vision_source_id": "vision_source:対面カメラ",
+                    "enabled": True,
+                }
+            }
+        )
+        self._register_source(
+            vision_source_id="vision_source:対面カメラ",
+            kind="camera",
+            client_id="camera-connector",
+        )
+        observed: list[str] = []
+
+        def observe(**kwargs):
+            observed.append(kwargs["observation"]["input"]["vision_source_id"])
+            return {
+                "observation_id": kwargs["observation"]["observation_id"],
+                "status": "succeeded",
+                "visual_summary_text": "カメラを観測した。",
+            }
+
+        with patch.object(self.service, "_run_wake_policy_observation", side_effect=observe):
+            context = self._run_periodic_observations(state)
+        self.assertEqual(observed, ["vision_source:対面カメラ"])
+        self.assertEqual(len(context["wake_observations"]), 1)
+        self.assertEqual(len(context["wake_observation_trace"]["wake_observations"]), 1)
+
+    def test_all_connected_sources_are_observed_in_order(self) -> None:
+        state = _interval_state(
+            camera_sources={
+                "vision_source:対面カメラ": {
+                    "vision_source_id": "vision_source:対面カメラ",
+                    "enabled": True,
+                }
+            }
+        )
+        self._register_source(
+            vision_source_id="vision_source:console-x:desktop",
+            kind="desktop",
+            client_id="console-x",
+        )
+        self._register_source(
+            vision_source_id="vision_source:対面カメラ",
+            kind="camera",
+            client_id="camera-connector",
+        )
+        observed: list[str] = []
+
+        def observe(**kwargs):
+            observed.append(kwargs["observation"]["input"]["vision_source_id"])
+            return {
+                "observation_id": kwargs["observation"]["observation_id"],
+                "status": "succeeded",
+                "visual_summary_text": "観測した。",
+            }
+
+        with patch.object(self.service, "_run_wake_policy_observation", side_effect=observe):
+            context = self._run_periodic_observations(state)
+        self.assertEqual(observed, ["vision_source:console-x:desktop", "vision_source:対面カメラ"])
+        self.assertEqual(len(context["wake_observations"]), 2)
+
+    def test_disconnection_before_result_recording_is_omitted(self) -> None:
+        state = _interval_state()
+        session_id = self._register_source(
+            vision_source_id="vision_source:console-x:desktop",
+            kind="desktop",
+            client_id="console-x",
         )
 
-    def test_partial_hello_still_waits(self) -> None:
+        def observe(**kwargs):
+            self.service._event_stream_registry.remove_connection(session_id)
+            return {
+                "observation_id": kwargs["observation"]["observation_id"],
+                "status": "failed",
+                "failure_code": "source_unavailable",
+                "reason_summary": "接続が切れた。",
+            }
+
+        with patch.object(self.service, "_run_wake_policy_observation", side_effect=observe):
+            context = self._run_periodic_observations(state)
+        self.assertEqual(context, {"source": "background_thinking_scheduler"})
+        self.assertEqual(self.service._wake_observation_runtime_state, {})
+
+    def test_ambiguous_connected_source_remains_failure(self) -> None:
+        state = _interval_state()
+        self._register_source(
+            vision_source_id="vision_source:console-a:desktop",
+            kind="desktop",
+            client_id="console-a",
+        )
+        self._register_source(
+            vision_source_id="vision_source:console-b:desktop",
+            kind="desktop",
+            client_id="console-b",
+        )
+        context = self._run_periodic_observations(state)
+        self.assertEqual(context["wake_observations"][0]["status"], "failed")
+        self.assertEqual(context["wake_observations"][0]["failure_code"], "source_unavailable")
+        self.assertEqual(len(context["wake_observation_trace"]["wake_observations"]), 1)
+
+    def test_partial_hello_observes_only_connected_source(self) -> None:
         state = _interval_state(
             camera_sources={
                 "vision_source:対面カメラ": {
@@ -253,14 +360,25 @@ class WakeObservationSourceReadyTests(unittest.TestCase):
             client_id="console-live",
         )
 
-        self.assertEqual(
-            self.service._unseen_wake_observation_sources(state),
-            ["vision_source:対面カメラ"],
-        )
         due = self.service._wake_is_due(state=state, current_time=NOW)
-        self.assertTrue(due["should_skip"])
+        self.assertFalse(due["should_skip"])
+        observed: list[str] = []
 
-    def test_periodic_thought_topic_due_does_not_start_cycle_while_unseen(self) -> None:
+        def observe(**kwargs):
+            observed.append(kwargs["observation"]["input"]["vision_source_id"])
+            return {
+                "observation_id": kwargs["observation"]["observation_id"],
+                "status": "succeeded",
+                "visual_summary_text": "画面を観測した。",
+            }
+
+        with patch.object(self.service, "_run_wake_policy_observation", side_effect=observe):
+            context = self._run_periodic_observations(state)
+        self.assertEqual(observed, ["vision_source:console-x:desktop"])
+        self.assertEqual(len(context["wake_observations"]), 1)
+        self.assertEqual(len(context["wake_observation_trace"]["wake_observations"]), 1)
+
+    def test_periodic_thought_topic_starts_cycle_without_vision_source(self) -> None:
         state = _interval_state(
             periodic_thought_topics=[
                 {
@@ -274,27 +392,25 @@ class WakeObservationSourceReadyTests(unittest.TestCase):
         started: list[dict] = []
         self.service._execute_wake_cycle = lambda **kwargs: started.append(kwargs)
 
-        self.assertFalse(
+        self.assertTrue(
             self.service._background_thinking_should_proceed(
                 state=state,
                 current_time=NOW,
                 client_context={},
             )
         )
-        self.service._execute_scheduled_background_thinking(state=state)
-        self.assertEqual(started, [])
+        with patch.object(self.service, "_now_iso", return_value=NOW):
+            self.service._execute_scheduled_background_thinking(state=state)
+        self.assertEqual(len(started), 1)
         self.assertEqual(
             self.service._background_thinking_delay_seconds(state=state, current_time=NOW),
-            BACKGROUND_THINKING_POLL_SECONDS,
+            0.0,
         )
 
-    def test_inspection_lists_waiting_source_ids(self) -> None:
+    def test_inspection_has_no_waiting_source_ids(self) -> None:
         state = _interval_state()
         snapshot = self.service._snapshot_wake_runtime_state(state=state, current_time=NOW)
-        self.assertEqual(
-            snapshot["waiting_for_vision_source_ids"],
-            ["vision_source:console-x:desktop"],
-        )
+        self.assertNotIn("waiting_for_vision_source_ids", snapshot)
 
         self._register_source(
             vision_source_id="vision_source:console-live:desktop",
