@@ -36,14 +36,12 @@ PERSONA_CONTEXT_ROLES = frozenset({
 @dataclass(frozen=True, slots=True)
 class PersonaContext:
     display_name: str
-    initiative_baseline: dict[str, Any]
     persona_prompt_text: str
     expression_addon: str | None
     use_policy: str
 
     def to_prompt_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            "initiative_baseline": self.initiative_baseline,
             "persona_prompt_text": self.persona_prompt_text,
             "use_policy": self.use_policy,
         }
@@ -53,7 +51,6 @@ class PersonaContext:
 
     def to_summary_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            "initiative_baseline": self.initiative_baseline,
             "persona_prompt_excerpt": self._prompt_excerpt(),
         }
         return payload
@@ -75,15 +72,10 @@ def build_persona_context(
     if normalized_role not in PERSONA_CONTEXT_ROLES:
         raise ValueError(f"unsupported persona_context role: {role}")
     display_name = _persona_text(persona.get("display_name")) or "OtomeKairo"
-    initiative_level = _persona_text(persona.get("initiative_baseline")) or "medium"
     persona_prompt_text = _persona_text(persona.get("persona_prompt")) or ""
     expression_addon = _persona_text(persona.get("expression_addon")) if include_expression else None
     return PersonaContext(
         display_name=display_name,
-        initiative_baseline={
-            "level": initiative_level,
-            "summary_text": persona_initiative_baseline_summary(initiative_level),
-        },
         persona_prompt_text=persona_prompt_text,
         expression_addon=expression_addon,
         use_policy=PERSONA_CONTEXT_USE_POLICY,
@@ -92,14 +84,6 @@ def build_persona_context(
 
 def build_persona_context_summary(persona: dict[str, Any]) -> dict[str, Any]:
     return build_persona_context(persona, role="decision_generation").to_summary_payload()
-
-
-def persona_initiative_baseline_summary(level: str) -> str:
-    if level == "low":
-        return "自発発話は控えめ寄りで、前景理由が弱ければ見送る。"
-    if level == "high":
-        return "自発発話は強めで、前景理由が揃うと関わる判断を取りやすい。"
-    return "自発発話は中庸で、関わる、保留する、見送るを文脈で選ぶ。"
 
 
 def _persona_text(value: Any) -> str | None:
@@ -226,7 +210,6 @@ class InitiativeContext:
     time_context_summary: dict[str, Any]
     foreground_signal_summary: dict[str, Any]
     activity_context: dict[str, Any] | None
-    initiative_baseline: dict[str, Any]
     persona_context_summary: dict[str, Any]
     runtime_state_summary: dict[str, Any]
     recent_turn_summary: list[dict[str, str]]
@@ -261,7 +244,6 @@ class InitiativeContext:
             "time_context_summary": self.time_context_summary,
             "foreground_signal_summary": self.foreground_signal_summary,
             "activity_context": self.activity_context,
-            "initiative_baseline": self.initiative_baseline,
             "persona_context_summary": self.persona_context_summary,
             "runtime_state_summary": self.runtime_state_summary,
             "recent_turn_summary": self.recent_turn_summary,

@@ -28,7 +28,6 @@ class ServiceInputWakePipelineMixin:
         cycle_label = self._debug_cycle_label(cycle_id)
         # 入力テキスト
         input_text = self._build_wake_input_text(
-            state=state,
             client_context=client_context,
             selected_candidate=selected_candidate,
         )
@@ -74,7 +73,6 @@ class ServiceInputWakePipelineMixin:
                     "pre_observation_activity_context": pre_observation_activity_context,
                 }
             input_text = self._build_wake_input_text(
-                state=state,
                 client_context=client_context,
                 selected_candidate=selected_candidate,
             )
@@ -106,7 +104,6 @@ class ServiceInputWakePipelineMixin:
                 cycle_id=cycle_id,
             )
             input_text = self._build_wake_input_text(
-                state=state,
                 client_context=client_context,
                 selected_candidate=selected_candidate,
             )

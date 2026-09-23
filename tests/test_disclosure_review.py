@@ -247,7 +247,6 @@ class DisclosureReviewTests(unittest.TestCase):
     def _persona_context(self) -> PersonaContext:
         return PersonaContext(
             display_name="test",
-            initiative_baseline={"level": "medium", "summary_text": "中庸"},
             persona_prompt_text="テスト人格。",
             expression_addon=None,
             use_policy="書き換えの距離感と言い回しの補助に使う。開示可否と候補集合を変えない。",

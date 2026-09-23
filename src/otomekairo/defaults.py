@@ -23,7 +23,6 @@ DEFAULT_EMBEDDING_DIMENSION = 3072
 DEFAULT_GEMINI_GENERATION_MODEL = "openrouter/google/gemini-3.1-flash-lite-preview"
 DEFAULT_GEMINI_EMBEDDING_MODEL = "openrouter/google/gemini-embedding-001"
 DEFAULT_PERSONA_DISPLAY_NAME = "初音ミク"
-DEFAULT_PERSONA_INITIATIVE_BASELINE = "medium"
 DEFAULT_CONVERSATION_DISPLAY_NAME_ID = "conversation_display_name:default"
 DEFAULT_CONVERSATION_DISPLAY_NAME = "マスター"
 DEFAULT_ELYTH_MCP_SERVER_ID = "elyth"
@@ -228,7 +227,6 @@ def build_default_state() -> dict:
             DEFAULT_PERSONA_ID: {
                 "persona_id": DEFAULT_PERSONA_ID,
                 "display_name": DEFAULT_PERSONA_DISPLAY_NAME,
-                "initiative_baseline": DEFAULT_PERSONA_INITIATIVE_BASELINE,
                 "persona_prompt": DEFAULT_PERSONA_PROMPT,
                 "expression_addon": DEFAULT_PERSONA_EXPRESSION_ADDON,
                 "wake_words": list(DEFAULT_PERSONA_WAKE_WORDS),

@@ -25,7 +25,6 @@ CAPABILITY_UNAVAILABLE_REASONS = frozenset(
         "no_mcp_tool",
     }
 )
-PERSONA_INITIATIVE_BASELINES = {"low", "medium", "high"}
 VISION_SOURCE_KINDS = {"desktop", "camera", "virtual"}
 CAMERA_CONNECTOR_KINDS = {"tapo_c220"}
 CAMERA_DEFAULT_CONNECTOR_KIND = "tapo_c220"

@@ -125,7 +125,6 @@ class ServiceSpontaneousWakeMixin:
             observation_summary: dict[str, Any] | None = None
             reference_context: dict[str, Any] | None = None
             input_text = self._build_wake_input_text(
-                state=state,
                 client_context=client_context,
                 selected_candidate=None,
             )
@@ -139,7 +138,6 @@ class ServiceSpontaneousWakeMixin:
                         reference_payload=reference_payload,
                     )
                     input_text = self._build_wake_input_text(
-                        state=state,
                         client_context=client_context,
                         selected_candidate=None,
                     )
@@ -629,14 +627,11 @@ class ServiceSpontaneousWakeMixin:
     def _build_wake_input_text(
         self,
         *,
-        state: dict[str, Any],
         client_context: dict[str, Any],
         selected_candidate: dict[str, Any] | None,
     ) -> str:
         # プレフィックス
         parts = ["定期思考。"]
-        persona = state["personas"][state["selected_persona_id"]]
-        parts.append(f"initiative_baseline は {persona['initiative_baseline']}。")
         parts.extend(
             self._client_context_input_parts(
                 client_context=client_context,

@@ -1,5 +1,6 @@
 import unittest
 from copy import deepcopy
+from unittest.mock import patch
 
 from otomekairo.defaults import DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_SUMMARY, build_default_state
 from otomekairo.service.common import ServiceError
@@ -24,6 +25,24 @@ class DummyService(ServiceConfigMixin):
 
 
 class CurrentConfigApiTests(unittest.TestCase):
+    def test_persona_round_trip_preserves_speech_disposition_in_prompt(self) -> None:
+        service = DummyService()
+        persona = service.get_config("token")["selected_persona"]
+        self.assertEqual(
+            set(persona),
+            {"persona_id", "display_name", "persona_prompt", "expression_addon", "wake_words"},
+        )
+        persona["persona_prompt"] = "寡黙で、気になったことは自分から短く話す。"
+
+        with (
+            patch.object(service, "_clear_pending_intent_candidates", create=True),
+            patch.object(service, "_reload_audio_runtime_settings", create=True),
+        ):
+            service.replace_persona("token", persona["persona_id"], persona)
+
+        self.assertEqual(service.get_persona("token", persona["persona_id"])["persona"], persona)
+        self.assertEqual(service.get_config("token")["selected_persona"], persona)
+
     def test_default_model_preset_uses_one_generation_config(self) -> None:
         service = DummyService()
         state = service.store.read_state()

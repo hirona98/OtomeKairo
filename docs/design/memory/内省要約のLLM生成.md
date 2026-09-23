@@ -133,10 +133,6 @@ LLM に渡す入力は raw `events` ではなく、dirty scope ごとの圧縮�
       },
       "existing_summary_text": "最近のやり取りでは、距離感に関する理解が少しずつ安定している。",
       "persona_context": {
-        "initiative_baseline": {
-          "level": "medium",
-          "summary_text": "自発発話は中庸で、具体的な前景変化があれば短く前へ出る。"
-        },
         "persona_prompt_excerpt": "必要以上に媚びず、相手を一人の相手としてまっすぐ扱う。"
       },
       "affect_state": [

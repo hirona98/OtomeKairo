@@ -23,7 +23,6 @@ def _initiative_context(**overrides) -> InitiativeContext:
         "time_context_summary": {},
         "foreground_signal_summary": {},
         "activity_context": None,
-        "initiative_baseline": {},
         "persona_context_summary": {},
         "runtime_state_summary": {},
         "recent_turn_summary": [],
@@ -156,7 +155,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
             },
             initiative_entry_summary=None,
             suppression_summary={"suppression_level": "low"},
-            initiative_baseline={},
             speech_timing_state={"background_trigger": True},
             capability_summary={},
         )
@@ -197,7 +195,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
             },
             initiative_entry_summary=None,
             suppression_summary={"suppression_level": "low"},
-            initiative_baseline={},
             speech_timing_state={"background_trigger": True},
             capability_summary={},
         )
@@ -357,10 +354,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
     def test_wake_input_text_keeps_capability_on_the_board(self) -> None:
         service = DummyInputService()
         text = service._build_wake_input_text(
-            state={
-                "selected_persona_id": "persona:default",
-                "personas": {"persona:default": {"initiative_baseline": "medium"}},
-            },
             client_context={"source": "background_thinking_scheduler"},
             selected_candidate=None,
         )
@@ -706,7 +699,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
                 "visual_observations": [{"change_state": "stable"}],
             },
             activity_context=None,
-            initiative_baseline={},
             persona_context_summary={},
             runtime_state_summary={},
             recent_turn_summary=[],
@@ -1112,10 +1104,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
     def test_wake_input_text_omits_observation_summaries(self) -> None:
         service = DummyInputService()
         text = service._build_wake_input_text(
-            state={
-                "personas": {"p": {"initiative_baseline": "medium"}},
-                "selected_persona_id": "p",
-            },
             client_context={
                 "source": "background_thinking_scheduler",
                 "wake_observation_summary": "リズムゲームでS評価を獲得した。",
@@ -1355,7 +1343,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
             time_context_summary={},
             foreground_signal_summary={},
             activity_context=None,
-            initiative_baseline={},
             persona_context_summary={},
             runtime_state_summary={},
             recent_turn_summary=[],
@@ -1442,7 +1429,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
                 ]
             },
             activity_context=None,
-            initiative_baseline={},
             persona_context_summary={},
             runtime_state_summary={},
             recent_turn_summary=[],

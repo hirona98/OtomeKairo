@@ -31,7 +31,7 @@ class ServiceInputInitiativeScoringMixin:
             support_count = drive_state.get("support_count")
             if isinstance(support_count, int) and support_count > 0:
                 item["support_count"] = support_count
-            for key in ("support_strength", "scope_alignment", "signal_strength", "persona_alignment"):
+            for key in ("support_strength", "scope_alignment", "signal_strength"):
                 value = drive_state.get(key)
                 if isinstance(value, (int, float)):
                     item[key] = round(max(0.0, min(float(value), 1.0)), 2)

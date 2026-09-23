@@ -585,7 +585,6 @@ class ServiceConfigInspectionMixin:
                     "scope_alignment": drive_state.get("scope_alignment"),
                     "freshness_hint": drive_state.get("freshness_hint"),
                     "signal_strength": drive_state.get("signal_strength"),
-                    "persona_alignment": drive_state.get("persona_alignment"),
                     "stability_hint": drive_state.get("stability_hint"),
                     "source_updated_at": drive_state.get("source_updated_at"),
                     "updated_at": drive_state.get("updated_at"),

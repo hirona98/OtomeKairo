@@ -23,7 +23,6 @@ class TextTruncationTests(unittest.TestCase):
                 "visual_observations": [{"summary_text": text}],
             },
             activity_context=None,
-            initiative_baseline={},
             persona_context_summary={},
             runtime_state_summary={},
             recent_turn_summary=[],

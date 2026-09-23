@@ -4187,7 +4187,6 @@ function addPersona() {
         "新規人格設定",
       ),
       // UI に無い必須構造。選択中人格の本文等はコピーしない。
-      initiative_baseline: "medium",
       persona_prompt: "",
       expression_addon: "",
       wake_words: [],

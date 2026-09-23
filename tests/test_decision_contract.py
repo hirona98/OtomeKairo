@@ -32,7 +32,6 @@ from otomekairo.llm.prompts import (
 def _persona_context() -> PersonaContext:
     return PersonaContext(
         display_name="Test",
-        initiative_baseline={"level": "medium", "summary_text": "test"},
         persona_prompt_text="テスト人格。",
         expression_addon=None,
         use_policy="テスト判断に使う。",
@@ -933,7 +932,6 @@ class DecisionPromptScopeTests(unittest.TestCase):
             time_context_summary={},
             foreground_signal_summary={},
             activity_context=None,
-            initiative_baseline={},
             persona_context_summary={},
             runtime_state_summary={},
             recent_turn_summary=[],
@@ -996,7 +994,6 @@ class DecisionPromptScopeTests(unittest.TestCase):
             time_context_summary={},
             foreground_signal_summary={},
             activity_context=None,
-            initiative_baseline={"level": "medium"},
             persona_context_summary={},
             runtime_state_summary={},
             recent_turn_summary=[],
@@ -1017,7 +1014,6 @@ class DecisionPromptScopeTests(unittest.TestCase):
             pending_intent_selection=None,
         )
         self.assertEqual(summary["speech_frequency_level"], 10)
-        self.assertEqual(summary["initiative_baseline"], "medium")
 
     def test_trigger_policy_is_empty_without_trigger_context(self) -> None:
         for comparison_scope in ("self_activity", "outward_speech"):

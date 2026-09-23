@@ -75,15 +75,14 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 
 `initiative_context` は inspection へ要約を残す。
 `initiative_context` そのものを永続的な状態正本にしない。
-`persona_context_summary` は `initiative_baseline` と `persona_prompt_excerpt` を持つ。
-`initiative_context` は `initiative_baseline` を単独の人格判断値として扱わず、`persona_context_summary.initiative_baseline` と前景文脈を合わせて扱う。
+`persona_context_summary` は `persona_prompt_excerpt` を持つ。
 `initiative_entry_summary` は `entry_kind / entry_basis / reason_summary` を含む。
 `entry_basis` は `activity_mode_transition / strong_interest / same_activity_detail_change / observation_only` のいずれかである。
 `entry_kind=enter` は `entry_basis=activity_mode_transition / strong_interest` の場合に評価対象として強く前景化したことを表す。
 `entry_basis=same_activity_detail_change / observation_only` は同じ活動モード内の詳細変化または観測のみを表す。
 具体的な前景変化や関係上の意味が薄い `same_activity_detail_change / observation_only` は `entry_kind=skip` にする。
 同一活動内でも、人格・記憶・現在文脈から強い関心や関係上の意味がある場合は `entry_basis=strong_interest` として `entry_kind=enter` にする。
-`drive_summaries` の各 entry は、生成時点に存在する `drive_kind / support_count / support_strength / freshness_hint / scope_alignment / signal_strength / persona_alignment / stability_hint` を含む。
+`drive_summaries` の各 entry は、生成時点に存在する `drive_kind / support_count / support_strength / freshness_hint / scope_alignment / signal_strength / stability_hint` を含む。
 `drive_summaries` は中期的な向きの背景材料である。
 `support_count / support_strength / signal_strength / freshness_hint / stability_hint` の構造値が強い `drive_state` は、自発系 family の前景材料として渡す。
 `drive_state` から `speech / noop / pending_intent / capability_request` のどれへ置くかは、`decision_generation` が他の文脈と合わせて判断する。
@@ -267,7 +266,6 @@ initiative loop は、前へ出る理由と見送る理由を判断入力に含�
 - 直近で相手が休止や拒否を示した事実
 - `autonomous_run` または `ongoing_action` が結果待ちであること
 - capability が unavailable であること
-- `persona_context_summary.initiative_baseline.level=low` であること
 
 visual observation の `change_state=first_seen / changed` は自律判断の前景材料にする。
 autonomous family の availability は、強い `initiative_entry_summary`、構造値が強い `drive_state`、視覚観測の `first_seen / changed`、または due な定期思考トピックで組み立てる。

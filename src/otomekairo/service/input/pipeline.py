@@ -972,7 +972,6 @@ class ServiceInputPipelineMixin:
         )
         initiative_context = self._build_initiative_context(
             state=state,
-            persona=persona,
             persona_context_summary=build_persona_context_summary(persona),
             current_time=started_at,
             time_context=time_context,

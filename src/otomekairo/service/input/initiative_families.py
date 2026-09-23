@@ -26,7 +26,6 @@ class ServiceInputInitiativeFamiliesMixin:
         ongoing_action_summary: dict[str, Any] | None,
         selected_candidate: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None,
-        initiative_baseline: dict[str, Any],
         speech_timing_state: dict[str, Any],
         capability_summary: dict[str, Any],
         due_periodic_thought_topics: list[dict[str, Any]] | None = None,
@@ -61,7 +60,6 @@ class ServiceInputInitiativeFamiliesMixin:
                 foreground_signal_summary=foreground_signal_summary,
                 initiative_entry_summary=initiative_entry_summary,
                 suppression_summary=suppression_summary,
-                initiative_baseline=initiative_baseline,
                 speech_timing_state=speech_timing_state,
                 capability_summary=capability_summary,
             ),
@@ -185,12 +183,11 @@ class ServiceInputInitiativeFamiliesMixin:
         foreground_signal_summary: dict[str, Any],
         initiative_entry_summary: dict[str, Any] | None,
         suppression_summary: dict[str, Any],
-        initiative_baseline: dict[str, Any],
         speech_timing_state: dict[str, Any],
         capability_summary: dict[str, Any],
         due_periodic_thought_topics: list[dict[str, Any]] | None = None,
     ) -> InitiativeCandidateFamily:
-        _ = initiative_baseline, speech_timing_state
+        _ = speech_timing_state
         entry_kind = (
             initiative_entry_summary.get("entry_kind")
             if isinstance(initiative_entry_summary, dict)

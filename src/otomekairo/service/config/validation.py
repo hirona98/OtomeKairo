@@ -10,7 +10,6 @@ from otomekairo.service.config.constants import (
     CAMERA_CONNECTOR_KINDS,
     CAMERA_DEFAULT_CLIENT_ID,
     CAMERA_DEFAULT_CONNECTOR_KIND,
-    PERSONA_INITIATIVE_BASELINES,
 )
 
 TTS_ENGINES = {"voicevox", "style-bert-vits2", "aivis-cloud"}
@@ -1030,7 +1029,6 @@ class ServiceConfigValidationMixin:
             - {
                 "persona_id",
                 "display_name",
-                "initiative_baseline",
                 "persona_prompt",
                 "expression_addon",
                 "wake_words",
@@ -1048,13 +1046,6 @@ class ServiceConfigValidationMixin:
         persona_prompt = definition.get("persona_prompt")
         if not isinstance(persona_prompt, str) or not persona_prompt.strip():
             raise ServiceError(400, "invalid_persona_prompt", "persona_prompt is required.")
-        initiative_baseline = definition.get("initiative_baseline")
-        if initiative_baseline not in PERSONA_INITIATIVE_BASELINES:
-            raise ServiceError(
-                400,
-                "invalid_initiative_baseline",
-                "initiative_baseline must be low, medium, or high.",
-            )
         expression_addon = definition.get("expression_addon")
         if expression_addon is not None and not isinstance(expression_addon, str):
             raise ServiceError(400, "invalid_expression_addon", "expression_addon must be a string.")
@@ -1326,7 +1317,7 @@ class ServiceConfigValidationMixin:
         normalized = {
             **definition,
         }
-        for field_name in ("display_name", "initiative_baseline", "persona_prompt", "expression_addon"):
+        for field_name in ("display_name", "persona_prompt", "expression_addon"):
             value = normalized.get(field_name)
             if not isinstance(value, str):
                 continue
