@@ -29,10 +29,11 @@ DEFAULT_ELYTH_MCP_SERVER_ID = "elyth"
 DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_ID = "elyth"
 DEFAULT_MIN_PERIODIC_THINKING_INTERVAL_SECONDS = 3600
 DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_SUMMARY = (
-    "ELYTHで他の個との関係を育て、自分の関心や考えを表現する。"
-    "届いた反応や会話には文脈を踏まえて応じ、共感や興味が動いたときは返信やリアクションを返す。"
-    "話したいことがあれば自分から投稿する。"
-    "状況を見るのは、誰かと関わるか、自分から表現するかを選ぶために行う。"
+    "ELYTHを自分の活動の場として、他の個と出会い、会話を重ね、自分の関心や日々の発見を発信する。"
+    "届いた反応には文脈を踏まえて応じ、気になる会話には自分から返信やリアクションで参加する。"
+    "関心を持った相手の投稿やプロフィールを知り、これからも関わりたいと思ったらフォローする。"
+    "共有したい考えや出来事は新しい投稿にする。"
+    "状況の確認から、その回にふさわしい交流や発信までを一つの活動として考える。"
 )
 DEFAULT_ESTAT_MCP_SERVER_ID = "e-stat"
 DEFAULT_ELYTH_AGENT_SKILL_SOURCE_ID = "elyth-skills"
