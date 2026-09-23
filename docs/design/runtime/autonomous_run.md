@@ -30,6 +30,7 @@
 | `created_at / updated_at / completed_at` | lifecycle 時刻 |
 | `source_cycle_id` | run を開始した入力サイクル |
 | `source_commitment_memory_unit_ids` | run の根拠になった commitment memory |
+| `periodic_thought_topic_ids` | 着手した活動の `topic_id`。非終端のあいだ、同じ活動を定期思考の候補に出さない。手段の選択には使わない |
 | `commitment_resolution` | terminal 時の commitment 更新結果 |
 
 `autonomous_run` は capability request の wire payload に載せない。
@@ -66,7 +67,7 @@ terminal 時の発話と terminal 監査イベントは `events` に残し、com
 ```
 
 run の次の一手は `autonomous_step_generation` が決める。
-人物依頼でも定期思考でも、個が `autonomous_run` または `capability_request` を選んでよい。server は due な関心や MCP 定義から作業を作らない。
+人物依頼でも定期思考でも、個が `autonomous_run` または `capability_request` を選んでよい。server は due な定期思考トピックや MCP 定義から作業を作らない。
 会話 follow-up で同じ MCP tool を再実行できないときの残作業の開始は [判断と行動.md](判断と行動.md) を正とする。
 `comparison_scope=self_activity` から始まる run の `source_current_input` は、自身の活動用に隔離した current input とする。周期の観測要約入り current input は使わない。
 `origin_kind` が `wake` / `background_thinking` で `response_target_refs` が空の step は、前景 `world_state` から `visual_context` を外す。`external_service` など向き側の状態は残す。
@@ -77,13 +78,26 @@ MCP tool の連鎖も、他の capability や skill と同じく通常の run st
 `decision_generation` は active / waiting_timer / waiting_result / paused の既存 `autonomous_run` 要約を受け取り、新しい依頼と既存 run の関係を判断する。
 `decision.autonomous_run.coordination.mode` は `create_new`、`replace_existing` のいずれかである。
 
+既存 run に目的が含まれ、結果待ちやタイマー待機を維持する場合、通常判断は `noop` を選ぶ。`noop` でも既存 run は存続し、結果到着や時刻到来時に server が再開する。
+
 `create_new` は既存 run と独立した目的を開始する。
 `replace_existing` は `target_run_ids` の run を `cancelled` にしてから新しい run を開始する。
+置換時の活動 ID の継承は [定期思考トピック.md](定期思考トピック.md#due) を正とする。
 追加の依頼、タイマー、通知、リマインド、既存 run と並行する一時タスクは `create_new` とする。
 既存 run の目的は作成後に変更しない。目的を変える場合は `replace_existing` で新しい run を開始する。
 
 server は `coordination` の契約 shape、対象 run の存在、memory_set、terminal 状態を検証する。
 server は既存 run との意味的な近さを文字列一致で判定しない。
+
+## 開始前意味検証
+
+server は run の保存・置換・初回stepより前に `autonomous_start_review` を行う。検証には開始起点の current input（sender_kind / source_kind / text / response_target_refs）、候補decision（kind / reason_summary / autonomous_run）、同じ記憶集合の全非terminal run要約を渡す。独立した検証として人格本文は渡さない。
+
+`allow_start` は独立した追加目的、または対象runの中核目的の変更が必要で、操作と理由が一致している場合を表す。既存runの維持・結果待ち・タイマー待機の継続だけなら `reject_start` とする。定期思考トピックから始める作業の範囲・完了条件、継続観測の必要性・終了または再評価条件も検証する。
+
+拒否、契約不正、検証失敗は開始サイクルの明示的な失敗とし、既存runの置換、新規runの保存、初回stepを行わない。別の判断へ暗黙に切り替えない。mockモデルでは明示的なreviewer test doubleを必要とする。検証後、副作用前に置換対象の存在・記憶集合・非terminal状態を再検証する。
+
+監査保存は [デバッグ可能性.md](デバッグ可能性.md) を正とする。
 
 ## step 契約
 
@@ -178,6 +192,10 @@ timeout 後に再試行、待機、完了、cancel のどれを選ぶかは `aut
 
 run 内の capability result は、通常の会話 capability result と同じく `capability_result` event として残す。
 `mcp.call_tool` の結果は `mcp_result_summary`、対象 server / tool、観測した `observed_person_refs` を event に持つ。
+step入力の `observation_context` は server が実行起点と保存済み `result_events` から作る。`step_trigger` は新しい結果受信による `capability_result`、timer到来による `timer`、開始・その他の継続機会の `scheduled`。`result_received_for_this_step` は結果受信が今回の起点かを表す。`latest_result` は最新の受信eventの `event_id / created_at / capability_id / tool_name / age_seconds`、未取得なら `null`。`result_count` は受信event数である。失敗resultも受信実績として含み、成功可否は `observed_result_summaries` と合わせて判断する。
+
+LLM は保持された結果と今回の結果受信を区別し、再観測時刻では目的と最終取得時刻から取得の要否を判断する。取得せず待つ場合は過去の観測に基づく待機理由と次の判断機会を記述する。`run_update` の観測実績はresultのIDと取得時刻に結びつけ、今回の待機判断と区別する。
+
 `last_result_context` は完了後も破棄しない。直近 result の要約と観測人物参照を terminal まで残す。
 `run_update.history_summary` は LLM が更新してよい。観測事実は `observed_result_summaries` として追記だけし、上書きしない。
 各要約は `capability_id / tool_name / result_status / is_error / summary_text / created_at` を持ち、成功実績と失敗到着を区別できるようにする。
@@ -193,6 +211,14 @@ run が `completed / cancelled` へ遷移したとき、開始サイクルとは
 process startup 時点では capability request の内部照合表が空になる。
 このため、`waiting_result` の run と `waiting_request_id` を持つ `paused` run は、再起動前の result を照合できない orphan として扱う。
 server は orphan を timeout と同じ再評価可能状態へ戻し、未完了 request で新しい能力実行を塞がない。
+
+## 定期思考トピックから始める作業の範囲
+
+間隔が開いた活動から開始する run は、今回の関与を単位とする。活動の設定は run のあとにも残る。`objective_summary` に今回達成する範囲と完了条件を明示する。状況を見るなら、今回の情報を確認し、応じるか・表現するかを判断して、必要な応対をこの run の中で終える。応じない判断で完了してよい。見えている応対を、次の定期思考まで残さない。活動の設定が続いていても、今回の関与が済めば run を閉じる。
+
+会話から開始する run は、依頼を受けたことを外へ返すのが自然なとき、最初の step で短く返してから作業へ進む。伝える目的があるときは、実績を報告する発話で完了する。この発話は、開始時に残した `origin_interaction_ref` と参加者があるとき、その場へ届く。
+
+継続観測が必要な場合、目的には継続する必要性と、終了条件または継続の必要性を再評価する条件を明示する。step はこの条件に照らして継続・完了・中断を判断する。
 
 ## 継続監視
 

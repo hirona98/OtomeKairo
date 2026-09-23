@@ -4,7 +4,14 @@ from dataclasses import replace
 from unittest.mock import patch
 
 from otomekairo.llm.client import LLMClient
-from otomekairo.llm.contexts import AutonomousStepContext, CurrentInput, DecisionContext, PersonaContext
+from otomekairo.llm.contexts import (
+    AutonomousStepContext,
+    CurrentInput,
+    DecisionContext,
+    InitiativeContext,
+    PersonaContext,
+)
+from otomekairo.service.input.trace_compact import ServiceInputTraceCompactMixin
 from otomekairo.llm.contracts import (
     LLMError,
     build_decision_target_stances_for_kind,
@@ -25,7 +32,6 @@ from otomekairo.llm.prompts import (
 def _persona_context() -> PersonaContext:
     return PersonaContext(
         display_name="Test",
-        initiative_baseline={"level": "medium", "summary_text": "test"},
         persona_prompt_text="テスト人格。",
         expression_addon=None,
         use_policy="テスト判断に使う。",
@@ -352,12 +358,12 @@ class DecisionContractTests(unittest.TestCase):
         with self.assertRaises(LLMError):
             validate_decision_contract(payload)
 
-    def test_noop_with_standing_concern_requires_self_activity_hold(self) -> None:
+    def test_noop_with_periodic_thought_topic_requires_self_activity_hold(self) -> None:
         workspace = {
             "workspace_candidates": [
                 {
-                    "factor_ref": "standing_concern:elyth",
-                    "kind": "standing_concern",
+                    "factor_ref": "periodic_thought_topic:elyth",
+                    "kind": "periodic_thought_topic",
                     "summary_text": "ELYTH。",
                 }
             ]
@@ -371,7 +377,7 @@ class DecisionContractTests(unittest.TestCase):
             "capability_request": None,
             "autonomous_run": None,
             "foreground_selection": {
-                "primary_factor_ref": "standing_concern:elyth",
+                "primary_factor_ref": "periodic_thought_topic:elyth",
                 "supporting_factor_refs": [],
                 "suppressed_factors": [],
                 "summary_text": "外向きだけ控えた。",
@@ -435,7 +441,7 @@ class DecisionContractTests(unittest.TestCase):
             "capability_request": None,
             "autonomous_run": None,
             "foreground_selection": {
-                "primary_factor_ref": "standing_concern:elyth",
+                "primary_factor_ref": "periodic_thought_topic:elyth",
                 "supporting_factor_refs": [],
                 "suppressed_factors": [],
                 "summary_text": "関心を主役にした。",
@@ -468,7 +474,7 @@ class DecisionContractTests(unittest.TestCase):
                 },
             },
             "foreground_selection": {
-                "primary_factor_ref": "standing_concern:elyth",
+                "primary_factor_ref": "periodic_thought_topic:elyth",
                 "supporting_factor_refs": [],
                 "suppressed_factors": [],
                 "summary_text": "関心を主役にした。",
@@ -844,17 +850,19 @@ class DecisionPromptScopeTests(unittest.TestCase):
 
     def test_self_activity_prompt_asks_orientation_not_reply(self) -> None:
         system = self._system_prompt("self_activity")
-        self.assertIn("今、気にかけていることや継続中の自身の活動へ関わるか", system)
+        self.assertIn("今、候補に出ている活動や継続中の自身の活動へ関わるか", system)
         self.assertIn("capability_request / autonomous_run / pending_intent / noop", system)
-        self.assertIn("向きと CapabilityDecisionView の catalog から autonomous_run を始めてよい", system)
-        self.assertIn("autonomous_run.objective_summary は向き自身の言葉です", system)
+        self.assertIn("活動と CapabilityDecisionView の catalog から autonomous_run を始めてよい", system)
+        self.assertIn("autonomous_run.objective_summary は今回の関与の範囲と完了条件を、個の言葉で書きます", system)
         self.assertIn("capability_request.input の自然文は、その能力の先の場へ向けた個の表現です", system)
         self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です", system)
         self.assertIn("使わない排他キーもキーとして残し、値は null にします", system)
         self.assertIn("kind が capability_request のとき capability_request は object、pending_intent と autonomous_run は null です", system)
-        self.assertIn("その関心に関われる手段が CapabilityDecisionView に available=true であるときだけ", system)
+        self.assertIn("その活動に関われる手段が CapabilityDecisionView に available=true であるときだけ", system)
         self.assertIn("手段が無いときは今は関わらない", system)
         self.assertIn("target_stances は self_activity を 1 件だけ持ちます", system)
+        self.assertIn("控える理由を説明できる候補を primary factor に選んでください", system)
+        self.assertNotIn("会話の間合いは conversation_context", system)
         self.assertNotIn("伝達、能力実行、保留、見送り、継続目的開始のどれが", system)
         self.assertNotIn("人物発話自体が未来実行", system)
         self.assertNotIn("outward_speech は毎回必須です", system)
@@ -863,19 +871,31 @@ class DecisionPromptScopeTests(unittest.TestCase):
     def test_outward_speech_prompt_asks_short_view_not_visit(self) -> None:
         system = self._system_prompt("outward_speech")
         self.assertIn("今、外へ短い見方を出すか", system)
+        self.assertIn("未回答の問いがまだ相手の番なら", system)
+        self.assertIn("各周期で、未回答の問いがまだ相手の番か", system)
+        self.assertIn("やり取りが閉じた、または切り替わったと読めたあとは", system)
+        self.assertIn("返答待ちを続ける理由にも、待ちを終える理由にもしません", system)
+        self.assertNotIn("相手が次に話す番として", system)
+        self.assertNotIn("独り言も相手には次の発話として聞こえる", system)
         self.assertIn("speech / noop / pending_intent", system)
         self.assertIn("観測事実に基づく一文の状況認識", system)
         self.assertIn("助言、依頼、支援提案、休息促し、身体注意、画面への一般コメントは speech ではなく控える理由", system)
         self.assertIn("target_stances は outward_speech を 1 件だけ持ちます", system)
+        self.assertIn("控える理由を説明できる候補を primary factor に選んでください", system)
+        self.assertIn("構造化済み抑制は suppression、会話の間合いは conversation_context 候補を使えます", system)
         self.assertIn("AffectContext の affect_states と recent_episode_affects は WorkspaceContext の affect 候補です。", system)
         self.assertNotIn("今見に行く自然さがあれば capability_request", system)
-        self.assertNotIn("向きと CapabilityDecisionView の catalog から autonomous_run", system)
+        self.assertNotIn("活動と CapabilityDecisionView の catalog から autonomous_run", system)
         self.assertNotIn("有限 MCP セッションは CapabilityDecisionView", system)
 
     def test_full_prompt_keeps_combined_question(self) -> None:
         system = self._system_prompt("full")
         self.assertIn("伝達、能力実行、保留、見送り、継続目的開始のどれが", system)
         self.assertIn("outward_speech は毎回必須です", system)
+        self.assertIn("各周期で、未回答の問いがまだ相手の番か", system)
+        self.assertNotIn("相手が次に話す番として", system)
+        self.assertIn("控える理由を説明できる候補を primary factor に選んでください", system)
+        self.assertIn("構造化済み抑制は suppression、会話の間合いは conversation_context 候補を使えます", system)
         self.assertIn("載っている self_activity は hold です。対話の継続は outward_speech です。", system)
         self.assertIn("Agent Skill の skill_id は capability_id でも MCP tool_name でもありません。", system)
         self.assertIn("使わない排他キーもキーとして残し、値は null にします", system)
@@ -907,12 +927,11 @@ class DecisionPromptScopeTests(unittest.TestCase):
 
         initiative = InitiativeContext(
             trigger_kind="background_thinking",
-            opportunity_summary="気にかけていることがしばらく前景に出ていない。",
+            opportunity_summary="定期思考トピックがしばらく前景に出ていない。",
             initiative_entry_summary=None,
             time_context_summary={},
             foreground_signal_summary={},
             activity_context=None,
-            initiative_baseline={},
             persona_context_summary={},
             runtime_state_summary={},
             recent_turn_summary=[],
@@ -942,13 +961,59 @@ class DecisionPromptScopeTests(unittest.TestCase):
         outward_text = "\n".join(outward_policies)
         self.assertIn("InitiativeContext は今回の自律判断機会の材料", self_text)
         self.assertIn("preferred_capability_id がある candidate_family は capability_request の提案", self_text)
-        self.assertNotIn("standing_concern は実行指示ではありません", self_text)
+        self.assertNotIn("periodic_thought_topic は実行指示ではありません", self_text)
         self.assertNotIn("向きと catalog から autonomous_run を始めてよい", self_text)
         self.assertNotIn("短い独り言", self_text)
         self.assertIn("speech は短い独り言", outward_text)
         self.assertIn("speech_frequency_level は 5", outward_text)
+        self.assertIn("1 から 3 は控えめです", outward_text)
+        self.assertIn("8 から 10 は、重要性や今必要な続きであることを求めません", outward_text)
+        self.assertIn("10 はその上端です", outward_text)
+        self.assertIn("話せる材料があること自体は、発話を選ぶ理由にしません", outward_text)
+        self.assertNotIn("speech_frequency_level", self_text)
         self.assertNotIn("向きと catalog から autonomous_run", outward_text)
         self.assertNotIn("speech / noop / pending_intent / capability_request / autonomous_run から 1 つ", outward_text)
+
+    def test_compact_initiative_trace_keeps_speech_frequency_level(self) -> None:
+        class _Compact(ServiceInputTraceCompactMixin):
+            def _clamp(self, value: str | None, limit: int = 160) -> str | None:
+                if value is None:
+                    return None
+                stripped = value.strip()
+                if len(stripped) <= limit:
+                    return stripped
+                return stripped[: limit - 1] + "…"
+
+            def _compact_visual_observation_signals(self, value: object) -> list[dict[str, object]]:
+                return []
+
+        initiative = InitiativeContext(
+            trigger_kind="background_thinking",
+            opportunity_summary="短い見方を比べる。",
+            initiative_entry_summary=None,
+            time_context_summary={},
+            foreground_signal_summary={},
+            activity_context=None,
+            persona_context_summary={},
+            runtime_state_summary={},
+            recent_turn_summary=[],
+            drive_summaries=[],
+            pending_intent_summaries=[],
+            world_state_summary=[],
+            ongoing_action_summary=None,
+            capability_summary={},
+            candidate_families=[],
+            selected_candidate_family=None,
+            speech_timing_state={},
+            suppression_summary={},
+            speech_timing_summary="",
+            speech_frequency_level=10,
+        )
+        summary = _Compact()._compact_initiative_context_summary(
+            initiative_context=initiative,
+            pending_intent_selection=None,
+        )
+        self.assertEqual(summary["speech_frequency_level"], 10)
 
     def test_trigger_policy_is_empty_without_trigger_context(self) -> None:
         for comparison_scope in ("self_activity", "outward_speech"):
@@ -1152,3 +1217,20 @@ class AutonomousCompletionReviewContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AutonomousStartReviewTests(unittest.TestCase):
+    def test_start_review_uses_structured_transport_and_repairs_invalid_outcome(self) -> None:
+        valid = {"outcome": "reject_start", "reason_summary": "既存実行で満たされる。"}
+        with patch("otomekairo.llm.client.complete_text", side_effect=[
+            json.dumps({"outcome": "allow", "reason_summary": "invalid"}), json.dumps(valid)
+        ]) as complete:
+            result = LLMClient().generate_autonomous_start_review(
+                model_config={"model": "real-model"}, review_context={"existing_runs": [], "decision": {}}
+            )
+        self.assertEqual(result, valid)
+        self.assertEqual(complete.call_count, 2)
+
+    def test_mock_start_review_requires_explicit_test_double(self) -> None:
+        with self.assertRaises(LLMError):
+            LLMClient().generate_autonomous_start_review(model_config={"model": "mock-test"}, review_context={})

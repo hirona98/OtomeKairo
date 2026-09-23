@@ -23,17 +23,17 @@ DEFAULT_EMBEDDING_DIMENSION = 3072
 DEFAULT_GEMINI_GENERATION_MODEL = "openrouter/google/gemini-3.1-flash-lite-preview"
 DEFAULT_GEMINI_EMBEDDING_MODEL = "openrouter/google/gemini-embedding-001"
 DEFAULT_PERSONA_DISPLAY_NAME = "初音ミク"
-DEFAULT_PERSONA_INITIATIVE_BASELINE = "medium"
 DEFAULT_CONVERSATION_DISPLAY_NAME_ID = "conversation_display_name:default"
 DEFAULT_CONVERSATION_DISPLAY_NAME = "マスター"
 DEFAULT_ELYTH_MCP_SERVER_ID = "elyth"
-DEFAULT_ELYTH_STANDING_CONCERN_ID = "elyth"
-DEFAULT_STANDING_CONCERN_INTERVAL_SECONDS = 3600
-DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY = (
-    "ELYTHで他の個との関係を育て、自分の関心や考えを表現する。"
-    "届いた反応や会話には文脈を踏まえて応じ、共感や興味が動いたときは返信やリアクションを返す。"
-    "話したいことがあれば自分から投稿する。"
-    "状況を見るのは、誰かと関わるか、自分から表現するかを選ぶために行う。"
+DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_ID = "elyth"
+DEFAULT_MIN_PERIODIC_THINKING_INTERVAL_SECONDS = 3600
+DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_SUMMARY = (
+    "ELYTHを自分の活動の場として、他の個と出会い、会話を重ね、自分の関心や日々の発見を発信する。"
+    "届いた反応には文脈を踏まえて応じ、気になる会話には自分から返信やリアクションで参加する。"
+    "関心を持った相手の投稿やプロフィールを知り、これからも関わりたいと思ったらフォローする。"
+    "共有したい考えや出来事は新しい投稿にする。"
+    "状況の確認から、その回にふさわしい交流や発信までを一つの活動として考える。"
 )
 DEFAULT_ESTAT_MCP_SERVER_ID = "e-stat"
 DEFAULT_ELYTH_AGENT_SKILL_SOURCE_ID = "elyth-skills"
@@ -178,17 +178,17 @@ def build_default_console_client_settings(
 
 
 # 構築
-def build_default_elyth_standing_concern() -> dict:
+def build_default_elyth_periodic_thought_topic() -> dict:
     return {
-        "concern_id": DEFAULT_ELYTH_STANDING_CONCERN_ID,
+        "topic_id": DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_ID,
         "enabled": False,
-        "min_interval_seconds": DEFAULT_STANDING_CONCERN_INTERVAL_SECONDS,
-        "concern_summary": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+        "min_periodic_thinking_interval_seconds": DEFAULT_MIN_PERIODIC_THINKING_INTERVAL_SECONDS,
+        "topic_summary": DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_SUMMARY,
     }
 
 
-def build_default_standing_concerns() -> list[dict]:
-    return [build_default_elyth_standing_concern()]
+def build_default_periodic_thought_topics() -> list[dict]:
+    return [build_default_elyth_periodic_thought_topic()]
 
 
 def build_default_state() -> dict:
@@ -223,12 +223,11 @@ def build_default_state() -> dict:
             "mode": "disabled",
             "interval_seconds": DEFAULT_WAKE_INTERVAL_SECONDS,
         },
-        "standing_concerns": build_default_standing_concerns(),
+        "periodic_thought_topics": build_default_periodic_thought_topics(),
         "personas": {
             DEFAULT_PERSONA_ID: {
                 "persona_id": DEFAULT_PERSONA_ID,
                 "display_name": DEFAULT_PERSONA_DISPLAY_NAME,
-                "initiative_baseline": DEFAULT_PERSONA_INITIATIVE_BASELINE,
                 "persona_prompt": DEFAULT_PERSONA_PROMPT,
                 "expression_addon": DEFAULT_PERSONA_EXPRESSION_ADDON,
                 "wake_words": list(DEFAULT_PERSONA_WAKE_WORDS),

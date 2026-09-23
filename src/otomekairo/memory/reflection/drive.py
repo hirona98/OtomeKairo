@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import timedelta
 from typing import Any
 
-from otomekairo.llm.contexts import PersonaContext, build_persona_context
+from otomekairo.llm.contexts import build_persona_context
 from otomekairo.memory.reflection.constants import (
     ACTIVE_MEMORY_STATUSES,
     DRIVE_CANDIDATE_FRESHNESS_WEIGHTS,
@@ -22,8 +22,6 @@ from otomekairo.memory.reflection.constants import (
     DRIVE_MIN_SUMMARY_DRIVE_SALIENCE,
     DRIVE_MOOD_SIGNAL_HIGH,
     DRIVE_MOOD_SIGNAL_LOW,
-    DRIVE_PERSONA_ALIGNMENT_BY_BASELINE,
-    DRIVE_PERSONA_ALIGNMENT_SALIENCE_RANGE,
     DRIVE_RELATIONSHIP_SIGNAL_HIGH,
     DRIVE_RELATIONSHIP_SIGNAL_LOW,
     DRIVE_SCOPE_SALIENCE_BOOSTS,
@@ -76,7 +74,6 @@ class MemoryReflectionDriveMixin:
             memory_set_id=memory_set_id,
             finished_at=finished_at,
             source_units=source_units,
-            persona_context=persona_context,
             mood_state=mood_state,
             affect_states=affect_states,
             scope_support_index=scope_support_index,
@@ -119,7 +116,6 @@ class MemoryReflectionDriveMixin:
         memory_set_id: str,
         finished_at: str,
         source_units: list[dict[str, Any]],
-        persona_context: PersonaContext,
         mood_state: dict[str, Any],
         affect_states: list[dict[str, Any]],
         scope_support_index: dict[tuple[str, str], dict[str, Any]],
@@ -147,7 +143,6 @@ class MemoryReflectionDriveMixin:
                 memory_set_id=memory_set_id,
                 finished_at=finished_at,
                 candidates=grouped_candidates[group_key],
-                persona_context=persona_context,
                 mood_state=mood_state,
                 affect_states=affect_states,
                 scope_support_index=scope_support_index,
@@ -227,7 +222,6 @@ class MemoryReflectionDriveMixin:
         memory_set_id: str,
         finished_at: str,
         candidates: list[dict[str, Any]],
-        persona_context: PersonaContext,
         mood_state: dict[str, Any],
         affect_states: list[dict[str, Any]],
         scope_support_index: dict[tuple[str, str], dict[str, Any]],
@@ -310,18 +304,6 @@ class MemoryReflectionDriveMixin:
             ),
             3,
         )
-        persona_alignment = round(
-            self._drive_persona_alignment(
-                drive_kind=drive_kind,
-                persona_context=persona_context,
-                scope_support_kinds=scope_support_kinds,
-                supporting_memory_types=supporting_memory_types,
-                support_count=support_count,
-                support_strength=support_strength,
-                scope_alignment=scope_alignment,
-            ),
-            3,
-        )
         mixed_penalty = self._drive_mixed_penalty(
             candidates=ordered_candidates,
             finished_at=finished_at,
@@ -339,7 +321,6 @@ class MemoryReflectionDriveMixin:
             + min(DRIVE_MAX_SCOPE_SUPPORT_BONUS, max(0.0, (scope_alignment - 0.5) * 0.08) + 0.02 * max(0, len(scope_support_kinds) - 1))
             + DRIVE_FRESHNESS_SALIENCE_ADJUSTMENTS.get(freshness_hint, 0.0)
             + min(DRIVE_MAX_SIGNAL_BONUS, signal_strength * DRIVE_MAX_SIGNAL_BONUS)
-            + ((persona_alignment - 0.5) * DRIVE_PERSONA_ALIGNMENT_SALIENCE_RANGE)
             - mixed_penalty
             - self._drive_stability_penalty(stability_hint=stability_hint)
         )
@@ -385,7 +366,6 @@ class MemoryReflectionDriveMixin:
             "scope_alignment": scope_alignment,
             "freshness_hint": freshness_hint,
             "signal_strength": signal_strength,
-            "persona_alignment": persona_alignment,
             "stability_hint": stability_hint,
             "source_updated_at": freshest_support_at,
             "updated_at": finished_at,
@@ -609,38 +589,6 @@ class MemoryReflectionDriveMixin:
             return clamp_score(affect_signal * 0.85)
         return clamp_score(affect_signal * 0.6)
 
-    def _drive_persona_alignment(
-        self,
-        *,
-        drive_kind: str,
-        persona_context: PersonaContext,
-        scope_support_kinds: list[str],
-        supporting_memory_types: list[str],
-        support_count: int,
-        support_strength: float,
-        scope_alignment: float,
-    ) -> float:
-        baseline_payload = persona_context.initiative_baseline
-        baseline = str(baseline_payload.get("level") or "medium").strip() if isinstance(baseline_payload, dict) else "medium"
-        table = DRIVE_PERSONA_ALIGNMENT_BY_BASELINE.get(baseline, DRIVE_PERSONA_ALIGNMENT_BY_BASELINE["medium"])
-        alignment = float(table.get(drive_kind, 0.5))
-        if "persona_context" in scope_support_kinds:
-            alignment += 0.04
-        if "commitment" in supporting_memory_types and drive_kind in {"follow_through", "resume_when_ready"}:
-            alignment += 0.04
-        if "summary" in supporting_memory_types and drive_kind in {
-            "relationship_attunement",
-            "person_attention",
-            "self_regulation",
-            "topic_continuation",
-        }:
-            alignment += 0.02
-        alignment += (scope_alignment - 0.5) * 0.08
-        alignment += min(0.04, clamp_score(support_strength) * 0.04)
-        if support_count >= 2:
-            alignment += 0.02
-        return clamp_score(alignment)
-
     def _drive_mixed_penalty(
         self,
         *,
@@ -757,7 +705,6 @@ class MemoryReflectionDriveMixin:
                     "scope_alignment": drive_state.get("scope_alignment"),
                     "freshness_hint": drive_state.get("freshness_hint"),
                     "signal_strength": drive_state.get("signal_strength"),
-                    "persona_alignment": drive_state.get("persona_alignment"),
                     "stability_hint": drive_state.get("stability_hint"),
                     "source_updated_at": drive_state.get("source_updated_at"),
                     "updated_at": drive_state.get("updated_at"),

@@ -47,7 +47,7 @@ JSON payload 内の `input_text`、`recent_turns`、`source_pack`、`memory_cont
 JSON payload は `<<<OTOMEKAIRO_SOURCE_PACK>>>` や `<<<OTOMEKAIRO_JSON_PAYLOAD>>>` のような reserved sentinel で囲い、payload 本文は compact JSON にする。
 
 全補助 role の source pack には原則として `persona_context` を含める。
-`persona_context` は、選択中 persona から作る runtime 文脈であり、意味的な注目点、距離感、優先順位、要約粒度の補助に使う。
+`persona_context` は選択中 persona から作る runtime 文脈であり、適用方針は [../configuration/人格設定詳細.md](../configuration/人格設定詳細.md) を正とする。
 `persona_context` は候補集合、観測事実、ユーザー発話、根拠 ID、scope、memory_type、state_type を上書きする入力ではない。
 `expression_addon` は `expression_generation` にだけ渡し、補助 role の `persona_context` には入れない。
 

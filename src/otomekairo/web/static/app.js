@@ -29,7 +29,7 @@ const state = {
   selectedWatcherSourceId: "",
   selectedMcpId: "",
   selectedAgentSkillSourceId: "",
-  selectedStandingConcernId: "",
+  selectedPeriodicThoughtTopicId: "",
   attachment: null,
   settingsOpen: false,
   sending: false,
@@ -2370,11 +2370,11 @@ async function saveSettings({ closeAfterSave = false } = {}) {
       showNotice(`MCP の名前「${duplicateMcpName}」が重複しています。`, true);
       return;
     }
-    const duplicateStandingConcernId = findDuplicateName(
-      standingConcerns().map((item) => item.concern_id),
+    const duplicatePeriodicThoughtTopicId = findDuplicateName(
+      periodicThoughtTopics().map((item) => item.topic_id),
     );
-    if (duplicateStandingConcernId) {
-      showNotice(`関心の名前「${duplicateStandingConcernId}」が重複しています。`, true);
+    if (duplicatePeriodicThoughtTopicId) {
+      showNotice(`トピック名「${duplicatePeriodicThoughtTopicId}」が重複しています。`, true);
       return;
     }
     const duplicateAgentSkillSourceId = findDuplicateName(
@@ -2485,7 +2485,7 @@ function renderSettings() {
   renderMicrophoneSettings();
   renderConsoleClientSettings();
   renderCurrent();
-  renderStandingConcerns();
+  renderPeriodicThoughtTopics();
   renderPersona();
   renderModel();
   renderMemory();
@@ -3236,84 +3236,84 @@ async function pasteApiKey(inputId, label) {
   }
 }
 
-function standingConcerns() {
-  if (!Array.isArray(state.editor?.current?.standing_concerns)) {
+function periodicThoughtTopics() {
+  if (!Array.isArray(state.editor?.current?.periodic_thought_topics)) {
     if (state.editor?.current) {
-      state.editor.current.standing_concerns = [];
+      state.editor.current.periodic_thought_topics = [];
     }
     return [];
   }
-  return state.editor.current.standing_concerns;
+  return state.editor.current.periodic_thought_topics;
 }
 
-function renderStandingConcerns() {
-  const concerns = standingConcerns();
-  const hasConcerns = concerns.length > 0;
-  state.selectedStandingConcernId = selectedOrFirst(
-    concerns,
-    "concern_id",
-    state.selectedStandingConcernId,
+function renderPeriodicThoughtTopics() {
+  const topics = periodicThoughtTopics();
+  const hasConcerns = topics.length > 0;
+  state.selectedPeriodicThoughtTopicId = selectedOrFirst(
+    topics,
+    "topic_id",
+    state.selectedPeriodicThoughtTopicId,
   );
   setSelectOptions(
-    element("standing-concern-select"),
-    concerns,
-    "concern_id",
-    state.selectedStandingConcernId,
+    element("periodic-thought-topic-select"),
+    topics,
+    "topic_id",
+    state.selectedPeriodicThoughtTopicId,
   );
   setCollectionEditorEnabled(
-    "standing-concern-select",
+    "periodic-thought-topic-select",
     "fieldset.capability-group",
-    "delete-standing-concern",
+    "delete-periodic-thought-topic",
     hasConcerns,
   );
-  const concern = arrayById(concerns, "concern_id", state.selectedStandingConcernId);
-  element("standing-concern-enabled").checked = concern?.enabled === true;
-  element("standing-concern-id").value = concern?.concern_id || "";
-  element("standing-concern-interval").value = concern?.min_interval_seconds || 3600;
-  element("standing-concern-summary").value = concern?.concern_summary || "";
+  const topic = arrayById(topics, "topic_id", state.selectedPeriodicThoughtTopicId);
+  element("periodic-thought-topic-enabled").checked = topic?.enabled === true;
+  element("periodic-thought-topic-id").value = topic?.topic_id || "";
+  element("periodic-thought-topic-min-periodic-thinking-interval").value = topic?.min_periodic_thinking_interval_seconds || 3600;
+  element("periodic-thought-topic-summary").value = topic?.topic_summary || "";
 }
 
-function syncStandingConcerns() {
-  const concern = arrayById(
-    standingConcerns(),
-    "concern_id",
-    state.selectedStandingConcernId,
+function syncPeriodicThoughtTopics() {
+  const topic = arrayById(
+    periodicThoughtTopics(),
+    "topic_id",
+    state.selectedPeriodicThoughtTopicId,
   );
-  if (!concern) {
+  if (!topic) {
     return;
   }
-  concern.enabled = boolValue("standing-concern-enabled");
-  concern.concern_id = textValue("standing-concern-id");
-  concern.min_interval_seconds = boundedIntValue(
-    "standing-concern-interval",
-    "思い出す間隔",
+  topic.enabled = boolValue("periodic-thought-topic-enabled");
+  topic.topic_id = textValue("periodic-thought-topic-id");
+  topic.min_periodic_thinking_interval_seconds = boundedIntValue(
+    "periodic-thought-topic-min-periodic-thinking-interval",
+    "最小定期思考間隔",
     1,
     31536000,
   );
-  concern.concern_summary = textValue("standing-concern-summary");
-  state.selectedStandingConcernId = concern.concern_id;
+  topic.topic_summary = textValue("periodic-thought-topic-summary");
+  state.selectedPeriodicThoughtTopicId = topic.topic_id;
 }
 
-function addStandingConcern() {
+function addPeriodicThoughtTopic() {
   syncAllForms();
   const id = uniqueDisplayName(
-    standingConcerns().map((item) => item.concern_id),
-    "concern",
+    periodicThoughtTopics().map((item) => item.topic_id),
+    "topic",
   );
-  standingConcerns().push({
-    concern_id: id,
+  periodicThoughtTopics().push({
+    topic_id: id,
     enabled: false,
-    min_interval_seconds: 3600,
-    concern_summary: "",
+    min_periodic_thinking_interval_seconds: 3600,
+    topic_summary: "",
   });
-  state.selectedStandingConcernId = id;
-  renderStandingConcerns();
+  state.selectedPeriodicThoughtTopicId = id;
+  renderPeriodicThoughtTopics();
 }
 
-function deleteStandingConcern() {
-  removeById(standingConcerns(), "concern_id", state.selectedStandingConcernId);
-  state.selectedStandingConcernId = standingConcerns()[0]?.concern_id || "";
-  renderStandingConcerns();
+function deletePeriodicThoughtTopic() {
+  removeById(periodicThoughtTopics(), "topic_id", state.selectedPeriodicThoughtTopicId);
+  state.selectedPeriodicThoughtTopicId = periodicThoughtTopics()[0]?.topic_id || "";
+  renderPeriodicThoughtTopics();
 }
 
 function renderCurrent() {
@@ -4008,7 +4008,7 @@ function syncAllForms() {
   syncMicrophoneSettings();
   syncConsoleClientSettings();
   syncCurrent();
-  syncStandingConcerns();
+  syncPeriodicThoughtTopics();
   syncPersona();
   syncModel();
   syncMemory();
@@ -4187,7 +4187,6 @@ function addPersona() {
         "新規人格設定",
       ),
       // UI に無い必須構造。選択中人格の本文等はコピーしない。
-      initiative_baseline: "medium",
       persona_prompt: "",
       expression_addon: "",
       wake_words: [],
@@ -4702,12 +4701,12 @@ function bindEvents() {
     },
     render: renderMcp,
   });
-  bindCollectionSelect("standing-concern-select", {
-    sync: syncStandingConcerns,
+  bindCollectionSelect("periodic-thought-topic-select", {
+    sync: syncPeriodicThoughtTopics,
     setSelected: (id) => {
-      state.selectedStandingConcernId = id;
+      state.selectedPeriodicThoughtTopicId = id;
     },
-    render: renderStandingConcerns,
+    render: renderPeriodicThoughtTopics,
   });
   bindCollectionSelect("agent-skill-source-select", {
     sync: syncAgentSkills,
@@ -4738,8 +4737,8 @@ function bindEvents() {
     "delete-camera": deleteCamera,
     "add-mcp": addMcp,
     "delete-mcp": deleteMcp,
-    "add-standing-concern": addStandingConcern,
-    "delete-standing-concern": deleteStandingConcern,
+    "add-periodic-thought-topic": addPeriodicThoughtTopic,
+    "delete-periodic-thought-topic": deletePeriodicThoughtTopic,
     "add-agent-skill-source": addAgentSkillSource,
     "delete-agent-skill-source": deleteAgentSkillSource,
     "reload-agent-skills": reloadAgentSkills,

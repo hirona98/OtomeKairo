@@ -141,6 +141,14 @@ class ServiceInputCycleMixin:
             self._end_user_response_cycle()
             raise
         try:
+            # 会話ごとに感覚を更新してから、入力解釈と行動判断へ進む。
+            current_client_context = self._run_wake_policy_observations(
+                state=state,
+                started_at=started_at,
+                client_context=current_client_context,
+                cycle_id=cycle_id,
+                for_background_thinking=False,
+            )
             # 会話添付画像は capability 実行ではなく、会話入力の補助要約として扱う。
             if input_images:
                 current_client_context["image_count"] = len(input_images)

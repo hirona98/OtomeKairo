@@ -481,14 +481,15 @@ class ServiceInputTraceBuildMixin:
             input_trace["augmented_query_summary"] = self._clamp(str(augmented_query_text or ""))
         if foreground_world_state:
             input_trace["foreground_world_state"] = foreground_world_state
+        wake_observation_trace = client_context.get("wake_observation_trace", {})
         wake_observation_summary = self._client_context_text(
-            client_context.get("wake_observation_summary"),
+            wake_observation_trace.get("wake_observation_summary"),
             limit=360,
         )
         if isinstance(wake_observation_summary, str):
             input_trace["wake_observation_summary"] = wake_observation_summary
         compact_wake_observations = self._compact_wake_observations(
-            client_context.get("wake_observations")
+            wake_observation_trace.get("wake_observations")
         )
         if compact_wake_observations:
             input_trace["wake_observations"] = compact_wake_observations
@@ -613,6 +614,7 @@ class ServiceInputTraceBuildMixin:
         recall_pack: dict[str, Any],
         decision: dict[str, Any],
         pending_intent_summary: dict[str, Any] | None,
+        recent_interaction_summary: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         trace = {
             "reason_summary": decision["reason_summary"],
@@ -620,6 +622,7 @@ class ServiceInputTraceBuildMixin:
             "memory_summary": state["memory_sets"][state["selected_memory_set_id"]]["display_name"],
             "current_context_summary": self._clamp(input_text),
             "internal_context_summary": {
+                "recent_interaction_summary": recent_interaction_summary or [],
                 "time_context": time_context,
                 "affect_context_summary": self._summarize_affect_context(affect_context),
                 "drive_state_summary": drive_state_summary,

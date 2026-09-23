@@ -19,14 +19,14 @@ class ServiceInputCapabilityContextMixin:
     ) -> list[dict[str, Any]] | None:
         if not capability_decision_view:
             return capability_decision_view
-        if trigger_kind == "user_message":
+        wake_observation_sources = self._fresh_wake_observation_visual_sources(client_context)
+        if trigger_kind == "user_message" and not wake_observation_sources:
             return capability_decision_view
-        reuse_world_state = self._foreground_world_state_for_capability_reuse(
+        reuse_world_state = [] if trigger_kind == "user_message" else self._foreground_world_state_for_capability_reuse(
             foreground_world_state=foreground_world_state,
             world_state_trace=world_state_trace,
             trigger_kind=trigger_kind,
         )
-        wake_observation_sources = self._fresh_wake_observation_visual_sources(client_context)
         if not reuse_world_state and not wake_observation_sources:
             return capability_decision_view
         fresh_world_states = self._fresh_foreground_world_state_summaries(reuse_world_state)

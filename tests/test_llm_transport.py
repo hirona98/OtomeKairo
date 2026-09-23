@@ -20,7 +20,6 @@ def _completion_response(content: str) -> SimpleNamespace:
 def _persona_context() -> PersonaContext:
     return PersonaContext(
         display_name="Test",
-        initiative_baseline={"level": "medium", "summary_text": "test"},
         persona_prompt_text="テスト人格。",
         expression_addon=None,
         use_policy="テスト判断に使う。",

@@ -64,37 +64,10 @@ DRIVE_COMMITMENT_STATE_WEIGHTS = {
     "open": 0.92,
     "on_hold": 0.68,
 }
-DRIVE_PERSONA_ALIGNMENT_BY_BASELINE = {
-    "low": {
-        "follow_through": 0.68,
-        "resume_when_ready": 0.58,
-        "relationship_attunement": 0.44,
-        "person_attention": 0.46,
-        "self_regulation": 0.72,
-        "topic_continuation": 0.38,
-    },
-    "medium": {
-        "follow_through": 0.64,
-        "resume_when_ready": 0.56,
-        "relationship_attunement": 0.58,
-        "person_attention": 0.56,
-        "self_regulation": 0.62,
-        "topic_continuation": 0.52,
-    },
-    "high": {
-        "follow_through": 0.66,
-        "resume_when_ready": 0.5,
-        "relationship_attunement": 0.74,
-        "person_attention": 0.7,
-        "self_regulation": 0.58,
-        "topic_continuation": 0.66,
-    },
-}
 DRIVE_SUPPORT_SALIENCE_STEP = 0.04
 DRIVE_MAX_SUPPORT_BONUS = 0.12
 DRIVE_MAX_SIGNAL_BONUS = 0.12
 DRIVE_MAX_SCOPE_SUPPORT_BONUS = 0.08
-DRIVE_PERSONA_ALIGNMENT_SALIENCE_RANGE = 0.08
 DRIVE_MAX_MIXED_PENALTY = 0.16
 DRIVE_WEAK_STABILITY_PENALTY = 0.22
 DRIVE_MAX_SUPPORTING_MEMORY_UNITS = 8

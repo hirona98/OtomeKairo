@@ -18,9 +18,9 @@ from otomekairo.service.agent_skills import (
 )
 from otomekairo.service.capability import PreSendCheckWithheldError
 from otomekairo.service.common import debug_log
-from otomekairo.service.standing_concerns import (
-    build_standing_concern_orientation_context,
-    standing_concern_factor_ref,
+from otomekairo.service.periodic_thought_topics import (
+    build_periodic_thought_topic_orientation_context,
+    periodic_thought_topic_factor_ref,
 )
 
 
@@ -82,18 +82,18 @@ PRE_SEND_CHECK_WITHHELD_NOTICE = (
 
 
 class ServiceInputPipelineMixin:
-    def _mark_standing_concerns_attended(self, **_kwargs) -> list[str]:
+    def _mark_periodic_thought_topics_attended(self, **_kwargs) -> list[str]:
         return []
 
     def _build_agent_skill_orientation_context(
         self,
         *,
         trigger_kind: str,
-        due_standing_concerns: list[dict[str, Any]],
+        due_periodic_thought_topics: list[dict[str, Any]],
     ) -> dict[str, list[dict[str, str]]]:
         if trigger_kind not in SELF_INITIATED_SOURCE_KINDS:
-            return {"standing_concerns": []}
-        return build_standing_concern_orientation_context(due_standing_concerns)
+            return {"periodic_thought_topics": []}
+        return build_periodic_thought_topic_orientation_context(due_periodic_thought_topics)
 
     def _build_pipeline_skill_and_self_activity_materials(
         self,
@@ -105,7 +105,7 @@ class ServiceInputPipelineMixin:
         trigger_kind: str,
         observation_summary: dict[str, Any] | None,
         capability_request_summary: dict[str, Any] | None,
-        due_standing_concerns: list[dict[str, Any]],
+        due_periodic_thought_topics: list[dict[str, Any]],
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: InitiativeContext | None,
@@ -115,7 +115,7 @@ class ServiceInputPipelineMixin:
     ) -> dict[str, Any]:
         orientation_context = self._build_agent_skill_orientation_context(
             trigger_kind=trigger_kind,
-            due_standing_concerns=due_standing_concerns,
+            due_periodic_thought_topics=due_periodic_thought_topics,
         )
         prior_activation = (
             capability_request_summary.get("source_current_input", {}).get("agent_skill_activation")
@@ -204,6 +204,7 @@ class ServiceInputPipelineMixin:
         capability_request_summary: dict[str, Any] | None = None,
         assistant_message_target_client_id: str | None = None,
         reference_context: dict[str, Any] | None = None,
+        recent_interactions: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         cycle_label = self._debug_cycle_label(cycle_id)
         current_client_context = client_context or {}
@@ -267,6 +268,7 @@ class ServiceInputPipelineMixin:
 
         # 内部コンテキスト
         pipeline_contexts = self._build_pipeline_internal_contexts(
+            recent_interactions=recent_interactions,
             state=state,
             persona=persona,
             started_at=started_at,
@@ -289,6 +291,7 @@ class ServiceInputPipelineMixin:
 
         # decision生成
         decision = self._run_pipeline_decision(
+            recent_interactions=recent_interactions,
             input_text=input_text,
             current_input=current_input,
             trigger_kind=trigger_kind,
@@ -336,6 +339,7 @@ class ServiceInputPipelineMixin:
             prior_attempts: list[dict[str, Any]] | None = None,
         ) -> dict[str, Any]:
             return self._run_pipeline_output(
+                recent_interactions=recent_interactions,
                 state=state,
                 cycle_id=cycle_id,
                 input_text=input_text,
@@ -379,6 +383,7 @@ class ServiceInputPipelineMixin:
         except PreSendCheckWithheldError as first_withhold:
             first_attempt = deepcopy(first_withhold.audit_summary)
             decision = self._run_pipeline_decision(
+                recent_interactions=recent_interactions,
                 input_text=input_text,
                 current_input=current_input,
                 trigger_kind=trigger_kind,
@@ -464,7 +469,7 @@ class ServiceInputPipelineMixin:
                         output_result = self._empty_pipeline_output_result()
                         system_notice = self._pre_send_check_withheld_notice(current_input=current_input)
 
-        self._mark_standing_concerns_attended(
+        self._mark_periodic_thought_topics_attended(
             decision=decision,
             workspace_context=pipeline_contexts.get("workspace_context"),
             current_time=started_at,
@@ -474,6 +479,13 @@ class ServiceInputPipelineMixin:
             "persona_id": state["selected_persona_id"],
             "persona_display_name": persona["display_name"],
             "current_input": current_input.to_prompt_payload(),
+            "recent_interaction_summary": [
+                {
+                    "interaction_ref": group["interaction_ref"],
+                    "event_ids": [turn["event_id"] for turn in group["turns"]],
+                }
+                for group in (recent_interactions or [])
+            ],
             "augmented_query_text": augmented_query_text,
             "recall_hint": recall_hint,
             "recall_pack": recall_pack,
@@ -812,7 +824,7 @@ class ServiceInputPipelineMixin:
             or client_context.get("autonomous_visual_observation_direct_entry") is not True
         ):
             return False
-        return not bool(self._due_standing_concerns(state=state, current_time=current_time))
+        return not bool(self._due_periodic_thought_topics(state=state, current_time=current_time))
 
     def _build_visual_observation_direct_recall_inputs(
         self,
@@ -876,6 +888,7 @@ class ServiceInputPipelineMixin:
         recall_pack: dict[str, Any],
         cycle_label: str,
         model_config: dict[str, Any],
+        recent_interactions: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         # 内部コンテキスト
         time_context = self._build_time_context(current_time=started_at)
@@ -938,7 +951,7 @@ class ServiceInputPipelineMixin:
             trigger_kind=trigger_kind,
             client_context=client_context,
         )
-        due_standing_concerns = self._due_standing_concerns(
+        due_periodic_thought_topics = self._due_periodic_thought_topics(
             state=state,
             current_time=started_at,
         )
@@ -959,7 +972,6 @@ class ServiceInputPipelineMixin:
         )
         initiative_context = self._build_initiative_context(
             state=state,
-            persona=persona,
             persona_context_summary=build_persona_context_summary(persona),
             current_time=started_at,
             time_context=time_context,
@@ -1019,8 +1031,9 @@ class ServiceInputPipelineMixin:
             affect_context=affect_context,
         )
         workspace_context = self._build_workspace_context(
+            recent_interactions=recent_interactions,
             current_input=current_input,
-            due_standing_concerns=due_standing_concerns,
+            due_periodic_thought_topics=due_periodic_thought_topics,
             recall_pack=recall_pack,
             drive_state_summary=drive_state_summary,
             foreground_world_state=foreground_world_state,
@@ -1045,7 +1058,7 @@ class ServiceInputPipelineMixin:
             trigger_kind=trigger_kind,
             observation_summary=observation_summary,
             capability_request_summary=capability_request_summary,
-            due_standing_concerns=due_standing_concerns,
+            due_periodic_thought_topics=due_periodic_thought_topics,
             ongoing_action_summary=ongoing_action_summary,
             capability_decision_view=capability_decision_view,
             initiative_context=initiative_context,
@@ -1461,7 +1474,7 @@ class ServiceInputPipelineMixin:
         self,
         *,
         current_input: CurrentInput,
-        due_standing_concerns: list[dict[str, Any]] | None = None,
+        due_periodic_thought_topics: list[dict[str, Any]] | None = None,
         recall_pack: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
         foreground_world_state: list[dict[str, Any]] | None,
@@ -1477,10 +1490,22 @@ class ServiceInputPipelineMixin:
         prediction_error_context: dict[str, Any] | None,
         default_mode_context: dict[str, Any] | None,
         affect_context: dict[str, Any] | None = None,
+        recent_interactions: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         candidates: list[dict[str, Any]] = []
         used_refs: set[str] = set()
         source_counts: dict[str, int] = {}
+        if recent_interactions:
+            self._append_workspace_candidate(
+                candidates=candidates,
+                used_refs=used_refs,
+                source_counts=source_counts,
+                factor_ref="conversation_context:recent_interactions",
+                kind="conversation_context",
+                source="recent_interactions",
+                summary_text="場ごとの直近会話から、話の続きと今の発話の間合いを比較する。",
+                metadata={"interaction_refs": [group["interaction_ref"] for group in recent_interactions]},
+            )
         self._append_workspace_visual_observation_candidates(
             candidates=candidates,
             used_refs=used_refs,
@@ -1513,19 +1538,25 @@ class ServiceInputPipelineMixin:
             summary_keys=("status_text", "result_summary_text", "summary_text", "error"),
             metadata_keys=("capability_id", "request_id", "result_status", "response_target_refs"),
         )
-        for concern in due_standing_concerns or []:
-            concern_id = str(concern.get("concern_id") or "").strip()
-            if not concern_id:
+        activity_topics = (
+            due_periodic_thought_topics or []
+            if current_input.sender_kind == "system"
+            and current_input.source_kind in SELF_INITIATED_SOURCE_KINDS
+            else []
+        )
+        for topic in activity_topics:
+            topic_id = str(topic.get("topic_id") or "").strip()
+            if not topic_id:
                 continue
             self._append_workspace_candidate(
                 candidates=candidates,
                 used_refs=used_refs,
                 source_counts=source_counts,
-                factor_ref=standing_concern_factor_ref(concern_id),
-                kind="standing_concern",
-                source="standing_concerns",
-                summary_text=str(concern.get("concern_summary") or "").strip() or None,
-                metadata={"concern_id": concern_id},
+                factor_ref=periodic_thought_topic_factor_ref(topic_id),
+                kind="periodic_thought_topic",
+                source="periodic_thought_topics",
+                summary_text=str(topic.get("topic_summary") or "").strip() or None,
+                metadata={"topic_id": topic_id},
             )
         self._append_workspace_initiative_candidates(
             candidates=candidates,
@@ -2267,6 +2298,7 @@ class ServiceInputPipelineMixin:
         self_activity_recall_hint: dict[str, Any] | None = None,
         self_activity_recall_pack: dict[str, Any] | None = None,
         self_activity_agent_skill_context: dict[str, Any] | None = None,
+        recent_interactions: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         # decision生成
         if self._should_compare_self_activity_separately(
@@ -2275,6 +2307,7 @@ class ServiceInputPipelineMixin:
             initiative_context=initiative_context,
         ):
             return self._run_separated_activity_decisions(
+                recent_interactions=recent_interactions,
                 input_text=input_text,
                 current_input=current_input,
                 trigger_kind=trigger_kind,
@@ -2310,6 +2343,7 @@ class ServiceInputPipelineMixin:
                 pre_send_check_feedback=pre_send_check_feedback,
             )
         decision_context = self._build_decision_context(
+            recent_interactions=recent_interactions,
             input_text=input_text,
             current_input=current_input,
             trigger_kind=trigger_kind,
@@ -2382,6 +2416,7 @@ class ServiceInputPipelineMixin:
         pre_send_check_prior_attempts: list[dict[str, Any]] | None = None,
         suppress_outward_speech: bool = False,
         suppress_outward_speech_reason: str | None = None,
+        recent_interactions: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         self_decision = self._execution_self_decision(decision)
         outward_decision = self._execution_outward_decision(decision)
@@ -2431,6 +2466,7 @@ class ServiceInputPipelineMixin:
                 source_current_input=source_current_input,
                 source_cycle_id=cycle_id,
                 assistant_message_target_client_id=assistant_message_target_client_id,
+                workspace_context=workspace_context,
             )
             run_payload = start_result.get("autonomous_run")
             if isinstance(run_payload, dict):
@@ -2511,6 +2547,7 @@ class ServiceInputPipelineMixin:
                 context=speech_context,
             )
             speech_payload = self._apply_disclosure_review(
+                recent_interactions=recent_interactions,
                 model_config=model_config,
                 persona_context=self._build_selected_persona_context(
                     state=state,
@@ -2552,10 +2589,12 @@ class ServiceInputPipelineMixin:
         recall_pack: dict[str, Any],
         speech_payload: dict[str, Any],
         decision: dict[str, Any],
+        recent_interactions: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         sensitive_sources = self._disclosure_review_sources(
+            recent_interactions=recent_interactions,
             recall_pack=recall_pack,
-            current_person_refs=set(current_input.participant_refs),
+            current_person_refs=set(current_input.response_target_refs),
         )
         if not sensitive_sources:
             return speech_payload
@@ -2601,10 +2640,23 @@ class ServiceInputPipelineMixin:
         *,
         recall_pack: dict[str, Any],
         current_person_refs: set[str],
+        recent_interactions: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
-        # 選択済み記憶の構造化provenanceだけでレビュー要否を決める。
+        # 判断で読んだ会話は、理由文を経由して本文へ入る可能性も含めて確認する。
         sources: list[dict[str, Any]] = []
         seen: set[str] = set()
+        for group in recent_interactions or []:
+            for turn in group["turns"]:
+                if not set(turn["participant_refs"]) - current_person_refs:
+                    continue
+                source_ref = turn["event_id"]
+                if source_ref in seen:
+                    continue
+                seen.add(source_ref)
+                sources.append({
+                    "source_ref": source_ref,
+                    "source_item": {"interaction_ref": group["interaction_ref"], **turn},
+                })
         for section_name in (
             "person_model",
             "relationship_model",
@@ -2678,8 +2730,10 @@ class ServiceInputPipelineMixin:
         reference_context: dict[str, Any] | None = None,
         pre_send_check_feedback: str | None = None,
         comparison_scope: str = "full",
+        recent_interactions: list[dict[str, Any]] | None = None,
     ) -> DecisionContext:
         return DecisionContext(
+            recent_interactions=recent_interactions,
             input_text=input_text,
             current_input=current_input,
             trigger_kind=trigger_kind,

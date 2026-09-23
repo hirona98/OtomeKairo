@@ -174,11 +174,9 @@ class ServiceInputTraceCompactMixin:
             selected_candidate_family = initiative_payload.get("selected_candidate_family")
             if isinstance(selected_candidate_family, str) and selected_candidate_family.strip():
                 payload["selected_candidate_family"] = selected_candidate_family.strip()
-            initiative_baseline = initiative_payload.get("initiative_baseline")
-            if isinstance(initiative_baseline, dict):
-                baseline_level = initiative_baseline.get("level")
-                if isinstance(baseline_level, str) and baseline_level.strip():
-                    payload["initiative_baseline"] = baseline_level.strip()
+            speech_frequency_level = initiative_payload.get("speech_frequency_level")
+            if isinstance(speech_frequency_level, int):
+                payload["speech_frequency_level"] = speech_frequency_level
             compact_pending_intent_summaries = self._compact_initiative_pending_intent_summaries(
                 initiative_payload.get("pending_intent_summaries")
             )
@@ -271,7 +269,7 @@ class ServiceInputTraceCompactMixin:
             support_count = summary.get("support_count")
             if isinstance(support_count, int) and support_count > 0:
                 item["support_count"] = support_count
-            for key in ("support_strength", "scope_alignment", "signal_strength", "persona_alignment"):
+            for key in ("support_strength", "scope_alignment", "signal_strength"):
                 value = summary.get(key)
                 if isinstance(value, (int, float)):
                     item[key] = round(max(0.0, min(float(value), 1.0)), 2)

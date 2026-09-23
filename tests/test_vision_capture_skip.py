@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from otomekairo.service.app import OtomeKairoService
 from otomekairo.service.common import ServiceError
@@ -215,6 +216,82 @@ class VisionCaptureSkipResultTests(unittest.TestCase):
         )
         self.assertIn("skipped", text)
         self.assertNotIn("failed", text)
+
+    def _run_observation_summaries(self, summaries: list[dict]) -> dict:
+        with (
+            patch.object(self.service, "_enabled_wake_policy_observations", return_value=summaries),
+            patch.object(self.service, "_run_wake_policy_observation", side_effect=summaries),
+        ):
+            return self.service._run_wake_policy_observations(
+                state={}, started_at="2026-08-14T12:00:00+09:00",
+                client_context={"source": "background_thinking_scheduler"}, cycle_id=None,
+                for_background_thinking=False,
+            )
+
+    def test_skipped_observations_match_off_for_thinking_but_remain_in_trace(self) -> None:
+        off_context = self._run_observation_summaries([])
+        for reason in ("excluded_window_title", "idle"):
+            with self.subTest(reason=reason):
+                summary = {
+                    "observation_id": "observation:main_desktop",
+                    "capability_id": "vision.capture",
+                    "status": "skipped", "skip_reason": reason,
+                    "reason_summary": vision_capture_skip_reason_summary(reason),
+                    "image_count": 0,
+                }
+                context = self._run_observation_summaries([summary])
+                self.assertEqual(
+                    {key: value for key, value in context.items() if key != "wake_observation_trace"},
+                    off_context,
+                )
+                self.assertEqual(self.service._activity_client_context(context),
+                                 self.service._activity_client_context(off_context))
+                with patch.object(
+                    self.service, "_build_selected_persona_context",
+                    return_value=Mock(to_prompt_payload=Mock(return_value={})),
+                ):
+                    entry_inputs = [
+                        self.service._build_initiative_entry_check_source_pack(
+                            state={}, current_time="2026-08-14T12:00:00+09:00",
+                            trigger_kind="background_thinking", client_context=value,
+                            recent_turns=[], foreground_world_state=None,
+                        )
+                        for value in (context, off_context)
+                    ]
+                self.assertEqual(*entry_inputs)
+                self.assertFalse(self.service._client_context_has_visual_wake_observation(context))
+                self.assertFalse(self.service._client_context_has_retryable_wake_observation_failure(context))
+                trace = self.service._build_cycle_trace(
+                    cycle_id="cycle:test", cycle_summary={"trigger_kind": "background_thinking"},
+                    input_text="定期思考。", interaction_context=None, augmented_query_text=None,
+                    client_context=context, runtime_summary={}, foreground_world_state=None,
+                    activity_trace=None, recall_trace={}, decision_trace={}, world_state_trace=None,
+                    result_trace={}, memory_trace=None,
+                )
+                self.assertEqual(trace["input_trace"]["wake_observations"][0]["skip_reason"], reason)
+                self.assertIn(summary["reason_summary"], trace["input_trace"]["wake_observation_summary"])
+
+    def test_mixed_observations_keep_success_and_failure_as_decision_input(self) -> None:
+        skipped = {
+            "observation_id": "observation:desktop", "status": "skipped",
+            "skip_reason": "idle", "reason_summary": vision_capture_skip_reason_summary("idle"),
+        }
+        succeeded = {
+            "observation_id": "observation:camera", "status": "succeeded",
+            "visual_summary_text": "室内に人がいる。",
+        }
+        failed = {
+            "observation_id": "observation:other", "status": "failed",
+            "failure_code": "source_unavailable", "reason_summary": "source unavailable",
+        }
+        for observations in ([succeeded], [failed], [succeeded, failed]):
+            with self.subTest(observations=observations):
+                context = self._run_observation_summaries([skipped, *observations])
+                self.assertEqual(context["wake_observations"], observations)
+                self.assertEqual(context["wake_observation_summary"],
+                                 self.service._wake_policy_observation_summary_text(observations))
+                self.assertEqual(len(context["wake_observation_trace"]["wake_observations"]),
+                                 len(observations) + 1)
 
     def test_wake_skip_does_not_refresh_world_or_activity(self) -> None:
         called: list[str] = []

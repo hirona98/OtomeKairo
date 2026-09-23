@@ -4,11 +4,11 @@ import threading
 import unittest
 from datetime import datetime
 
-from otomekairo.defaults import DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY
+from otomekairo.defaults import DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_SUMMARY
 from otomekairo.llm.contexts import CurrentInput, InitiativeCandidateFamily, InitiativeContext
 from otomekairo.service.input.decision_comparison import (
     SELF_ACTIVITY_INPUT_TEXT,
-    SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT,
+    SELF_ACTIVITY_PERIODIC_THOUGHT_TOPIC_INPUT_TEXT,
 )
 from otomekairo.service.input.mixin import ServiceInputMixin
 from otomekairo.service.spontaneous.pending_intent import ServiceSpontaneousPendingIntentMixin
@@ -18,12 +18,11 @@ from otomekairo.service.spontaneous.wake import ServiceSpontaneousWakeMixin
 def _initiative_context(**overrides) -> InitiativeContext:
     payload = {
         "trigger_kind": "background_thinking",
-        "opportunity_summary": "気にかけていることがしばらく前景に出ていない。",
+        "opportunity_summary": "定期思考トピックがしばらく前景に出ていない。",
         "initiative_entry_summary": None,
         "time_context_summary": {},
         "foreground_signal_summary": {},
         "activity_context": None,
-        "initiative_baseline": {},
         "persona_context_summary": {},
         "runtime_state_summary": {},
         "recent_turn_summary": [],
@@ -49,7 +48,7 @@ class DummyWakeService(ServiceSpontaneousWakeMixin):
         self._wake_runtime_state = {
             "last_wake_at": None,
             "last_spontaneous_at": None,
-            "initial_delay_until": None,
+            "interval_started_at": "2026-06-21T15:52:00+09:00",
             "retry_after": None,
             "speech_history_by_dedupe": {},
         }
@@ -57,17 +56,13 @@ class DummyWakeService(ServiceSpontaneousWakeMixin):
     def _parse_iso(self, value: str) -> datetime:
         return datetime.fromisoformat(value)
 
-    def _unseen_wake_observation_sources(self, state: dict) -> list[str]:
-        _ = state
-        return []
-
 
 class DummyInputService(ServiceInputMixin, ServiceSpontaneousWakeMixin):
     def __init__(self) -> None:
         self._runtime_state_lock = threading.RLock()
         self._wake_runtime_state = {
             "last_wake_at": None,
-            "standing_concern_last_attended_at": {},
+            "periodic_thought_topic_last_attended_at": {},
         }
 
     def _list_current_drive_states(self, *, state: dict, current_time: str) -> list[dict]:
@@ -156,7 +151,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
             },
             initiative_entry_summary=None,
             suppression_summary={"suppression_level": "low"},
-            initiative_baseline={},
             speech_timing_state={"background_trigger": True},
             capability_summary={},
         )
@@ -197,7 +191,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
             },
             initiative_entry_summary=None,
             suppression_summary={"suppression_level": "low"},
-            initiative_baseline={},
             speech_timing_state={"background_trigger": True},
             capability_summary={},
         )
@@ -240,15 +233,15 @@ class WakeInterventionLoadTests(unittest.TestCase):
             )
         )
 
-    def test_due_standing_concern_keeps_initiative_context_after_entry_skip(self) -> None:
+    def test_due_periodic_thought_topic_keeps_initiative_context_after_entry_skip(self) -> None:
         service = DummyInputService()
         state = {
-            "standing_concerns": [
+            "periodic_thought_topics": [
                 {
-                    "concern_id": "elyth",
+                    "topic_id": "elyth",
                     "enabled": True,
-                    "min_interval_seconds": 600,
-                    "concern_summary": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+                    "min_periodic_thinking_interval_seconds": 600,
+                    "topic_summary": DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_SUMMARY,
                 }
             ]
         }
@@ -268,7 +261,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
             )
         )
 
-    def test_entry_skip_without_due_standing_concern_has_no_initiative_context(self) -> None:
+    def test_entry_skip_without_due_periodic_thought_topic_has_no_initiative_context(self) -> None:
         service = DummyInputService()
         client_context = {
             "initiative_entry_check": {
@@ -280,7 +273,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
 
         self.assertFalse(
             service._has_autonomous_initiative_context(
-                state={"standing_concerns": []},
+                state={"periodic_thought_topics": []},
                 current_time="2026-08-13T12:20:00+09:00",
                 client_context=client_context,
             )
@@ -316,7 +309,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertEqual(recall_inputs["recall_pack"]["candidate_count"], 0)
         self.assertEqual(recall_inputs["evidence_pack"]["status"], "summary")
 
-    def test_due_standing_concern_keeps_recall_on_visual_direct_entry(self) -> None:
+    def test_due_periodic_thought_topic_keeps_recall_on_visual_direct_entry(self) -> None:
         service = DummyInputService()
         current_input = CurrentInput(
             sender_kind="system",
@@ -331,12 +324,12 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertFalse(
             service._should_skip_recall_interpretation_for_wake_visual_observation(
                 state={
-                    "standing_concerns": [
+                    "periodic_thought_topics": [
                         {
-                            "concern_id": "elyth",
+                            "topic_id": "elyth",
                             "enabled": True,
-                            "min_interval_seconds": 600,
-                            "concern_summary": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+                            "min_periodic_thinking_interval_seconds": 600,
+                            "topic_summary": DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_SUMMARY,
                         }
                     ]
                 },
@@ -347,7 +340,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         )
         self.assertTrue(
             service._should_skip_recall_interpretation_for_wake_visual_observation(
-                state={"standing_concerns": []},
+                state={"periodic_thought_topics": []},
                 current_time="2026-08-13T12:20:00+09:00",
                 current_input=current_input,
                 client_context=client_context,
@@ -357,10 +350,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
     def test_wake_input_text_keeps_capability_on_the_board(self) -> None:
         service = DummyInputService()
         text = service._build_wake_input_text(
-            state={
-                "selected_persona_id": "persona:default",
-                "personas": {"persona:default": {"initiative_baseline": "medium"}},
-            },
             client_context={"source": "background_thinking_scheduler"},
             selected_candidate=None,
         )
@@ -373,8 +362,8 @@ class WakeInterventionLoadTests(unittest.TestCase):
         workspace = {
             "workspace_candidates": [
                 {
-                    "factor_ref": "standing_concern:elyth",
-                    "kind": "standing_concern",
+                    "factor_ref": "periodic_thought_topic:elyth",
+                    "kind": "periodic_thought_topic",
                     "summary_text": "ELYTH。",
                 }
             ]
@@ -398,8 +387,8 @@ class WakeInterventionLoadTests(unittest.TestCase):
             {
                 "workspace_candidates": [
                     {
-                        "factor_ref": "standing_concern:elyth",
-                        "kind": "standing_concern",
+                        "factor_ref": "periodic_thought_topic:elyth",
+                        "kind": "periodic_thought_topic",
                     },
                     {
                         "factor_ref": "visual_observation_signal:camera",
@@ -424,7 +413,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertEqual(
             refs,
             {
-                "standing_concern:elyth",
+                "periodic_thought_topic:elyth",
                 "capability:mcp.call_tool",
                 "affect_context:recent_episode_affects:0",
             },
@@ -440,7 +429,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
             interaction_context=None,
             text="定期思考。",
         )
-        with_concern = service._build_self_activity_decision_context(
+        with_topic = service._build_self_activity_decision_context(
             current_input=current_input,
             trigger_kind="background_thinking",
             recent_turns=[],
@@ -463,8 +452,8 @@ class WakeInterventionLoadTests(unittest.TestCase):
             workspace_context={
                 "workspace_candidates": [
                     {
-                        "factor_ref": "standing_concern:elyth",
-                        "kind": "standing_concern",
+                        "factor_ref": "periodic_thought_topic:elyth",
+                        "kind": "periodic_thought_topic",
                     }
                 ]
             },
@@ -473,7 +462,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
             reference_context=None,
             pre_send_check_feedback=None,
         )
-        without_concern = service._build_self_activity_decision_context(
+        without_topic = service._build_self_activity_decision_context(
             current_input=current_input,
             trigger_kind="background_thinking",
             recent_turns=[],
@@ -501,11 +490,11 @@ class WakeInterventionLoadTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            with_concern.current_input.text,
-            SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT,
+            with_topic.current_input.text,
+            SELF_ACTIVITY_PERIODIC_THOUGHT_TOPIC_INPUT_TEXT,
         )
-        self.assertIn("自分から書く", with_concern.current_input.text)
-        self.assertEqual(without_concern.current_input.text, SELF_ACTIVITY_INPUT_TEXT)
+        self.assertIn("自分から書く", with_topic.current_input.text)
+        self.assertEqual(without_topic.current_input.text, SELF_ACTIVITY_INPUT_TEXT)
 
     def test_self_activity_initiative_drops_visual_pressure(self) -> None:
         service = DummyInputService()
@@ -538,7 +527,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                     available=True,
                     selected=True,
                     priority_score=1.0,
-                    reason_summary="気にかけていること 1 件 / 現在観測候補 1 件 / available capability 2 件 が自律判断の材料にある。",
+                    reason_summary="定期思考トピック 1 件 / 現在観測候補 1 件 / available capability 2 件 が自律判断の材料にある。",
                     preferred_capability_id="vision.capture",
                     preferred_capability_input={"vision_source_id": "vision_source:対面カメラ", "mode": "still"},
                     preferred_result_kind="capability_request",
@@ -549,14 +538,14 @@ class WakeInterventionLoadTests(unittest.TestCase):
         workspace = {
             "workspace_candidates": [
                 {
-                    "factor_ref": "standing_concern:elyth",
-                    "kind": "standing_concern",
-                    "summary_text": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+                    "factor_ref": "periodic_thought_topic:elyth",
+                    "kind": "periodic_thought_topic",
+                    "summary_text": DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_SUMMARY,
                 },
                 {
                     "factor_ref": "initiative:autonomous",
                     "kind": "initiative_candidate",
-                    "summary_text": "気にかけていること 1 件 / available capability 2 件 が自律判断の材料にある。",
+                    "summary_text": "定期思考トピック 1 件 / available capability 2 件 が自律判断の材料にある。",
                     "metadata": {
                         "family": "autonomous",
                         "available": True,
@@ -597,7 +586,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertIn("mcp.call_tool", [item["id"] for item in isolated.capability_summary.get("unavailable_items", [])])
         self.assertIsNotNone(family)
         self.assertTrue(family.available)
-        self.assertIn("気にかけていること 1 件", family.reason_summary)
+        self.assertIn("設定された活動 1 件", family.reason_summary)
         self.assertNotIn("現在観測候補", family.reason_summary)
         self.assertNotIn("available capability", family.reason_summary)
         self.assertIsNone(family.preferred_capability_id)
@@ -635,7 +624,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertFalse(family.available)
         self.assertFalse(family.selected)
         self.assertIsNone(isolated.selected_candidate_family)
-        self.assertEqual(family.blocking_reason_summary, "気にかけていることも前景の drive_state も無い。")
+        self.assertEqual(family.blocking_reason_summary, "設定された活動も前景の drive_state も無い。")
 
     def test_outward_speech_workspace_drops_self_activity_means(self) -> None:
         service = DummyInputService()
@@ -643,8 +632,8 @@ class WakeInterventionLoadTests(unittest.TestCase):
             {
                 "workspace_candidates": [
                     {
-                        "factor_ref": "standing_concern:elyth",
-                        "kind": "standing_concern",
+                        "factor_ref": "periodic_thought_topic:elyth",
+                        "kind": "periodic_thought_topic",
                     },
                     {
                         "factor_ref": "visual_observation_signal:camera",
@@ -699,14 +688,13 @@ class WakeInterventionLoadTests(unittest.TestCase):
         )
         initiative_context = InitiativeContext(
             trigger_kind="background_thinking",
-            opportunity_summary="気にかけていることがしばらく前景に出ていない。",
+            opportunity_summary="定期思考トピックがしばらく前景に出ていない。",
             initiative_entry_summary=None,
             time_context_summary={},
             foreground_signal_summary={
                 "visual_observations": [{"change_state": "stable"}],
             },
             activity_context=None,
-            initiative_baseline={},
             persona_context_summary={},
             runtime_state_summary={},
             recent_turn_summary=[],
@@ -748,7 +736,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
             default_mode_context=None,
             workspace_context={
                 "workspace_candidates": [
-                    {"factor_ref": "standing_concern:elyth", "kind": "standing_concern"},
+                    {"factor_ref": "periodic_thought_topic:elyth", "kind": "periodic_thought_topic"},
                     {"factor_ref": "visual_observation:current", "kind": "visual_observation"},
                 ]
             },
@@ -832,7 +820,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                     },
                 },
                 "foreground_selection": {
-                    "primary_factor_ref": "standing_concern:elyth",
+                    "primary_factor_ref": "periodic_thought_topic:elyth",
                     "supporting_factor_refs": [],
                     "suppressed_factors": [],
                     "summary_text": "関わる。",
@@ -882,7 +870,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertEqual(targets, {"outward_speech": "advance", "self_activity": "advance"})
         self.assertEqual(
             composed["separated_comparisons"]["self_activity"]["foreground_selection"]["primary_factor_ref"],
-            "standing_concern:elyth",
+            "periodic_thought_topic:elyth",
         )
 
     def test_compose_separated_decisions_keeps_self_activity_when_outward_holds(self) -> None:
@@ -1049,8 +1037,8 @@ class WakeInterventionLoadTests(unittest.TestCase):
             workspace_context={
                 "workspace_candidates": [
                     {
-                        "factor_ref": "standing_concern:elyth",
-                        "kind": "standing_concern",
+                        "factor_ref": "periodic_thought_topic:elyth",
+                        "kind": "periodic_thought_topic",
                     }
                 ]
             },
@@ -1062,7 +1050,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
             pre_send_check_feedback=None,
         )
 
-        self.assertEqual(context.current_input.text, SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT)
+        self.assertEqual(context.current_input.text, SELF_ACTIVITY_PERIODIC_THOUGHT_TOPIC_INPUT_TEXT)
         self.assertEqual(context.recall_hint["primary_recall_focus"], "topic")
         self.assertEqual(context.recall_pack["event_evidence"][0]["summary_text"], "向き側の記憶")
         self.assertNotIn("visual_observations", context.recall_pack)
@@ -1112,10 +1100,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
     def test_wake_input_text_omits_observation_summaries(self) -> None:
         service = DummyInputService()
         text = service._build_wake_input_text(
-            state={
-                "personas": {"p": {"initiative_baseline": "medium"}},
-                "selected_persona_id": "p",
-            },
             client_context={
                 "source": "background_thinking_scheduler",
                 "wake_observation_summary": "リズムゲームでS評価を獲得した。",
@@ -1180,12 +1164,12 @@ class WakeInterventionLoadTests(unittest.TestCase):
             trigger_kind="background_thinking",
             observation_summary={"capability_id": "vision.capture", "summary_text": "S評価"},
             capability_request_summary=None,
-            due_standing_concerns=[
+            due_periodic_thought_topics=[
                 {
-                    "concern_id": "elyth",
+                    "topic_id": "elyth",
                     "enabled": True,
-                    "min_interval_seconds": 3600,
-                    "concern_summary": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+                    "min_periodic_thinking_interval_seconds": 3600,
+                    "topic_summary": DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_SUMMARY,
                 }
             ],
             ongoing_action_summary=None,
@@ -1194,8 +1178,8 @@ class WakeInterventionLoadTests(unittest.TestCase):
             workspace_context={
                 "workspace_candidates": [
                     {
-                        "factor_ref": "standing_concern:elyth",
-                        "kind": "standing_concern",
+                        "factor_ref": "periodic_thought_topic:elyth",
+                        "kind": "periodic_thought_topic",
                     }
                 ]
             },
@@ -1204,11 +1188,11 @@ class WakeInterventionLoadTests(unittest.TestCase):
         )
 
         self.assertEqual(len(service.recall_calls), 1)
-        self.assertEqual(service.recall_calls[0]["current_input"].text, SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT)
+        self.assertEqual(service.recall_calls[0]["current_input"].text, SELF_ACTIVITY_PERIODIC_THOUGHT_TOPIC_INPUT_TEXT)
         self.assertIsNone(service.recall_calls[0]["visual_observation_context"])
         self.assertEqual(service.recall_calls[0]["recent_turns"], [])
         self.assertEqual(len(service.skill_calls), 1)
-        self.assertEqual(service.skill_calls[0]["current_input"].text, SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT)
+        self.assertEqual(service.skill_calls[0]["current_input"].text, SELF_ACTIVITY_PERIODIC_THOUGHT_TOPIC_INPUT_TEXT)
         self.assertEqual(service.skill_calls[0]["recent_turns"], [])
         self.assertEqual(service.skill_calls[0]["work_log"], [])
         self.assertEqual(
@@ -1295,8 +1279,8 @@ class WakeInterventionLoadTests(unittest.TestCase):
             workspace_context={
                 "workspace_candidates": [
                     {
-                        "factor_ref": "standing_concern:elyth",
-                        "kind": "standing_concern",
+                        "factor_ref": "periodic_thought_topic:elyth",
+                        "kind": "periodic_thought_topic",
                     }
                 ]
             },
@@ -1313,7 +1297,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
 
         self.assertEqual(len(service.started), 1)
         source = service.started[0]["source_current_input"]
-        self.assertEqual(source["text"], SELF_ACTIVITY_STANDING_CONCERN_INPUT_TEXT)
+        self.assertEqual(source["text"], SELF_ACTIVITY_PERIODIC_THOUGHT_TOPIC_INPUT_TEXT)
         self.assertEqual(source["response_target_refs"], [])
         self.assertNotIn("S評価", source["text"])
 
@@ -1355,7 +1339,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
             time_context_summary={},
             foreground_signal_summary={},
             activity_context=None,
-            initiative_baseline={},
             persona_context_summary={},
             runtime_state_summary={},
             recent_turn_summary=[],
@@ -1442,7 +1425,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
                 ]
             },
             activity_context=None,
-            initiative_baseline={},
             persona_context_summary={},
             runtime_state_summary={},
             recent_turn_summary=[],

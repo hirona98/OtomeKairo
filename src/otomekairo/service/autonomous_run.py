@@ -16,6 +16,10 @@ from otomekairo.service.capability import (
     PreSendCheckWithheldError,
 )
 from otomekairo.service.common import ServiceError, debug_log
+from otomekairo.service.periodic_thought_topics import (
+    selected_periodic_thought_topic_ids,
+    periodic_thought_topic_ids_from_runs,
+)
 
 
 AUTONOMOUS_RUN_POLL_SECONDS = 1.0
@@ -573,6 +577,51 @@ class ServiceAutonomousRunMixin:
         merged = f"{existing} / {entry}" if existing else entry
         return merged
 
+    def _review_autonomous_start_candidate(
+        self, *, state: dict[str, Any], decision: dict[str, Any],
+        source_current_input: dict[str, Any], source_cycle_id: str | None,
+        current_time: str,
+    ) -> None:
+        existing = self.store.list_autonomous_runs(
+            memory_set_id=state["selected_memory_set_id"],
+            statuses=sorted(AUTONOMOUS_RUN_ACTIVE_STATUSES), limit=None,
+        )
+        outcome = None
+        try:
+            review = self.llm.generate_autonomous_start_review(
+                model_config=state["model_presets"][state["selected_model_preset_id"]],
+                review_context={
+                    "current_input": {key: deepcopy(source_current_input.get(key)) for key in (
+                        "sender_kind", "source_kind", "text", "response_target_refs"
+                    )},
+                    "decision": {key: deepcopy(decision.get(key)) for key in (
+                        "kind", "reason_summary", "autonomous_run"
+                    )},
+                    "existing_runs": [self._autonomous_run_prompt_summary(run) for run in existing],
+                },
+            )
+            outcome = review.get("outcome")
+            if outcome not in {"allow_start", "reject_start"}:
+                outcome = None
+                raise LLMError("AutonomousStartReview.outcome が不正です。")
+        finally:
+            self.store.append_events(events=[{
+                "event_id": f"event:{uuid.uuid4().hex}",
+                "cycle_id": source_cycle_id or f"cycle:{uuid.uuid4().hex}",
+                "memory_set_id": state["selected_memory_set_id"],
+                "kind": "autonomous_start_review", "role": "system", "text": None,
+                "created_at": current_time,
+                "start_review": {
+                    "outcome": outcome,
+                    "result_status": "failed" if outcome is None else "completed",
+                    "coordination_mode": decision["autonomous_run"]["coordination"]["mode"],
+                    "target_run_ids": decision["autonomous_run"]["coordination"]["target_run_ids"],
+                    "existing_run_ids": [run["run_id"] for run in existing],
+                },
+            }])
+        if outcome != "allow_start":
+            raise LLMError("AutonomousStartReview が開始候補を拒否しました。")
+
     def _start_autonomous_run_from_decision(
         self,
         *,
@@ -582,6 +631,7 @@ class ServiceAutonomousRunMixin:
         source_current_input: dict[str, Any],
         source_cycle_id: str | None,
         assistant_message_target_client_id: str | None,
+        workspace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         run_payload = decision.get("autonomous_run")
         if not isinstance(run_payload, dict):
@@ -596,6 +646,12 @@ class ServiceAutonomousRunMixin:
         current_step_summary = str(run_payload.get("initial_step_summary") or "").strip()
         if not current_step_summary:
             current_step_summary = "autonomous_run の最初の一手を判断する。"
+        self._review_autonomous_start_candidate(
+            state=state, decision=decision, source_current_input=source_current_input,
+            source_cycle_id=source_cycle_id, current_time=current_time,
+        )
+        # LLM 検証中に変化しうる置換対象を、副作用の前に再検証する。
+        coordination = self._decision_autonomous_run_coordination(state=state, run_payload=run_payload)
         origin_kind = str(source_current_input.get("source_kind") or "user_message").strip() or "user_message"
         run = {
             "run_id": f"autonomous_run:{uuid.uuid4().hex}",
@@ -654,6 +710,14 @@ class ServiceAutonomousRunMixin:
                 ]
         if isinstance(source_cycle_id, str) and source_cycle_id.strip():
             run["source_cycle_id"] = source_cycle_id.strip()
+        topic_ids = set(selected_periodic_thought_topic_ids(
+            decision=decision,
+            workspace_context=workspace_context,
+        ))
+        if coordination["mode"] == "replace_existing":
+            topic_ids.update(periodic_thought_topic_ids_from_runs(coordination["target_runs"]))
+        if topic_ids:
+            run["periodic_thought_topic_ids"] = sorted(topic_ids)
         normalized_target = self._normalize_capability_client_id(assistant_message_target_client_id)
         if normalized_target is not None:
             run["assistant_message_target_client_id"] = normalized_target
@@ -793,12 +857,18 @@ class ServiceAutonomousRunMixin:
             )
             current_time = started_at
             selected_preset = state["model_presets"][state["selected_model_preset_id"]]
+            step_trigger = (
+                "capability_result" if last_result_context is not None
+                else "timer" if run.get("status") == "waiting_timer"
+                else "scheduled"
+            )
             step_context, step, speech_payload = self._generate_reviewed_autonomous_step_candidate(
                 state=state,
                 run=run,
                 selected_preset=selected_preset,
                 source_current_input=source_current_input,
                 last_result_context=last_result_context or run.get("last_result_context"),
+                step_trigger=step_trigger,
             )
             action = step["action"]
             transition = step["transition"]
@@ -884,6 +954,7 @@ class ServiceAutonomousRunMixin:
                         selected_preset=selected_preset,
                         source_current_input=source_current_input,
                         last_result_context=last_result_context or run.get("last_result_context"),
+                        step_trigger=step_trigger,
                         pre_send_check_feedback=AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK,
                     )
                     action = step["action"]
@@ -1158,6 +1229,7 @@ class ServiceAutonomousRunMixin:
         selected_preset: dict[str, Any],
         source_current_input: dict[str, Any] | None,
         last_result_context: dict[str, Any] | None,
+        step_trigger: str = "scheduled",
         pre_send_check_feedback: str | None = None,
     ) -> tuple[AutonomousStepContext, dict[str, Any], dict[str, Any] | None]:
         completion_review_feedback: str | None = None
@@ -1168,6 +1240,7 @@ class ServiceAutonomousRunMixin:
                 current_time=self._now_iso(),
                 source_current_input=source_current_input,
                 last_result_context=last_result_context,
+                step_trigger=step_trigger,
                 pre_send_check_feedback=pre_send_check_feedback,
                 completion_review_feedback=completion_review_feedback,
             )
@@ -1332,6 +1405,29 @@ class ServiceAutonomousRunMixin:
             ]
         )
 
+    def _autonomous_step_observation_context(
+        self, *, run: dict[str, Any], current_time: str, step_trigger: str,
+    ) -> dict[str, Any]:
+        if step_trigger not in {"capability_result", "timer", "scheduled"}:
+            raise ValueError("autonomous step trigger is invalid.")
+        events = run.get("result_events") or []
+        latest = events[-1] if events else None
+        latest_result = None
+        if latest is not None:
+            latest_result = {
+                key: latest.get(key)
+                for key in ("event_id", "created_at", "capability_id", "tool_name")
+            }
+            latest_result["age_seconds"] = (
+                self._parse_iso(current_time) - self._parse_iso(latest["created_at"])
+            ).total_seconds()
+        return {
+            "step_trigger": step_trigger,
+            "result_received_for_this_step": step_trigger == "capability_result",
+            "latest_result": latest_result,
+            "result_count": len(events),
+        }
+
     def _build_autonomous_step_context(
         self,
         *,
@@ -1340,6 +1436,7 @@ class ServiceAutonomousRunMixin:
         current_time: str,
         source_current_input: dict[str, Any] | None,
         last_result_context: dict[str, Any] | None,
+        step_trigger: str = "scheduled",
         pre_send_check_feedback: str | None = None,
         completion_review_feedback: str | None = None,
     ) -> AutonomousStepContext:
@@ -1413,6 +1510,9 @@ class ServiceAutonomousRunMixin:
         )
         return AutonomousStepContext(
             run=self._autonomous_run_prompt_summary(run),
+            observation_context=self._autonomous_step_observation_context(
+                run=run, current_time=current_time, step_trigger=step_trigger,
+            ),
             current_input=current_input,
             recent_turns=recent_turns,
             time_context=self._build_time_context(current_time=current_time),

@@ -60,6 +60,7 @@ class ServiceInputTracePersistMixin:
 
         # 永続化
         events = self._persist_cycle_success(
+            recent_interaction_summary=pipeline.get("recent_interaction_summary"),
             cycle_id=cycle_id,
             started_at=started_at,
             finished_at=finished_at,
@@ -225,6 +226,7 @@ class ServiceInputTracePersistMixin:
         followup_capability_request_summary: dict[str, Any] | None = None,
         ongoing_action_transition_summary: dict[str, Any] | None = None,
         system_notice: dict[str, Any] | None = None,
+        recent_interaction_summary: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         memory_set_id = state["selected_memory_set_id"]
         events = self._build_cycle_events(
@@ -291,6 +293,7 @@ class ServiceInputTracePersistMixin:
             foreground_world_state=foreground_world_state,
             recall_trace=self._build_success_recall_trace(recall_hint, recall_pack),
             decision_trace=self._build_success_decision_trace(
+                recent_interaction_summary=recent_interaction_summary,
                 state=state,
                 input_text=input_text,
                 augmented_query_text=augmented_query_text,

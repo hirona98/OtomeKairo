@@ -95,7 +95,6 @@ class LLMMockMemoryMixin:
             counts = evidence_pack.get("evidence_counts", {})
             open_loop_count = counts.get("open_loops", 0) if isinstance(counts, dict) else 0
             summary_status = str(evidence_pack.get("summary_status_candidate") or "inferred")
-            persona = evidence_pack.get("persona_context")
             mood_state = evidence_pack.get("mood_state")
             affect_state = evidence_pack.get("affect_state")
             theme = self._mock_reflection_theme(
@@ -103,7 +102,6 @@ class LLMMockMemoryMixin:
                 mood_state=mood_state,
                 affect_state=affect_state,
             )
-            persona_lead = self._mock_reflection_persona_lead(persona)
 
             if scope_type == "topic":
                 topic_label = self._mock_reflection_scope_label(scope_key)
@@ -114,16 +112,16 @@ class LLMMockMemoryMixin:
             elif scope_type == "relationship":
                 relation_label = f"{self._mock_reflection_scope_label(scope_key)} の関係文脈"
                 if int(open_loop_count) > 0:
-                    summary_text = f"最近の{relation_label}では、{persona_lead}{theme}がありつつ、続きを確かめる流れが続いている。"
+                    summary_text = f"最近の{relation_label}では、{theme}がありつつ、続きを確かめる流れが続いている。"
                 elif summary_status == "confirmed":
-                    summary_text = f"最近の{relation_label}では、{persona_lead}{theme}が少しずつ安定している。"
+                    summary_text = f"最近の{relation_label}では、{theme}が少しずつ安定している。"
                 else:
-                    summary_text = f"最近の{relation_label}では、{persona_lead}{theme}がゆるやかに積み上がっている。"
+                    summary_text = f"最近の{relation_label}では、{theme}がゆるやかに積み上がっている。"
             elif scope_type == "self":
                 if int(open_loop_count) > 0:
-                    summary_text = f"最近の自分側の応答では、{persona_lead}{theme}があり、継続中の確認事項も抱えている。"
+                    summary_text = f"最近の自分側の応答では、{theme}があり、継続中の確認事項も抱えている。"
                 else:
-                    summary_text = f"最近の自分側の応答では、{persona_lead}{theme}が続いている。"
+                    summary_text = f"最近の自分側の応答では、{theme}が続いている。"
             else:
                 summary_text = f"最近の{scope_label}に関するやり取りでは、{theme}の理解が少しずつ積み上がっている。"
 
@@ -593,20 +591,6 @@ class LLMMockMemoryMixin:
                 if normalized:
                     return normalized[:24]
         return None
-
-    def _mock_reflection_persona_lead(self, persona: Any) -> str:
-        if not isinstance(persona, dict):
-            return ""
-        initiative_baseline_payload = persona.get("initiative_baseline")
-        if isinstance(initiative_baseline_payload, dict):
-            initiative_baseline = str(initiative_baseline_payload.get("level") or "").strip()
-        else:
-            initiative_baseline = str(initiative_baseline_payload or "").strip()
-        if initiative_baseline == "low":
-            return "無理を押しすぎず、"
-        if initiative_baseline == "high":
-            return "必要なら一歩前へ出ながら、"
-        return ""
 
     def _mock_reflection_scope_label(self, scope_key: str) -> str:
         # 簡易表示

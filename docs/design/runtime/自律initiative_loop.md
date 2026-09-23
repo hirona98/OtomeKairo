@@ -70,19 +70,19 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 | `capability_summary` | 使える能力と使えない能力の判断用要約 |
 | `suppression_summary` | 重複発話境界とタイミング事実の要約 |
 | `speech_timing_state` | 定期思考や直近発話済み事実など、発話タイミングの構造値 |
-| `speech_timing_summary` | 自発発話の頻度、重複、タイミング不自然さの要約 |
+| `speech_timing_summary` | 直近発話の重複、結果待ち、自発の控えなど、タイミング上の要約 |
+| `speech_frequency_level` | その判断へ渡した `current.thinking_speech_level`。値の意味は [../configuration/設定モデル.md](../configuration/設定モデル.md) を正とする |
 
 `initiative_context` は inspection へ要約を残す。
 `initiative_context` そのものを永続的な状態正本にしない。
-`persona_context_summary` は `initiative_baseline` と `persona_prompt_excerpt` を持つ。
-`initiative_context` は `initiative_baseline` を単独の人格判断値として扱わず、`persona_context_summary.initiative_baseline` と前景文脈を合わせて扱う。
+`persona_context_summary` は `persona_prompt_excerpt` を持つ。
 `initiative_entry_summary` は `entry_kind / entry_basis / reason_summary` を含む。
 `entry_basis` は `activity_mode_transition / strong_interest / same_activity_detail_change / observation_only` のいずれかである。
 `entry_kind=enter` は `entry_basis=activity_mode_transition / strong_interest` の場合に評価対象として強く前景化したことを表す。
 `entry_basis=same_activity_detail_change / observation_only` は同じ活動モード内の詳細変化または観測のみを表す。
 具体的な前景変化や関係上の意味が薄い `same_activity_detail_change / observation_only` は `entry_kind=skip` にする。
 同一活動内でも、人格・記憶・現在文脈から強い関心や関係上の意味がある場合は `entry_basis=strong_interest` として `entry_kind=enter` にする。
-`drive_summaries` の各 entry は、生成時点に存在する `drive_kind / support_count / support_strength / freshness_hint / scope_alignment / signal_strength / persona_alignment / stability_hint` を含む。
+`drive_summaries` の各 entry は、生成時点に存在する `drive_kind / support_count / support_strength / freshness_hint / scope_alignment / signal_strength / stability_hint` を含む。
 `drive_summaries` は中期的な向きの背景材料である。
 `support_count / support_strength / signal_strength / freshness_hint / stability_hint` の構造値が強い `drive_state` は、自発系 family の前景材料として渡す。
 `drive_state` から `speech / noop / pending_intent / capability_request` のどれへ置くかは、`decision_generation` が他の文脈と合わせて判断する。
@@ -115,22 +115,20 @@ initiative loop は、候補を次の 3 系統に分ける。
 - 再評価系
   - due になった `pending_intent`
 - 自発系
-  - 強く前景化した `drive_state`、強い `entry_basis` を持つ `initiative_entry_summary.entry_kind=enter`、視覚観測の `first_seen / changed` と現在文脈が噛み合うもの、または due な気にかけていること
+  - 強く前景化した `drive_state`、強い `entry_basis` を持つ `initiative_entry_summary.entry_kind=enter`、視覚観測の `first_seen / changed` と現在文脈が噛み合うもの、または due な定期思考トピック
 
 自発系は、強く前景化した `drive_state`、`ongoing_action`、`pending_intent`、強い `entry_basis` を持つ `initiative_entry_summary`、または視覚観測の `first_seen / changed` と現在文脈の噛み合いを材料にする。
 視覚観測の `first_seen / changed` は `workspace_context` の `visual_observation` 候補として扱う。
 視覚観測の `first_seen / changed` で通常判断へ direct entry する場合も、判断前観測で更新された `activity_context` は `initiative_context` と `workspace_context` に残す。
 direct entry は視覚新規性だけへ判断材料を縮約する仕組みではなく、活動遷移、継続時間、source の整合、抑制候補を同じ盤面で比較する入口である。
-due な気にかけていることは自発系の材料であり、偽の `drive_state` にはしない。その関心に関われる手段が無いときの扱いも含め、意味境界は [気にかけていること.md](気にかけていること.md) を正とする。
-direct entry でも due な関心があるときは想起解釈を省略せず、盤面を視覚反応へ縮約しない。
+due な定期思考トピックは自発系の材料であり、偽の `drive_state` にはしない。その定期思考トピックに関われる手段が無いときの扱いも含め、意味境界は [定期思考トピック.md](定期思考トピック.md) を正とする。
+direct entry でも due な定期思考トピックがあるときは想起解釈を省略せず、盤面を視覚反応へ縮約しない。
 `background_thinking` は定期思考による自己評価である。感覚への反応と向きへの関与は別比較である。
 外向き伝達を控えることと、自身の活動を控えることは別比較である。同じ判断に畳まない。
 対象ごとに結果は 1 つであり、両方進めてよい。比較の分け方は [判断と行動.md](判断と行動.md) を正とする。
 `visual_observations[].change_state=first_seen / changed` は前景候補、`stable` は現在状態の継続シグナル、`same_as_recent_speech` は直近重複の抑制候補である。
 `background_thinking` の `speech` は、観測差分の実況ではなく、現在の個の短い見方として一言にまとまる独り言である。
-`background_thinking` は短い独話として前へ出る自然さを 10 段階で内的に見積もり、`current.thinking_speech_level` を前へ出る軽さの補助として使う。
-`thinking_speech_level=5` は標準である。
-`thinking_speech_level=3` 以下は控えめ基準である。
+前へ出る軽さは `current.thinking_speech_level` を補助に使う。値の意味は [../configuration/設定モデル.md](../configuration/設定モデル.md) を正とし、間合いとの比較はこの文書の外向き伝達の判断に従う。
 `foreground_thinness=thin`、`change_state=stable`、`change_state=changed`、同一活動継続は `speech` を義務づけない。
 観測と人格、記憶、関心、現在文脈が噛み合い、短い一言として自然にまとまる場合は `speech` と比較する。
 評価値は JSON や `reason_summary` に出力しない。
@@ -145,7 +143,7 @@ direct entry でも due な関心があるときは想起解釈を省略せず�
 操作媒体、対象種別、身体動作の組み合わせが、同じ活動モード内の対象差し替えでは説明できないほど変わる場合はこの抑制に含めない。
 `speech` は会話開始ではなく、反応要求を含まない短い独り言として比較する。
 `pending_intent` は、あとで再評価する材料だけを残す場合に選ぶ。
-`noop` の意味と、視覚発話抑制との分離は [判断と行動.md](判断と行動.md) を正とする。向きまで見送る条件は [気にかけていること.md](気にかけていること.md) を正とする。
+`noop` の意味と、視覚発話抑制との分離は [判断と行動.md](判断と行動.md) を正とする。向きまで見送る条件は [定期思考トピック.md](定期思考トピック.md) を正とする。
 `foreground_signal_summary.foreground_thinness=thin` は自動 `speech` にしない。ただし、軽い節目としてまとまる場合は `speech` と比較する。
 `change_state=stable` と同一活動継続は自動 `speech` にしない。ただし、継続そのものに現在の個の短い見方が立つ場合は `speech` と比較する。
 `capability_request` は、`candidate_families` に capability 提案があり、現在判断に追加観測が必要な場合に選ぶ。
@@ -153,7 +151,7 @@ direct entry でも due な関心があるときは想起解釈を省略せず�
 `speech` は助言、依頼、支援提案、反応要求ではなく、観測事実に基づく一文の独話的な状況認識として作る。
 `background_thinking` の `speech` は独り言として扱い、相手の反応や会話継続を前提にしない。
 支援提案、作業停止の促し、休息促し、身体注意、画面への一般コメント、長い感想は控える理由側に置く。
-`persona_context` は距離感と表現補助であり、観測にない内容を `speech` に押し上げない。
+`persona_context` の適用は [../configuration/人格設定詳細.md](../configuration/人格設定詳細.md) を正とし、観測にない内容を `speech` に押し上げない。
 `foreground_drive_summaries` に入っていない `drive_state`、`freshness_hint=stale`、`stability_hint=weak`、`signal_strength=0.0` の `drive_state` は背景材料として扱い、薄い視覚前景と合わせる場合は `speech` の支柱にせず、補助材料としてだけ扱う。
 反復に近い詳細更新、同一活動内の画面・表示対象・操作単位の小さな変化、観測対象の表層的な変化、姿勢や操作の細かな変化、同じ活動モード内の対象名や表示内容だけの差し替え、一般的な注意や助言に留まる内容は、自動 `speech` にせず、軽い節目としてまとまる場合だけ `speech` と比較する。
 操作媒体、対象種別、身体動作の組み合わせが、同じ活動モード内の対象差し替えでは説明できないほど変わる場合は、この抑制理由に含めない。
@@ -200,7 +198,7 @@ LLM は次を担う。
 - `last_wake_at` は `background_thinking` が interval を消費したときだけ更新すること。API 起床は定期思考の interval 起点を動かさない
 - 思考前観測の取得、視覚記録、`world_state`、`activity_context` への反映
 - `drive_state / ongoing_action / pending_intent / initiative_entry_summary` による自律評価対象の前景化制御
-- due な気にかけていることがあるとき、`initiative_entry_check` の skip だけで定期思考を打ち切らないこと。意味境界は [気にかけていること.md](気にかけていること.md) を正とする
+- due な定期思考トピックがあるとき、`initiative_entry_check` の skip だけで定期思考を打ち切らないこと。意味境界は [定期思考トピック.md](定期思考トピック.md) を正とする
 - 観測変化、直近発話済み観測、重複発話事実の補助文脈化
 - 期限切れ候補の除外
 - capability availability と権限の検証
@@ -217,10 +215,10 @@ LLM の自由文をそのまま状態遷移へ使わない。
 `wake / background_thinking` の入力文は、観測、`drive_state`、直近文脈、候補を合わせて、関わる、保留する、見送る、能力を使うのどれが自然かを評価する自律判断機会を表す。
 身体状態は body context、body capability result、明示的な身体状態 source を根拠にする。
 予定状態は schedule context、schedule capability result、明示的な予定 source を根拠にする。
-`wake_policy.observations` は 定期思考 の判断前に enabled 項目だけを順番に取得する。
+`wake_policy.observations` は 定期思考 の判断前に enabled かつ接続中の項目を順番に取得する。
 visual capture の source、result、保存、inspection の詳細は [../capability/視覚機能.md](../capability/視覚機能.md) を正とする。
 思考前観測 の運用時刻は `wake_policy` と process-local runtime で扱い、成功結果は内部観測と自律判断の材料として扱う。
-visual capture を含む enabled observation の無効→有効直後の初回 5 秒待機と、対象 vision source がこの process で未登録のあいだ due にしないことと、その後の初回 due は [../api/状態と設定.md](../api/状態と設定.md) を正とする。
+定期思考の間隔の起点と、対象 vision source が未接続のときの扱いは [../api/状態と設定.md](../api/状態と設定.md) を正とする。
 思考前観測 として同期取得する capability result は、`ongoing_action` 外の内部観測として扱う。
 会話入力、手動 wake、capability result handling は FIFO で直列化する。
 これらのサイクルが実行中または待機中なら、server はその周期の due autonomous run と `background_thinking` を開始しない。
@@ -230,11 +228,19 @@ in-flight capability result は受け取るが、ユーザー向け応答中は 
 特定 run は cancel API、会話からの全run停止は `autonomous_run_action.kind=cancel_all` で cancel する。
 server は会話本文から停止意図を推定しない。
 `background_thinking` の観測中に `conversation_input` または `speech` が新しく増えた場合、server は観測前の直近会話 snapshot を使って外向き発話だけを止める。自身の活動の比較と実行は続ける。ユーザー応答中の定期思考も同じである。
+直近会話の取得境界は [../foundation/人物と相互作用.md](../foundation/人物と相互作用.md) を正とする。相手を持たない自己評価でも、同じ取得範囲で観測中の会話追加を検出する。
+外向き伝達の判断では、LLM が `recent_interactions` の場ごとの会話から話題の継続、未解決の問い、相手の返答を待つ間合いを読み、今発話する意味と観測の新規性を比較する。
+別の場の返答待ちをすべての場の発話停止理由にしない。周囲への独り言では、直近のやり取りとの時間的な近さと内容から、その続きを遮るかを比較する。参照会話から現在の相手や配送先を決めない。
+各周期で、未回答の問いがまだ相手の番か、やり取りが閉じたか切り替わったか、今の一言がその番を取り返すかを読み直す。
+自分の問いかけの直後で相手がまだ答えていないときは、その流れに関わる発話と、別の観測へ話題をずらす発話を分ける。後者は今割って入る必要と待つ意味を比べ、観測の新規性や短さだけでは選ばない。問いの繰り返しや返答の催促にはしない。
+やり取りが閉じた、または切り替わったと読めたあとは、`thinking_speech_level` に沿って短い独話を比べる。
+作業中、閲覧中、検討中、入力中であることは前景の説明である。それ自体は返答待ちを続ける理由にも、待ちを終える理由にもしない。相手が会話を離れたかは、番がまだ開いているかを読む材料にする。
+話題が閉じたかどうかは会話の意味から判断する。会話の存在や経過秒数、疑問符などで一律に抑制しない。この会話の間合いは外向き伝達の判断材料とし、分離した自身の活動の比較・実行はその向きから判断する。
 visual capture の変化は `first_seen / changed / stable / same_as_recent_speech` の `change_state` に正規化し、正規化規則は [../capability/視覚機能.md](../capability/視覚機能.md) を正とする。
 `first_seen / changed` は新規性の前景シグナルとして扱う。
 `same_as_recent_speech` は直近発話との重複シグナル、`stable` は現在状態の継続シグナルとして扱う。
 新規性と反復性は、`drive_state`、`world_state`、`activity_context`、`pending_intent`、抑制要約と同じ盤面で比較する。
-薄い視覚前景だけで成立する新規性は発話を義務づけない。due な関心があるときは向きの比較を残し、視覚へ発話しないことだけで `noop` にしない。
+薄い視覚前景だけで成立する新規性は発話を義務づけない。due な定期思考トピックがあるときは向きの比較を残し、視覚へ発話しないことだけで `noop` にしない。
 活動遷移に触れる発話は、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして表現する。
 `source_owner=self` の camera 視覚観測は OtomeKairo 自身の視覚根拠として扱う。
 `source_owner=user_environment` の視覚観測、`world_state.visual_context`、`activity_context.actor=person` は対応する `person_ref` の人物側の状況として扱う。
@@ -260,10 +266,9 @@ initiative loop は、前へ出る理由と見送る理由を判断入力に含�
 - 直近で相手が休止や拒否を示した事実
 - `autonomous_run` または `ongoing_action` が結果待ちであること
 - capability が unavailable であること
-- `persona_context_summary.initiative_baseline.level=low` であること
 
 visual observation の `change_state=first_seen / changed` は自律判断の前景材料にする。
-autonomous family の availability は、強い `initiative_entry_summary`、構造値が強い `drive_state`、視覚観測の `first_seen / changed`、または due な気にかけていることで組み立てる。
+autonomous family の availability は、強い `initiative_entry_summary`、構造値が強い `drive_state`、視覚観測の `first_seen / changed`、または due な定期思考トピックで組み立てる。
 autonomous family の priority は、`drive_state`、現在文脈、前景世界状態、候補理由の強さで決める。
 `foreground_thinness=thin`、`trigger_kind=background_thinking`、`suppression_level=high` は、LLM が結果を判断するための文脈事実として渡す。視覚発話抑制は向きまで閉じない。
 同じ `dedupe_key` の直近発話は server の重複発話境界として扱う。
@@ -336,14 +341,14 @@ API起床の自律判断 matrix は次の 16 件に固定する。
 
 | case | 入力条件 | 期待する構造 |
 | --- | --- | --- |
-| `background-no-context-skip` | interval 初回定期思考で `drive_state / world_state / ongoing_action` が空 | 定期思考 cycle を作り、`initiative_context` なしの `decision.kind=noop` と `memory_trace=skipped` を残す |
-| `background-recent-duplicate-noop` | interval 初回定期思考で視覚観測の `change_state` が `same_as_recent_speech` である | `suppression_level=high`、`decision.kind=noop`、`memory_trace=skipped` |
-| `background-grounded-speech` | interval 初回定期思考で予定 `world_state` と整合する構造値が強い `drive_state` がある | `background_thinking_scheduler_active=true`、`foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`memory_trace=succeeded` |
-| `background-interval-not-due` | `last_wake_at` 相当の直後に長い interval を設定する | `background_thinking_scheduler_active=true` を観測し、新しい定期思考 cycle を作らない |
+| `background-no-context-skip` | interval 経過後の定期思考で `drive_state / world_state / ongoing_action` が空 | 定期思考 cycle を作り、`initiative_context` なしの `decision.kind=noop` と `memory_trace=skipped` を残す |
+| `background-recent-duplicate-noop` | interval 経過後の定期思考で視覚観測の `change_state` が `same_as_recent_speech` である | `suppression_level=high`、`decision.kind=noop`、`memory_trace=skipped` |
+| `background-grounded-speech` | interval 経過後の定期思考で予定 `world_state` と整合する構造値が強い `drive_state` がある | `background_thinking_scheduler_active=true`、`foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`memory_trace=succeeded` |
+| `background-interval-not-due` | `interval_started_at` 相当の直後に長い interval を設定する | `background_thinking_scheduler_active=true` を観測し、新しい定期思考 cycle を作らない |
 
 matrix の共通判定境界は前述の `initiative_context`、LLM とコードの責務、自発発話抑制に従う。
-`visual_context` だけの前景は thin foreground として扱う。due な気にかけていることがあるときは、薄い視覚前景だけで `noop` を期待しない。
-視覚観測の `change_state=first_seen / changed` は通常の initiative 判断へ進み、`initiative_entry_check` を追加で呼ばない。due な関心があるときは想起解釈を省略せず、盤面を視覚反応へ縮約しない。
+`visual_context` だけの前景は thin foreground として扱う。due な定期思考トピックがあるときは、薄い視覚前景だけで `noop` を期待しない。
+視覚観測の `change_state=first_seen / changed` は通常の initiative 判断へ進み、`initiative_entry_check` を追加で呼ばない。due な定期思考トピックがあるときは想起解釈を省略せず、盤面を視覚反応へ縮約しない。
 構造値が強い `drive_state` があり、対応する grounded foreground がない場合、発話より追加観測が自然かを同じ判断盤面で比較する。
 構造値が強い `drive_state` が特定の status family を要求する場合は、foreground `world_state` と capability の対象を合わせて LLM が既存要約または追加取得を選ぶ。
 非視覚 capability は state type の一致だけで機械的に遮断しない。

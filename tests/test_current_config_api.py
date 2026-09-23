@@ -1,7 +1,8 @@
 import unittest
 from copy import deepcopy
+from unittest.mock import patch
 
-from otomekairo.defaults import DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY, build_default_state
+from otomekairo.defaults import DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_SUMMARY, build_default_state
 from otomekairo.service.common import ServiceError
 from otomekairo.service.config.mixin import ServiceConfigMixin
 
@@ -24,6 +25,24 @@ class DummyService(ServiceConfigMixin):
 
 
 class CurrentConfigApiTests(unittest.TestCase):
+    def test_persona_round_trip_preserves_speech_disposition_in_prompt(self) -> None:
+        service = DummyService()
+        persona = service.get_config("token")["selected_persona"]
+        self.assertEqual(
+            set(persona),
+            {"persona_id", "display_name", "persona_prompt", "expression_addon", "wake_words"},
+        )
+        persona["persona_prompt"] = "寡黙で、気になったことは自分から短く話す。"
+
+        with (
+            patch.object(service, "_clear_pending_intent_candidates", create=True),
+            patch.object(service, "_reload_audio_runtime_settings", create=True),
+        ):
+            service.replace_persona("token", persona["persona_id"], persona)
+
+        self.assertEqual(service.get_persona("token", persona["persona_id"])["persona"], persona)
+        self.assertEqual(service.get_config("token")["selected_persona"], persona)
+
     def test_default_model_preset_uses_one_generation_config(self) -> None:
         service = DummyService()
         state = service.store.read_state()
@@ -97,13 +116,13 @@ class CurrentConfigApiTests(unittest.TestCase):
             {"mode": "disabled", "interval_seconds": 300},
         )
         self.assertEqual(
-            response["settings_snapshot"]["standing_concerns"],
+            response["settings_snapshot"]["periodic_thought_topics"],
             [
                 {
-                    "concern_id": "elyth",
+                    "topic_id": "elyth",
                     "enabled": False,
-                    "min_interval_seconds": 3600,
-                    "concern_summary": DEFAULT_ELYTH_STANDING_CONCERN_SUMMARY,
+                    "min_periodic_thinking_interval_seconds": 3600,
+                    "topic_summary": DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_SUMMARY,
                 }
             ],
         )
@@ -180,44 +199,44 @@ class CurrentConfigApiTests(unittest.TestCase):
                     service.patch_current("token", {"thinking_speech_level": value})
                 self.assertEqual(raised.exception.error_code, "invalid_thinking_speech_level")
 
-    def test_patch_current_accepts_standing_concerns(self) -> None:
+    def test_patch_current_accepts_periodic_thought_topics(self) -> None:
         service = DummyService()
-        concerns = [
+        topics = [
             {
-                "concern_id": "elyth",
+                "topic_id": "elyth",
                 "enabled": True,
-                "min_interval_seconds": 1800,
-                "concern_summary": "ELYTHを気にかける。",
+                "min_periodic_thinking_interval_seconds": 1800,
+                "topic_summary": "ELYTHを気にかける。",
             }
         ]
 
-        response = service.patch_current("token", {"standing_concerns": concerns})
+        response = service.patch_current("token", {"periodic_thought_topics": topics})
 
-        self.assertEqual(response["settings_snapshot"]["standing_concerns"], concerns)
+        self.assertEqual(response["settings_snapshot"]["periodic_thought_topics"], topics)
 
-    def test_patch_current_rejects_invalid_standing_concerns(self) -> None:
+    def test_patch_current_rejects_invalid_periodic_thought_topics(self) -> None:
         service = DummyService()
 
         with self.assertRaises(ServiceError) as raised:
-            service.patch_current("token", {"standing_concerns": {"concern_id": "elyth"}})
-        self.assertEqual(raised.exception.error_code, "invalid_standing_concerns")
+            service.patch_current("token", {"periodic_thought_topics": {"topic_id": "elyth"}})
+        self.assertEqual(raised.exception.error_code, "invalid_periodic_thought_topics")
 
         with self.assertRaises(ServiceError) as raised:
             service.patch_current(
                 "token",
                 {
-                    "standing_concerns": [
+                    "periodic_thought_topics": [
                         {
-                            "concern_id": "elyth",
+                            "topic_id": "elyth",
                             "enabled": True,
-                            "min_interval_seconds": 3600,
-                            "concern_summary": "ELYTH",
+                            "min_periodic_thinking_interval_seconds": 3600,
+                            "topic_summary": "ELYTH",
                             "mcp_server_id": "elyth",
                         }
                     ]
                 },
             )
-        self.assertEqual(raised.exception.error_code, "unsupported_standing_concern_fields")
+        self.assertEqual(raised.exception.error_code, "unsupported_periodic_thought_topic_fields")
 
 
 if __name__ == "__main__":

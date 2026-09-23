@@ -72,13 +72,13 @@ def resolve_agent_skill_host_authorization(
         }
     if current_input.sender_kind == "person" and current_input.response_target_refs:
         return {
-            "kind": "person_request",
-            "summary_text": "人物の明示依頼がある。",
+            "kind": "person_input",
+            "summary_text": "人物発話が起点である。実行する目的と許可の範囲は、その発話と会話文脈の意味から判断する。",
         }
     if origin in PERSON_ORIGIN_SOURCE_KINDS or current_input.response_target_refs:
         return {
-            "kind": "person_request",
-            "summary_text": "人物の依頼から続く作業である。",
+            "kind": "person_input",
+            "summary_text": "人物発話に由来する入力である。実行する目的と許可の範囲は、起点の発話と継続中の作業から判断する。",
         }
     return {
         "kind": "none",
@@ -130,7 +130,7 @@ class ServiceAgentSkillsMixin:
                 "trigger_kind": trigger_kind,
                 "recent_turns": recent_turns or [],
                 "work_log": work_log or [],
-                "orientation_context": orientation_context or {"standing_concerns": []},
+                "orientation_context": orientation_context or {"periodic_thought_topics": []},
                 "run": run,
                 "prior_activation": prior_activation,
                 "host_authorization": host_authorization,
@@ -192,7 +192,7 @@ class ServiceAgentSkillsMixin:
                 selection_context={
                     "current_input": current_input.to_prompt_payload(),
                     "trigger_kind": trigger_kind,
-                    "orientation_context": orientation_context or {"standing_concerns": []},
+                    "orientation_context": orientation_context or {"periodic_thought_topics": []},
                     "run": run,
                     "prior_activation": prior_activation,
                     "host_authorization": host_authorization,

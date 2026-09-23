@@ -269,7 +269,7 @@ class McpConfigApiTests(unittest.TestCase):
         definition["autonomous_session"] = {
             "enabled": True,
             "background_enabled": True,
-            "min_interval_seconds": 3600,
+            "min_periodic_thinking_interval_seconds": 3600,
             "max_tool_calls": 10,
         }
 

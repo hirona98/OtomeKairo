@@ -34,6 +34,7 @@ class ServiceInputWakeObservationMixin:
         started_at: str,
         client_context: dict[str, Any],
         cycle_id: str | None,
+        for_background_thinking: bool,
     ) -> dict[str, Any]:
         observations = self._enabled_wake_policy_observations(state)
         if not observations:
@@ -42,34 +43,50 @@ class ServiceInputWakeObservationMixin:
         cycle_label = self._debug_cycle_label(cycle_id)
         summaries: list[dict[str, Any]] = []
         for observation in observations:
+            if for_background_thinking and self._wake_observation_source_is_disconnected(observation):
+                continue
             summary = self._run_wake_policy_observation(
                 state=state,
                 started_at=started_at,
                 observation=observation,
                 cycle_id=cycle_id,
             )
+            if (
+                for_background_thinking
+                and summary.get("failure_code") == "source_unavailable"
+                and self._wake_observation_source_is_disconnected(observation)
+            ):
+                continue
             summary = self._record_wake_policy_observation_runtime_state(
                 summary=summary,
                 current_time=started_at,
             )
             summaries.append(summary)
+        if not summaries:
+            return client_context
         summary_text = self._wake_policy_observation_summary_text(summaries)
         debug_log("Wake", f"{cycle_label} observations done summary={self._clamp(summary_text)}")
         next_context = {
             **client_context,
-            "wake_observations": summaries,
-            "wake_observation_summary": summary_text,
+            "wake_observation_trace": {
+                "wake_observations": summaries,
+                "wake_observation_summary": summary_text,
+            },
         }
-        visual_signals = self._wake_policy_visual_observation_signals(summaries)
+        # 取得の運用記録と判断材料を分ける。正常な見送りは観測 OFF と同じ入力にする。
+        decision_summaries = [summary for summary in summaries if summary.get("status") != "skipped"]
+        if decision_summaries:
+            next_context["wake_observations"] = decision_summaries
+            next_context["wake_observation_summary"] = self._wake_policy_observation_summary_text(decision_summaries)
+        visual_signals = self._wake_policy_visual_observation_signals(decision_summaries)
         if visual_signals:
             next_context["visual_observation_signals"] = visual_signals
         return next_context
 
     def _enabled_wake_policy_observations(self, state: dict[str, Any]) -> list[dict[str, Any]]:
         wake_policy = state.get("wake_policy")
-        if not isinstance(wake_policy, dict) or wake_policy.get("mode") != "interval":
-            return []
-        observations = wake_policy.get("observations")
+        # 観測の有効状態は定期思考のスケジュールとは独立。会話でも同じ対象を使う。
+        observations = wake_policy.get("observations") if isinstance(wake_policy, dict) else None
         if not isinstance(observations, list):
             observations = []
         enabled_observations = [
@@ -158,7 +175,7 @@ class ServiceInputWakeObservationMixin:
             return self._wake_policy_observation_failure_summary(
                 observation=observation,
                 failure_code="source_unavailable",
-                reason_summary="対象 vision source が接続されていない。",
+                reason_summary="対象 vision source を接続中 source へ一意に解決できない。",
             )
         resolved_observation = {
             **observation,
@@ -208,36 +225,23 @@ class ServiceInputWakeObservationMixin:
             previous_observation_runtime=previous_observation_runtime,
         )
 
-    def _unseen_wake_observation_sources(self, state: dict[str, Any]) -> list[str]:
-        unseen: list[str] = []
-        seen_ids: set[str] = set()
-        for observation in self._enabled_wake_policy_observations(state):
-            if observation.get("capability_id") != "vision.capture":
-                continue
-            input_payload = observation.get("input")
-            if not isinstance(input_payload, dict):
-                continue
-            vision_source_id = input_payload.get("vision_source_id")
-            if not isinstance(vision_source_id, str) or not vision_source_id.strip():
-                continue
-            normalized_source_id = vision_source_id.strip()
-            if normalized_source_id in seen_ids:
-                continue
-            if self._wake_observation_source_has_been_seen(normalized_source_id):
-                continue
-            seen_ids.add(normalized_source_id)
-            unseen.append(normalized_source_id)
-        return unseen
-
-    def _wake_observation_source_has_been_seen(self, vision_source_id: str) -> bool:
-        if self._event_stream_registry.has_seen_vision_source(vision_source_id):
-            return True
-        if isinstance(self._event_stream_registry.get_vision_source(vision_source_id), dict):
-            return True
-        stale_kind = vision_source_id.rsplit(":", 1)[-1].strip()
+    def _wake_observation_source_is_disconnected(self, observation: dict[str, Any]) -> bool:
+        if observation.get("capability_id") != "vision.capture":
+            return False
+        input_payload = observation.get("input")
+        if not isinstance(input_payload, dict):
+            return False
+        vision_source_id = input_payload.get("vision_source_id")
+        if not isinstance(vision_source_id, str) or not vision_source_id.strip():
+            return False
+        normalized_source_id = vision_source_id.strip()
+        sources = self._event_stream_registry.list_capability_bindings()["vision_sources"]
+        if any(source.get("vision_source_id") == normalized_source_id for source in sources):
+            return False
+        stale_kind = normalized_source_id.rsplit(":", 1)[-1].strip()
         if stale_kind in {"desktop", "camera", "virtual"}:
-            return self._event_stream_registry.has_seen_vision_source_kind(stale_kind)
-        return False
+            return not any(source.get("kind") == stale_kind for source in sources)
+        return True
 
     def _resolve_wake_policy_observation_input(
         self,

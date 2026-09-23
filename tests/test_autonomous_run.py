@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from otomekairo.llm.contexts import CurrentInput
+from otomekairo.llm.contracts import LLMError
 from otomekairo.service.app import OtomeKairoService
 from otomekairo.service.autonomous_run import AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK
 from otomekairo.service.autonomous_run import AUTONOMOUS_COMPLETION_REVIEW_RETRY_FEEDBACK
@@ -17,6 +18,180 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
         state["model_presets"][preset_id]["model"] = "mock-test"
         service.store.write_state(state)
         return service.store.read_state()
+
+    def test_step_execution_distinguishes_retained_result_from_new_arrival(self) -> None:
+        for status, incoming, expected in (
+            ("waiting_timer", None, "timer"),
+            ("active", None, "scheduled"),
+            ("active", {"source_capability_id": "mcp.call_tool"}, "capability_result"),
+        ):
+            with self.subTest(trigger=expected), tempfile.TemporaryDirectory() as temp_dir:
+                service = OtomeKairoService(Path(temp_dir))
+                state = service.store.read_state()
+                retained = {"source_capability_id": "mcp.call_tool"}
+                run = {**self._commitment_run_record(memory_set_id=state["selected_memory_set_id"]),
+                    "status": status, "last_result_context": retained}
+                service.store.upsert_autonomous_run(autonomous_run=run)
+                service._autonomous_run_step_guard = Mock(return_value=None)
+                service._now_iso = Mock(return_value="2026-09-21T10:00:00+09:00")
+                generate = Mock(return_value=(None, {
+                    "action": {"kind": "none", "capability_request": None, "speech": None},
+                    "transition": {"kind": "wait_until", "next_run_at": "2026-09-21T11:00:00+09:00"},
+                    "run_update": {"current_step_summary": "以前の結果に基づき待つ。", "history_summary": "追加取得なし。"},
+                }, None))
+                service._generate_reviewed_autonomous_step_candidate = generate
+                result = service._execute_autonomous_run_step_locked(
+                    state=state, run_id=run["run_id"], started_at="2026-09-21T10:00:00+09:00",
+                    last_result_context=incoming, emit_speech_event=False, allow_during_user_response=True,
+                )
+                self.assertEqual(result["status"], "waiting_timer")
+                self.assertEqual(generate.call_args.kwargs["step_trigger"], expected)
+                self.assertEqual(generate.call_args.kwargs["last_result_context"], retained)
+                stored = service.store.get_autonomous_run(run_id=run["run_id"])
+                self.assertEqual(stored.get("result_events"), run.get("result_events"))
+                self.assertEqual(stored.get("observed_result_summaries"), run.get("observed_result_summaries"))
+
+    def test_timer_keeps_observation_age_and_id_without_claiming_new_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            run = {"result_events": [{
+                "event_id": "event:observed", "created_at": "2026-09-21T09:00:00+09:00",
+                "capability_id": "mcp.call_tool", "tool_name": "get_notifications",
+            }]}
+            received = service._autonomous_step_observation_context(
+                run=run, current_time="2026-09-21T09:00:01+09:00", step_trigger="capability_result",
+            )
+            timer = service._autonomous_step_observation_context(
+                run=run, current_time="2026-09-21T10:00:00+09:00", step_trigger="timer",
+            )
+            resumed = service._autonomous_step_observation_context(
+                run=run, current_time="2026-09-21T10:01:00+09:00", step_trigger="scheduled",
+            )
+            self.assertTrue(received["result_received_for_this_step"])
+            self.assertFalse(timer["result_received_for_this_step"])
+            self.assertFalse(resumed["result_received_for_this_step"])
+            self.assertEqual(timer["latest_result"]["event_id"], received["latest_result"]["event_id"])
+            self.assertEqual(timer["latest_result"]["age_seconds"], 3600)
+            self.assertEqual(timer["result_count"], 1)
+            empty = service._autonomous_step_observation_context(
+                run={}, current_time="2026-09-21T10:00:00+09:00", step_trigger="scheduled",
+            )
+            self.assertIsNone(empty["latest_result"])
+            self.assertEqual(empty["result_count"], 0)
+            with self.assertRaises(ValueError):
+                service._autonomous_step_observation_context(
+                    run=run, current_time="2026-09-21T10:00:00+09:00", step_trigger="invalid",
+                )
+
+    def test_start_review_blocks_creation_and_replacement_before_side_effects(self) -> None:
+        for mode in ("create_new", "replace_existing"):
+            for response in ({"outcome": "reject_start"}, {"outcome": "invalid"}, LLMError("failed")):
+                with self.subTest(mode=mode, response=response), tempfile.TemporaryDirectory() as temp_dir:
+                    service = OtomeKairoService(Path(temp_dir))
+                    state = service.store.read_state()
+                    run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
+                    service.store.upsert_autonomous_run(autonomous_run=run)
+                    review = Mock(side_effect=response) if isinstance(response, Exception) else Mock(return_value=response)
+                    service.llm = SimpleNamespace(generate_autonomous_start_review=review)
+                    service._execute_autonomous_run_step = Mock()
+                    with self.assertRaises(LLMError):
+                        service._start_autonomous_run_from_decision(
+                            state=state, current_time=run["created_at"],
+                            decision={"kind": "autonomous_run", "reason_summary": "既存の待機を維持する。",
+                                "autonomous_run": {"objective_summary": "交流機会を確認する。",
+                                    "initial_step_summary": "待つ。", "coordination": {
+                                        "mode": mode,
+                                        "target_run_ids": [run["run_id"]] if mode == "replace_existing" else [],
+                                        "reason_summary": "既存の待機を維持する。"}}},
+                            source_current_input=run["source_current_input"],
+                            source_cycle_id="cycle:test-review", assistant_message_target_client_id=None,
+                        )
+                    self.assertEqual(service.store.get_autonomous_run(run_id=run["run_id"]), run)
+                    self.assertEqual(len(service.store.list_autonomous_runs(memory_set_id=run["memory_set_id"])), 1)
+                    service._execute_autonomous_run_step.assert_not_called()
+                    self.assertEqual(review.call_args.kwargs["review_context"]["existing_runs"][0]["run_id"], run["run_id"])
+
+    def test_allowed_start_review_creates_run_and_includes_all_existing_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
+            for index in range(21):
+                service.store.upsert_autonomous_run(autonomous_run={**run, "run_id": f"autonomous_run:{index}"})
+            review = Mock(return_value={"outcome": "allow_start", "reason_summary": "独立した追加目的。"})
+            service.llm = SimpleNamespace(generate_autonomous_start_review=review)
+            service._execute_autonomous_run_step = Mock(return_value={"status": "active"})
+            result = service._start_autonomous_run_from_decision(
+                state=state, current_time=run["created_at"],
+                decision={"kind": "autonomous_run", "autonomous_run": {
+                    "objective_summary": "指定時刻に声をかけて完了する。", "initial_step_summary": "時刻を確認する。",
+                    "coordination": {"mode": "create_new", "target_run_ids": [], "reason_summary": "独立した依頼。"}}},
+                source_current_input=run["source_current_input"], source_cycle_id="cycle:test-review",
+                assistant_message_target_client_id=None,
+            )
+            self.assertEqual(len(review.call_args.kwargs["review_context"]["existing_runs"]), 21)
+            self.assertEqual(result["autonomous_run"]["status"], "active")
+            service._execute_autonomous_run_step.assert_called_once()
+
+    def test_run_coordination_preserves_topic_suppression_only_for_replaced_runs(self) -> None:
+        for mode in ("replace_existing", "create_new"):
+            for select_new_topic in (False, True):
+                with self.subTest(mode=mode, select_new=select_new_topic), tempfile.TemporaryDirectory() as temp_dir:
+                    service = OtomeKairoService(Path(temp_dir))
+                    state = service.store.read_state()
+                    state["periodic_thought_topics"] = [
+                        {"topic_id": topic_id, "enabled": True, "min_periodic_thinking_interval_seconds": 60,
+                         "topic_summary": "公開の会話を読み、必要なら応じる。"}
+                        for topic_id in ("first", "second", "new")
+                    ]
+                    run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
+                    target_ids = []
+                    for index, topic_ids in enumerate((["first"], ["first", "second"])):
+                        target_id = f"autonomous_run:topic-{index}"
+                        target_ids.append(target_id)
+                        service.store.upsert_autonomous_run(autonomous_run={
+                            **run, "run_id": target_id, "periodic_thought_topic_ids": topic_ids,
+                        })
+                    service.llm = SimpleNamespace(generate_autonomous_start_review=Mock(return_value={
+                        "outcome": "allow_start", "reason_summary": "今回の目的と操作が一致している。",
+                    }))
+                    service._execute_autonomous_run_step = Mock(return_value={"status": "active"})
+                    # 置換時の記憶統合と外部 LLM 呼び出しは、この保存・候補化境界の対象外。
+                    service._finalize_autonomous_run_commitments = Mock(side_effect=lambda **kwargs: kwargs["run"])
+                    now = "2026-09-22T12:00:00+09:00"
+                    workspace = {"workspace_candidates": ([{
+                        "kind": "periodic_thought_topic", "factor_ref": "periodic_thought_topic:new",
+                        "metadata": {"topic_id": "new"},
+                    }] if select_new_topic else [])}
+                    result = service._start_autonomous_run_from_decision(
+                        state=state, current_time=now,
+                        decision={"kind": "autonomous_run", "foreground_selection": {
+                            "primary_factor_ref": "periodic_thought_topic:new" if select_new_topic else None,
+                            "supporting_factor_refs": [],
+                        }, "autonomous_run": {
+                            "objective_summary": "公開の会話を確認し、必要な訂正を投稿して終える。",
+                            "initial_step_summary": "会話を確認する。",
+                            "coordination": {"mode": mode,
+                                "target_run_ids": target_ids if mode == "replace_existing" else [],
+                                "reason_summary": "目的を変更する。" if mode == "replace_existing" else "別の活動を始める。"},
+                        }},
+                        source_current_input=run["source_current_input"], source_cycle_id=None,
+                        assistant_message_target_client_id=None, workspace_context=workspace,
+                    )
+                    replacement = result["autonomous_run"]
+                    expected = {"first", "second"} if mode == "replace_existing" else set()
+                    if select_new_topic:
+                        expected.add("new")
+                    self.assertEqual(replacement.get("periodic_thought_topic_ids", []), sorted(expected))
+                    self.assertEqual(
+                        [item["topic_id"] for item in service._due_periodic_thought_topics(state=state, current_time=now)],
+                        [] if select_new_topic else ["new"],
+                    )
+                    if mode == "replace_existing":
+                        for target_id in target_ids:
+                            self.assertEqual(service.store.get_autonomous_run(run_id=target_id)["status"], "cancelled")
+                        service.store.upsert_autonomous_run(autonomous_run={**replacement, "status": "completed"})
+                        self.assertEqual(len(service._due_periodic_thought_topics(state=state, current_time=now)), 3)
 
     def test_pre_send_check_withhold_regenerates_autonomous_step_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -79,6 +254,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
 
             self.assertEqual(result["status"], "cancelled")
             self.assertEqual(generate_autonomous_step.call_count, 2)
+            self.assertEqual(service._build_autonomous_step_context.call_args.kwargs["step_trigger"], "scheduled")
             self.assertEqual(
                 service._build_autonomous_step_context.call_args.kwargs[
                     "pre_send_check_feedback"
@@ -845,7 +1021,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 "sender_ref": None,
                 "source_kind": "background_thinking",
                 "response_target_refs": [],
-                "text": "自己評価。しばらく関わっていない気にかけていることがある。",
+                "text": "自己評価。しばらく関わっていない定期思考トピックがある。",
             }
             service._list_current_world_states = Mock(
                 return_value=[
@@ -872,8 +1048,13 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 current_time="2026-08-16T19:33:00+09:00",
                 source_current_input=run["source_current_input"],
                 last_result_context=None,
+                step_trigger="timer",
             )
 
+            self.assertEqual(context.to_prompt_payload()["observation_context"], {
+                "step_trigger": "timer", "result_received_for_this_step": False,
+                "latest_result": None, "result_count": 0,
+            })
             self.assertEqual(
                 context.foreground_world_state,
                 [{"state_type": "external_service", "summary_text": "ELYTHの通知は空"}],

@@ -26,10 +26,12 @@ server 起動時と設定全体置換時に immutable registry snapshot を作�
 
 ## LLM による選択と progressive disclosure
 
-skill の適用可否は固定文字列や keyword 表では決めない。通常判断と各 autonomous run step の前に、LLM が向きである current input、直近会話、作業記録、run 目的、capability decision view と `name / description` catalog を比較して必要な skill を選ぶ。`wake / background_thinking` の通常判断で due な気にかけていることがあるときは、`concern_summary` そのものを `orientation_context.standing_concerns[].summary_text` として追加の向きの材料にする。`factor_ref` と `summary_text` 以外の workspace 判断盤面は Skill 選択へ渡さない。
+目的と未完了の内容は現在入力、会話文脈、継続中の作業から読み取る。その目的に対し、skill description の対象、適用条件、作業範囲を意味で比較し、必要な専門手順を選ぶ。catalog は利用可能な手段の情報であり、目的の根拠は現在入力と作業文脈に置く。専門手順を加える必要がなければ選択は空配列とする。`reason_summary` には目的と専門手順の関係、または不要な理由を残す。
+
+skill の適用可否は固定文字列や keyword 表では決めない。通常判断と各 autonomous run step の前に、LLM が向きである current input、直近会話、作業記録、run 目的、capability decision view と `name / description` catalog を比較して必要な skill を選ぶ。`wake / background_thinking` の通常判断で due な定期思考トピックがあるときは、`topic_summary` そのものを `orientation_context.periodic_thought_topics[].summary_text` として追加の向きの材料にする。`factor_ref` と `summary_text` 以外の workspace 判断盤面は Skill 選択へ渡さない。
 人物発話の向きでは、直近会話と作業記録を見ずに skill を選ばない。向きと到着の分離は [../llm/プロンプト文脈分離方針.md](../llm/プロンプト文脈分離方針.md) を正とする。
 
-`orientation_context.standing_concerns` は実行指示ではなく、しばらく関わっていない気にかけていることである。current input はこの cycle の向きの本体のままとし、関心があることだけで skill を必須にしない。関心の向き全体に合う workflow があるときは、観測の一手だけに縮めずその workflow も比較する。意味境界は [気にかけていること](../runtime/気にかけていること.md) を正とする。
+`orientation_context.periodic_thought_topics` は実行指示ではなく、今回の判断で検討できる活動である。current input はこの cycle の向きの本体のままとし、候補に出ていることだけで skill を必須にしない。活動の範囲に合う workflow があるときは、観測の一手だけに縮めずその workflow も比較する。意味境界は [定期思考トピック](../runtime/定期思考トピック.md) を正とする。
 
 比較を分けた `wake / background_thinking` では、自身の活動の Skill 選択は隔離済み current input と `orientation_context` で行う。人物側の視覚観測、直近会話、観測 work_log は渡さない。外向き比較には Agent Skill context を渡さない。比較の材料境界は [../runtime/判断と行動.md](../runtime/判断と行動.md) を正とする。
 
@@ -38,7 +40,7 @@ skill の適用可否は固定文字列や keyword 表では決めない。通�
 1. 全 skill の `name / description / source_id / digest` と、その catalog から作った `allowed_skill_ids` から必要な skill を選ぶ。capability catalog は必要性の判断材料とし、capability id を skill id として返さない
 2. 選択した `SKILL.md` 本文と resource catalog、本文から直接参照された sibling skill 候補を提示する
 3. LLM が `allowed_additional_skill_ids` と `allowed_resource_reads` から必要な追加 skill と UTF-8 text resource だけを選ぶ。すでに `active_skills` にある skill_id を `additional_skill_ids` に含めた場合は追加済みとして扱い、候補外とはしない。選択した resource 本文と追加 skill 本文を次の選択へ渡し、両方の選択結果が空になるまで段階的に読む。sibling `SKILL.md` へのリンクは追加 skill 候補であり resource path として扱わず、script と binary resource は本文読込候補に含めない
-4. 選択済み instructions と resource を trusted Agent Skill system context として decision、expression、autonomous step に渡す
+4. 選択済み instructions と resource を trusted Agent Skill system context として decision、expression、autonomous step に渡す。選択は利用候補の提示であり、実行の決定は行動判断が現在入力と作業目的に基づいて行う。専門手順が不要なら、現在の目的を満たす判断や表現をそのまま行う
 
 capability request と autonomous run の起点には instructions 本文ではなく `source_id / skill_id / digest` の activation summary を残す。result follow-up と次 run step の選択 LLM へこの summary を前回文脈として渡し、現在の catalog と目的を基に再選択させる。古い本文を暗黙再利用しない。
 
@@ -57,10 +59,10 @@ skill が Human の明示依頼、trusted host policy、trusted workflow を求�
 | kind | 意味 |
 | --- | --- |
 | `current_individual_decision` | いまの個がこの判断で働きかける許可。`wake` / `background_thinking` 起点、またはそこから始まった run / capability result |
-| `person_request` | 人物の明示依頼、またはそこから続く作業 |
+| `person_input` | 人物発話に由来する入力。実行依頼の有無と許可範囲は、起点の発話、会話文脈、継続中の作業から LLM が判断する |
 | `none` | 上記の許可がこの入力から立っていない |
 
-判定は `sender_kind`、`response_target_refs`、`trigger_kind`、`source_kind`、`run.origin_kind` の閉じた値だけで行う。自然文や skill 名では判定しない。
+起点の分類は `sender_kind`、`response_target_refs`、`trigger_kind`、`source_kind`、`run.origin_kind` の閉じた値だけで行う。人物からの入力であることだけで、明示依頼や外部実行の許可があるとは確定しない。発話の意味と実行範囲は LLM が判断する。
 
 `current_individual_decision` は、skill が求める trusted host policy / trusted workflow である。Human の明示依頼が無いことだけを理由に公開や送信を見送らない。送信前チェック、catalog、host の出力契約、秘密情報の境界は上書きしない。公開は今この判断の範囲で一度だけ行う。
 

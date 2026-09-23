@@ -9,36 +9,39 @@ from otomekairo.interaction import InteractionContext
 PERSONA_PROMPT_EXCERPT_LIMIT = 240
 
 
-PERSONA_CONTEXT_USE_POLICIES = {
-    "decision_generation": "行動選択、見送り、能力実行、保留、継続目的の基底として使う。記憶、観測、候補集合を上書きしない。",
-    "autonomous_step_generation": "autonomous_run の次 step と継続境界の基底として使う。run 目的、能力可否、観測事実を上書きしない。",
-    "expression_generation": "外向き本文の立ち位置、距離感、言い回し、注目点に使う。判断結果と根拠文脈の外を補わない。",
-    "disclosure_review": "書き換えの距離感と言い回しの補助に使う。開示可否と候補集合を変えない。",
-    "pending_intent_selection": "今前へ出る自然さ、関心の強さ、距離感の判断に使う。候補外の意図を作らない。",
-    "initiative_entry_check": "外向き自律判断へ進む自然さ、関心の強さ、距離感の判断に使う。観測事実を追加しない。",
-    "input_interpretation": "入力内で何を重く見るかの補助に使う。ユーザー発話、時刻参照、根拠分類を上書きしない。",
-    "recall_pack_selection": "想起候補の優先順位の補助に使う。候補集合、候補本文、conflict を上書きしない。",
-    "event_evidence_generation": "証拠要約の注目点の補助に使う。source pack 外の出来事や言い換えを足さない。",
-    "memory_interpretation": "self / relationship の反応や関係温度の解釈補助、および直近 revision の訂正対象選定に使う。ユーザー事実を人格で補完しない。対象候補外の revision を作らない。",
-    "memory_reflection_summary": "言い回しと注目点の補助に使う。episodes と memory_units を根拠の中心にする。",
-    "world_state": "観測事実の優先順位と要約粒度の補助に使う。見えていない短期状態を足さない。",
-    "activity_state": "活動推定の注目点と要約粒度の補助に使う。観測外の活動を足さない。",
-    "visual_observation": "画像内で判断に効く部分の優先順位と要約粒度の補助に使う。見えていないものを足さない。",
-    "drive_state": "drive の種類、根拠記憶、scope support と合わせた整合度評価に使う。人格本文を状態へ複写しない。",
-}
+PERSONA_CONTEXT_USE_POLICY = (
+    "人格全体を、常に考え方、判断、振る舞い、話し方の基底として使う。"
+    "本人の発言・投稿・返信は、人格本文の話し方、一人称、語尾、距離感に従う。"
+    "事実は記憶と観測の根拠に従い、各処理の出力契約を守る。"
+)
+PERSONA_CONTEXT_ROLES = frozenset({
+    "decision_generation",
+    "autonomous_step_generation",
+    "expression_generation",
+    "disclosure_review",
+    "pending_intent_selection",
+    "initiative_entry_check",
+    "input_interpretation",
+    "recall_pack_selection",
+    "event_evidence_generation",
+    "memory_interpretation",
+    "memory_reflection_summary",
+    "world_state",
+    "activity_state",
+    "visual_observation",
+    "drive_state",
+})
 
 
 @dataclass(frozen=True, slots=True)
 class PersonaContext:
     display_name: str
-    initiative_baseline: dict[str, Any]
     persona_prompt_text: str
     expression_addon: str | None
     use_policy: str
 
     def to_prompt_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            "initiative_baseline": self.initiative_baseline,
             "persona_prompt_text": self.persona_prompt_text,
             "use_policy": self.use_policy,
         }
@@ -48,7 +51,6 @@ class PersonaContext:
 
     def to_summary_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            "initiative_baseline": self.initiative_baseline,
             "persona_prompt_excerpt": self._prompt_excerpt(),
         }
         return payload
@@ -67,35 +69,21 @@ def build_persona_context(
     include_expression: bool = False,
 ) -> PersonaContext:
     normalized_role = role.strip()
-    use_policy = PERSONA_CONTEXT_USE_POLICIES.get(normalized_role)
-    if use_policy is None:
+    if normalized_role not in PERSONA_CONTEXT_ROLES:
         raise ValueError(f"unsupported persona_context role: {role}")
     display_name = _persona_text(persona.get("display_name")) or "OtomeKairo"
-    initiative_level = _persona_text(persona.get("initiative_baseline")) or "medium"
     persona_prompt_text = _persona_text(persona.get("persona_prompt")) or ""
     expression_addon = _persona_text(persona.get("expression_addon")) if include_expression else None
     return PersonaContext(
         display_name=display_name,
-        initiative_baseline={
-            "level": initiative_level,
-            "summary_text": persona_initiative_baseline_summary(initiative_level),
-        },
         persona_prompt_text=persona_prompt_text,
         expression_addon=expression_addon,
-        use_policy=use_policy,
+        use_policy=PERSONA_CONTEXT_USE_POLICY,
     )
 
 
 def build_persona_context_summary(persona: dict[str, Any]) -> dict[str, Any]:
     return build_persona_context(persona, role="decision_generation").to_summary_payload()
-
-
-def persona_initiative_baseline_summary(level: str) -> str:
-    if level == "low":
-        return "自発発話は控えめ寄りで、前景理由が弱ければ見送る。"
-    if level == "high":
-        return "自発発話は強めで、前景理由が揃うと関わる判断を取りやすい。"
-    return "自発発話は中庸で、関わる、保留する、見送るを文脈で選ぶ。"
 
 
 def _persona_text(value: Any) -> str | None:
@@ -222,7 +210,6 @@ class InitiativeContext:
     time_context_summary: dict[str, Any]
     foreground_signal_summary: dict[str, Any]
     activity_context: dict[str, Any] | None
-    initiative_baseline: dict[str, Any]
     persona_context_summary: dict[str, Any]
     runtime_state_summary: dict[str, Any]
     recent_turn_summary: list[dict[str, str]]
@@ -257,7 +244,6 @@ class InitiativeContext:
             "time_context_summary": self.time_context_summary,
             "foreground_signal_summary": self.foreground_signal_summary,
             "activity_context": self.activity_context,
-            "initiative_baseline": self.initiative_baseline,
             "persona_context_summary": self.persona_context_summary,
             "runtime_state_summary": self.runtime_state_summary,
             "recent_turn_summary": self.recent_turn_summary,
@@ -304,6 +290,7 @@ class DecisionContext:
     pre_send_check_feedback: str | None = None
     agent_skill_context: dict[str, Any] | None = None
     comparison_scope: str = "full"
+    recent_interactions: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -317,6 +304,7 @@ class AutonomousStepContext:
     ongoing_action_summary: dict[str, Any] | None
     capability_decision_view: list[dict[str, Any]] | None
     last_result_context: dict[str, Any] | None
+    observation_context: dict[str, Any] | None = None
     people_context: list[dict[str, str]] | None = None
     pre_send_check_feedback: str | None = None
     completion_review_feedback: str | None = None
@@ -333,6 +321,7 @@ class AutonomousStepContext:
             "ongoing_action_summary": self.ongoing_action_summary,
             "capability_decision_view": self.capability_decision_view,
             "last_result_context": self.last_result_context,
+            "observation_context": self.observation_context,
             "people_context": self.people_context or [],
         }
         if self.pre_send_check_feedback is not None:

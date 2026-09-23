@@ -2156,7 +2156,6 @@ class LongSmokeRunner:
             "scope_alignment": 0.95,
             "freshness_hint": "fresh",
             "signal_strength": 0.95,
-            "persona_alignment": 0.95,
             "stability_hint": "stable",
             "source_updated_at": updated_at,
             "updated_at": updated_at,

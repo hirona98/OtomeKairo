@@ -26,10 +26,9 @@ class ServiceInputInitiativeFamiliesMixin:
         ongoing_action_summary: dict[str, Any] | None,
         selected_candidate: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None,
-        initiative_baseline: dict[str, Any],
         speech_timing_state: dict[str, Any],
         capability_summary: dict[str, Any],
-        due_standing_concerns: list[dict[str, Any]] | None = None,
+        due_periodic_thought_topics: list[dict[str, Any]] | None = None,
     ) -> list[InitiativeCandidateFamily]:
         pending_pool_count = 0
         pending_eligible_count = 0
@@ -55,13 +54,12 @@ class ServiceInputInitiativeFamiliesMixin:
             self._initiative_autonomous_family(
                 trigger_kind=trigger_kind,
                 drive_summaries=drive_summaries,
-                due_standing_concerns=due_standing_concerns,
+                due_periodic_thought_topics=due_periodic_thought_topics,
                 world_state_summary=world_state_summary,
                 recent_turn_summary=recent_turn_summary,
                 foreground_signal_summary=foreground_signal_summary,
                 initiative_entry_summary=initiative_entry_summary,
                 suppression_summary=suppression_summary,
-                initiative_baseline=initiative_baseline,
                 speech_timing_state=speech_timing_state,
                 capability_summary=capability_summary,
             ),
@@ -185,12 +183,11 @@ class ServiceInputInitiativeFamiliesMixin:
         foreground_signal_summary: dict[str, Any],
         initiative_entry_summary: dict[str, Any] | None,
         suppression_summary: dict[str, Any],
-        initiative_baseline: dict[str, Any],
         speech_timing_state: dict[str, Any],
         capability_summary: dict[str, Any],
-        due_standing_concerns: list[dict[str, Any]] | None = None,
+        due_periodic_thought_topics: list[dict[str, Any]] | None = None,
     ) -> InitiativeCandidateFamily:
-        _ = initiative_baseline, speech_timing_state
+        _ = speech_timing_state
         entry_kind = (
             initiative_entry_summary.get("entry_kind")
             if isinstance(initiative_entry_summary, dict)
@@ -211,7 +208,7 @@ class ServiceInputInitiativeFamiliesMixin:
             foreground_drives
             or entry_is_strong
             or visual_signals
-            or due_standing_concerns
+            or due_periodic_thought_topics
         )
         if not available:
             blocking_reason = "drive_state、強い自律判断入口、現在観測候補がまだ無い。"
@@ -237,7 +234,7 @@ class ServiceInputInitiativeFamiliesMixin:
                     visual_signals=visual_signals,
                     suppression_summary=suppression_summary,
                     capability_summary=capability_summary,
-                    due_standing_concerns=due_standing_concerns,
+                    due_periodic_thought_topics=due_periodic_thought_topics,
                 ),
                 blocking_reason_summary=blocking_reason,
             )
@@ -266,7 +263,7 @@ class ServiceInputInitiativeFamiliesMixin:
                 visual_signals=visual_signals,
                 suppression_summary=suppression_summary,
                 capability_summary=capability_summary,
-                due_standing_concerns=due_standing_concerns,
+                due_periodic_thought_topics=due_periodic_thought_topics,
             ),
             preferred_result_kind=preferred_result_kind,
             preferred_result_reason_summary=preferred_result_reason,
@@ -430,11 +427,11 @@ class ServiceInputInitiativeFamiliesMixin:
         visual_signals: list[dict[str, Any]],
         suppression_summary: dict[str, Any],
         capability_summary: dict[str, Any],
-        due_standing_concerns: list[dict[str, Any]] | None = None,
+        due_periodic_thought_topics: list[dict[str, Any]] | None = None,
     ) -> str | None:
         parts: list[str] = []
-        if due_standing_concerns:
-            parts.append(f"気にかけていること {len(due_standing_concerns)} 件")
+        if due_periodic_thought_topics:
+            parts.append(f"設定された活動 {len(due_periodic_thought_topics)} 件")
         if isinstance(initiative_entry_summary, dict):
             reason_summary = self._client_context_text(initiative_entry_summary.get("reason_summary"), limit=180)
             entry_basis = self._client_context_text(initiative_entry_summary.get("entry_basis"), limit=48)

@@ -133,10 +133,6 @@ LLM に渡す入力は raw `events` ではなく、dirty scope ごとの圧縮�
       },
       "existing_summary_text": "最近のやり取りでは、距離感に関する理解が少しずつ安定している。",
       "persona_context": {
-        "initiative_baseline": {
-          "level": "medium",
-          "summary_text": "自発発話は中庸で、具体的な前景変化があれば短く前へ出る。"
-        },
         "persona_prompt_excerpt": "必要以上に媚びず、相手を一人の相手としてまっすぐ扱う。"
       },
       "affect_state": [
@@ -232,7 +228,7 @@ system prompt では、少なくとも次を明示する。
 - 渡された evidence pack の外を推測で埋めない
 - `summary_status_candidate=inferred` なら断定しすぎない
 - `summary_status_candidate=confirmed` でも過剰に強い人格断定にしない
-- `persona_context` は言い回しと注目点の補助に留め、`episodes / memory_units` の外側を上書きしない
+- 人格の適用は [../configuration/人格設定詳細.md](../configuration/人格設定詳細.md) を正とし、要約の根拠は `episodes / memory_units` に従う
 - `mood_state` と `affect_state` は、`episodes / memory_units` と整合する範囲だけで補助的に使う
 - `open_loops` は長期傾向に効くときだけ触れる
 - 単発イベントの説明ではなく、継続パターンとして要約する

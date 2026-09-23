@@ -13,7 +13,6 @@ class ServiceInputInitiativeContextMixin:
         self,
         *,
         state: dict[str, Any],
-        persona: dict[str, Any],
         persona_context_summary: dict[str, Any],
         current_time: str,
         time_context: dict[str, Any],
@@ -33,7 +32,6 @@ class ServiceInputInitiativeContextMixin:
         drive_summaries = self._initiative_drive_summaries(drive_state_summary)
         pending_intent_summaries = self._initiative_pending_intent_summaries(selected_candidate)
         world_state_summary = foreground_world_state or []
-        initiative_baseline = self._initiative_baseline_summary(persona)
         runtime_state_summary = self._initiative_runtime_state_summary(
             state=state,
             ongoing_action_summary=ongoing_action_summary,
@@ -52,7 +50,6 @@ class ServiceInputInitiativeContextMixin:
         )
         capability_summary = self._initiative_capability_summary(capability_decision_view)
         speech_timing_summary = self._initiative_speech_timing_summary(
-            initiative_baseline=initiative_baseline,
             speech_timing_state=speech_timing_state,
             ongoing_action_summary=ongoing_action_summary,
             capability_summary=capability_summary,
@@ -63,11 +60,11 @@ class ServiceInputInitiativeContextMixin:
             speech_timing_state=speech_timing_state,
             speech_timing_summary=speech_timing_summary,
         )
-        due_standing_concerns = self._due_standing_concerns(state=state, current_time=current_time)
+        due_periodic_thought_topics = self._due_periodic_thought_topics(state=state, current_time=current_time)
         candidate_families = self._initiative_candidate_families(
             trigger_kind=trigger_kind,
             drive_summaries=drive_summaries,
-            due_standing_concerns=due_standing_concerns,
+            due_periodic_thought_topics=due_periodic_thought_topics,
             world_state_summary=world_state_summary,
             recent_turn_summary=recent_turn_summary,
             foreground_signal_summary=foreground_signal_summary,
@@ -76,7 +73,6 @@ class ServiceInputInitiativeContextMixin:
             ongoing_action_summary=ongoing_action_summary,
             selected_candidate=selected_candidate,
             pending_intent_selection=pending_intent_selection,
-            initiative_baseline=initiative_baseline,
             speech_timing_state=speech_timing_state,
             capability_summary=capability_summary,
         )
@@ -109,13 +105,12 @@ class ServiceInputInitiativeContextMixin:
                 client_context=client_context,
                 selected_candidate=selected_candidate,
                 initiative_entry_summary=initiative_entry_summary,
-                due_standing_concerns=due_standing_concerns,
+                due_periodic_thought_topics=due_periodic_thought_topics,
             ),
             initiative_entry_summary=initiative_entry_summary,
             time_context_summary=self._initiative_time_context_summary(time_context=time_context),
             foreground_signal_summary=foreground_signal_summary,
             activity_context=self._initiative_activity_context(activity_context),
-            initiative_baseline=initiative_baseline,
             persona_context_summary=persona_context_summary,
             runtime_state_summary=runtime_state_summary,
             recent_turn_summary=recent_turn_summary,
@@ -139,13 +134,13 @@ class ServiceInputInitiativeContextMixin:
         client_context: dict[str, Any],
         selected_candidate: dict[str, Any] | None,
         initiative_entry_summary: dict[str, Any] | None,
-        due_standing_concerns: list[dict[str, Any]] | None = None,
+        due_periodic_thought_topics: list[dict[str, Any]] | None = None,
     ) -> str:
         _ = trigger_kind, client_context
         if isinstance(selected_candidate, dict):
             return "自律判断の評価機会があり、保留候補をいま扱うか、保留を続けるか、見送るかを選ぶ。"
-        if due_standing_concerns:
-            return "気にかけていることがしばらく前景に出ていない。"
+        if due_periodic_thought_topics:
+            return "設定された活動が、今回の自己評価の候補にある。"
         if (
             isinstance(initiative_entry_summary, dict)
             and initiative_entry_summary.get("entry_kind") == "enter"
@@ -281,21 +276,6 @@ class ServiceInputInitiativeContextMixin:
         if not isinstance(suppression_summary, dict):
             return None
         return self._client_context_text(suppression_summary.get("suppression_level"), limit=16)
-
-    def _initiative_baseline_summary(self, persona: dict[str, Any]) -> dict[str, Any]:
-        level = self._client_context_text(persona.get("initiative_baseline"), limit=16)
-        if level is None:
-            return {}
-        if level == "low":
-            summary_text = "自発発話は控えめ寄りで、前景理由が弱ければ見送る。"
-        elif level == "high":
-            summary_text = "自発発話は強めで、前景理由が揃うと関わる判断を取りやすい。"
-        else:
-            summary_text = "自発発話は中庸で、関わる、保留する、見送るを文脈で選ぶ。"
-        return {
-            "level": level,
-            "summary_text": summary_text,
-        }
 
     def _initiative_runtime_state_summary(
         self,
@@ -474,15 +454,11 @@ class ServiceInputInitiativeContextMixin:
     def _initiative_speech_timing_summary(
         self,
         *,
-        initiative_baseline: dict[str, Any],
         speech_timing_state: dict[str, Any],
         ongoing_action_summary: dict[str, Any] | None,
         capability_summary: dict[str, Any],
     ) -> str | None:
         reasons: list[str] = []
-        baseline_level = self._client_context_text(initiative_baseline.get("level"), limit=16)
-        if baseline_level == "low":
-            reasons.append("initiative_baseline が low で、自発発話は控えめにしたい。")
         if speech_timing_state.get("same_dedupe_recently_replied") is True:
             reasons.append("同じ pending_intent 系統には最近 speech 済みで、同じ内容の連続発話を避けたい。")
         if isinstance(ongoing_action_summary, dict) and ongoing_action_summary.get("status") == "waiting_result":

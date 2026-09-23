@@ -194,7 +194,7 @@ class ServiceConfigInspectionMixin:
                 state=state,
                 current_time=current_time,
             ),
-            "standing_concerns": self._standing_concern_runtime_snapshot(
+            "periodic_thought_topics": self._periodic_thought_topic_runtime_snapshot(
                 state=state,
                 current_time=current_time,
             ),
@@ -407,18 +407,15 @@ class ServiceConfigInspectionMixin:
 
     def _snapshot_wake_runtime_state(self, *, state: dict[str, Any], current_time: str) -> dict[str, Any]:
         self._prune_pending_intent_candidates(current_time=current_time)
-        waiting_for_vision_source_ids = self._unseen_wake_observation_sources(state)
         with self._runtime_state_lock:
             speech_history = self._wake_runtime_state.get("speech_history_by_dedupe", {})
             snapshot = {
                 "last_wake_at": self._wake_runtime_state.get("last_wake_at"),
                 "last_spontaneous_at": self._wake_runtime_state.get("last_spontaneous_at"),
-                "initial_delay_until": self._wake_runtime_state.get("initial_delay_until"),
+                "interval_started_at": self._wake_runtime_state["interval_started_at"],
                 "retry_after": self._wake_runtime_state.get("retry_after"),
                 "speech_history_count": len(speech_history) if isinstance(speech_history, dict) else 0,
             }
-        if waiting_for_vision_source_ids:
-            snapshot["waiting_for_vision_source_ids"] = waiting_for_vision_source_ids
         return snapshot
 
     def _snapshot_memory_postprocess_runtime_state(self) -> dict[str, Any]:
@@ -585,7 +582,6 @@ class ServiceConfigInspectionMixin:
                     "scope_alignment": drive_state.get("scope_alignment"),
                     "freshness_hint": drive_state.get("freshness_hint"),
                     "signal_strength": drive_state.get("signal_strength"),
-                    "persona_alignment": drive_state.get("persona_alignment"),
                     "stability_hint": drive_state.get("stability_hint"),
                     "source_updated_at": drive_state.get("source_updated_at"),
                     "updated_at": drive_state.get("updated_at"),

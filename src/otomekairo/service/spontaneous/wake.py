@@ -10,7 +10,6 @@ from otomekairo.recall.builder import RecallPackSelectionError
 from otomekairo.service.capability import PreSendCheckFailureError
 from otomekairo.service.common import (
     BACKGROUND_THINKING_POLL_SECONDS,
-    INITIAL_VISUAL_CAPTURE_DELAY_SECONDS,
     WAKE_RECENT_DEDUPE_WINDOW_MINUTES,
     debug_log,
 )
@@ -120,12 +119,12 @@ class ServiceSpontaneousWakeMixin:
             cycle_id = self._new_cycle_id()
             started_at = self._now_iso()
             recent_turns = self._load_recent_turns(state, interaction_context)
+            recent_interactions = self._load_recent_interactions(state)
             runtime_summary = self._build_runtime_summary(state)
             pending_intent_selection = self._empty_pending_intent_selection_trace()
             observation_summary: dict[str, Any] | None = None
             reference_context: dict[str, Any] | None = None
             input_text = self._build_wake_input_text(
-                state=state,
                 client_context=client_context,
                 selected_candidate=None,
             )
@@ -139,7 +138,6 @@ class ServiceSpontaneousWakeMixin:
                         reference_payload=reference_payload,
                     )
                     input_text = self._build_wake_input_text(
-                        state=state,
                         client_context=client_context,
                         selected_candidate=None,
                     )
@@ -199,6 +197,7 @@ class ServiceSpontaneousWakeMixin:
                     client_context=client_context,
                     interaction_context=interaction_context,
                     recent_turns=recent_turns,
+                    recent_interactions=recent_interactions,
                     selected_candidate=selected_candidate,
                     pending_intent_selection=pending_intent_selection,
                     cycle_id=cycle_id,
@@ -369,12 +368,7 @@ class ServiceSpontaneousWakeMixin:
 
     def _execute_scheduled_background_thinking(self, *, state: dict[str, Any]) -> None:
         current_time = self._now_iso()
-        unseen_sources = self._unseen_wake_observation_sources(state)
-        if unseen_sources:
-            return
-        regular_due = self._wake_is_due(state=state, current_time=current_time)["should_skip"] is not True
-        standing_due = bool(self._due_standing_concerns(state=state, current_time=current_time))
-        if not (regular_due or standing_due):
+        if self._wake_is_due(state=state, current_time=current_time)["should_skip"] is True:
             return
         client_context: dict[str, Any] = {"source": "background_thinking_scheduler"}
         self._execute_wake_cycle(
@@ -409,45 +403,24 @@ class ServiceSpontaneousWakeMixin:
     def _background_thinking_delay_seconds(self, *, state: dict[str, Any], current_time: str) -> float:
         # 無効時
         wake_policy = state.get("wake_policy", {})
-        extra_delay_seconds = self._extra_standing_concern_thinking_delay_seconds(
-            state=state,
-            current_time=current_time,
-        )
         if wake_policy.get("mode") != "interval":
-            delay_seconds = BACKGROUND_THINKING_POLL_SECONDS
-            if extra_delay_seconds is not None:
-                delay_seconds = min(extra_delay_seconds, delay_seconds)
-            return delay_seconds
-
-        # 初回観測待ち
-        initial_delay_seconds = self._wake_initial_delay_remaining_seconds(current_time=current_time)
-        if initial_delay_seconds is not None:
-            return min(initial_delay_seconds, BACKGROUND_THINKING_POLL_SECONDS)
+            return BACKGROUND_THINKING_POLL_SECONDS
 
         # 一時失敗後の再試行待ち
         retry_delay_seconds = self._wake_retry_delay_remaining_seconds(current_time=current_time)
         if retry_delay_seconds is not None:
             return min(retry_delay_seconds, BACKGROUND_THINKING_POLL_SECONDS)
 
-        # 対象 vision source がこの process で未登録
-        if self._unseen_wake_observation_sources(state):
-            return BACKGROUND_THINKING_POLL_SECONDS
-
-        # 初回定期思考
         with self._runtime_state_lock:
-            last_wake_at = self._wake_runtime_state.get("last_wake_at")
-        if not isinstance(last_wake_at, str) or not last_wake_at:
-            return 0.0
+            interval_started_at = self._wake_runtime_state["interval_started_at"]
 
         # 残り
         interval_seconds = int(wake_policy["interval_seconds"])
         current_dt = self._parse_iso(current_time)
-        due_at = self._parse_iso(last_wake_at) + timedelta(seconds=interval_seconds)
+        due_at = self._parse_iso(interval_started_at) + timedelta(seconds=interval_seconds)
         remaining_seconds = (due_at - current_dt).total_seconds()
         if remaining_seconds <= 0:
             return 0.0
-        if extra_delay_seconds is not None:
-            remaining_seconds = min(remaining_seconds, extra_delay_seconds)
 
         # ポーリング上限
         return min(remaining_seconds, BACKGROUND_THINKING_POLL_SECONDS)
@@ -548,6 +521,7 @@ class ServiceSpontaneousWakeMixin:
         # 更新
         with self._runtime_state_lock:
             self._wake_runtime_state["last_wake_at"] = current_time
+            self._wake_runtime_state["interval_started_at"] = current_time
             self._wake_runtime_state["retry_after"] = None
 
     def _set_wake_retry_after(self, current_time: str) -> None:
@@ -563,48 +537,12 @@ class ServiceSpontaneousWakeMixin:
         next_wake_policy: dict[str, Any] | None,
         current_time: str,
     ) -> None:
-        previous_enabled = self._wake_policy_has_enabled_visual_capture(previous_wake_policy)
-        next_enabled = self._wake_policy_has_enabled_visual_capture(next_wake_policy)
-        with self._runtime_state_lock:
-            # visual capture 有効化直後は 5 秒待ち、その後必ず初回処理へ進む。
-            # 直前の last_wake_at が残ると interval 残りで初回が遅れるため、起点もリセットする。
-            if next_enabled and not previous_enabled:
-                self._wake_runtime_state["initial_delay_until"] = (
-                    self._parse_iso(current_time) + timedelta(seconds=INITIAL_VISUAL_CAPTURE_DELAY_SECONDS)
-                ).isoformat()
-                self._wake_runtime_state["last_wake_at"] = None
+        previous_enabled = previous_wake_policy is not None and previous_wake_policy.get("mode") == "interval"
+        next_enabled = next_wake_policy is not None and next_wake_policy.get("mode") == "interval"
+        if next_enabled and not previous_enabled:
+            with self._runtime_state_lock:
+                self._wake_runtime_state["interval_started_at"] = current_time
                 self._wake_runtime_state["retry_after"] = None
-                return
-            if not next_enabled:
-                self._wake_runtime_state["initial_delay_until"] = None
-
-    def _wake_policy_has_enabled_visual_capture(self, wake_policy: dict[str, Any] | None) -> bool:
-        if not isinstance(wake_policy, dict) or wake_policy.get("mode") != "interval":
-            return False
-        observations = wake_policy.get("observations")
-        if not isinstance(observations, list):
-            return False
-        for observation in observations:
-            if not isinstance(observation, dict):
-                continue
-            if observation.get("enabled") is not True:
-                continue
-            if observation.get("capability_id") == "vision.capture":
-                return True
-        return False
-
-    def _wake_initial_delay_remaining_seconds(self, *, current_time: str) -> float | None:
-        with self._runtime_state_lock:
-            initial_delay_until = self._wake_runtime_state.get("initial_delay_until")
-        if not isinstance(initial_delay_until, str) or not initial_delay_until:
-            return None
-        remaining_seconds = (self._parse_iso(initial_delay_until) - self._parse_iso(current_time)).total_seconds()
-        if remaining_seconds > 0:
-            return remaining_seconds
-        with self._runtime_state_lock:
-            if self._wake_runtime_state.get("initial_delay_until") == initial_delay_until:
-                self._wake_runtime_state["initial_delay_until"] = None
-        return None
 
     def _wake_retry_delay_remaining_seconds(self, *, current_time: str) -> float | None:
         with self._runtime_state_lock:
@@ -628,14 +566,6 @@ class ServiceSpontaneousWakeMixin:
                 "reason_summary": "`wake_policy.mode=disabled` のため、自発判断は止まっている。",
             }
 
-        # 初回観測待ち
-        initial_delay_seconds = self._wake_initial_delay_remaining_seconds(current_time=current_time)
-        if initial_delay_seconds is not None:
-            return {
-                "should_skip": True,
-                "reason_summary": "visual capture 有効化直後のため、初回観測を 5 秒待っている。",
-            }
-
         # 一時失敗後の再試行待ち
         retry_delay_seconds = self._wake_retry_delay_remaining_seconds(current_time=current_time)
         if retry_delay_seconds is not None:
@@ -644,26 +574,13 @@ class ServiceSpontaneousWakeMixin:
                 "reason_summary": "思考前観測 の一時失敗後の再試行待機中。",
             }
 
-        # 対象 vision source がこの process で未登録
-        if self._unseen_wake_observation_sources(state):
-            return {
-                "should_skip": True,
-                "reason_summary": "思考前観測の対象 vision source が、この process でまだ一度も登録されていない。",
-            }
-
-        # 初回定期思考
         with self._runtime_state_lock:
-            last_wake_at = self._wake_runtime_state.get("last_wake_at")
-        if not isinstance(last_wake_at, str) or not last_wake_at:
-            return {
-                "should_skip": False,
-                "reason_summary": None,
-            }
+            interval_started_at = self._wake_runtime_state["interval_started_at"]
 
         # 間隔
         interval_seconds = wake_policy["interval_seconds"]
         current_dt = self._parse_iso(current_time)
-        due_at = self._parse_iso(last_wake_at) + timedelta(seconds=int(interval_seconds))
+        due_at = self._parse_iso(interval_started_at) + timedelta(seconds=int(interval_seconds))
         if current_dt < due_at:
             return {
                 "should_skip": True,
@@ -696,14 +613,11 @@ class ServiceSpontaneousWakeMixin:
     def _build_wake_input_text(
         self,
         *,
-        state: dict[str, Any],
         client_context: dict[str, Any],
         selected_candidate: dict[str, Any] | None,
     ) -> str:
         # プレフィックス
         parts = ["定期思考。"]
-        persona = state["personas"][state["selected_persona_id"]]
-        parts.append(f"initiative_baseline は {persona['initiative_baseline']}。")
         parts.extend(
             self._client_context_input_parts(
                 client_context=client_context,

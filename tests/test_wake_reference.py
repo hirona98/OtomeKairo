@@ -30,21 +30,16 @@ class DummyImmediateWakePipeline(ServiceInputWakePipelineMixin):
     def _build_wake_input_text(
         self,
         *,
-        state: dict,
         client_context: dict,
         selected_candidate: dict | None,
     ) -> str:
-        _ = state, client_context, selected_candidate
+        _ = client_context, selected_candidate
         return "wake input"
 
     def _wake_is_due(self, *, state: dict, current_time: str) -> dict:
         _ = state, current_time
         self.due_called = True
         return {"should_skip": self.due_should_skip, "reason_summary": "not due"}
-
-    def _unseen_wake_observation_sources(self, state: dict) -> list[str]:
-        _ = state
-        return []
 
     def _clamp(self, value: object, limit: int = 200) -> str:
         _ = limit
@@ -61,8 +56,9 @@ class DummyImmediateWakePipeline(ServiceInputWakePipelineMixin):
         started_at: str,
         client_context: dict,
         cycle_id: str | None,
+        for_background_thinking: bool,
     ) -> dict:
-        _ = state, started_at, cycle_id
+        _ = state, started_at, cycle_id, for_background_thinking
         return client_context
 
     def _summarize_activity_context(self, activity_state, *, current_time: str):

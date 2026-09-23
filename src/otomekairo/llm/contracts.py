@@ -85,7 +85,7 @@ DECISION_TARGET_STANCE_VALUES = {
     "hold",
 }
 SELF_ACTIVITY_WORKSPACE_KINDS = {
-    "standing_concern",
+    "periodic_thought_topic",
     "ongoing_action",
     "autonomous_run",
 }
@@ -515,6 +515,14 @@ def validate_pre_send_check_contract(payload: dict[str, Any]) -> None:
     reason_summary = payload["reason_summary"]
     if not isinstance(reason_summary, str) or not reason_summary.strip():
         raise LLMError("PreSendCheck.reason_summary は空にできません。")
+
+
+def validate_autonomous_start_review_contract(payload: dict[str, Any]) -> None:
+    _validate_exact_keys(payload, {"outcome", "reason_summary"}, "AutonomousStartReview")
+    if payload["outcome"] not in ("allow_start", "reject_start"):
+        raise LLMError("AutonomousStartReview.outcome が不正です。")
+    if not isinstance(payload["reason_summary"], str) or not payload["reason_summary"].strip():
+        raise LLMError("AutonomousStartReview.reason_summary は空にできません。")
 
 
 def validate_autonomous_completion_review_contract(payload: dict[str, Any]) -> None:

@@ -9,7 +9,7 @@ from typing import Any
 
 from otomekairo.defaults import (
     build_default_desktop_capture,
-    build_default_standing_concerns,
+    build_default_periodic_thought_topics,
     build_default_state,
 )
 from otomekairo.memory.utils import now_iso
@@ -52,7 +52,7 @@ class ConfigStore:
                     thinking_speech_level,
                     selected_conversation_display_name_id,
                     wake_policy_json,
-                    standing_concerns_json,
+                    periodic_thought_topics_json,
                     audio_output_settings_json,
                     microphone_settings_json
                 FROM current_config
@@ -81,7 +81,7 @@ class ConfigStore:
                 ],
                 "conversation_display_names": self._read_conversation_display_names(conn),
                 "wake_policy": json.loads(current["wake_policy_json"]),
-                "standing_concerns": json.loads(current["standing_concerns_json"]),
+                "periodic_thought_topics": json.loads(current["periodic_thought_topics_json"]),
                 "audio_output_settings": json.loads(
                     current["audio_output_settings_json"]
                 ),
@@ -432,7 +432,7 @@ class ConfigStore:
                 thinking_speech_level INTEGER NOT NULL DEFAULT 5,
                 selected_conversation_display_name_id TEXT,
                 wake_policy_json TEXT NOT NULL,
-                standing_concerns_json TEXT NOT NULL,
+                periodic_thought_topics_json TEXT NOT NULL,
                 audio_output_settings_json TEXT NOT NULL,
                 microphone_settings_json TEXT NOT NULL,
                 FOREIGN KEY (selected_conversation_display_name_id)
@@ -566,7 +566,7 @@ class ConfigStore:
                 thinking_speech_level,
                 selected_conversation_display_name_id,
                 wake_policy_json,
-                standing_concerns_json,
+                periodic_thought_topics_json,
                 audio_output_settings_json,
                 microphone_settings_json
             )
@@ -581,7 +581,7 @@ class ConfigStore:
                 state["thinking_speech_level"],
                 state["selected_conversation_display_name_id"],
                 self._to_json(state["wake_policy"]),
-                self._to_json(state.get("standing_concerns") or build_default_standing_concerns()),
+                self._to_json(state.get("periodic_thought_topics") or build_default_periodic_thought_topics()),
                 self._to_json(state["audio_output_settings"]),
                 self._to_json(state["microphone_settings"]),
             ),

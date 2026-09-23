@@ -50,7 +50,6 @@ class InputInterpretationContractTests(unittest.TestCase):
         persona_context = build_persona_context(
             {
                 "display_name": "テスト",
-                "initiative_baseline": "medium",
                 "persona_prompt": "入力を落ち着いて解釈する。",
             },
             role="input_interpretation",
