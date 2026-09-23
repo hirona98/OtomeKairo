@@ -1125,7 +1125,7 @@ def _decision_role_section(comparison_scope: str) -> str:
         )
     return (
         "自律 AI 本体の内部処理 role `decision_generation` として、外向き伝達を判断します。\n"
-        "この比較は、今、外へ短い見方を出すか、会話の続きを相手が話せるよう待つかを決めます。\n"
+        "この比較は、今、外へ短い見方を出すかを決めます。未回答の問いがまだ相手の番なら、その番を取り返す発話と、反応を求めない短い独話を分けて比べます。\n"
         f"人格設定、記憶、観測、直近文脈を踏まえて、{kinds} のいずれかを決め、JSON オブジェクト 1 個だけを返してください。\n"
         "人格本文と利用境界は internal context の persona_context に入ります。"
     )
@@ -1300,7 +1300,7 @@ def _decision_self_activity_rules_section() -> str:
 
 def _decision_outward_speech_rules_section() -> str:
     return (
-        _conversation_continuity_rules(comparison_scope="outward_speech")
+        _conversation_continuity_rules()
         + _decision_recall_evidence_rules()
         + "RecallPack.visual_observations は過去画像の詳細な視覚説明、visual_daily_digests は日単位の整理です。特定物体の有無は visual_observations を優先します。\n"
         "自律判断時だけ InitiativeContext が入ります。trigger 固有の差分は trigger_policy です。\n"
@@ -1472,7 +1472,12 @@ def _speech_frequency_policy(level: int) -> str:
     return (
         f"speech_frequency_level は {level} です。"
         "短い独話として前へ出る軽さの補助に使い、JSON や reason_summary には出さないでください。"
-        "5 は標準、3 以下は控えめ基準です。"
+        "1 から 3 は控えめです。短い一言がかなり自然に揃うときだけ前へ出ます。"
+        "5 は標準です。短い見方や感想がまとまるときに比べます。"
+        "4、6、7 は、隣り合う基準のあいだの軽さです。"
+        "8 から 10 は、重要性や今必要な続きであることを求めません。小さな関心や気づきが一言にまとまるなら前へ出やすいです。"
+        "10 はその上端です。"
+        "話せる材料があること自体は、発話を選ぶ理由にしません。"
     )
 
 
@@ -1511,21 +1516,19 @@ def _recent_interactions_boundary_instruction() -> str:
     )
 
 
-def _conversation_continuity_rules(*, comparison_scope: str = "full") -> str:
-    wait_choice = (
-        "outward_speech=hold、kind=noop"
-        if comparison_scope == "outward_speech"
-        else "outward_speech=hold"
-    )
+def _conversation_continuity_rules() -> str:
     return (
-        "recent_interactions がある自己評価では、外向き伝達の主題を新しく選ぶ前に、各場で自分が始めた会話の続きを読みます。"
+        "recent_interactions がある自己評価では、外向き伝達の前に、各場のやり取りがまだ続いているかを読みます。"
         "会話の継続や終了はそのやり取りの意味で決まり、定期思考の到着や current_input.interaction_context=null は話題の区切りにはなりません。"
-        f"自身が問いかけ、相手がまだ答えていない直後は、相手が次に話す番として {wait_choice} を選びます。"
-        "その間の新しい情景や動作への感想は、相手の応答を待ってから扱います。独り言も相手には次の発話として聞こえるためです。"
-        "会話への必要な補足や、待てない状況への対応がある場合は、その理由を示して speech と比較できます。"
-        "相手が答えた、話が閉じた、話題を切り替えた場合は、その後の文脈から今の発話を比較します。"
+        "各周期で、未回答の問いがまだ相手の番か、やり取りが閉じたか切り替わったか、今の一言がその番を取り返すかを読み直します。"
+        "自分の問いかけの直後で相手がまだ答えていないときは、その流れの発話と、別の観測へ話題をずらす発話を分けます。"
+        "後者は、今割って入る必要と待つ意味を比べます。短いことや観測の新しさだけでは選びません。"
+        "問いの繰り返しや返答の催促にはしません。"
+        "やり取りが閉じた、または切り替わったと読めたあとは、短い独話として前へ出る軽さに沿って比べます。"
+        "作業中、閲覧中、検討中、入力中であることは前景の説明です。それ自体は、返答待ちを続ける理由にも、待ちを終える理由にもしません。"
+        "相手が会話を離れたかは、番がまだ開いているかを読む材料にします。"
+        "経過秒数や疑問符では一律に止めず、直近のやり取りとの近さと内容から続きを遮るかを比べます。"
         "場ごとに判断し、別の場で返答を待っていることだけで現在の場の発話を止めません。"
-        "周囲への独り言では、直近のやり取りとの時間的な近さと内容から、その続きを遮るかを比較します。"
         "自身の活動への関与は、外向き伝達の間合いと分けて、その向きから判断します。\n"
     )
 

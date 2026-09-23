@@ -4,7 +4,14 @@ from dataclasses import replace
 from unittest.mock import patch
 
 from otomekairo.llm.client import LLMClient
-from otomekairo.llm.contexts import AutonomousStepContext, CurrentInput, DecisionContext, PersonaContext
+from otomekairo.llm.contexts import (
+    AutonomousStepContext,
+    CurrentInput,
+    DecisionContext,
+    InitiativeContext,
+    PersonaContext,
+)
+from otomekairo.service.input.trace_compact import ServiceInputTraceCompactMixin
 from otomekairo.llm.contracts import (
     LLMError,
     build_decision_target_stances_for_kind,
@@ -865,6 +872,12 @@ class DecisionPromptScopeTests(unittest.TestCase):
     def test_outward_speech_prompt_asks_short_view_not_visit(self) -> None:
         system = self._system_prompt("outward_speech")
         self.assertIn("今、外へ短い見方を出すか", system)
+        self.assertIn("未回答の問いがまだ相手の番なら", system)
+        self.assertIn("各周期で、未回答の問いがまだ相手の番か", system)
+        self.assertIn("やり取りが閉じた、または切り替わったと読めたあとは", system)
+        self.assertIn("返答待ちを続ける理由にも、待ちを終える理由にもしません", system)
+        self.assertNotIn("相手が次に話す番として", system)
+        self.assertNotIn("独り言も相手には次の発話として聞こえる", system)
         self.assertIn("speech / noop / pending_intent", system)
         self.assertIn("観測事実に基づく一文の状況認識", system)
         self.assertIn("助言、依頼、支援提案、休息促し、身体注意、画面への一般コメントは speech ではなく控える理由", system)
@@ -880,6 +893,8 @@ class DecisionPromptScopeTests(unittest.TestCase):
         system = self._system_prompt("full")
         self.assertIn("伝達、能力実行、保留、見送り、継続目的開始のどれが", system)
         self.assertIn("outward_speech は毎回必須です", system)
+        self.assertIn("各周期で、未回答の問いがまだ相手の番か", system)
+        self.assertNotIn("相手が次に話す番として", system)
         self.assertIn("控える理由を説明できる候補を primary factor に選んでください", system)
         self.assertIn("構造化済み抑制は suppression、会話の間合いは conversation_context 候補を使えます", system)
         self.assertIn("載っている self_activity は hold です。対話の継続は outward_speech です。", system)
@@ -953,8 +968,56 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertNotIn("短い独り言", self_text)
         self.assertIn("speech は短い独り言", outward_text)
         self.assertIn("speech_frequency_level は 5", outward_text)
+        self.assertIn("1 から 3 は控えめです", outward_text)
+        self.assertIn("8 から 10 は、重要性や今必要な続きであることを求めません", outward_text)
+        self.assertIn("10 はその上端です", outward_text)
+        self.assertIn("話せる材料があること自体は、発話を選ぶ理由にしません", outward_text)
+        self.assertNotIn("speech_frequency_level", self_text)
         self.assertNotIn("向きと catalog から autonomous_run", outward_text)
         self.assertNotIn("speech / noop / pending_intent / capability_request / autonomous_run から 1 つ", outward_text)
+
+    def test_compact_initiative_trace_keeps_speech_frequency_level(self) -> None:
+        class _Compact(ServiceInputTraceCompactMixin):
+            def _clamp(self, value: str | None, limit: int = 160) -> str | None:
+                if value is None:
+                    return None
+                stripped = value.strip()
+                if len(stripped) <= limit:
+                    return stripped
+                return stripped[: limit - 1] + "…"
+
+            def _compact_visual_observation_signals(self, value: object) -> list[dict[str, object]]:
+                return []
+
+        initiative = InitiativeContext(
+            trigger_kind="background_thinking",
+            opportunity_summary="短い見方を比べる。",
+            initiative_entry_summary=None,
+            time_context_summary={},
+            foreground_signal_summary={},
+            activity_context=None,
+            initiative_baseline={"level": "medium"},
+            persona_context_summary={},
+            runtime_state_summary={},
+            recent_turn_summary=[],
+            drive_summaries=[],
+            pending_intent_summaries=[],
+            world_state_summary=[],
+            ongoing_action_summary=None,
+            capability_summary={},
+            candidate_families=[],
+            selected_candidate_family=None,
+            speech_timing_state={},
+            suppression_summary={},
+            speech_timing_summary="",
+            speech_frequency_level=10,
+        )
+        summary = _Compact()._compact_initiative_context_summary(
+            initiative_context=initiative,
+            pending_intent_selection=None,
+        )
+        self.assertEqual(summary["speech_frequency_level"], 10)
+        self.assertEqual(summary["initiative_baseline"], "medium")
 
     def test_trigger_policy_is_empty_without_trigger_context(self) -> None:
         for comparison_scope in ("self_activity", "outward_speech"):

@@ -179,6 +179,9 @@ class ServiceInputTraceCompactMixin:
                 baseline_level = initiative_baseline.get("level")
                 if isinstance(baseline_level, str) and baseline_level.strip():
                     payload["initiative_baseline"] = baseline_level.strip()
+            speech_frequency_level = initiative_payload.get("speech_frequency_level")
+            if isinstance(speech_frequency_level, int):
+                payload["speech_frequency_level"] = speech_frequency_level
             compact_pending_intent_summaries = self._compact_initiative_pending_intent_summaries(
                 initiative_payload.get("pending_intent_summaries")
             )
