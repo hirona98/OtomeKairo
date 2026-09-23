@@ -50,8 +50,7 @@ def _source_pack() -> WorldStateSourcePack:
         ),
         external_service_context=WorldStateExternalServiceContext(
             summary_text="外部サービスに未確認項目がある。",
-            status_text="外部サービスに未確認項目がある。",
-            service="example",
+            external_service_summary="外部サービスに未確認項目がある。",
         ),
         body_context=WorldStateNamedSummaryContext(
             summary_text="肩に疲れがある。",

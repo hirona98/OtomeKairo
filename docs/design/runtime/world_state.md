@@ -81,7 +81,7 @@
 - 実行結果が次の判断条件を変えた場合
 
 人からの入力が状態確認の依頼だけで具体的な状態値を含まない場合、その入力は `world_state` の現在状態 source にしない。
-現在場所、身体状態、端末状態、周囲環境、対人文脈の確認依頼は、対応 capability の result または `client_context` に明示 summary がある場合だけ短期状態へ反映する。
+現在場所、身体状態、端末状態、周囲環境、対人文脈の確認依頼は、観測結果や `client_context` に明示 summary がある場合だけ短期状態へ反映する。
 
 `world_state` 更新 LLM は、状態化できる source がある場合だけ呼ぶ。
 `capability_result` は常に更新 LLM の対象にする。
@@ -124,7 +124,7 @@ LLM に渡す source pack の wire shape は
 `current_input_summary` は入力意図と明示された状態値の補助に限定し、確認依頼だけから現在状態を推測しない。
 `schedule_context` には `summary_text` に加えて、wake が再評価対象として選んだ pending-intent の `intent_summary / reason_summary / slot_key / not_before / expires_at` を含める。
 real schedule source がある場合は `schedule_slots` を持ち、各 slot は `slot_key / summary_text / not_before / expires_at` を持つ短い object にする。
-`external_service_context` には `summary_text` に加えて、`service / status_text / capability_id` と、必要な `client_summary_text / result_summary_text / summary_source_hint` の短い境界補助 field を含める。
+`external_service_context` には `summary_text` に加えて、MCP の場合は `service / mcp_server_id / tool_name / capability_id`、必要に応じて `client_summary_text / result_summary_text / summary_source_hint` を含める。
 `visual_context` には `visual_summary_text / image_interpreted / visual_confidence_hint / image_count / capability_id / vision_source_id / source_kind / source_label / source_owner` を含める。
 `visual_context` は `vision.capture` のような現在の視覚状態を観測する source から作る。
 `source_owner=self` の `visual_context` は OtomeKairo 自身の視覚根拠として扱える。
@@ -137,14 +137,9 @@ real schedule source がある場合は `schedule_slots` を持ち、各 slot �
 通常会話の添付画像は `conversation_attachment` として会話入力へ反映し、添付画像だけから `world_state.visual_context` を更新しない。
 `social_context_context` には `social_context_summary / capability_id`、`environment_context` には `environment_summary`、`location_context` には `location_summary` を含める。
 `body_context` には `body_state_summary / capability_id`、`device_context` には `device_state_summary / capability_id`、`schedule_context` には `schedule_summary / capability_id` を含める。
-`social.status` result は `social_context_context.social_context_summary` に投影し、raw social payload は `world_state` に入れない。
-`body.status` result は `body_context.body_state_summary` に投影し、raw body payload は `world_state` に入れない。
-`device.status` result は `device_context.device_state_summary` に投影し、raw device payload は `world_state` に入れない。
-`environment.status` result は `environment_context.environment_summary` に投影し、raw environment payload は `world_state` に入れない。
-`location.status` result は `location_context.location_summary` に投影し、raw location payload は `world_state` に入れない。
 `mcp.call_tool` result から `external_service_context` へ投影する条件と field は [world_state source pack](../capability/world_state_source_pack.md) を正本とする。
 LLM は `mcp_result_summary` が現在も成立する外部サービス条件を表す場合にだけ `external_service` 候補へ採用する。単発処理の完了は実行履歴として扱い、`world_state` 候補にしない。
-real source と client summary が両方あるときは、`body / device / schedule / social_context / environment / location` でも `client_summary_text / result_summary_text / summary_source_hint` を持つ。
+capability result の要約と client summary が両方あるときは、`body / device / schedule` でも `client_summary_text / result_summary_text / summary_source_hint` を持つ。
 
 source pack には、raw image payload、音声、MCP の `content / structured_content / arguments`、長い外部サービス応答、資格情報、内部 URL、配送先 client を含めない。
 画像意味理解を通した場合は `visual_summary_text` と `visual_observation_id` を補助根拠として渡す。
@@ -216,21 +211,16 @@ validator 失敗時は 1 回だけ再生成する。
 - `schedule` は generic summary を `schedule:self` へ置き、selected pending-intent または real schedule slot がある場合は `slot_key` 単位 state と併存させる
 - それ以外は同じ `state_type / scope_type / scope_key` の近い状態を統合または置換する
 - `visual_context` と `environment` は短い TTL を標準にする
-- `external_service` は `capability_result.status_text`、`capability_result.client_context.mcp_result_summary`、`client_context.external_service_summary` のどれを正本にしたかで TTL を変える
-- `schedule` は `schedule_summary`、`capability_result.schedule_slots`、`client_context.schedule_slots`、`capability_result.client_context.schedule_slots` を基準に TTL を決め、pending-intent または schedule slot の `expires_at` があればそれを上限にする
+- `external_service` は `capability_result.client_context.mcp_result_summary` と `client_context.external_service_summary` のどちらを正本にしたかで TTL を変える
+- `schedule` は `schedule_summary`、`client_context.schedule_slots`、`capability_result.client_context.schedule_slots` を基準に TTL を決め、pending-intent または schedule slot の `expires_at` があればそれを上限にする
 - 長期理解へ育てる条件を満たす出来事は、`turn consolidation` で記憶へ渡す
 
 `summary_source` は少なくとも次を区別する。
 
-- `capability_result.status_text`
 - `capability_result.client_context.mcp_result_summary`
 - `capability_result.body_state_summary`
 - `capability_result.device_state_summary`
-- `capability_result.social_context_summary`
-- `capability_result.environment_summary`
-- `capability_result.location_summary`
 - `capability_result.schedule_summary`
-- `capability_result.schedule_slots`
 - `capability_result.client_context.<field>`
 - `client_context.<field>`
 - `pending_intent`

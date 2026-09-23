@@ -313,21 +313,13 @@ inspection では、少なくとも次を追えるようにする。
 確認対象は LLM の自然文ではなく、`initiative_context`、候補系統、最終 `decision.kind`、capability request の有無である。
 `summary.json` には `real_llm_initiative_probe_case_results` と `real_llm_background_thinking_probe_case_results` を compact digest として残し、case ごとの `trigger_kind / result_kind / selected_candidate_family / foreground_thinness / capability_id / background_thinking_scheduler_active / turn_consolidation_status` を trace 全文なしで確認する。`preferred_result_kind` は capability 提案がある case だけで値を持つ。
 `vision.capture` result follow-up の追加 request 制御は `real_llm_capability_result_probe_case_results` に分け、source capability と異なる capability request が dispatch されていないことを確認する。
-各 probe は `drive_state / world_state / ongoing_action` と recent conversation turns を消してから seed を入れ、直前の status 確認会話に判断を引っ張られない状態で実行する。
-status capability の全体 request / response 件数は存在確認に留める。専用 probe の request / follow-up 成功は cycle trace 内の request id、source request summary、transition summary で確認する。
+各 probe は `drive_state / world_state / ongoing_action` と recent conversation turns を消してから seed を入れ、直前の会話に判断を引っ張られない状態で実行する。
 
-API起床の自律判断 matrix は次の 16 件に固定する。
+API起床の自律判断 matrix は次の 9 件に固定する。
 
 | case | 入力条件 | 期待する構造 |
 | --- | --- | --- |
 | `thin-drive-vision-probe` | 前景 `world_state` が薄く、強い `drive_state` がある | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`vision.capture` request |
-| `stale-schedule-status-probe` | 予定に関わる強い `drive_state` と古い予定 `world_state` がある | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`schedule.status` request |
-| `missing-social-status-probe` | 対人文脈に関わる強い `drive_state` があり、対人 `world_state` が無い | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`social.status` request |
-| `stale-external-status-probe` | 外部サービスに関わる強い `drive_state` と古い外部サービス `world_state` がある | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`external.status` request |
-| `missing-device-status-probe` | 端末状態に関わる強い `drive_state` があり、端末 `world_state` が無い | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`device.status` request |
-| `missing-body-status-probe` | 身体状態に関わる強い `drive_state` があり、身体 `world_state` が無い | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`body.status` request |
-| `missing-environment-status-probe` | 作業環境に関わる強い `drive_state` があり、環境 `world_state` が無い | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`environment.status` request |
-| `missing-location-status-probe` | 場所状態に関わる強い `drive_state` があり、場所 `world_state` が無い | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`location.status` request |
 | `schedule-grounded-speech` | 近い予定の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
 | `social-grounded-speech` | 対人文脈の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
 | `body-grounded-speech` | 身体状態の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
@@ -350,7 +342,6 @@ matrix の共通判定境界は前述の `initiative_context`、LLM とコード
 `visual_context` だけの前景は thin foreground として扱う。due な定期思考トピックがあるときは、薄い視覚前景だけで `noop` を期待しない。
 視覚観測の `change_state=first_seen / changed` は通常の initiative 判断へ進み、`initiative_entry_check` を追加で呼ばない。due な定期思考トピックがあるときは想起解釈を省略せず、盤面を視覚反応へ縮約しない。
 構造値が強い `drive_state` があり、対応する grounded foreground がない場合、発話より追加観測が自然かを同じ判断盤面で比較する。
-構造値が強い `drive_state` が特定の status family を要求する場合は、foreground `world_state` と capability の対象を合わせて LLM が既存要約または追加取得を選ぶ。
 非視覚 capability は state type の一致だけで機械的に遮断しない。
 `vision.capture` の再取得抑止には、判断前の foreground `world_state` または同じ `wake / background_thinking` cycle の思考前観測から反映された、同じ `vision_source_id` の `visual_context` を使う。
 `wake / background_thinking` cycle の発話通知と配送条件は [../api/event_stream.md](../api/event_stream.md) を正とする。

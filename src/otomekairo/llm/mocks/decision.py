@@ -66,7 +66,7 @@ class LLMMockDecisionMixin:
                 normalized=normalized,
                 autonomous_run_summaries=autonomous_run_summaries,
             )
-        if payload is None:
+        if payload is None and not isinstance(capability_result_context, dict):
             payload = self._mock_capability_request_decision(
                 normalized=normalized,
                 ongoing_action_summary=ongoing_action_summary,

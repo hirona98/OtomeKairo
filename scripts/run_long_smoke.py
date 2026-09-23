@@ -36,7 +36,7 @@ WAIT_SERVER_TIMEOUT_SECONDS = 20.0
 WAIT_QUEUE_DRAIN_TIMEOUT_SECONDS = 30.0
 WAIT_CAPTURE_RECOVERY_TIMEOUT_SECONDS = 30.0
 WAIT_RESTART_PENDING_TIMEOUT_SECONDS = 8.0
-WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS = 20.0
+WAIT_CAPABILITY_PROBE_TIMEOUT_SECONDS = 20.0
 WAIT_ONGOING_ACTION_CLEAR_TIMEOUT_SECONDS = 20.0
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 10.0
 REAL_LLM_REQUEST_TIMEOUT_SECONDS = 120.0
@@ -432,6 +432,7 @@ class LongSmokeRunner:
         self.cert_file = artifact_dir / "cert.pem"
         self.key_file = artifact_dir / "key.pem"
         self.server_log_path = artifact_dir / "server.log"
+        self.runtime_log_path = self.data_dir / "server.log"
         self.summary_path = artifact_dir / "summary.json"
         self.api = JsonApiClient(
             host=self.host,
@@ -454,20 +455,6 @@ class LongSmokeRunner:
         self.camera_capture_request_ids: list[str] = []
         self.camera_ptz_request_count = 0
         self.camera_ptz_response_count = 0
-        self.external_status_request_count = 0
-        self.external_status_response_count = 0
-        self.schedule_status_request_count = 0
-        self.schedule_status_response_count = 0
-        self.device_status_request_count = 0
-        self.device_status_response_count = 0
-        self.body_status_request_count = 0
-        self.body_status_response_count = 0
-        self.environment_status_request_count = 0
-        self.environment_status_response_count = 0
-        self.location_status_request_count = 0
-        self.location_status_response_count = 0
-        self.social_status_request_count = 0
-        self.social_status_response_count = 0
         self.conversation_cycle_ids: list[str] = []
         self.memory_quality_probe_cycle_ids: list[str] = []
         self.memory_quality_probe_digest: dict[str, Any] = {}
@@ -483,20 +470,6 @@ class LongSmokeRunner:
         self.capture_invalid_images_request_ids: list[str] = []
         self.capture_invalid_error_request_ids: list[str] = []
         self.capture_unknown_request_ids: list[str] = []
-        self.external_status_request_ids: list[str] = []
-        self.external_status_followup_verified_request_ids: list[str] = []
-        self.schedule_status_request_ids: list[str] = []
-        self.schedule_status_followup_verified_request_ids: list[str] = []
-        self.device_status_request_ids: list[str] = []
-        self.device_status_followup_verified_request_ids: list[str] = []
-        self.body_status_request_ids: list[str] = []
-        self.body_status_followup_verified_request_ids: list[str] = []
-        self.environment_status_request_ids: list[str] = []
-        self.environment_status_followup_verified_request_ids: list[str] = []
-        self.location_status_request_ids: list[str] = []
-        self.location_status_followup_verified_request_ids: list[str] = []
-        self.social_status_request_ids: list[str] = []
-        self.social_status_followup_verified_request_ids: list[str] = []
         self.camera_ptz_request_ids: list[str] = []
         self.remaining_capture_empty_results = 0
         self.remaining_capture_mismatches = args.capture_mismatch_failures
@@ -516,20 +489,6 @@ class LongSmokeRunner:
         self.camera_ptz_capture_followup_request_id: str | None = None
         self.camera_ptz_probe_verified = False
         self.camera_ptz_inspection_verified = False
-        self.external_status_probe_conversation_cycle_id: str | None = None
-        self.external_status_probe_followup_cycle_id: str | None = None
-        self.schedule_status_probe_conversation_cycle_id: str | None = None
-        self.schedule_status_probe_followup_cycle_id: str | None = None
-        self.device_status_probe_conversation_cycle_id: str | None = None
-        self.device_status_probe_followup_cycle_id: str | None = None
-        self.body_status_probe_conversation_cycle_id: str | None = None
-        self.body_status_probe_followup_cycle_id: str | None = None
-        self.environment_status_probe_conversation_cycle_id: str | None = None
-        self.environment_status_probe_followup_cycle_id: str | None = None
-        self.location_status_probe_conversation_cycle_id: str | None = None
-        self.location_status_probe_followup_cycle_id: str | None = None
-        self.social_status_probe_conversation_cycle_id: str | None = None
-        self.social_status_probe_followup_cycle_id: str | None = None
         self.real_llm_initiative_probe_cycle_ids: dict[str, str] = {}
         self.real_llm_initiative_probe_verified = False
         self.real_llm_capability_result_probe_cycle_ids: dict[str, str] = {}
@@ -537,15 +496,6 @@ class LongSmokeRunner:
         self.real_llm_capability_result_probe_verified = False
         self.real_llm_background_thinking_probe_cycle_ids: dict[str, str] = {}
         self.real_llm_background_thinking_probe_verified = False
-        self.external_status_probe_verified = False
-        self.schedule_status_probe_verified = False
-        self.device_status_probe_verified = False
-        self.body_status_probe_verified = False
-        self.environment_status_probe_verified = False
-        self.location_status_probe_verified = False
-        self.social_status_probe_verified = False
-        self.external_status_multi_service_verified = False
-        self.external_status_persisted_integration_keys: list[str] = []
         self.editor_state_mode_used = args.editor_state_mode
         self.selected_model_preset_id: str | None = None
         self.selected_memory_set_id: str | None = None
@@ -555,22 +505,8 @@ class LongSmokeRunner:
         self.background_thinking_count_before_restart = 0
         self.capture_empty_result_skip_count = 0
         self._capture_context_overrides: list[dict[str, Any]] = []
-        self._external_status_overrides: list[dict[str, Any]] = []
-        self._schedule_status_overrides: list[dict[str, Any]] = []
-        self._device_status_overrides: list[dict[str, Any]] = []
-        self._body_status_overrides: list[dict[str, Any]] = []
-        self._environment_status_overrides: list[dict[str, Any]] = []
-        self._location_status_overrides: list[dict[str, Any]] = []
-        self._social_status_overrides: list[dict[str, Any]] = []
         self._capture_lock = threading.Lock()
         self._camera_ptz_lock = threading.Lock()
-        self._external_status_lock = threading.Lock()
-        self._schedule_status_lock = threading.Lock()
-        self._device_status_lock = threading.Lock()
-        self._body_status_lock = threading.Lock()
-        self._environment_status_lock = threading.Lock()
-        self._location_status_lock = threading.Lock()
-        self._social_status_lock = threading.Lock()
 
     def run(self) -> dict[str, Any]:
         self.artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -594,9 +530,6 @@ class LongSmokeRunner:
             self._wait_for_no_ongoing_action(label="restart probe")
             self._exercise_capture_empty_result()
             self._exercise_multiple_client_boundary()
-            self._exercise_external_status_followup()
-            self._exercise_schedule_status_followup()
-            self._exercise_device_status_followup()
             self._exercise_memory_quality_probe()
             self._exercise_recall_quality_probe()
             self._run_conversations()
@@ -1011,14 +944,6 @@ class LongSmokeRunner:
                 "required_permissions": ["observe_desktop"],
             }
         ]
-        if client_label == "primary":
-            caps.append({"id": "external.status", "version": "1"})
-            caps.append({"id": "schedule.status", "version": "1"})
-            caps.append({"id": "device.status", "version": "1"})
-            caps.append({"id": "body.status", "version": "1"})
-            caps.append({"id": "environment.status", "version": "1"})
-            caps.append({"id": "location.status", "version": "1"})
-            caps.append({"id": "social.status", "version": "1"})
         client.connect(client_id=client_id, caps=caps, vision_sources=vision_sources)
         return client
 
@@ -1117,32 +1042,6 @@ class LongSmokeRunner:
                 continue
             return True
         return False
-
-    def _apply_status_client_context_source(
-        self,
-        *,
-        client_context: dict[str, Any],
-        override: Any,
-    ) -> None:
-        source = None
-        unconnected_reason = None
-        if isinstance(override, dict):
-            source = override.get("data_source")
-            unconnected_reason = override.get("unconnected_reason")
-        if not isinstance(source, str) or not source.strip():
-            source = "safe_script_data" if isinstance(override, dict) else "synthetic_default"
-        if not isinstance(client_context.get("data_source"), str) or not client_context["data_source"].strip():
-            client_context["data_source"] = source
-        if isinstance(unconnected_reason, str) and unconnected_reason.strip():
-            client_context["unconnected_reason"] = unconnected_reason.strip()
-            return
-        if isinstance(override, dict):
-            return
-        if (
-            not isinstance(client_context.get("unconnected_reason"), str)
-            or not client_context["unconnected_reason"].strip()
-        ):
-            client_context["unconnected_reason"] = "safe_status_source_not_configured"
 
     def _handle_server_event(
         self,
@@ -1400,379 +1299,6 @@ class LongSmokeRunner:
             )
             self.camera_ptz_response_count += 1
             return
-        if event_type == "external.status_request":
-            if client_label != "primary":
-                raise SmokeError(f"{client_label} desktop client unexpectedly received external.status_request.")
-            request_id = data.get("request_id")
-            capability_id = data.get("capability_id")
-            service = data.get("service")
-            if not isinstance(request_id, str) or not request_id:
-                raise SmokeError("external.status_request did not include request_id.")
-            if capability_id != "external.status":
-                raise SmokeError(f"external.status_request capability_id was invalid: {capability_id}")
-            if not isinstance(service, str) or not service.strip():
-                raise SmokeError("external.status_request did not include service.")
-            with self._external_status_lock:
-                self.external_status_request_count += 1
-                self.external_status_request_ids.append(request_id)
-                override = self._external_status_overrides.pop(0) if self._external_status_overrides else None
-            status_text = (
-                str(override.get("status_text")).strip()
-                if isinstance(override, dict) and isinstance(override.get("status_text"), str) and override.get("status_text", "").strip()
-                else f"{service.strip()} は正常に応答している。"
-            )
-            client_context = (
-                dict(override["client_context"])
-                if isinstance(override, dict) and isinstance(override.get("client_context"), dict)
-                else {}
-            )
-            suppress_default_client_context = (
-                isinstance(override, dict) and override.get("suppress_default_client_context") is True
-            )
-            if not suppress_default_client_context:
-                if not isinstance(client_context.get("external_service_summary"), str) or not client_context["external_service_summary"].strip():
-                    client_context["external_service_summary"] = status_text
-                if not isinstance(client_context.get("device_state_summary"), str) or not client_context["device_state_summary"].strip():
-                    client_context["device_state_summary"] = "external.status を返せる desktop client が接続中。"
-                if not isinstance(client_context.get("schedule_summary"), str) or not client_context["schedule_summary"].strip():
-                    client_context["schedule_summary"] = f"{service.strip()} の状態確認をこのまま進められる。"
-            self._apply_status_client_context_source(client_context=client_context, override=override)
-            self.api.post(
-                "/api/capability/result",
-                {
-                    "request_id": request_id,
-                    "client_id": connected_client_id,
-                    "capability_id": "external.status",
-                    "result": {
-                        "status_text": status_text,
-                        "client_context": client_context,
-                        "error": None,
-                    },
-                },
-            )
-            self._remember_capability_result_followup_from_recent_cycles(
-                request_id=request_id,
-                capability_id="external.status",
-                verified_request_ids=self.external_status_followup_verified_request_ids,
-            )
-            self.external_status_response_count += 1
-            return
-        if event_type == "schedule.status_request":
-            if client_label != "primary":
-                raise SmokeError(f"{client_label} desktop client unexpectedly received schedule.status_request.")
-            request_id = data.get("request_id")
-            capability_id = data.get("capability_id")
-            requested_range = data.get("range")
-            if not isinstance(request_id, str) or not request_id:
-                raise SmokeError("schedule.status_request did not include request_id.")
-            if capability_id != "schedule.status":
-                raise SmokeError(f"schedule.status_request capability_id was invalid: {capability_id}")
-            if not isinstance(requested_range, str) or not requested_range.strip():
-                raise SmokeError("schedule.status_request did not include range.")
-            with self._schedule_status_lock:
-                self.schedule_status_request_count += 1
-                self.schedule_status_request_ids.append(request_id)
-                override = self._schedule_status_overrides.pop(0) if self._schedule_status_overrides else None
-            schedule_summary = (
-                str(override.get("schedule_summary")).strip()
-                if isinstance(override, dict)
-                and isinstance(override.get("schedule_summary"), str)
-                and override.get("schedule_summary", "").strip()
-                else f"{requested_range.strip()} の近い予定は 1 件ある。"
-            )
-            schedule_slots = (
-                list(override["schedule_slots"])
-                if isinstance(override, dict) and isinstance(override.get("schedule_slots"), list)
-                else [
-                    {
-                        "slot_key": "schedule-status-default",
-                        "summary_text": schedule_summary,
-                    }
-                ]
-            )
-            client_context = (
-                dict(override["client_context"])
-                if isinstance(override, dict) and isinstance(override.get("client_context"), dict)
-                else {}
-            )
-            suppress_default_client_context = (
-                isinstance(override, dict) and override.get("suppress_default_client_context") is True
-            )
-            if (
-                not suppress_default_client_context
-                and (
-                    not isinstance(client_context.get("device_state_summary"), str)
-                    or not client_context["device_state_summary"].strip()
-                )
-            ):
-                client_context["device_state_summary"] = "schedule.status を返せる desktop client が接続中。"
-            self._apply_status_client_context_source(client_context=client_context, override=override)
-            self.api.post(
-                "/api/capability/result",
-                {
-                    "request_id": request_id,
-                    "client_id": connected_client_id,
-                    "capability_id": "schedule.status",
-                    "result": {
-                        "schedule_summary": schedule_summary,
-                        "schedule_slots": schedule_slots,
-                        "client_context": client_context,
-                        "error": None,
-                    },
-                },
-            )
-            self._remember_capability_result_followup_from_recent_cycles(
-                request_id=request_id,
-                capability_id="schedule.status",
-                verified_request_ids=self.schedule_status_followup_verified_request_ids,
-            )
-            self.schedule_status_response_count += 1
-            return
-        if event_type == "device.status_request":
-            if client_label != "primary":
-                raise SmokeError(f"{client_label} desktop client unexpectedly received device.status_request.")
-            request_id = data.get("request_id")
-            capability_id = data.get("capability_id")
-            requested_scope = data.get("scope")
-            if not isinstance(request_id, str) or not request_id:
-                raise SmokeError("device.status_request did not include request_id.")
-            if capability_id != "device.status":
-                raise SmokeError(f"device.status_request capability_id was invalid: {capability_id}")
-            if not isinstance(requested_scope, str) or not requested_scope.strip():
-                raise SmokeError("device.status_request did not include scope.")
-            with self._device_status_lock:
-                self.device_status_request_count += 1
-                self.device_status_request_ids.append(request_id)
-                override = self._device_status_overrides.pop(0) if self._device_status_overrides else None
-            device_state_summary = (
-                str(override.get("device_state_summary")).strip()
-                if isinstance(override, dict)
-                and isinstance(override.get("device_state_summary"), str)
-                and override.get("device_state_summary", "").strip()
-                else f"{requested_scope.strip()} は通常範囲で利用できる。"
-            )
-            client_context = (
-                dict(override["client_context"])
-                if isinstance(override, dict) and isinstance(override.get("client_context"), dict)
-                else {}
-            )
-            self._apply_status_client_context_source(client_context=client_context, override=override)
-            self.api.post(
-                "/api/capability/result",
-                {
-                    "request_id": request_id,
-                    "client_id": connected_client_id,
-                    "capability_id": "device.status",
-                    "result": {
-                        "device_state_summary": device_state_summary,
-                        "client_context": client_context,
-                        "error": None,
-                    },
-                },
-            )
-            self._remember_capability_result_followup_from_recent_cycles(
-                request_id=request_id,
-                capability_id="device.status",
-                verified_request_ids=self.device_status_followup_verified_request_ids,
-            )
-            self.device_status_response_count += 1
-            return
-        if event_type == "body.status_request":
-            if client_label != "primary":
-                raise SmokeError(f"{client_label} desktop client unexpectedly received body.status_request.")
-            request_id = data.get("request_id")
-            capability_id = data.get("capability_id")
-            requested_scope = data.get("scope")
-            if not isinstance(request_id, str) or not request_id:
-                raise SmokeError("body.status_request did not include request_id.")
-            if capability_id != "body.status":
-                raise SmokeError(f"body.status_request capability_id was invalid: {capability_id}")
-            if not isinstance(requested_scope, str) or not requested_scope.strip():
-                raise SmokeError("body.status_request did not include scope.")
-            with self._body_status_lock:
-                self.body_status_request_count += 1
-                self.body_status_request_ids.append(request_id)
-                override = self._body_status_overrides.pop(0) if self._body_status_overrides else None
-            body_state_summary = (
-                str(override.get("body_state_summary")).strip()
-                if isinstance(override, dict)
-                and isinstance(override.get("body_state_summary"), str)
-                and override.get("body_state_summary", "").strip()
-                else f"{requested_scope.strip()} は大きな支障が少ない状態。"
-            )
-            client_context = (
-                dict(override["client_context"])
-                if isinstance(override, dict) and isinstance(override.get("client_context"), dict)
-                else {}
-            )
-            self._apply_status_client_context_source(client_context=client_context, override=override)
-            self.api.post(
-                "/api/capability/result",
-                {
-                    "request_id": request_id,
-                    "client_id": connected_client_id,
-                    "capability_id": "body.status",
-                    "result": {
-                        "body_state_summary": body_state_summary,
-                        "client_context": client_context,
-                        "error": None,
-                    },
-                },
-            )
-            self._remember_capability_result_followup_from_recent_cycles(
-                request_id=request_id,
-                capability_id="body.status",
-                verified_request_ids=self.body_status_followup_verified_request_ids,
-            )
-            self.body_status_response_count += 1
-            return
-        if event_type == "environment.status_request":
-            if client_label != "primary":
-                raise SmokeError(f"{client_label} desktop client unexpectedly received environment.status_request.")
-            request_id = data.get("request_id")
-            capability_id = data.get("capability_id")
-            requested_scope = data.get("scope")
-            if not isinstance(request_id, str) or not request_id:
-                raise SmokeError("environment.status_request did not include request_id.")
-            if capability_id != "environment.status":
-                raise SmokeError(f"environment.status_request capability_id was invalid: {capability_id}")
-            if not isinstance(requested_scope, str) or not requested_scope.strip():
-                raise SmokeError("environment.status_request did not include scope.")
-            with self._environment_status_lock:
-                self.environment_status_request_count += 1
-                self.environment_status_request_ids.append(request_id)
-                override = self._environment_status_overrides.pop(0) if self._environment_status_overrides else None
-            environment_summary = (
-                str(override.get("environment_summary")).strip()
-                if isinstance(override, dict)
-                and isinstance(override.get("environment_summary"), str)
-                and override.get("environment_summary", "").strip()
-                else f"{requested_scope.strip()} は作業に支障が少ない状態。"
-            )
-            client_context = (
-                dict(override["client_context"])
-                if isinstance(override, dict) and isinstance(override.get("client_context"), dict)
-                else {}
-            )
-            self._apply_status_client_context_source(client_context=client_context, override=override)
-            self.api.post(
-                "/api/capability/result",
-                {
-                    "request_id": request_id,
-                    "client_id": connected_client_id,
-                    "capability_id": "environment.status",
-                    "result": {
-                        "environment_summary": environment_summary,
-                        "client_context": client_context,
-                        "error": None,
-                    },
-                },
-            )
-            self._remember_capability_result_followup_from_recent_cycles(
-                request_id=request_id,
-                capability_id="environment.status",
-                verified_request_ids=self.environment_status_followup_verified_request_ids,
-            )
-            self.environment_status_response_count += 1
-            return
-        if event_type == "location.status_request":
-            if client_label != "primary":
-                raise SmokeError(f"{client_label} desktop client unexpectedly received location.status_request.")
-            request_id = data.get("request_id")
-            capability_id = data.get("capability_id")
-            requested_scope = data.get("scope")
-            if not isinstance(request_id, str) or not request_id:
-                raise SmokeError("location.status_request did not include request_id.")
-            if capability_id != "location.status":
-                raise SmokeError(f"location.status_request capability_id was invalid: {capability_id}")
-            if not isinstance(requested_scope, str) or not requested_scope.strip():
-                raise SmokeError("location.status_request did not include scope.")
-            with self._location_status_lock:
-                self.location_status_request_count += 1
-                self.location_status_request_ids.append(request_id)
-                override = self._location_status_overrides.pop(0) if self._location_status_overrides else None
-            location_summary = (
-                str(override.get("location_summary")).strip()
-                if isinstance(override, dict)
-                and isinstance(override.get("location_summary"), str)
-                and override.get("location_summary", "").strip()
-                else f"{requested_scope.strip()} は作業可能な場所にある。"
-            )
-            client_context = (
-                dict(override["client_context"])
-                if isinstance(override, dict) and isinstance(override.get("client_context"), dict)
-                else {}
-            )
-            self._apply_status_client_context_source(client_context=client_context, override=override)
-            self.api.post(
-                "/api/capability/result",
-                {
-                    "request_id": request_id,
-                    "client_id": connected_client_id,
-                    "capability_id": "location.status",
-                    "result": {
-                        "location_summary": location_summary,
-                        "client_context": client_context,
-                        "error": None,
-                    },
-                },
-            )
-            self._remember_capability_result_followup_from_recent_cycles(
-                request_id=request_id,
-                capability_id="location.status",
-                verified_request_ids=self.location_status_followup_verified_request_ids,
-            )
-            self.location_status_response_count += 1
-            return
-        if event_type == "social.status_request":
-            if client_label != "primary":
-                raise SmokeError(f"{client_label} desktop client unexpectedly received social.status_request.")
-            request_id = data.get("request_id")
-            capability_id = data.get("capability_id")
-            requested_scope = data.get("scope")
-            if not isinstance(request_id, str) or not request_id:
-                raise SmokeError("social.status_request did not include request_id.")
-            if capability_id != "social.status":
-                raise SmokeError(f"social.status_request capability_id was invalid: {capability_id}")
-            if not isinstance(requested_scope, str) or not requested_scope.strip():
-                raise SmokeError("social.status_request did not include scope.")
-            with self._social_status_lock:
-                self.social_status_request_count += 1
-                self.social_status_request_ids.append(request_id)
-                override = self._social_status_overrides.pop(0) if self._social_status_overrides else None
-            social_context_summary = (
-                str(override.get("social_context_summary")).strip()
-                if isinstance(override, dict)
-                and isinstance(override.get("social_context_summary"), str)
-                and override.get("social_context_summary", "").strip()
-                else f"{requested_scope.strip()} の対人文脈は落ち着いている。"
-            )
-            client_context = (
-                dict(override["client_context"])
-                if isinstance(override, dict) and isinstance(override.get("client_context"), dict)
-                else {}
-            )
-            self._apply_status_client_context_source(client_context=client_context, override=override)
-            self.api.post(
-                "/api/capability/result",
-                {
-                    "request_id": request_id,
-                    "client_id": connected_client_id,
-                    "capability_id": "social.status",
-                    "result": {
-                        "social_context_summary": social_context_summary,
-                        "client_context": client_context,
-                        "error": None,
-                    },
-                },
-            )
-            self._remember_capability_result_followup_from_recent_cycles(
-                request_id=request_id,
-                capability_id="social.status",
-                verified_request_ids=self.social_status_followup_verified_request_ids,
-            )
-            self.social_status_response_count += 1
-            return
     def _assert_event_clients_healthy(self) -> None:
         if self.event_client is not None and self.event_client.error is not None:
             raise SmokeError(f"desktop client failed: {self.event_client.error}")
@@ -1791,7 +1317,7 @@ class LongSmokeRunner:
             window_title=marker,
         )
         self.vision_capture_probe_cycle_id = conversation_cycle_id
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
+        deadline = time.monotonic() + WAIT_CAPABILITY_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
         request_id: str | None = None
         while time.monotonic() < deadline:
             self._assert_server_running()
@@ -1835,7 +1361,7 @@ class LongSmokeRunner:
             window_title=marker,
         )
         self.camera_ptz_probe_cycle_id = conversation_cycle_id
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
+        deadline = time.monotonic() + WAIT_CAPABILITY_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
         request_id: str | None = None
         request_summary: dict[str, Any] | None = None
         while time.monotonic() < deadline:
@@ -1920,7 +1446,7 @@ class LongSmokeRunner:
         )
 
     def _wait_for_camera_capture_result(self, *, request_id: str, previous_response_count: int) -> None:
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
+        deadline = time.monotonic() + WAIT_CAPABILITY_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
         while time.monotonic() < deadline:
             self._assert_server_running()
             self._assert_event_clients_healthy()
@@ -2007,34 +1533,6 @@ class LongSmokeRunner:
     def _queue_capture_context_override(self, override: dict[str, Any]) -> None:
         with self._capture_lock:
             self._capture_context_overrides.append(override)
-
-    def _queue_external_status_override(self, override: dict[str, Any]) -> None:
-        with self._external_status_lock:
-            self._external_status_overrides.append(override)
-
-    def _queue_schedule_status_override(self, override: dict[str, Any]) -> None:
-        with self._schedule_status_lock:
-            self._schedule_status_overrides.append(override)
-
-    def _queue_device_status_override(self, override: dict[str, Any]) -> None:
-        with self._device_status_lock:
-            self._device_status_overrides.append(override)
-
-    def _queue_body_status_override(self, override: dict[str, Any]) -> None:
-        with self._body_status_lock:
-            self._body_status_overrides.append(override)
-
-    def _queue_environment_status_override(self, override: dict[str, Any]) -> None:
-        with self._environment_status_lock:
-            self._environment_status_overrides.append(override)
-
-    def _queue_location_status_override(self, override: dict[str, Any]) -> None:
-        with self._location_status_lock:
-            self._location_status_overrides.append(override)
-
-    def _queue_social_status_override(self, override: dict[str, Any]) -> None:
-        with self._social_status_lock:
-            self._social_status_overrides.append(override)
 
     def _remember_capability_result_followup_from_recent_cycles(
         self,
@@ -2261,7 +1759,7 @@ class LongSmokeRunner:
             "step_summary": f"{marker} の結果待ちで、新しい介入は抑える。",
             "status": "waiting_result",
             "episode_series_id": f"series:{action_id}",
-            "last_capability_id": "external.status",
+            "last_capability_id": "vision.capture",
             "updated_at": updated_at,
             "expires_at": expires_at,
         }
@@ -2290,570 +1788,6 @@ class LongSmokeRunner:
             conn.commit()
         finally:
             conn.close()
-
-    def _run_external_status_probe(
-        self,
-        *,
-        marker: str,
-        conversation_text: str,
-        source: str,
-        client_id: str,
-        active_app: str,
-        window_title: str,
-        override: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        self._queue_external_status_override(override)
-        conversation_cycle_id = self._post_conversation(
-            text=conversation_text,
-            source=source,
-            client_id=client_id,
-            active_app=active_app,
-            window_title=window_title,
-        )
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
-        conversation_trace: dict[str, Any] | None = None
-        request_id: str | None = None
-        while time.monotonic() < deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            candidate = self.api.get(f"/api/inspection/cycles/{conversation_cycle_id}")
-            request_summary = ((candidate.get("result_trace") or {}).get("capability_request_summary"))
-            if (
-                isinstance(request_summary, dict)
-                and request_summary.get("capability_id") == "external.status"
-                and request_summary.get("status") == "dispatched"
-            ):
-                request_id = request_summary.get("request_id")
-                if isinstance(request_id, str) and request_id:
-                    conversation_trace = candidate
-                    break
-            time.sleep(0.25)
-        if conversation_trace is None or request_id is None:
-            raise SmokeError("external.status probe did not dispatch a request.")
-
-        followup_trace: dict[str, Any] | None = None
-        inspected_cycle_ids: set[str] = set()
-        while time.monotonic() < deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=80").get("cycle_summaries", [])
-            if not isinstance(cycle_summaries, list):
-                raise SmokeError("cycle_summaries response was invalid during external.status probe.")
-            for cycle_summary in cycle_summaries:
-                if not isinstance(cycle_summary, dict):
-                    continue
-                if cycle_summary.get("trigger_kind") != "capability_result":
-                    continue
-                cycle_id = cycle_summary.get("cycle_id")
-                if not isinstance(cycle_id, str) or not cycle_id or cycle_id in inspected_cycle_ids:
-                    continue
-                inspected_cycle_ids.add(cycle_id)
-                trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
-                followup_summary = ((trace.get("result_trace") or {}).get("capability_result_followup_summary"))
-                if not isinstance(followup_summary, dict):
-                    continue
-                source_request_summary = followup_summary.get("source_request_summary")
-                if not isinstance(source_request_summary, dict):
-                    continue
-                if source_request_summary.get("request_id") != request_id:
-                    continue
-                observation_summary = ((trace.get("input_trace") or {}).get("observation_summary"))
-                if not isinstance(observation_summary, dict):
-                    continue
-                observed_status_text = observation_summary.get("status_text")
-                if not isinstance(observed_status_text, str) or marker not in observed_status_text:
-                    continue
-                followup_trace = trace
-                break
-            if followup_trace is not None:
-                break
-            time.sleep(0.25)
-        if followup_trace is None:
-            raise SmokeError("external.status probe did not produce a capability_result follow-up cycle.")
-        if request_id not in self.external_status_followup_verified_request_ids:
-            self.external_status_followup_verified_request_ids.append(request_id)
-
-        return conversation_trace, followup_trace
-
-    def _run_device_status_probe(
-        self,
-        *,
-        marker: str,
-        conversation_text: str,
-        source: str,
-        client_id: str,
-        active_app: str,
-        window_title: str,
-        override: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        self._queue_device_status_override(override)
-        conversation_cycle_id = self._post_conversation(
-            text=conversation_text,
-            source=source,
-            client_id=client_id,
-            active_app=active_app,
-            window_title=window_title,
-        )
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
-        conversation_trace: dict[str, Any] | None = None
-        request_id: str | None = None
-        while time.monotonic() < deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            candidate = self.api.get(f"/api/inspection/cycles/{conversation_cycle_id}")
-            request_summary = ((candidate.get("result_trace") or {}).get("capability_request_summary"))
-            if (
-                isinstance(request_summary, dict)
-                and request_summary.get("capability_id") == "device.status"
-                and request_summary.get("status") == "dispatched"
-            ):
-                request_id = request_summary.get("request_id")
-                if isinstance(request_id, str) and request_id:
-                    conversation_trace = candidate
-                    break
-            time.sleep(0.25)
-        if conversation_trace is None or request_id is None:
-            raise SmokeError("device.status probe did not dispatch a request.")
-
-        followup_trace: dict[str, Any] | None = None
-        inspected_cycle_ids: set[str] = set()
-        while time.monotonic() < deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=80").get("cycle_summaries", [])
-            if not isinstance(cycle_summaries, list):
-                raise SmokeError("cycle_summaries response was invalid during device.status probe.")
-            for cycle_summary in cycle_summaries:
-                if not isinstance(cycle_summary, dict) or cycle_summary.get("trigger_kind") != "capability_result":
-                    continue
-                cycle_id = cycle_summary.get("cycle_id")
-                if not isinstance(cycle_id, str) or not cycle_id or cycle_id in inspected_cycle_ids:
-                    continue
-                inspected_cycle_ids.add(cycle_id)
-                trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
-                followup_summary = ((trace.get("result_trace") or {}).get("capability_result_followup_summary"))
-                if not isinstance(followup_summary, dict):
-                    continue
-                source_request_summary = followup_summary.get("source_request_summary")
-                if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
-                    continue
-                observation_summary = ((trace.get("input_trace") or {}).get("observation_summary"))
-                if not isinstance(observation_summary, dict):
-                    continue
-                observed_device_summary = observation_summary.get("device_state_summary")
-                if not isinstance(observed_device_summary, str) or marker not in observed_device_summary:
-                    continue
-                followup_trace = trace
-                break
-            if followup_trace is not None:
-                break
-            time.sleep(0.25)
-        if followup_trace is None:
-            raise SmokeError("device.status probe did not produce a capability_result follow-up cycle.")
-        if request_id not in self.device_status_followup_verified_request_ids:
-            self.device_status_followup_verified_request_ids.append(request_id)
-
-        return conversation_trace, followup_trace
-
-    def _run_body_status_probe(
-        self,
-        *,
-        marker: str,
-        conversation_text: str,
-        source: str,
-        client_id: str,
-        active_app: str,
-        window_title: str,
-        override: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        self._queue_body_status_override(override)
-        conversation_cycle_id = self._post_conversation(
-            text=conversation_text,
-            source=source,
-            client_id=client_id,
-            active_app=active_app,
-            window_title=window_title,
-        )
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
-        conversation_trace: dict[str, Any] | None = None
-        request_id: str | None = None
-        while time.monotonic() < deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            candidate = self.api.get(f"/api/inspection/cycles/{conversation_cycle_id}")
-            request_summary = ((candidate.get("result_trace") or {}).get("capability_request_summary"))
-            if (
-                isinstance(request_summary, dict)
-                and request_summary.get("capability_id") == "body.status"
-                and request_summary.get("status") == "dispatched"
-            ):
-                request_id = request_summary.get("request_id")
-                if isinstance(request_id, str) and request_id:
-                    conversation_trace = candidate
-                    break
-            time.sleep(0.25)
-        if conversation_trace is None or request_id is None:
-            raise SmokeError("body.status probe did not dispatch a request.")
-
-        followup_trace: dict[str, Any] | None = None
-        inspected_cycle_ids: set[str] = set()
-        while time.monotonic() < deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=80").get("cycle_summaries", [])
-            if not isinstance(cycle_summaries, list):
-                raise SmokeError("cycle_summaries response was invalid during body.status probe.")
-            for cycle_summary in cycle_summaries:
-                if not isinstance(cycle_summary, dict) or cycle_summary.get("trigger_kind") != "capability_result":
-                    continue
-                cycle_id = cycle_summary.get("cycle_id")
-                if not isinstance(cycle_id, str) or not cycle_id or cycle_id in inspected_cycle_ids:
-                    continue
-                inspected_cycle_ids.add(cycle_id)
-                trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
-                followup_summary = ((trace.get("result_trace") or {}).get("capability_result_followup_summary"))
-                if not isinstance(followup_summary, dict):
-                    continue
-                source_request_summary = followup_summary.get("source_request_summary")
-                if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
-                    continue
-                observation_summary = ((trace.get("input_trace") or {}).get("observation_summary"))
-                if not isinstance(observation_summary, dict):
-                    continue
-                observed_body_summary = observation_summary.get("body_state_summary")
-                if not isinstance(observed_body_summary, str) or marker not in observed_body_summary:
-                    continue
-                followup_trace = trace
-                break
-            if followup_trace is not None:
-                break
-            time.sleep(0.25)
-        if followup_trace is None:
-            raise SmokeError("body.status probe did not produce a capability_result follow-up cycle.")
-        if request_id not in self.body_status_followup_verified_request_ids:
-            self.body_status_followup_verified_request_ids.append(request_id)
-
-        return conversation_trace, followup_trace
-
-    def _run_environment_status_probe(
-        self,
-        *,
-        marker: str,
-        conversation_text: str,
-        source: str,
-        client_id: str,
-        active_app: str,
-        window_title: str,
-        override: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        self._queue_environment_status_override(override)
-        conversation_cycle_id = self._post_conversation(
-            text=conversation_text,
-            source=source,
-            client_id=client_id,
-            active_app=active_app,
-            window_title=window_title,
-        )
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
-        conversation_trace: dict[str, Any] | None = None
-        request_id: str | None = None
-        while time.monotonic() < deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            candidate = self.api.get(f"/api/inspection/cycles/{conversation_cycle_id}")
-            request_summary = ((candidate.get("result_trace") or {}).get("capability_request_summary"))
-            if (
-                isinstance(request_summary, dict)
-                and request_summary.get("capability_id") == "environment.status"
-                and request_summary.get("status") == "dispatched"
-            ):
-                request_id = request_summary.get("request_id")
-                if isinstance(request_id, str) and request_id:
-                    conversation_trace = candidate
-                    break
-            time.sleep(0.25)
-        if conversation_trace is None or request_id is None:
-            raise SmokeError("environment.status probe did not dispatch a request.")
-
-        followup_trace: dict[str, Any] | None = None
-        inspected_cycle_ids: set[str] = set()
-        while time.monotonic() < deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=80").get("cycle_summaries", [])
-            if not isinstance(cycle_summaries, list):
-                raise SmokeError("cycle_summaries response was invalid during environment.status probe.")
-            for cycle_summary in cycle_summaries:
-                if not isinstance(cycle_summary, dict) or cycle_summary.get("trigger_kind") != "capability_result":
-                    continue
-                cycle_id = cycle_summary.get("cycle_id")
-                if not isinstance(cycle_id, str) or not cycle_id or cycle_id in inspected_cycle_ids:
-                    continue
-                inspected_cycle_ids.add(cycle_id)
-                trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
-                followup_summary = ((trace.get("result_trace") or {}).get("capability_result_followup_summary"))
-                if not isinstance(followup_summary, dict):
-                    continue
-                source_request_summary = followup_summary.get("source_request_summary")
-                if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
-                    continue
-                observation_summary = ((trace.get("input_trace") or {}).get("observation_summary"))
-                if not isinstance(observation_summary, dict):
-                    continue
-                observed_environment_summary = observation_summary.get("environment_summary")
-                if not isinstance(observed_environment_summary, str) or marker not in observed_environment_summary:
-                    continue
-                followup_trace = trace
-                break
-            if followup_trace is not None:
-                break
-            time.sleep(0.25)
-        if followup_trace is None:
-            raise SmokeError("environment.status probe did not produce a capability_result follow-up cycle.")
-        if request_id not in self.environment_status_followup_verified_request_ids:
-            self.environment_status_followup_verified_request_ids.append(request_id)
-
-        return conversation_trace, followup_trace
-
-    def _run_location_status_probe(
-        self,
-        *,
-        marker: str,
-        conversation_text: str,
-        source: str,
-        client_id: str,
-        active_app: str,
-        window_title: str,
-        override: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        self._queue_location_status_override(override)
-        conversation_cycle_id = self._post_conversation(
-            text=conversation_text,
-            source=source,
-            client_id=client_id,
-            active_app=active_app,
-            window_title=window_title,
-        )
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
-        conversation_trace: dict[str, Any] | None = None
-        request_id: str | None = None
-        while time.monotonic() < deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            candidate = self.api.get(f"/api/inspection/cycles/{conversation_cycle_id}")
-            request_summary = ((candidate.get("result_trace") or {}).get("capability_request_summary"))
-            if (
-                isinstance(request_summary, dict)
-                and request_summary.get("capability_id") == "location.status"
-                and request_summary.get("status") == "dispatched"
-            ):
-                request_id = request_summary.get("request_id")
-                if isinstance(request_id, str) and request_id:
-                    conversation_trace = candidate
-                    break
-            time.sleep(0.25)
-        if conversation_trace is None or request_id is None:
-            raise SmokeError("location.status probe did not dispatch a request.")
-
-        followup_trace: dict[str, Any] | None = None
-        inspected_cycle_ids: set[str] = set()
-        while time.monotonic() < deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=80").get("cycle_summaries", [])
-            if not isinstance(cycle_summaries, list):
-                raise SmokeError("cycle_summaries response was invalid during location.status probe.")
-            for cycle_summary in cycle_summaries:
-                if not isinstance(cycle_summary, dict) or cycle_summary.get("trigger_kind") != "capability_result":
-                    continue
-                cycle_id = cycle_summary.get("cycle_id")
-                if not isinstance(cycle_id, str) or not cycle_id or cycle_id in inspected_cycle_ids:
-                    continue
-                inspected_cycle_ids.add(cycle_id)
-                trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
-                followup_summary = ((trace.get("result_trace") or {}).get("capability_result_followup_summary"))
-                if not isinstance(followup_summary, dict):
-                    continue
-                source_request_summary = followup_summary.get("source_request_summary")
-                if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
-                    continue
-                observation_summary = ((trace.get("input_trace") or {}).get("observation_summary"))
-                if not isinstance(observation_summary, dict):
-                    continue
-                observed_location_summary = observation_summary.get("location_summary")
-                if not isinstance(observed_location_summary, str) or marker not in observed_location_summary:
-                    continue
-                followup_trace = trace
-                break
-            if followup_trace is not None:
-                break
-            time.sleep(0.25)
-        if followup_trace is None:
-            raise SmokeError("location.status probe did not produce a capability_result follow-up cycle.")
-        if request_id not in self.location_status_followup_verified_request_ids:
-            self.location_status_followup_verified_request_ids.append(request_id)
-
-        return conversation_trace, followup_trace
-
-    def _run_social_status_probe(
-        self,
-        *,
-        marker: str,
-        conversation_text: str,
-        source: str,
-        client_id: str,
-        active_app: str,
-        window_title: str,
-        override: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        self._queue_social_status_override(override)
-        conversation_cycle_id = self._post_conversation(
-            text=conversation_text,
-            source=source,
-            client_id=client_id,
-            active_app=active_app,
-            window_title=window_title,
-        )
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
-        conversation_trace: dict[str, Any] | None = None
-        request_id: str | None = None
-        while time.monotonic() < deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            candidate = self.api.get(f"/api/inspection/cycles/{conversation_cycle_id}")
-            request_summary = ((candidate.get("result_trace") or {}).get("capability_request_summary"))
-            if (
-                isinstance(request_summary, dict)
-                and request_summary.get("capability_id") == "social.status"
-                and request_summary.get("status") == "dispatched"
-            ):
-                request_id = request_summary.get("request_id")
-                if isinstance(request_id, str) and request_id:
-                    conversation_trace = candidate
-                    break
-            time.sleep(0.25)
-        if conversation_trace is None or request_id is None:
-            raise SmokeError("social.status probe did not dispatch a request.")
-
-        followup_trace: dict[str, Any] | None = None
-        inspected_cycle_ids: set[str] = set()
-        while time.monotonic() < deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=80").get("cycle_summaries", [])
-            if not isinstance(cycle_summaries, list):
-                raise SmokeError("cycle_summaries response was invalid during social.status probe.")
-            for cycle_summary in cycle_summaries:
-                if not isinstance(cycle_summary, dict) or cycle_summary.get("trigger_kind") != "capability_result":
-                    continue
-                cycle_id = cycle_summary.get("cycle_id")
-                if not isinstance(cycle_id, str) or not cycle_id or cycle_id in inspected_cycle_ids:
-                    continue
-                inspected_cycle_ids.add(cycle_id)
-                trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
-                followup_summary = ((trace.get("result_trace") or {}).get("capability_result_followup_summary"))
-                if not isinstance(followup_summary, dict):
-                    continue
-                source_request_summary = followup_summary.get("source_request_summary")
-                if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
-                    continue
-                observation_summary = ((trace.get("input_trace") or {}).get("observation_summary"))
-                if not isinstance(observation_summary, dict):
-                    continue
-                observed_social_summary = observation_summary.get("social_context_summary")
-                if not isinstance(observed_social_summary, str) or marker not in observed_social_summary:
-                    continue
-                followup_trace = trace
-                break
-            if followup_trace is not None:
-                break
-            time.sleep(0.25)
-        if followup_trace is None:
-            raise SmokeError("social.status probe did not produce a capability_result follow-up cycle.")
-        if request_id not in self.social_status_followup_verified_request_ids:
-            self.social_status_followup_verified_request_ids.append(request_id)
-
-        return conversation_trace, followup_trace
-
-    def _run_schedule_status_probe(
-        self,
-        *,
-        marker: str,
-        conversation_text: str,
-        source: str,
-        client_id: str,
-        active_app: str,
-        window_title: str,
-        override: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        self._queue_schedule_status_override(override)
-        conversation_cycle_id = self._post_conversation(
-            text=conversation_text,
-            source=source,
-            client_id=client_id,
-            active_app=active_app,
-            window_title=window_title,
-        )
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
-        conversation_trace: dict[str, Any] | None = None
-        request_id: str | None = None
-        while time.monotonic() < deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            candidate = self.api.get(f"/api/inspection/cycles/{conversation_cycle_id}")
-            request_summary = ((candidate.get("result_trace") or {}).get("capability_request_summary"))
-            if (
-                isinstance(request_summary, dict)
-                and request_summary.get("capability_id") == "schedule.status"
-                and request_summary.get("status") == "dispatched"
-            ):
-                request_id = request_summary.get("request_id")
-                if isinstance(request_id, str) and request_id:
-                    conversation_trace = candidate
-                    break
-            time.sleep(0.25)
-        if conversation_trace is None or request_id is None:
-            raise SmokeError("schedule.status probe did not dispatch a request.")
-
-        followup_trace: dict[str, Any] | None = None
-        inspected_cycle_ids: set[str] = set()
-        while time.monotonic() < deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=80").get("cycle_summaries", [])
-            if not isinstance(cycle_summaries, list):
-                raise SmokeError("cycle_summaries response was invalid during schedule.status probe.")
-            for cycle_summary in cycle_summaries:
-                if not isinstance(cycle_summary, dict) or cycle_summary.get("trigger_kind") != "capability_result":
-                    continue
-                cycle_id = cycle_summary.get("cycle_id")
-                if not isinstance(cycle_id, str) or not cycle_id or cycle_id in inspected_cycle_ids:
-                    continue
-                inspected_cycle_ids.add(cycle_id)
-                trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
-                followup_summary = ((trace.get("result_trace") or {}).get("capability_result_followup_summary"))
-                if not isinstance(followup_summary, dict):
-                    continue
-                source_request_summary = followup_summary.get("source_request_summary")
-                if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
-                    continue
-                observation_summary = ((trace.get("input_trace") or {}).get("observation_summary"))
-                if not isinstance(observation_summary, dict):
-                    continue
-                observed_schedule_summary = observation_summary.get("schedule_summary")
-                if not isinstance(observed_schedule_summary, str) or marker not in observed_schedule_summary:
-                    continue
-                followup_trace = trace
-                break
-            if followup_trace is not None:
-                break
-            time.sleep(0.25)
-        if followup_trace is None:
-            raise SmokeError("schedule.status probe did not produce a capability_result follow-up cycle.")
-        if request_id not in self.schedule_status_followup_verified_request_ids:
-            self.schedule_status_followup_verified_request_ids.append(request_id)
-
-        return conversation_trace, followup_trace
 
     def _list_persisted_world_states(self, *, state_type: str) -> list[dict[str, Any]]:
         if not isinstance(self.selected_memory_set_id, str) or not self.selected_memory_set_id:
@@ -2900,21 +1834,14 @@ class LongSmokeRunner:
         return cycle_ids
 
     def _count_server_log_occurrences(self, needle: str) -> int:
-        if not self.server_log_path.exists():
+        if not self.runtime_log_path.exists():
             return 0
-        return self.server_log_path.read_text(encoding="utf-8").count(needle)
+        return self.runtime_log_path.read_text(encoding="utf-8").count(needle)
 
     def _run_real_llm_initiative_matrix(self) -> dict[str, dict[str, Any]]:
         log("real LLM initiative matrix started")
         cases = [
             self._run_real_llm_initiative_probe_drive_thin_capability,
-            self._run_real_llm_initiative_probe_stale_schedule_status,
-            self._run_real_llm_initiative_probe_missing_social_status,
-            self._run_real_llm_initiative_probe_stale_external_status,
-            self._run_real_llm_initiative_probe_missing_device_status,
-            self._run_real_llm_initiative_probe_missing_body_status,
-            self._run_real_llm_initiative_probe_missing_environment_status,
-            self._run_real_llm_initiative_probe_missing_location_status,
             self._run_real_llm_initiative_probe_schedule_speech,
             self._run_real_llm_initiative_probe_social_speech,
             self._run_real_llm_initiative_probe_body_speech,
@@ -2989,352 +1916,6 @@ class LongSmokeRunner:
             expected_source_capability_id="vision.capture",
         )
         return case_id, trace
-
-    def _run_real_llm_initiative_probe_stale_schedule_status(self) -> tuple[str, dict[str, Any]]:
-        case_id = "stale-schedule-status-probe"
-        marker = "RealLLMInitiativeStaleScheduleStatusMarker"
-        schedule_summary = f"{marker}: 最新確認では 15 分後に予定確認がある。"
-        self._seed_initiative_probe_drive(
-            drive_id=f"drive:{case_id}",
-            drive_kind="follow_through",
-            summary_text=f"{marker}: 予定の現在状態を確認してから整えたい。",
-            focus_scope_key=marker,
-        )
-        self._seed_initiative_probe_world_state(
-            world_state_id=f"world:{case_id}",
-            state_type="schedule",
-            scope_key=marker,
-            summary_text=f"{marker}: 90 分前時点では予定確認が必要だった。",
-            age_minutes=12,
-        )
-        self._queue_schedule_status_override(
-            {
-                "schedule_summary": schedule_summary,
-                "schedule_slots": [
-                    {
-                        "slot_key": f"{marker}:slot",
-                        "summary_text": schedule_summary,
-                    }
-                ],
-            }
-        )
-        trace = self._run_manual_wake_probe(
-            case_id=case_id,
-            client_context={
-                "source": "real_llm_initiative_matrix",
-                "client_id": "real-llm-initiative-stale-schedule",
-                "active_app": "RealLLMInitiativeStaleSchedule",
-                "window_title": marker,
-                "locale": "ja-JP",
-            },
-        )
-        self._assert_initiative_probe_trace(
-            trace,
-            case_id=case_id,
-            expected_trigger_kind="wake",
-            expected_result_kind="capability_request",
-            expected_selected_family="autonomous",
-            expected_preferred_result_kind="capability_request",
-            expected_preferred_capability_id="schedule.status",
-            expected_foreground_thinness="grounded",
-            expected_world_state_type="schedule",
-        )
-        request_summary = ((trace.get("result_trace") or {}).get("capability_request_summary"))
-        if not isinstance(request_summary, dict) or request_summary.get("capability_id") != "schedule.status":
-            raise SmokeError("real-llm initiative stale-schedule probe capability request was invalid.")
-        request_id = request_summary.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            raise SmokeError("real-llm initiative stale-schedule probe request_id was not recorded.")
-        followup_trace = self._wait_for_capability_result_followup_by_request_id(request_id=request_id)
-        self._assert_status_refresh_probe_followup(
-            trace=followup_trace,
-            case_id=case_id,
-            expected_source_capability_id="schedule.status",
-            expected_world_state_type="schedule",
-        )
-        return case_id, trace
-
-    def _run_real_llm_initiative_probe_missing_social_status(self) -> tuple[str, dict[str, Any]]:
-        case_id = "missing-social-status-probe"
-        marker = "RealLLMInitiativeMissingSocialStatusMarker"
-        social_context_summary = f"{marker}: 現在の対人文脈は落ち着いており、短い確認で足りる。"
-        self._seed_initiative_probe_drive(
-            drive_id=f"drive:{case_id}",
-            drive_kind="relationship_attunement",
-            summary_text=f"{marker}: 対人文脈を確認してから短く気遣いたい。",
-            focus_scope_key=marker,
-        )
-        self._queue_social_status_override(
-            {
-                "social_context_summary": social_context_summary,
-                "environment_summary": "social.status を返せる desktop client が接続中。",
-            }
-        )
-        trace = self._run_manual_wake_probe(
-            case_id=case_id,
-            client_context={
-                "source": "real_llm_initiative_matrix",
-                "client_id": "real-llm-initiative-missing-social",
-                "active_app": "RealLLMInitiativeMissingSocial",
-                "window_title": marker,
-                "locale": "ja-JP",
-            },
-        )
-        self._assert_initiative_probe_trace(
-            trace,
-            case_id=case_id,
-            expected_trigger_kind="wake",
-            expected_result_kind="capability_request",
-            expected_selected_family="autonomous",
-            expected_preferred_result_kind="capability_request",
-            expected_preferred_capability_id="social.status",
-            expected_foreground_thinness="thin",
-        )
-        request_summary = ((trace.get("result_trace") or {}).get("capability_request_summary"))
-        if not isinstance(request_summary, dict) or request_summary.get("capability_id") != "social.status":
-            raise SmokeError("real-llm initiative missing-social probe capability request was invalid.")
-        request_id = request_summary.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            raise SmokeError("real-llm initiative missing-social probe request_id was not recorded.")
-        followup_trace = self._wait_for_capability_result_followup_by_request_id(request_id=request_id)
-        self._assert_status_refresh_probe_followup(
-            trace=followup_trace,
-            case_id=case_id,
-            expected_source_capability_id="social.status",
-            expected_world_state_type="social_context",
-        )
-        return case_id, trace
-
-    def _run_real_llm_initiative_probe_stale_external_status(self) -> tuple[str, dict[str, Any]]:
-        case_id = "stale-external-status-probe"
-        marker = "RealLLMInitiativeStaleExternalStatusMarker"
-        status_text = f"{marker}: GitHub の未確認レビューは 1 件ある。"
-        self._seed_initiative_probe_drive(
-            drive_id=f"drive:{case_id}",
-            drive_kind="topic_continuation",
-            summary_text=f"{marker}: GitHub レビューの外部サービス状態を確認してから続けたい。",
-            focus_scope_key=marker,
-        )
-        self._seed_initiative_probe_world_state(
-            world_state_id=f"world:{case_id}",
-            state_type="external_service",
-            scope_key=marker,
-            summary_text=f"{marker}: 90 分前時点では GitHub の未確認レビューがあった。",
-            age_minutes=12,
-        )
-        self._queue_external_status_override(
-            {
-                "status_text": status_text,
-                "client_context": {
-                    "external_service_summary": status_text,
-                },
-            }
-        )
-        trace = self._run_manual_wake_probe(
-            case_id=case_id,
-            client_context={
-                "source": "real_llm_initiative_matrix",
-                "client_id": "real-llm-initiative-stale-external",
-                "active_app": "RealLLMInitiativeStaleExternal",
-                "window_title": marker,
-                "locale": "ja-JP",
-            },
-        )
-        self._assert_initiative_probe_trace(
-            trace,
-            case_id=case_id,
-            expected_trigger_kind="wake",
-            expected_result_kind="capability_request",
-            expected_selected_family="autonomous",
-            expected_preferred_result_kind="capability_request",
-            expected_preferred_capability_id="external.status",
-            expected_foreground_thinness="thin",
-            expected_world_state_type="external_service",
-        )
-        request_summary = ((trace.get("result_trace") or {}).get("capability_request_summary"))
-        if not isinstance(request_summary, dict) or request_summary.get("capability_id") != "external.status":
-            raise SmokeError("real-llm initiative stale-external probe capability request was invalid.")
-        request_id = request_summary.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            raise SmokeError("real-llm initiative stale-external probe request_id was not recorded.")
-        followup_trace = self._wait_for_capability_result_followup_by_request_id(request_id=request_id)
-        self._assert_status_refresh_probe_followup(
-            trace=followup_trace,
-            case_id=case_id,
-            expected_source_capability_id="external.status",
-            expected_world_state_type="external_service",
-        )
-        return case_id, trace
-
-    def _run_real_llm_initiative_probe_missing_device_status(self) -> tuple[str, dict[str, Any]]:
-        case_id = "missing-device-status-probe"
-        marker = "RealLLMInitiativeMissingDeviceStatusMarker"
-        device_state_summary = f"{marker}: 端末接続は安定しており、作業を続けられる。"
-        self._seed_initiative_probe_drive(
-            drive_id=f"drive:{case_id}",
-            drive_kind="person_attention",
-            summary_text=f"{marker}: 端末の接続状態を確認してから短く判断したい。",
-            focus_scope_key=marker,
-        )
-        self._queue_device_status_override(
-            {
-                "device_state_summary": device_state_summary,
-            }
-        )
-        trace = self._run_manual_wake_probe(
-            case_id=case_id,
-            client_context={
-                "source": "real_llm_initiative_matrix",
-                "client_id": "real-llm-initiative-missing-device",
-                "active_app": "RealLLMInitiativeMissingDevice",
-                "window_title": marker,
-                "locale": "ja-JP",
-            },
-        )
-        self._assert_initiative_probe_trace(
-            trace,
-            case_id=case_id,
-            expected_trigger_kind="wake",
-            expected_result_kind="capability_request",
-            expected_selected_family="autonomous",
-            expected_preferred_result_kind="capability_request",
-            expected_preferred_capability_id="device.status",
-            expected_foreground_thinness="thin",
-        )
-        request_summary = ((trace.get("result_trace") or {}).get("capability_request_summary"))
-        if not isinstance(request_summary, dict) or request_summary.get("capability_id") != "device.status":
-            raise SmokeError("real-llm initiative missing-device probe capability request was invalid.")
-        request_id = request_summary.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            raise SmokeError("real-llm initiative missing-device probe request_id was not recorded.")
-        followup_trace = self._wait_for_capability_result_followup_by_request_id(request_id=request_id)
-        self._assert_status_refresh_probe_followup(
-            trace=followup_trace,
-            case_id=case_id,
-            expected_source_capability_id="device.status",
-            expected_world_state_type="device",
-        )
-        return case_id, trace
-
-    def _run_real_llm_initiative_probe_missing_body_status(self) -> tuple[str, dict[str, Any]]:
-        return self._run_real_llm_initiative_probe_missing_status(
-            case_id="missing-body-status-probe",
-            marker="RealLLMInitiativeMissingBodyStatusMarker",
-            capability_id="body.status",
-            world_state_type="body",
-            drive_kind="self_regulation",
-            drive_summary="身体状態が不明なので、体調を確認してから短く整えたい。",
-            override={
-                "body_state_summary": "身体状態は大きな支障がなく、短い休憩で整えられる。",
-            },
-            client_id="real-llm-initiative-missing-body",
-            active_app="RealLLMInitiativeMissingBody",
-        )
-
-    def _run_real_llm_initiative_probe_missing_environment_status(self) -> tuple[str, dict[str, Any]]:
-        return self._run_real_llm_initiative_probe_missing_status(
-            case_id="missing-environment-status-probe",
-            marker="RealLLMInitiativeMissingEnvironmentStatusMarker",
-            capability_id="environment.status",
-            world_state_type="environment",
-            drive_kind="self_regulation",
-            drive_summary="作業環境が不明なので、周囲の状態を確認してから短く整えたい。",
-            override={
-                "environment_summary": "周囲は静かで、作業を続けるには十分な環境である。",
-            },
-            client_id="real-llm-initiative-missing-environment",
-            active_app="RealLLMInitiativeMissingEnvironment",
-        )
-
-    def _run_real_llm_initiative_probe_missing_location_status(self) -> tuple[str, dict[str, Any]]:
-        return self._run_real_llm_initiative_probe_missing_status(
-            case_id="missing-location-status-probe",
-            marker="RealLLMInitiativeMissingLocationStatusMarker",
-            capability_id="location.status",
-            world_state_type="location",
-            drive_kind="follow_through",
-            drive_summary="現在地が不明なので、作業場所を確認してから短く続けたい。",
-            override={
-                "location_summary": "現在は自宅デスクで作業しており、移動は不要である。",
-            },
-            client_id="real-llm-initiative-missing-location",
-            active_app="RealLLMInitiativeMissingLocation",
-        )
-
-    def _run_real_llm_initiative_probe_missing_status(
-        self,
-        *,
-        case_id: str,
-        marker: str,
-        capability_id: str,
-        world_state_type: str,
-        drive_kind: str,
-        drive_summary: str,
-        override: dict[str, Any],
-        client_id: str,
-        active_app: str,
-    ) -> tuple[str, dict[str, Any]]:
-        self._seed_initiative_probe_drive(
-            drive_id=f"drive:{case_id}",
-            drive_kind=drive_kind,
-            summary_text=f"{marker}: {drive_summary}",
-            focus_scope_key=marker,
-        )
-        self._queue_initiative_probe_status_override(
-            capability_id=capability_id,
-            override=override,
-        )
-        trace = self._run_manual_wake_probe(
-            case_id=case_id,
-            client_context={
-                "source": "real_llm_initiative_matrix",
-                "client_id": client_id,
-                "active_app": active_app,
-                "window_title": marker,
-                "locale": "ja-JP",
-            },
-        )
-        self._assert_initiative_probe_trace(
-            trace,
-            case_id=case_id,
-            expected_trigger_kind="wake",
-            expected_result_kind="capability_request",
-            expected_selected_family="autonomous",
-            expected_preferred_result_kind="capability_request",
-            expected_preferred_capability_id=capability_id,
-            expected_foreground_thinness="thin",
-        )
-        request_summary = ((trace.get("result_trace") or {}).get("capability_request_summary"))
-        if not isinstance(request_summary, dict) or request_summary.get("capability_id") != capability_id:
-            raise SmokeError(f"real-llm initiative {case_id} capability request was invalid.")
-        request_id = request_summary.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            raise SmokeError(f"real-llm initiative {case_id} request_id was not recorded.")
-        followup_trace = self._wait_for_capability_result_followup_by_request_id(request_id=request_id)
-        self._assert_status_refresh_probe_followup(
-            trace=followup_trace,
-            case_id=case_id,
-            expected_source_capability_id=capability_id,
-            expected_world_state_type=world_state_type,
-        )
-        return case_id, trace
-
-    def _queue_initiative_probe_status_override(
-        self,
-        *,
-        capability_id: str,
-        override: dict[str, Any],
-    ) -> None:
-        if capability_id == "body.status":
-            self._queue_body_status_override(override)
-            return
-        if capability_id == "environment.status":
-            self._queue_environment_status_override(override)
-            return
-        if capability_id == "location.status":
-            self._queue_location_status_override(override)
-            return
-        raise SmokeError(f"unsupported initiative status override capability: {capability_id}")
 
     def _run_real_llm_initiative_probe_schedule_speech(self) -> tuple[str, dict[str, Any]]:
         case_id = "schedule-grounded-speech"
@@ -3445,7 +2026,7 @@ class LongSmokeRunner:
         return case_id, trace
 
     def _run_real_llm_initiative_probe_external_speech(self) -> tuple[str, dict[str, Any]]:
-        return self._run_real_llm_initiative_probe_fresh_status_speech(
+        return self._run_real_llm_initiative_probe_grounded_speech(
             case_id="external-fresh-speech",
             marker="RealLLMInitiativeExternalSpeechMarker",
             drive_kind="topic_continuation",
@@ -3458,7 +2039,7 @@ class LongSmokeRunner:
         )
 
     def _run_real_llm_initiative_probe_device_speech(self) -> tuple[str, dict[str, Any]]:
-        return self._run_real_llm_initiative_probe_fresh_status_speech(
+        return self._run_real_llm_initiative_probe_grounded_speech(
             case_id="device-fresh-speech",
             marker="RealLLMInitiativeDeviceSpeechMarker",
             drive_kind="person_attention",
@@ -3471,7 +2052,7 @@ class LongSmokeRunner:
         )
 
     def _run_real_llm_initiative_probe_environment_speech(self) -> tuple[str, dict[str, Any]]:
-        return self._run_real_llm_initiative_probe_fresh_status_speech(
+        return self._run_real_llm_initiative_probe_grounded_speech(
             case_id="environment-fresh-speech",
             marker="RealLLMInitiativeEnvironmentSpeechMarker",
             drive_kind="self_regulation",
@@ -3484,7 +2065,7 @@ class LongSmokeRunner:
         )
 
     def _run_real_llm_initiative_probe_location_speech(self) -> tuple[str, dict[str, Any]]:
-        return self._run_real_llm_initiative_probe_fresh_status_speech(
+        return self._run_real_llm_initiative_probe_grounded_speech(
             case_id="location-fresh-speech",
             marker="RealLLMInitiativeLocationSpeechMarker",
             drive_kind="follow_through",
@@ -3496,7 +2077,7 @@ class LongSmokeRunner:
             expected_foreground_thinness="mixed",
         )
 
-    def _run_real_llm_initiative_probe_fresh_status_speech(
+    def _run_real_llm_initiative_probe_grounded_speech(
         self,
         *,
         case_id: str,
@@ -3711,7 +2292,7 @@ class LongSmokeRunner:
         cycle_id: str | None = None
         try:
             self._set_wake_policy_interval(interval_seconds=interval_seconds)
-            deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
+            deadline = time.monotonic() + WAIT_CAPABILITY_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
             while time.monotonic() < deadline:
                 self._assert_server_running()
                 self._assert_event_clients_healthy()
@@ -3779,7 +2360,7 @@ class LongSmokeRunner:
         return self._wait_for_cycle_memory_to_finish(cycle_id)
 
     def _wait_for_capability_result_followup_by_request_id(self, *, request_id: str) -> dict[str, Any]:
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
+        deadline = time.monotonic() + WAIT_CAPABILITY_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
         inspected_cycle_ids: set[str] = set()
         while time.monotonic() < deadline:
             self._assert_server_running()
@@ -3865,42 +2446,6 @@ class LongSmokeRunner:
             "followup_capability_id": followup_capability_id,
         }
         self.real_llm_capability_result_probe_verified = True
-
-    def _assert_status_refresh_probe_followup(
-        self,
-        *,
-        trace: dict[str, Any],
-        case_id: str,
-        expected_source_capability_id: str,
-        expected_world_state_type: str | None = None,
-    ) -> None:
-        cycle_summary = trace.get("cycle_summary", {})
-        if not isinstance(cycle_summary, dict) or cycle_summary.get("trigger_kind") != "capability_result":
-            raise SmokeError(f"real-llm status refresh probe follow-up trigger_kind was invalid: {case_id}")
-        result_trace = trace.get("result_trace", {})
-        if not isinstance(result_trace, dict):
-            raise SmokeError(f"real-llm status refresh probe follow-up result_trace was invalid: {case_id}")
-        followup_summary = result_trace.get("capability_result_followup_summary", {})
-        if not isinstance(followup_summary, dict):
-            raise SmokeError(f"real-llm status refresh probe follow-up summary was invalid: {case_id}")
-        if followup_summary.get("capability_id") != expected_source_capability_id:
-            raise SmokeError(f"real-llm status refresh probe follow-up source capability was invalid: {case_id}")
-        if expected_world_state_type is not None:
-            world_state_trace = trace.get("world_state_trace", {})
-            foreground_world_state = (
-                world_state_trace.get("foreground_world_state")
-                if isinstance(world_state_trace, dict)
-                else None
-            )
-            if not isinstance(foreground_world_state, list) or not any(
-                isinstance(item, dict) and item.get("state_type") == expected_world_state_type
-                for item in foreground_world_state
-            ):
-                raise SmokeError(f"real-llm status refresh probe follow-up world_state was invalid: {case_id}")
-        self._assert_memory_trace_succeeded(
-            trace,
-            f"real-llm initiative {case_id} status refresh follow-up",
-        )
 
     def _assert_initiative_probe_trace(
         self,
@@ -4084,145 +2629,6 @@ class LongSmokeRunner:
             "noop_reason_summary": result_trace.get("noop_reason_summary"),
         }
 
-    def _exercise_external_status_followup(self) -> None:
-        github_marker = "LongSmokeExternalStatusProbeMarker"
-        github_status_text = f"{github_marker}: GitHub の未確認レビューが 1 件ある。"
-        conversation_trace, followup_trace = self._run_external_status_probe(
-            marker=github_marker,
-            conversation_text=f"GitHub の通知の状態を確認して教えて。{github_marker}",
-            source="long_smoke_external_status_probe",
-            client_id="long-smoke-external-status-probe",
-            active_app="LongSmokeExternalStatusProbe",
-            window_title=github_marker,
-            override={
-                "status_text": github_status_text,
-                "client_context": {
-                    "external_service_summary": github_status_text,
-                    "body_state_summary": "少し肩に疲れがある。",
-                    "device_state_summary": "external.status を返せる desktop client が接続中。",
-                    "schedule_summary": "GitHub の通知確認をこのまま進められる。",
-                },
-            },
-        )
-        conversation_cycle_id = conversation_trace.get("cycle_id")
-        if not isinstance(conversation_cycle_id, str) or not conversation_cycle_id:
-            raise SmokeError("external.status probe conversation cycle_id was not recorded.")
-        self.external_status_probe_conversation_cycle_id = conversation_cycle_id
-        followup_cycle_id = followup_trace.get("cycle_id")
-        if not isinstance(followup_cycle_id, str) or not followup_cycle_id:
-            raise SmokeError("external.status follow-up cycle_id was not recorded.")
-        self.external_status_probe_followup_cycle_id = followup_cycle_id
-
-        calendar_marker = "LongSmokeCalendarStatusProbeMarker"
-        calendar_status_text = f"{calendar_marker}: カレンダーに 30 分後の予定がある。"
-        self._run_external_status_probe(
-            marker=calendar_marker,
-            conversation_text=f"calendar service の状態を確認して教えて。{calendar_marker}",
-            source="long_smoke_calendar_status_probe",
-            client_id="long-smoke-calendar-status-probe",
-            active_app="LongSmokeCalendarStatusProbe",
-            window_title=calendar_marker,
-            override={
-                "status_text": calendar_status_text,
-                "client_context": {
-                    "external_service_summary": calendar_status_text,
-                    "body_state_summary": "少し肩に疲れがある。",
-                    "device_state_summary": "external.status を返せる desktop client が接続中。",
-                    "schedule_summary": "このあとカレンダーの予定確認を進められる。",
-                },
-            },
-        )
-        persisted_external_service_states = self._list_persisted_world_states(state_type="external_service")
-        integration_keys = sorted(
-            {
-                str(record.get("integration_key") or "").strip()
-                for record in persisted_external_service_states
-                if isinstance(record, dict) and isinstance(record.get("integration_key"), str) and record.get("integration_key", "").strip()
-            }
-        )
-        self.external_status_persisted_integration_keys = integration_keys
-        if "external_service:github" not in integration_keys or "external_service:calendar" not in integration_keys:
-            raise SmokeError("external.status multi-service world_state integration was not persisted.")
-        self.external_status_multi_service_verified = True
-        self.external_status_probe_verified = True
-        log(
-            "external.status followup confirmed"
-            f" conversation_cycle_id={conversation_cycle_id}"
-            f" followup_cycle_id={followup_cycle_id}"
-        )
-
-    def _exercise_schedule_status_followup(self) -> None:
-        marker = "LongSmokeScheduleStatusProbeMarker"
-        schedule_summary = f"{marker}: 45 分後に long smoke の予定確認がある。"
-        conversation_trace, followup_trace = self._run_schedule_status_probe(
-            marker=marker,
-            conversation_text=f"このあとの予定を確認して教えて。{marker}",
-            source="long_smoke_schedule_status_probe",
-            client_id="long-smoke-schedule-status-probe",
-            active_app="LongSmokeScheduleStatusProbe",
-            window_title=marker,
-            override={
-                "schedule_summary": schedule_summary,
-                "schedule_slots": [
-                    {
-                        "slot_key": "long-smoke-schedule",
-                        "summary_text": schedule_summary,
-                    }
-                ],
-                "client_context": {
-                    "body_state_summary": "少し肩に疲れがある。",
-                    "device_state_summary": "schedule.status を返せる desktop client が接続中。",
-                },
-            },
-        )
-        conversation_cycle_id = conversation_trace.get("cycle_id")
-        if not isinstance(conversation_cycle_id, str) or not conversation_cycle_id:
-            raise SmokeError("schedule.status probe conversation cycle_id was not recorded.")
-        self.schedule_status_probe_conversation_cycle_id = conversation_cycle_id
-        followup_cycle_id = followup_trace.get("cycle_id")
-        if not isinstance(followup_cycle_id, str) or not followup_cycle_id:
-            raise SmokeError("schedule.status follow-up cycle_id was not recorded.")
-        self.schedule_status_probe_followup_cycle_id = followup_cycle_id
-        self.schedule_status_probe_verified = True
-        log(
-            "schedule.status followup confirmed"
-            f" conversation_cycle_id={conversation_cycle_id}"
-            f" followup_cycle_id={followup_cycle_id}"
-        )
-
-    def _exercise_device_status_followup(self) -> None:
-        marker = "LongSmokeDeviceStatusProbeMarker"
-        device_state_summary = f"{marker}: ネットワーク接続は安定し、電源も利用可能。"
-        conversation_trace, followup_trace = self._run_device_status_probe(
-            marker=marker,
-            conversation_text=f"この端末の接続状態を確認して教えて。{marker}",
-            source="long_smoke_device_status_probe",
-            client_id="long-smoke-device-status-probe",
-            active_app="LongSmokeDeviceStatusProbe",
-            window_title=marker,
-            override={
-                "device_state_summary": device_state_summary,
-                "client_context": {
-                    "body_state_summary": "少し肩に疲れがある。",
-                    "schedule_summary": "端末状態確認をこのまま進められる。",
-                },
-            },
-        )
-        conversation_cycle_id = conversation_trace.get("cycle_id")
-        if not isinstance(conversation_cycle_id, str) or not conversation_cycle_id:
-            raise SmokeError("device.status probe conversation cycle_id was not recorded.")
-        self.device_status_probe_conversation_cycle_id = conversation_cycle_id
-        followup_cycle_id = followup_trace.get("cycle_id")
-        if not isinstance(followup_cycle_id, str) or not followup_cycle_id:
-            raise SmokeError("device.status follow-up cycle_id was not recorded.")
-        self.device_status_probe_followup_cycle_id = followup_cycle_id
-        self.device_status_probe_verified = True
-        log(
-            "device.status followup confirmed"
-            f" conversation_cycle_id={conversation_cycle_id}"
-            f" followup_cycle_id={followup_cycle_id}"
-        )
-
     def _exercise_multiple_client_boundary(self) -> None:
         pause_seconds = max(self.args.multiple_client_pause_seconds, 0.0)
         if pause_seconds <= 0:
@@ -4316,7 +2722,6 @@ class LongSmokeRunner:
                     f" in_progress={runtime_summary.get('memory_job_in_progress')}"
                     f" captures={self.capture_request_count}"
                     f" camera_ptz={self.camera_ptz_request_count}"
-                    f" external_status={self.external_status_request_count}"
                 )
                 last_status_log_at = now
 
@@ -5068,186 +3473,6 @@ class LongSmokeRunner:
         )
         conversation_trace = self._wait_for_cycle_memory_to_finish(conversation_cycle_id)
 
-        marker = "RealLLMExternalStatusProbeMarker"
-        status_text = f"{marker}: GitHub の未確認レビューが 1 件ある。"
-        capability_conversation_trace, followup_trace = self._run_external_status_probe(
-            marker=marker,
-            conversation_text=f"GitHub の通知の状態を確認して教えて。{marker}",
-            source="real_llm_smoke_external_status",
-            client_id="real-llm-smoke-external-status",
-            active_app="RealLLMSmokeExternalStatus",
-            window_title=marker,
-            override={
-                "status_text": status_text,
-                "suppress_default_client_context": True,
-            },
-        )
-        capability_conversation_cycle_id = capability_conversation_trace.get("cycle_id")
-        followup_cycle_id = followup_trace.get("cycle_id")
-        if not isinstance(capability_conversation_cycle_id, str) or not capability_conversation_cycle_id:
-            raise SmokeError("real-llm-smoke external.status conversation cycle_id was not recorded.")
-        if not isinstance(followup_cycle_id, str) or not followup_cycle_id:
-            raise SmokeError("real-llm-smoke external.status follow-up cycle_id was not recorded.")
-
-        schedule_marker = "RealLLMScheduleStatusProbeMarker"
-        schedule_summary = f"{schedule_marker}: 30 分後に実 LLM smoke の予定確認がある。"
-        schedule_conversation_trace, schedule_followup_trace = self._run_schedule_status_probe(
-            marker=schedule_marker,
-            conversation_text=f"このあとの予定を確認して教えて。{schedule_marker}",
-            source="real_llm_smoke_schedule_status",
-            client_id="real-llm-smoke-schedule-status",
-            active_app="RealLLMSmokeScheduleStatus",
-            window_title=schedule_marker,
-            override={
-                "schedule_summary": schedule_summary,
-                "schedule_slots": [
-                    {
-                        "slot_key": "real-llm-smoke-schedule",
-                        "summary_text": schedule_summary,
-                    }
-                ],
-                "suppress_default_client_context": True,
-            },
-        )
-        schedule_conversation_cycle_id = schedule_conversation_trace.get("cycle_id")
-        schedule_followup_cycle_id = schedule_followup_trace.get("cycle_id")
-        if not isinstance(schedule_conversation_cycle_id, str) or not schedule_conversation_cycle_id:
-            raise SmokeError("real-llm-smoke schedule.status conversation cycle_id was not recorded.")
-        if not isinstance(schedule_followup_cycle_id, str) or not schedule_followup_cycle_id:
-            raise SmokeError("real-llm-smoke schedule.status follow-up cycle_id was not recorded.")
-        self.schedule_status_probe_conversation_cycle_id = schedule_conversation_cycle_id
-        self.schedule_status_probe_followup_cycle_id = schedule_followup_cycle_id
-        self.schedule_status_probe_verified = True
-
-        social_marker = "RealLLMSocialStatusProbeMarker"
-        social_context_summary = f"{social_marker}: 今は緊急の連絡はなく、会話文脈は落ち着いている。"
-        social_conversation_trace, social_followup_trace = self._run_social_status_probe(
-            marker=social_marker,
-            conversation_text=f"今の対人文脈や会話状況をクライアント側の現在文脈として確認して教えて。{social_marker}",
-            source="real_llm_smoke_social_status",
-            client_id="real-llm-smoke-social-status",
-            active_app="RealLLMSmokeSocialStatus",
-            window_title=social_marker,
-            override={
-                "social_context_summary": social_context_summary,
-            },
-        )
-        social_conversation_cycle_id = social_conversation_trace.get("cycle_id")
-        social_followup_cycle_id = social_followup_trace.get("cycle_id")
-        if not isinstance(social_conversation_cycle_id, str) or not social_conversation_cycle_id:
-            raise SmokeError("real-llm-smoke social.status conversation cycle_id was not recorded.")
-        if not isinstance(social_followup_cycle_id, str) or not social_followup_cycle_id:
-            raise SmokeError("real-llm-smoke social.status follow-up cycle_id was not recorded.")
-        self.social_status_probe_conversation_cycle_id = social_conversation_cycle_id
-        self.social_status_probe_followup_cycle_id = social_followup_cycle_id
-        self.social_status_probe_verified = True
-
-        device_marker = "RealLLMDeviceStatusProbeMarker"
-        device_state_summary = f"{device_marker}: ネットワーク接続は安定し、電源も利用可能。"
-        device_conversation_trace, device_followup_trace = self._run_device_status_probe(
-            marker=device_marker,
-            conversation_text=f"この端末の接続状態を確認して教えて。{device_marker}",
-            source="real_llm_smoke_device_status",
-            client_id="real-llm-smoke-device-status",
-            active_app="RealLLMSmokeDeviceStatus",
-            window_title=device_marker,
-            override={
-                "device_state_summary": device_state_summary,
-            },
-        )
-        device_conversation_cycle_id = device_conversation_trace.get("cycle_id")
-        device_followup_cycle_id = device_followup_trace.get("cycle_id")
-        if not isinstance(device_conversation_cycle_id, str) or not device_conversation_cycle_id:
-            raise SmokeError("real-llm-smoke device.status conversation cycle_id was not recorded.")
-        if not isinstance(device_followup_cycle_id, str) or not device_followup_cycle_id:
-            raise SmokeError("real-llm-smoke device.status follow-up cycle_id was not recorded.")
-        self.device_status_probe_conversation_cycle_id = device_conversation_cycle_id
-        self.device_status_probe_followup_cycle_id = device_followup_cycle_id
-        self.device_status_probe_verified = True
-
-        body_marker = "RealLLMBodyStatusProbeMarker"
-        body_state_summary = f"{body_marker}: 肩に少し疲れがあり、短い休憩を挟むとよい状態。"
-        body_conversation_trace, body_followup_trace = self._run_body_status_probe(
-            marker=body_marker,
-            conversation_text=f"記憶や既存文脈から推測せず、クライアント側の現在の身体状態として確認して教えて。{body_marker}",
-            source="real_llm_smoke_body_status",
-            client_id="real-llm-smoke-body-status",
-            active_app="RealLLMSmokeBodyStatus",
-            window_title=body_marker,
-            override={
-                "body_state_summary": body_state_summary,
-            },
-        )
-        body_conversation_cycle_id = body_conversation_trace.get("cycle_id")
-        body_followup_cycle_id = body_followup_trace.get("cycle_id")
-        if not isinstance(body_conversation_cycle_id, str) or not body_conversation_cycle_id:
-            raise SmokeError("real-llm-smoke body.status conversation cycle_id was not recorded.")
-        if not isinstance(body_followup_cycle_id, str) or not body_followup_cycle_id:
-            raise SmokeError("real-llm-smoke body.status follow-up cycle_id was not recorded.")
-        self.body_status_probe_conversation_cycle_id = body_conversation_cycle_id
-        self.body_status_probe_followup_cycle_id = body_followup_cycle_id
-        self.body_status_probe_verified = True
-
-        environment_marker = "RealLLMEnvironmentStatusProbeMarker"
-        environment_summary = f"{environment_marker}: 周囲は静かで、集中しやすい環境。"
-        environment_conversation_trace, environment_followup_trace = self._run_environment_status_probe(
-            marker=environment_marker,
-            conversation_text=f"今の作業環境を確認して教えて。{environment_marker}",
-            source="real_llm_smoke_environment_status",
-            client_id="real-llm-smoke-environment-status",
-            active_app="RealLLMSmokeEnvironmentStatus",
-            window_title=environment_marker,
-            override={
-                "environment_summary": environment_summary,
-            },
-        )
-        environment_conversation_cycle_id = environment_conversation_trace.get("cycle_id")
-        environment_followup_cycle_id = environment_followup_trace.get("cycle_id")
-        if not isinstance(environment_conversation_cycle_id, str) or not environment_conversation_cycle_id:
-            raise SmokeError("real-llm-smoke environment.status conversation cycle_id was not recorded.")
-        if not isinstance(environment_followup_cycle_id, str) or not environment_followup_cycle_id:
-            raise SmokeError("real-llm-smoke environment.status follow-up cycle_id was not recorded.")
-        self.environment_status_probe_conversation_cycle_id = environment_conversation_cycle_id
-        self.environment_status_probe_followup_cycle_id = environment_followup_cycle_id
-        self.environment_status_probe_verified = True
-
-        location_marker = "RealLLMLocationStatusProbeMarker"
-        location_summary = f"{location_marker}: 現在は自宅デスクで作業している。"
-        location_conversation_trace, location_followup_trace = self._run_location_status_probe(
-            marker=location_marker,
-            conversation_text=f"記憶から推測せず、今の居場所をクライアント側の現在場所として確認して教えて。{location_marker}",
-            source="real_llm_smoke_location_status",
-            client_id="real-llm-smoke-location-status",
-            active_app="RealLLMSmokeLocationStatus",
-            window_title=location_marker,
-            override={
-                "location_summary": location_summary,
-            },
-        )
-        location_conversation_cycle_id = location_conversation_trace.get("cycle_id")
-        location_followup_cycle_id = location_followup_trace.get("cycle_id")
-        if not isinstance(location_conversation_cycle_id, str) or not location_conversation_cycle_id:
-            raise SmokeError("real-llm-smoke location.status conversation cycle_id was not recorded.")
-        if not isinstance(location_followup_cycle_id, str) or not location_followup_cycle_id:
-            raise SmokeError("real-llm-smoke location.status follow-up cycle_id was not recorded.")
-        self.location_status_probe_conversation_cycle_id = location_conversation_cycle_id
-        self.location_status_probe_followup_cycle_id = location_followup_cycle_id
-        self.location_status_probe_verified = True
-
-        capability_conversation_trace = self._wait_for_cycle_memory_to_finish(capability_conversation_cycle_id)
-        followup_trace = self._wait_for_cycle_memory_to_finish(followup_cycle_id)
-        schedule_conversation_trace = self._wait_for_cycle_memory_to_finish(schedule_conversation_cycle_id)
-        schedule_followup_trace = self._wait_for_cycle_memory_to_finish(schedule_followup_cycle_id)
-        social_conversation_trace = self._wait_for_cycle_memory_to_finish(social_conversation_cycle_id)
-        social_followup_trace = self._wait_for_cycle_memory_to_finish(social_followup_cycle_id)
-        device_conversation_trace = self._wait_for_cycle_memory_to_finish(device_conversation_cycle_id)
-        device_followup_trace = self._wait_for_cycle_memory_to_finish(device_followup_cycle_id)
-        body_conversation_trace = self._wait_for_cycle_memory_to_finish(body_conversation_cycle_id)
-        body_followup_trace = self._wait_for_cycle_memory_to_finish(body_followup_cycle_id)
-        environment_conversation_trace = self._wait_for_cycle_memory_to_finish(environment_conversation_cycle_id)
-        environment_followup_trace = self._wait_for_cycle_memory_to_finish(environment_followup_cycle_id)
-        location_conversation_trace = self._wait_for_cycle_memory_to_finish(location_conversation_cycle_id)
-        location_followup_trace = self._wait_for_cycle_memory_to_finish(location_followup_cycle_id)
         self._wait_for_memory_jobs_to_drain()
         initiative_probe_traces = self._run_real_llm_initiative_matrix()
         initiative_probe_case_results = self._real_llm_initiative_probe_case_results(initiative_probe_traces)
@@ -5265,21 +3490,6 @@ class LongSmokeRunner:
                 + json.dumps(self.real_llm_memory_trace_shape_digest, ensure_ascii=False, sort_keys=True)
             )
         conversation_trace = self.api.get(f"/api/inspection/cycles/{conversation_cycle_id}")
-        capability_conversation_trace = self.api.get(f"/api/inspection/cycles/{capability_conversation_cycle_id}")
-        followup_trace = self.api.get(f"/api/inspection/cycles/{followup_cycle_id}")
-        schedule_conversation_trace = self.api.get(f"/api/inspection/cycles/{schedule_conversation_cycle_id}")
-        schedule_followup_trace = self.api.get(f"/api/inspection/cycles/{schedule_followup_cycle_id}")
-        social_conversation_trace = self.api.get(f"/api/inspection/cycles/{social_conversation_cycle_id}")
-        social_followup_trace = self.api.get(f"/api/inspection/cycles/{social_followup_cycle_id}")
-        device_conversation_trace = self.api.get(f"/api/inspection/cycles/{device_conversation_cycle_id}")
-        device_followup_trace = self.api.get(f"/api/inspection/cycles/{device_followup_cycle_id}")
-        body_conversation_trace = self.api.get(f"/api/inspection/cycles/{body_conversation_cycle_id}")
-        body_followup_trace = self.api.get(f"/api/inspection/cycles/{body_followup_cycle_id}")
-        environment_conversation_trace = self.api.get(f"/api/inspection/cycles/{environment_conversation_cycle_id}")
-        environment_followup_trace = self.api.get(f"/api/inspection/cycles/{environment_followup_cycle_id}")
-        location_conversation_trace = self.api.get(f"/api/inspection/cycles/{location_conversation_cycle_id}")
-        location_followup_trace = self.api.get(f"/api/inspection/cycles/{location_followup_cycle_id}")
-
         status = self._get_status()
         summary = {
             "artifacts_dir": str(self.artifact_dir),
@@ -5290,62 +3500,6 @@ class LongSmokeRunner:
             "status": status,
             "conversation_cycle_id": conversation_cycle_id,
             "conversation_trace": conversation_trace,
-            "external_status_conversation_cycle_id": capability_conversation_cycle_id,
-            "external_status_conversation_trace": capability_conversation_trace,
-            "external_status_followup_cycle_id": followup_cycle_id,
-            "external_status_followup_trace": followup_trace,
-            "external_status_request_count": self.external_status_request_count,
-            "external_status_response_count": self.external_status_response_count,
-            "external_status_request_ids": self.external_status_request_ids,
-            "external_status_followup_verified_request_ids": self.external_status_followup_verified_request_ids,
-            "schedule_status_conversation_cycle_id": schedule_conversation_cycle_id,
-            "schedule_status_conversation_trace": schedule_conversation_trace,
-            "schedule_status_followup_cycle_id": schedule_followup_cycle_id,
-            "schedule_status_followup_trace": schedule_followup_trace,
-            "schedule_status_request_count": self.schedule_status_request_count,
-            "schedule_status_response_count": self.schedule_status_response_count,
-            "schedule_status_request_ids": self.schedule_status_request_ids,
-            "schedule_status_followup_verified_request_ids": self.schedule_status_followup_verified_request_ids,
-            "social_status_conversation_cycle_id": social_conversation_cycle_id,
-            "social_status_conversation_trace": social_conversation_trace,
-            "social_status_followup_cycle_id": social_followup_cycle_id,
-            "social_status_followup_trace": social_followup_trace,
-            "social_status_request_count": self.social_status_request_count,
-            "social_status_response_count": self.social_status_response_count,
-            "social_status_request_ids": self.social_status_request_ids,
-            "social_status_followup_verified_request_ids": self.social_status_followup_verified_request_ids,
-            "device_status_conversation_cycle_id": device_conversation_cycle_id,
-            "device_status_conversation_trace": device_conversation_trace,
-            "device_status_followup_cycle_id": device_followup_cycle_id,
-            "device_status_followup_trace": device_followup_trace,
-            "device_status_request_count": self.device_status_request_count,
-            "device_status_response_count": self.device_status_response_count,
-            "device_status_request_ids": self.device_status_request_ids,
-            "device_status_followup_verified_request_ids": self.device_status_followup_verified_request_ids,
-            "body_status_conversation_cycle_id": body_conversation_cycle_id,
-            "body_status_conversation_trace": body_conversation_trace,
-            "body_status_followup_cycle_id": body_followup_cycle_id,
-            "body_status_followup_trace": body_followup_trace,
-            "body_status_request_count": self.body_status_request_count,
-            "body_status_response_count": self.body_status_response_count,
-            "body_status_request_ids": self.body_status_request_ids,
-            "body_status_followup_verified_request_ids": self.body_status_followup_verified_request_ids,
-            "environment_status_conversation_cycle_id": environment_conversation_cycle_id,
-            "environment_status_conversation_trace": environment_conversation_trace,
-            "environment_status_followup_cycle_id": environment_followup_cycle_id,
-            "environment_status_followup_trace": environment_followup_trace,
-            "environment_status_request_count": self.environment_status_request_count,
-            "environment_status_response_count": self.environment_status_response_count,
-            "environment_status_request_ids": self.environment_status_request_ids,
-            "environment_status_followup_verified_request_ids": self.environment_status_followup_verified_request_ids,
-            "location_status_conversation_cycle_id": location_conversation_cycle_id,
-            "location_status_conversation_trace": location_conversation_trace,
-            "location_status_followup_cycle_id": location_followup_cycle_id,
-            "location_status_followup_trace": location_followup_trace,
-            "location_status_request_count": self.location_status_request_count,
-            "location_status_response_count": self.location_status_response_count,
-            "location_status_request_ids": self.location_status_request_ids,
-            "location_status_followup_verified_request_ids": self.location_status_followup_verified_request_ids,
             "real_llm_initiative_probe_cycle_ids": self.real_llm_initiative_probe_cycle_ids,
             "real_llm_initiative_probe_case_results": initiative_probe_case_results,
             "real_llm_initiative_probe_traces": initiative_probe_traces,
@@ -5411,100 +3565,6 @@ class LongSmokeRunner:
                 f"/api/inspection/cycles/{self.camera_ptz_followup_cycle_id}"
             )
 
-        external_status_probe_conversation_trace = None
-        if (
-            isinstance(self.external_status_probe_conversation_cycle_id, str)
-            and self.external_status_probe_conversation_cycle_id
-        ):
-            external_status_probe_conversation_trace = self.api.get(
-                f"/api/inspection/cycles/{self.external_status_probe_conversation_cycle_id}"
-            )
-        external_status_probe_followup_trace = None
-        if isinstance(self.external_status_probe_followup_cycle_id, str) and self.external_status_probe_followup_cycle_id:
-            external_status_probe_followup_trace = self.api.get(
-                f"/api/inspection/cycles/{self.external_status_probe_followup_cycle_id}"
-            )
-        schedule_status_probe_conversation_trace = None
-        if (
-            isinstance(self.schedule_status_probe_conversation_cycle_id, str)
-            and self.schedule_status_probe_conversation_cycle_id
-        ):
-            schedule_status_probe_conversation_trace = self.api.get(
-                f"/api/inspection/cycles/{self.schedule_status_probe_conversation_cycle_id}"
-            )
-        schedule_status_probe_followup_trace = None
-        if isinstance(self.schedule_status_probe_followup_cycle_id, str) and self.schedule_status_probe_followup_cycle_id:
-            schedule_status_probe_followup_trace = self.api.get(
-                f"/api/inspection/cycles/{self.schedule_status_probe_followup_cycle_id}"
-            )
-        device_status_probe_conversation_trace = None
-        if isinstance(self.device_status_probe_conversation_cycle_id, str) and self.device_status_probe_conversation_cycle_id:
-            device_status_probe_conversation_trace = self.api.get(
-                f"/api/inspection/cycles/{self.device_status_probe_conversation_cycle_id}"
-            )
-        device_status_probe_followup_trace = None
-        if isinstance(self.device_status_probe_followup_cycle_id, str) and self.device_status_probe_followup_cycle_id:
-            device_status_probe_followup_trace = self.api.get(
-                f"/api/inspection/cycles/{self.device_status_probe_followup_cycle_id}"
-            )
-        body_status_probe_conversation_trace = None
-        if isinstance(self.body_status_probe_conversation_cycle_id, str) and self.body_status_probe_conversation_cycle_id:
-            body_status_probe_conversation_trace = self.api.get(
-                f"/api/inspection/cycles/{self.body_status_probe_conversation_cycle_id}"
-            )
-        body_status_probe_followup_trace = None
-        if isinstance(self.body_status_probe_followup_cycle_id, str) and self.body_status_probe_followup_cycle_id:
-            body_status_probe_followup_trace = self.api.get(
-                f"/api/inspection/cycles/{self.body_status_probe_followup_cycle_id}"
-            )
-        environment_status_probe_conversation_trace = None
-        if (
-            isinstance(self.environment_status_probe_conversation_cycle_id, str)
-            and self.environment_status_probe_conversation_cycle_id
-        ):
-            environment_status_probe_conversation_trace = self.api.get(
-                f"/api/inspection/cycles/{self.environment_status_probe_conversation_cycle_id}"
-            )
-        environment_status_probe_followup_trace = None
-        if (
-            isinstance(self.environment_status_probe_followup_cycle_id, str)
-            and self.environment_status_probe_followup_cycle_id
-        ):
-            environment_status_probe_followup_trace = self.api.get(
-                f"/api/inspection/cycles/{self.environment_status_probe_followup_cycle_id}"
-            )
-        location_status_probe_conversation_trace = None
-        if (
-            isinstance(self.location_status_probe_conversation_cycle_id, str)
-            and self.location_status_probe_conversation_cycle_id
-        ):
-            location_status_probe_conversation_trace = self.api.get(
-                f"/api/inspection/cycles/{self.location_status_probe_conversation_cycle_id}"
-            )
-        location_status_probe_followup_trace = None
-        if (
-            isinstance(self.location_status_probe_followup_cycle_id, str)
-            and self.location_status_probe_followup_cycle_id
-        ):
-            location_status_probe_followup_trace = self.api.get(
-                f"/api/inspection/cycles/{self.location_status_probe_followup_cycle_id}"
-            )
-        social_status_probe_conversation_trace = None
-        if (
-            isinstance(self.social_status_probe_conversation_cycle_id, str)
-            and self.social_status_probe_conversation_cycle_id
-        ):
-            social_status_probe_conversation_trace = self.api.get(
-                f"/api/inspection/cycles/{self.social_status_probe_conversation_cycle_id}"
-            )
-        social_status_probe_followup_trace = None
-        if (
-            isinstance(self.social_status_probe_followup_cycle_id, str)
-            and self.social_status_probe_followup_cycle_id
-        ):
-            social_status_probe_followup_trace = self.api.get(
-                f"/api/inspection/cycles/{self.social_status_probe_followup_cycle_id}"
-            )
         capability_result_traces: list[dict[str, Any]] = []
         for cycle_summary in cycle_summaries:
             if not isinstance(cycle_summary, dict):
@@ -5560,34 +3620,6 @@ class LongSmokeRunner:
             "server_log_capture_response_count": self._count_server_log_occurrences(
                 "[CapabilityResult] capability response accepted request=vision_capture_request:"
             ),
-            "external_status_request_count": self.external_status_request_count,
-            "external_status_response_count": self.external_status_response_count,
-            "external_status_request_ids": self.external_status_request_ids,
-            "external_status_followup_verified_request_ids": self.external_status_followup_verified_request_ids,
-            "schedule_status_request_count": self.schedule_status_request_count,
-            "schedule_status_response_count": self.schedule_status_response_count,
-            "schedule_status_request_ids": self.schedule_status_request_ids,
-            "schedule_status_followup_verified_request_ids": self.schedule_status_followup_verified_request_ids,
-            "device_status_request_count": self.device_status_request_count,
-            "device_status_response_count": self.device_status_response_count,
-            "device_status_request_ids": self.device_status_request_ids,
-            "device_status_followup_verified_request_ids": self.device_status_followup_verified_request_ids,
-            "body_status_request_count": self.body_status_request_count,
-            "body_status_response_count": self.body_status_response_count,
-            "body_status_request_ids": self.body_status_request_ids,
-            "body_status_followup_verified_request_ids": self.body_status_followup_verified_request_ids,
-            "environment_status_request_count": self.environment_status_request_count,
-            "environment_status_response_count": self.environment_status_response_count,
-            "environment_status_request_ids": self.environment_status_request_ids,
-            "environment_status_followup_verified_request_ids": self.environment_status_followup_verified_request_ids,
-            "location_status_request_count": self.location_status_request_count,
-            "location_status_response_count": self.location_status_response_count,
-            "location_status_request_ids": self.location_status_request_ids,
-            "location_status_followup_verified_request_ids": self.location_status_followup_verified_request_ids,
-            "social_status_request_count": self.social_status_request_count,
-            "social_status_response_count": self.social_status_response_count,
-            "social_status_request_ids": self.social_status_request_ids,
-            "social_status_followup_verified_request_ids": self.social_status_followup_verified_request_ids,
             "capture_empty_result_request_ids": self.capture_empty_result_request_ids,
             "capture_empty_result_skip_count": self.capture_empty_result_skip_count,
             "capture_mismatch_request_ids": self.capture_mismatch_request_ids,
@@ -5607,45 +3639,8 @@ class LongSmokeRunner:
             "camera_ptz_capture_followup_request_id": self.camera_ptz_capture_followup_request_id,
             "camera_ptz_probe_verified": self.camera_ptz_probe_verified,
             "camera_ptz_inspection_verified": self.camera_ptz_inspection_verified,
-            "external_status_probe_conversation_cycle_id": self.external_status_probe_conversation_cycle_id,
-            "external_status_probe_followup_cycle_id": self.external_status_probe_followup_cycle_id,
-            "external_status_probe_verified": self.external_status_probe_verified,
-            "schedule_status_probe_conversation_cycle_id": self.schedule_status_probe_conversation_cycle_id,
-            "schedule_status_probe_followup_cycle_id": self.schedule_status_probe_followup_cycle_id,
-            "schedule_status_probe_verified": self.schedule_status_probe_verified,
-            "device_status_probe_conversation_cycle_id": self.device_status_probe_conversation_cycle_id,
-            "device_status_probe_followup_cycle_id": self.device_status_probe_followup_cycle_id,
-            "device_status_probe_verified": self.device_status_probe_verified,
-            "body_status_probe_conversation_cycle_id": self.body_status_probe_conversation_cycle_id,
-            "body_status_probe_followup_cycle_id": self.body_status_probe_followup_cycle_id,
-            "body_status_probe_verified": self.body_status_probe_verified,
-            "environment_status_probe_conversation_cycle_id": self.environment_status_probe_conversation_cycle_id,
-            "environment_status_probe_followup_cycle_id": self.environment_status_probe_followup_cycle_id,
-            "environment_status_probe_verified": self.environment_status_probe_verified,
-            "location_status_probe_conversation_cycle_id": self.location_status_probe_conversation_cycle_id,
-            "location_status_probe_followup_cycle_id": self.location_status_probe_followup_cycle_id,
-            "location_status_probe_verified": self.location_status_probe_verified,
-            "social_status_probe_conversation_cycle_id": self.social_status_probe_conversation_cycle_id,
-            "social_status_probe_followup_cycle_id": self.social_status_probe_followup_cycle_id,
-            "social_status_probe_verified": self.social_status_probe_verified,
-            "external_status_multi_service_verified": self.external_status_multi_service_verified,
-            "external_status_persisted_integration_keys": self.external_status_persisted_integration_keys,
             "camera_ptz_probe_conversation_trace": camera_ptz_probe_conversation_trace,
             "camera_ptz_probe_followup_trace": camera_ptz_probe_followup_trace,
-            "external_status_probe_conversation_trace": external_status_probe_conversation_trace,
-            "external_status_probe_followup_trace": external_status_probe_followup_trace,
-            "schedule_status_probe_conversation_trace": schedule_status_probe_conversation_trace,
-            "schedule_status_probe_followup_trace": schedule_status_probe_followup_trace,
-            "device_status_probe_conversation_trace": device_status_probe_conversation_trace,
-            "device_status_probe_followup_trace": device_status_probe_followup_trace,
-            "body_status_probe_conversation_trace": body_status_probe_conversation_trace,
-            "body_status_probe_followup_trace": body_status_probe_followup_trace,
-            "environment_status_probe_conversation_trace": environment_status_probe_conversation_trace,
-            "environment_status_probe_followup_trace": environment_status_probe_followup_trace,
-            "location_status_probe_conversation_trace": location_status_probe_conversation_trace,
-            "location_status_probe_followup_trace": location_status_probe_followup_trace,
-            "social_status_probe_conversation_trace": social_status_probe_conversation_trace,
-            "social_status_probe_followup_trace": social_status_probe_followup_trace,
             "conversation_traces": conversation_traces,
             "restart_probe_traces": restart_probe_traces,
             "capability_result_traces": capability_result_traces,
@@ -5663,13 +3658,7 @@ class LongSmokeRunner:
     ) -> dict[str, Any]:
         active_ongoing_actions = self._list_active_ongoing_actions()
         stale_world_states = self._list_stale_world_states()
-        followed_request_ids: set[str] = set(self.external_status_followup_verified_request_ids)
-        followed_request_ids.update(self.schedule_status_followup_verified_request_ids)
-        followed_request_ids.update(self.device_status_followup_verified_request_ids)
-        followed_request_ids.update(self.body_status_followup_verified_request_ids)
-        followed_request_ids.update(self.environment_status_followup_verified_request_ids)
-        followed_request_ids.update(self.location_status_followup_verified_request_ids)
-        followed_request_ids.update(self.social_status_followup_verified_request_ids)
+        followed_request_ids: set[str] = set()
         for trace in capability_result_traces:
             followup_summary = ((trace.get("result_trace") or {}).get("capability_result_followup_summary"))
             if not isinstance(followup_summary, dict):
@@ -5684,13 +3673,6 @@ class LongSmokeRunner:
             request_id
             for request_id in [
                 *self.camera_ptz_request_ids,
-                *self.external_status_request_ids,
-                *self.schedule_status_request_ids,
-                *self.device_status_request_ids,
-                *self.body_status_request_ids,
-                *self.environment_status_request_ids,
-                *self.location_status_request_ids,
-                *self.social_status_request_ids,
             ]
             if request_id not in followed_request_ids
         ]
@@ -5738,7 +3720,6 @@ class LongSmokeRunner:
                 "observed_cycle_count": capability_result_count,
                 "verified": (
                     capability_result_count >= 1
-                    and self.external_status_probe_verified
                     and int(soak_observability.get("capability_followup_missing_count", 0)) == 0
                 ),
             },
@@ -5887,27 +3868,6 @@ class LongSmokeRunner:
             raise SmokeError("real-llm-smoke memory worker was still processing a job.")
         if runtime_summary.get("ongoing_action_exists"):
             raise SmokeError("real-llm-smoke ongoing_action remained active.")
-        def assert_status_event_observed(field_prefix: str, capability_id: str) -> None:
-            request_count = summary.get(f"{field_prefix}_request_count")
-            if not isinstance(request_count, int) or request_count < 1:
-                raise SmokeError(f"real-llm-smoke {capability_id} request was not observed.")
-            response_count = summary.get(f"{field_prefix}_response_count")
-            if not isinstance(response_count, int) or response_count < 1:
-                raise SmokeError(f"real-llm-smoke {capability_id} response was not observed.")
-
-        # 自律 follow-up が同じ capability を追加で呼ぶため、全体件数は存在確認に留める。
-        status_event_checks = [
-            ("external_status", "external.status"),
-            ("schedule_status", "schedule.status"),
-            ("device_status", "device.status"),
-            ("body_status", "body.status"),
-            ("environment_status", "environment.status"),
-            ("location_status", "location.status"),
-            ("social_status", "social.status"),
-        ]
-        for field_prefix, capability_id in status_event_checks:
-            assert_status_event_observed(field_prefix, capability_id)
-
         conversation_trace = summary.get("conversation_trace")
         if not isinstance(conversation_trace, dict):
             raise SmokeError("real-llm-smoke conversation_trace was not recorded.")
@@ -5918,257 +3878,8 @@ class LongSmokeRunner:
             raise SmokeError("real-llm-smoke initial conversation failed.")
         self._assert_memory_trace_succeeded(conversation_trace, "real-llm-smoke initial conversation")
 
-        capability_conversation_trace = summary.get("external_status_conversation_trace")
-        if not isinstance(capability_conversation_trace, dict):
-            raise SmokeError("real-llm-smoke external.status conversation trace was not recorded.")
-        capability_summary = capability_conversation_trace.get("cycle_summary", {})
-        if not isinstance(capability_summary, dict) or capability_summary.get("result_kind") != "capability_request":
-            raise SmokeError("real-llm-smoke external.status conversation did not dispatch capability_request.")
-        request_summary = ((capability_conversation_trace.get("result_trace") or {}).get("capability_request_summary"))
-        if not isinstance(request_summary, dict) or request_summary.get("capability_id") != "external.status":
-            raise SmokeError("real-llm-smoke external.status request summary was invalid.")
-        if request_summary.get("status") != "dispatched":
-            raise SmokeError("real-llm-smoke external.status request was not dispatched.")
-        self._assert_capability_request_readiness_digest(
-            request_summary,
-            "external.status",
-            "real-llm-smoke external.status conversation",
-        )
-        self._assert_memory_trace_succeeded(capability_conversation_trace, "real-llm-smoke external.status conversation")
-
-        followup_trace = summary.get("external_status_followup_trace")
-        if not isinstance(followup_trace, dict):
-            raise SmokeError("real-llm-smoke external.status follow-up trace was not recorded.")
-        followup_summary = followup_trace.get("cycle_summary", {})
-        if not isinstance(followup_summary, dict) or followup_summary.get("trigger_kind") != "capability_result":
-            raise SmokeError("real-llm-smoke external.status follow-up trigger was invalid.")
-        if followup_summary.get("result_kind") != "speech" or followup_summary.get("failed"):
-            raise SmokeError("real-llm-smoke external.status follow-up did not produce speech.")
-        transition_summary = ((followup_trace.get("result_trace") or {}).get("ongoing_action_transition_summary"))
-        if not isinstance(transition_summary, dict) or transition_summary.get("final_state") != "completed":
-            raise SmokeError("real-llm-smoke external.status follow-up did not complete ongoing_action.")
-        external_observation_summary = ((followup_trace.get("input_trace") or {}).get("observation_summary"))
-        if not isinstance(external_observation_summary, dict):
-            raise SmokeError("real-llm-smoke external.status observation_summary was not recorded.")
-        self._assert_capability_observation_readiness_digest(
-            external_observation_summary,
-            "external.status",
-            "real-llm-smoke external.status follow-up",
-        )
-        self._assert_status_client_context_source(
-            external_observation_summary,
-            "real-llm-smoke external.status follow-up",
-        )
-        self._assert_memory_trace_succeeded(followup_trace, "real-llm-smoke external.status follow-up")
-
-        schedule_conversation_trace = summary.get("schedule_status_conversation_trace")
-        if not isinstance(schedule_conversation_trace, dict):
-            raise SmokeError("real-llm-smoke schedule.status conversation trace was not recorded.")
-        schedule_summary = schedule_conversation_trace.get("cycle_summary", {})
-        if not isinstance(schedule_summary, dict) or schedule_summary.get("result_kind") != "capability_request":
-            raise SmokeError("real-llm-smoke schedule.status conversation did not dispatch capability_request.")
-        schedule_request_summary = ((schedule_conversation_trace.get("result_trace") or {}).get("capability_request_summary"))
-        if not isinstance(schedule_request_summary, dict) or schedule_request_summary.get("capability_id") != "schedule.status":
-            raise SmokeError("real-llm-smoke schedule.status request summary was invalid.")
-        if schedule_request_summary.get("status") != "dispatched":
-            raise SmokeError("real-llm-smoke schedule.status request was not dispatched.")
-        self._assert_capability_request_readiness_digest(
-            schedule_request_summary,
-            "schedule.status",
-            "real-llm-smoke schedule.status conversation",
-        )
-        self._assert_memory_trace_succeeded(schedule_conversation_trace, "real-llm-smoke schedule.status conversation")
-
-        schedule_followup_trace = summary.get("schedule_status_followup_trace")
-        if not isinstance(schedule_followup_trace, dict):
-            raise SmokeError("real-llm-smoke schedule.status follow-up trace was not recorded.")
-        schedule_followup_summary = schedule_followup_trace.get("cycle_summary", {})
-        if not isinstance(schedule_followup_summary, dict) or schedule_followup_summary.get("trigger_kind") != "capability_result":
-            raise SmokeError("real-llm-smoke schedule.status follow-up trigger was invalid.")
-        if schedule_followup_summary.get("result_kind") != "speech" or schedule_followup_summary.get("failed"):
-            raise SmokeError("real-llm-smoke schedule.status follow-up did not produce speech.")
-        schedule_transition_summary = ((schedule_followup_trace.get("result_trace") or {}).get("ongoing_action_transition_summary"))
-        if not isinstance(schedule_transition_summary, dict) or schedule_transition_summary.get("final_state") != "completed":
-            raise SmokeError("real-llm-smoke schedule.status follow-up did not complete ongoing_action.")
-        schedule_observation_summary = ((schedule_followup_trace.get("input_trace") or {}).get("observation_summary"))
-        if not isinstance(schedule_observation_summary, dict):
-            raise SmokeError("real-llm-smoke schedule.status observation_summary was not recorded.")
-        if schedule_observation_summary.get("capability_id") != "schedule.status":
-            raise SmokeError("real-llm-smoke schedule.status observation capability_id was invalid.")
-        observed_slots = schedule_observation_summary.get("schedule_slots")
-        if not isinstance(observed_slots, list) or not observed_slots:
-            raise SmokeError("real-llm-smoke schedule.status schedule_slots were not recorded.")
-        self._assert_capability_observation_readiness_digest(
-            schedule_observation_summary,
-            "schedule.status",
-            "real-llm-smoke schedule.status follow-up",
-        )
-        self._assert_status_client_context_source(
-            schedule_observation_summary,
-            "real-llm-smoke schedule.status follow-up",
-        )
-        schedule_world_state_trace = schedule_followup_trace.get("world_state_trace", {})
-        if not isinstance(schedule_world_state_trace, dict):
-            raise SmokeError("real-llm-smoke schedule.status world_state_trace was not recorded.")
-        schedule_policies = schedule_world_state_trace.get("normalized_candidate_policies", [])
-        if not isinstance(schedule_policies, list):
-            raise SmokeError("real-llm-smoke schedule.status normalized_candidate_policies were not recorded.")
-        schedule_slot_policy = next(
-            (
-                item
-                for item in schedule_policies
-                if isinstance(item, dict) and item.get("integration_key") == "schedule:real-llm-smoke-schedule"
-            ),
-            None,
-        )
-        if not isinstance(schedule_slot_policy, dict):
-            raise SmokeError("real-llm-smoke schedule.status schedule slot policy was not recorded.")
-        if schedule_slot_policy.get("summary_source") != "capability_result.schedule_slots":
-            raise SmokeError("real-llm-smoke schedule.status schedule slot summary_source was invalid.")
-        self._assert_memory_trace_succeeded(schedule_followup_trace, "real-llm-smoke schedule.status follow-up")
-
-        device_conversation_trace = summary.get("device_status_conversation_trace")
-        if not isinstance(device_conversation_trace, dict):
-            raise SmokeError("real-llm-smoke device.status conversation trace was not recorded.")
-        device_summary = device_conversation_trace.get("cycle_summary", {})
-        if not isinstance(device_summary, dict) or device_summary.get("result_kind") != "capability_request":
-            raise SmokeError("real-llm-smoke device.status conversation did not dispatch capability_request.")
-        device_request_summary = ((device_conversation_trace.get("result_trace") or {}).get("capability_request_summary"))
-        if not isinstance(device_request_summary, dict) or device_request_summary.get("capability_id") != "device.status":
-            raise SmokeError("real-llm-smoke device.status request summary was invalid.")
-        if device_request_summary.get("status") != "dispatched":
-            raise SmokeError("real-llm-smoke device.status request was not dispatched.")
-        self._assert_memory_trace_succeeded(device_conversation_trace, "real-llm-smoke device.status conversation")
-
-        device_followup_trace = summary.get("device_status_followup_trace")
-        self._assert_device_status_probe_trace(
-            device_conversation_trace,
-            device_followup_trace,
-            marker="RealLLMDeviceStatusProbeMarker",
-        )
-        if isinstance(device_followup_trace, dict):
-            self._assert_memory_trace_succeeded(device_followup_trace, "real-llm-smoke device.status follow-up")
-
-        body_conversation_trace = summary.get("body_status_conversation_trace")
-        if not isinstance(body_conversation_trace, dict):
-            raise SmokeError("real-llm-smoke body.status conversation trace was not recorded.")
-        body_summary = body_conversation_trace.get("cycle_summary", {})
-        if not isinstance(body_summary, dict) or body_summary.get("result_kind") != "capability_request":
-            raise SmokeError("real-llm-smoke body.status conversation did not dispatch capability_request.")
-        body_request_summary = ((body_conversation_trace.get("result_trace") or {}).get("capability_request_summary"))
-        if not isinstance(body_request_summary, dict) or body_request_summary.get("capability_id") != "body.status":
-            raise SmokeError("real-llm-smoke body.status request summary was invalid.")
-        if body_request_summary.get("status") != "dispatched":
-            raise SmokeError("real-llm-smoke body.status request was not dispatched.")
-        self._assert_memory_trace_succeeded(body_conversation_trace, "real-llm-smoke body.status conversation")
-
-        body_followup_trace = summary.get("body_status_followup_trace")
-        self._assert_body_status_probe_trace(
-            body_conversation_trace,
-            body_followup_trace,
-            marker="RealLLMBodyStatusProbeMarker",
-        )
-        if isinstance(body_followup_trace, dict):
-            self._assert_memory_trace_succeeded(body_followup_trace, "real-llm-smoke body.status follow-up")
-
-        environment_conversation_trace = summary.get("environment_status_conversation_trace")
-        if not isinstance(environment_conversation_trace, dict):
-            raise SmokeError("real-llm-smoke environment.status conversation trace was not recorded.")
-        environment_summary = environment_conversation_trace.get("cycle_summary", {})
-        if not isinstance(environment_summary, dict) or environment_summary.get("result_kind") != "capability_request":
-            raise SmokeError("real-llm-smoke environment.status conversation did not dispatch capability_request.")
-        environment_request_summary = (
-            (environment_conversation_trace.get("result_trace") or {}).get("capability_request_summary")
-        )
-        if not isinstance(environment_request_summary, dict) or environment_request_summary.get("capability_id") != "environment.status":
-            raise SmokeError("real-llm-smoke environment.status request summary was invalid.")
-        if environment_request_summary.get("status") != "dispatched":
-            raise SmokeError("real-llm-smoke environment.status request was not dispatched.")
-        self._assert_memory_trace_succeeded(
-            environment_conversation_trace,
-            "real-llm-smoke environment.status conversation",
-        )
-
-        environment_followup_trace = summary.get("environment_status_followup_trace")
-        self._assert_environment_status_probe_trace(
-            environment_conversation_trace,
-            environment_followup_trace,
-            marker="RealLLMEnvironmentStatusProbeMarker",
-        )
-        if isinstance(environment_followup_trace, dict):
-            self._assert_memory_trace_succeeded(
-                environment_followup_trace,
-                "real-llm-smoke environment.status follow-up",
-            )
-
-        location_conversation_trace = summary.get("location_status_conversation_trace")
-        if not isinstance(location_conversation_trace, dict):
-            raise SmokeError("real-llm-smoke location.status conversation trace was not recorded.")
-        location_summary = location_conversation_trace.get("cycle_summary", {})
-        if not isinstance(location_summary, dict) or location_summary.get("result_kind") != "capability_request":
-            raise SmokeError("real-llm-smoke location.status conversation did not dispatch capability_request.")
-        location_request_summary = (
-            (location_conversation_trace.get("result_trace") or {}).get("capability_request_summary")
-        )
-        if not isinstance(location_request_summary, dict) or location_request_summary.get("capability_id") != "location.status":
-            raise SmokeError("real-llm-smoke location.status request summary was invalid.")
-        if location_request_summary.get("status") != "dispatched":
-            raise SmokeError("real-llm-smoke location.status request was not dispatched.")
-        self._assert_memory_trace_succeeded(
-            location_conversation_trace,
-            "real-llm-smoke location.status conversation",
-        )
-
-        location_followup_trace = summary.get("location_status_followup_trace")
-        self._assert_location_status_probe_trace(
-            location_conversation_trace,
-            location_followup_trace,
-            marker="RealLLMLocationStatusProbeMarker",
-        )
-        if isinstance(location_followup_trace, dict):
-            self._assert_memory_trace_succeeded(
-                location_followup_trace,
-                "real-llm-smoke location.status follow-up",
-            )
-
-        social_conversation_trace = summary.get("social_status_conversation_trace")
-        if not isinstance(social_conversation_trace, dict):
-            raise SmokeError("real-llm-smoke social.status conversation trace was not recorded.")
-        social_summary = social_conversation_trace.get("cycle_summary", {})
-        if not isinstance(social_summary, dict) or social_summary.get("result_kind") != "capability_request":
-            raise SmokeError("real-llm-smoke social.status conversation did not dispatch capability_request.")
-        social_request_summary = (
-            (social_conversation_trace.get("result_trace") or {}).get("capability_request_summary")
-        )
-        if not isinstance(social_request_summary, dict) or social_request_summary.get("capability_id") != "social.status":
-            raise SmokeError("real-llm-smoke social.status request summary was invalid.")
-        if social_request_summary.get("status") != "dispatched":
-            raise SmokeError("real-llm-smoke social.status request was not dispatched.")
-        self._assert_memory_trace_succeeded(
-            social_conversation_trace,
-            "real-llm-smoke social.status conversation",
-        )
-
-        social_followup_trace = summary.get("social_status_followup_trace")
-        self._assert_social_status_probe_trace(
-            social_conversation_trace,
-            social_followup_trace,
-            marker="RealLLMSocialStatusProbeMarker",
-        )
-        if isinstance(social_followup_trace, dict):
-            self._assert_memory_trace_succeeded(
-                social_followup_trace,
-                "real-llm-smoke social.status follow-up",
-            )
         expected_initiative_cases = {
             "thin-drive-vision-probe",
-            "stale-schedule-status-probe",
-            "missing-social-status-probe",
-            "stale-external-status-probe",
-            "missing-device-status-probe",
-            "missing-body-status-probe",
-            "missing-environment-status-probe",
-            "missing-location-status-probe",
             "schedule-grounded-speech",
             "social-grounded-speech",
             "body-grounded-speech",
@@ -6195,76 +3906,6 @@ class LongSmokeRunner:
                 "preferred_capability_id": "vision.capture",
                 "foreground_thinness": "thin",
                 "capability_id": "vision.capture",
-                "capability_request_status": "dispatched",
-            },
-            "stale-schedule-status-probe": {
-                "trigger_kind": "wake",
-                "result_kind": "capability_request",
-                "selected_candidate_family": "autonomous",
-                "preferred_result_kind": "capability_request",
-                "preferred_capability_id": "schedule.status",
-                "foreground_thinness": "grounded",
-                "capability_id": "schedule.status",
-                "capability_request_status": "dispatched",
-            },
-            "missing-social-status-probe": {
-                "trigger_kind": "wake",
-                "result_kind": "capability_request",
-                "selected_candidate_family": "autonomous",
-                "preferred_result_kind": "capability_request",
-                "preferred_capability_id": "social.status",
-                "foreground_thinness": "thin",
-                "capability_id": "social.status",
-                "capability_request_status": "dispatched",
-            },
-            "stale-external-status-probe": {
-                "trigger_kind": "wake",
-                "result_kind": "capability_request",
-                "selected_candidate_family": "autonomous",
-                "preferred_result_kind": "capability_request",
-                "preferred_capability_id": "external.status",
-                "foreground_thinness": "thin",
-                "capability_id": "external.status",
-                "capability_request_status": "dispatched",
-            },
-            "missing-device-status-probe": {
-                "trigger_kind": "wake",
-                "result_kind": "capability_request",
-                "selected_candidate_family": "autonomous",
-                "preferred_result_kind": "capability_request",
-                "preferred_capability_id": "device.status",
-                "foreground_thinness": "thin",
-                "capability_id": "device.status",
-                "capability_request_status": "dispatched",
-            },
-            "missing-body-status-probe": {
-                "trigger_kind": "wake",
-                "result_kind": "capability_request",
-                "selected_candidate_family": "autonomous",
-                "preferred_result_kind": "capability_request",
-                "preferred_capability_id": "body.status",
-                "foreground_thinness": "thin",
-                "capability_id": "body.status",
-                "capability_request_status": "dispatched",
-            },
-            "missing-environment-status-probe": {
-                "trigger_kind": "wake",
-                "result_kind": "capability_request",
-                "selected_candidate_family": "autonomous",
-                "preferred_result_kind": "capability_request",
-                "preferred_capability_id": "environment.status",
-                "foreground_thinness": "thin",
-                "capability_id": "environment.status",
-                "capability_request_status": "dispatched",
-            },
-            "missing-location-status-probe": {
-                "trigger_kind": "wake",
-                "result_kind": "capability_request",
-                "selected_candidate_family": "autonomous",
-                "preferred_result_kind": "capability_request",
-                "preferred_capability_id": "location.status",
-                "foreground_thinness": "thin",
-                "capability_id": "location.status",
                 "capability_request_status": "dispatched",
             },
             "schedule-grounded-speech": {
@@ -6503,23 +4144,11 @@ class LongSmokeRunner:
             raise SmokeError("no capability_result cycle was recorded during the smoke run.")
         if summary["capture_request_count"] < 1:
             raise SmokeError("no vision.capture_request event was received.")
-        if summary["external_status_request_count"] < 1:
-            raise SmokeError("no external.status_request event was received.")
-        if summary["schedule_status_request_count"] < 1:
-            raise SmokeError("no schedule.status_request event was received.")
-        if summary["device_status_request_count"] < 1:
-            raise SmokeError("no device.status_request event was received.")
         server_log_capture_response_count = summary.get("server_log_capture_response_count")
         if not isinstance(server_log_capture_response_count, int):
             raise SmokeError("server_log_capture_response_count was not recorded.")
         if server_log_capture_response_count != summary["capture_request_count"]:
             raise SmokeError("capture request / response counts did not match.")
-        if summary["external_status_response_count"] != summary["external_status_request_count"]:
-            raise SmokeError("external.status request / response counts did not match.")
-        if summary["schedule_status_response_count"] != summary["schedule_status_request_count"]:
-            raise SmokeError("schedule.status request / response counts did not match.")
-        if summary["device_status_response_count"] != summary["device_status_request_count"]:
-            raise SmokeError("device.status request / response counts did not match.")
         if summary["failed_cycle_ids"]:
             raise SmokeError(f"failed cycles were recorded: {', '.join(summary['failed_cycle_ids'])}")
         if not summary["vision_capture_probe_verified"]:
@@ -6567,14 +4196,6 @@ class LongSmokeRunner:
             raise SmokeError("multiple desktop client pause boundary was not verified.")
         if not summary["multiple_client_resume_verified"]:
             raise SmokeError("multiple desktop client resume boundary was not verified.")
-        if not summary["external_status_probe_verified"]:
-            raise SmokeError("external.status follow-up boundary was not verified.")
-        if not summary["schedule_status_probe_verified"]:
-            raise SmokeError("schedule.status follow-up boundary was not verified.")
-        if not summary["device_status_probe_verified"]:
-            raise SmokeError("device.status follow-up boundary was not verified.")
-        if not summary["external_status_multi_service_verified"]:
-            raise SmokeError("external.status multi-service integration boundary was not verified.")
         if int(soak_observability.get("active_ongoing_action_count", 0)) != 0:
             raise SmokeError("ongoing_action remained active at the end of the soak run.")
         if int(soak_observability.get("stale_world_state_count", 0)) != 0:
@@ -6597,19 +4218,6 @@ class LongSmokeRunner:
                 raise SmokeError("failure_case_matrix entry was invalid.")
             if not failure_case.get("verified"):
                 raise SmokeError(f"failure case verification failed: {failure_case.get('case_id')}")
-        self._assert_external_status_probe_trace(
-            summary.get("external_status_probe_conversation_trace"),
-            summary.get("external_status_probe_followup_trace"),
-        )
-        self._assert_schedule_status_probe_trace(
-            summary.get("schedule_status_probe_conversation_trace"),
-            summary.get("schedule_status_probe_followup_trace"),
-        )
-        self._assert_device_status_probe_trace(
-            summary.get("device_status_probe_conversation_trace"),
-            summary.get("device_status_probe_followup_trace"),
-        )
-
         for trace in summary["conversation_traces"]:
             cycle_id = trace.get("cycle_id")
             memory_trace = trace.get("memory_trace", {})
@@ -6691,889 +4299,6 @@ class LongSmokeRunner:
         if observation_summary.get("capability_id") != capability_id:
             raise SmokeError(f"{label} observation readiness capability_id was invalid.")
 
-    def _assert_status_client_context_source(
-        self,
-        observation_summary: Any,
-        label: str,
-    ) -> None:
-        if not isinstance(observation_summary, dict):
-            raise SmokeError(f"{label} observation_summary was invalid.")
-        data_source = observation_summary.get("data_source")
-        if not isinstance(data_source, str) or not data_source.strip():
-            raise SmokeError(f"{label} data_source was not recorded.")
-        if data_source == "synthetic_default":
-            unconnected_reason = observation_summary.get("unconnected_reason")
-            if not isinstance(unconnected_reason, str) or not unconnected_reason.strip():
-                raise SmokeError(f"{label} synthetic data source did not record unconnected_reason.")
-
-    def _assert_external_status_probe_trace(
-        self,
-        conversation_trace: Any,
-        followup_trace: Any,
-    ) -> None:
-        if not isinstance(conversation_trace, dict):
-            raise SmokeError("external.status probe conversation trace was not collected.")
-        if not isinstance(followup_trace, dict):
-            raise SmokeError("external.status probe follow-up trace was not collected.")
-
-        result_trace = conversation_trace.get("result_trace", {})
-        if not isinstance(result_trace, dict):
-            raise SmokeError("external.status probe conversation result_trace was invalid.")
-        capability_request_summary = result_trace.get("capability_request_summary", {})
-        if not isinstance(capability_request_summary, dict):
-            raise SmokeError("external.status probe conversation capability_request_summary was invalid.")
-        if capability_request_summary.get("capability_id") != "external.status":
-            raise SmokeError("external.status probe conversation capability_id was invalid.")
-        if capability_request_summary.get("status") != "dispatched":
-            raise SmokeError("external.status probe conversation capability_request status was invalid.")
-        self._assert_capability_request_readiness_digest(
-            capability_request_summary,
-            "external.status",
-            "external.status probe conversation",
-        )
-        request_id = capability_request_summary.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            raise SmokeError("external.status probe conversation request_id was not recorded.")
-        ongoing_action_transition_summary = result_trace.get("ongoing_action_transition_summary", {})
-        if not isinstance(ongoing_action_transition_summary, dict):
-            raise SmokeError("external.status probe conversation ongoing_action_transition_summary was invalid.")
-        transition_sequence = ongoing_action_transition_summary.get("transition_sequence", [])
-        if not isinstance(transition_sequence, list) or len(transition_sequence) != 1:
-            raise SmokeError("external.status probe conversation transition_sequence was invalid.")
-        if transition_sequence[0] not in {"started", "continued"}:
-            raise SmokeError("external.status probe conversation transition kind was invalid.")
-        if ongoing_action_transition_summary.get("final_state") != "waiting_result":
-            raise SmokeError("external.status probe conversation final_state was invalid.")
-        if ongoing_action_transition_summary.get("last_capability_id") != "external.status":
-            raise SmokeError("external.status probe conversation last_capability_id was invalid.")
-
-        followup_cycle_summary = followup_trace.get("cycle_summary", {})
-        if not isinstance(followup_cycle_summary, dict):
-            raise SmokeError("external.status probe follow-up cycle_summary was invalid.")
-        if followup_cycle_summary.get("trigger_kind") != "capability_result":
-            raise SmokeError("external.status probe follow-up trigger_kind was invalid.")
-        if followup_cycle_summary.get("result_kind") != "speech":
-            raise SmokeError("external.status probe follow-up result_kind was invalid.")
-        input_trace = followup_trace.get("input_trace", {})
-        if not isinstance(input_trace, dict):
-            raise SmokeError("external.status probe follow-up input_trace was invalid.")
-        observation_summary = input_trace.get("observation_summary", {})
-        if not isinstance(observation_summary, dict):
-            raise SmokeError("external.status probe follow-up observation_summary was invalid.")
-        if observation_summary.get("capability_id") != "external.status":
-            raise SmokeError("external.status probe follow-up observation capability_id was invalid.")
-        status_text = observation_summary.get("status_text")
-        if not isinstance(status_text, str) or "LongSmokeExternalStatusProbeMarker" not in status_text:
-            raise SmokeError("external.status probe follow-up status_text was invalid.")
-        self._assert_capability_observation_readiness_digest(
-            observation_summary,
-            "external.status",
-            "external.status probe follow-up",
-        )
-        self._assert_status_client_context_source(observation_summary, "external.status probe follow-up")
-        world_state_trace = followup_trace.get("world_state_trace", {})
-        if not isinstance(world_state_trace, dict):
-            raise SmokeError("external.status probe follow-up world_state_trace was invalid.")
-        source_pack_contexts = world_state_trace.get("source_pack_contexts", {})
-        if not isinstance(source_pack_contexts, dict):
-            raise SmokeError("external.status probe follow-up source_pack_contexts was invalid.")
-        state_type_hooks = world_state_trace.get("source_pack_state_type_hooks", {})
-        if not isinstance(state_type_hooks, dict):
-            raise SmokeError("external.status probe follow-up source_pack_state_type_hooks was invalid.")
-        normalized_candidate_policies = world_state_trace.get("normalized_candidate_policies", [])
-        if not isinstance(normalized_candidate_policies, list):
-            raise SmokeError("external.status probe follow-up normalized_candidate_policies was invalid.")
-        external_service_context = source_pack_contexts.get("external_service_context", {})
-        if not isinstance(external_service_context, dict):
-            raise SmokeError("external.status probe follow-up external_service_context was invalid.")
-        if external_service_context.get("status_text") != status_text:
-            raise SmokeError("external.status probe follow-up external_service_context.status_text was invalid.")
-        if external_service_context.get("summary_source_hint") != "capability_result.status_text":
-            raise SmokeError("external.status probe follow-up external_service_context.summary_source_hint was invalid.")
-        external_service_hook = state_type_hooks.get("external_service", {})
-        if not isinstance(external_service_hook, dict):
-            raise SmokeError("external.status probe follow-up external_service hook was invalid.")
-        if external_service_hook.get("capability_id") != "external.status":
-            raise SmokeError("external.status probe follow-up external_service hook capability_id was invalid.")
-        if external_service_hook.get("summary_source") != "capability_result.status_text":
-            raise SmokeError("external.status probe follow-up external_service hook summary_source was invalid.")
-        if external_service_hook.get("service") != "github":
-            raise SmokeError("external.status probe follow-up external_service hook service was invalid.")
-        external_signal_fields = external_service_hook.get("signal_fields", [])
-        if not isinstance(external_signal_fields, list) or "status_text" not in external_signal_fields:
-            raise SmokeError("external.status probe follow-up external_service hook signal_fields was invalid.")
-        external_service_policy = next(
-            (
-                item
-                for item in normalized_candidate_policies
-                if isinstance(item, dict) and item.get("state_type") == "external_service"
-            ),
-            None,
-        )
-        if not isinstance(external_service_policy, dict):
-            raise SmokeError("external.status probe follow-up external_service policy was invalid.")
-        if external_service_policy.get("summary_source") != "capability_result.status_text":
-            raise SmokeError("external.status probe follow-up external_service policy summary_source was invalid.")
-        if external_service_policy.get("effective_ttl_seconds") != 7200:
-            raise SmokeError("external.status probe follow-up external_service policy TTL was invalid.")
-        if external_service_policy.get("integration_mode") != "external_service_service":
-            raise SmokeError("external.status probe follow-up external_service policy integration_mode was invalid.")
-        if external_service_policy.get("integration_key") != "external_service:github":
-            raise SmokeError("external.status probe follow-up external_service policy integration_key was invalid.")
-        body_hook = state_type_hooks.get("body", {})
-        if not isinstance(body_hook, dict):
-            raise SmokeError("external.status probe follow-up body hook was invalid.")
-        if body_hook.get("summary_source") != "capability_result.body_state_summary":
-            raise SmokeError("external.status probe follow-up body hook summary_source was invalid.")
-        device_hook = state_type_hooks.get("device", {})
-        if not isinstance(device_hook, dict):
-            raise SmokeError("external.status probe follow-up device hook was invalid.")
-        if device_hook.get("summary_source") != "capability_result.device_state_summary":
-            raise SmokeError("external.status probe follow-up device hook summary_source was invalid.")
-        schedule_hook = state_type_hooks.get("schedule", {})
-        if not isinstance(schedule_hook, dict):
-            raise SmokeError("external.status probe follow-up schedule hook was invalid.")
-        if schedule_hook.get("summary_source") != "capability_result.schedule_summary":
-            raise SmokeError("external.status probe follow-up schedule hook summary_source was invalid.")
-        schedule_policy = next(
-            (
-                item
-                for item in normalized_candidate_policies
-                if isinstance(item, dict) and item.get("state_type") == "schedule"
-            ),
-            None,
-        )
-        if not isinstance(schedule_policy, dict):
-            raise SmokeError("external.status probe follow-up schedule policy was invalid.")
-        if schedule_policy.get("summary_source") != "capability_result.schedule_summary":
-            raise SmokeError("external.status probe follow-up schedule policy summary_source was invalid.")
-        if schedule_policy.get("effective_ttl_seconds") != 5400:
-            raise SmokeError("external.status probe follow-up schedule policy TTL was invalid.")
-        if schedule_policy.get("integration_key") != "schedule:self":
-            raise SmokeError("external.status probe follow-up schedule policy integration_key was invalid.")
-        foreground_world_state = input_trace.get("foreground_world_state", [])
-        if not isinstance(foreground_world_state, list):
-            raise SmokeError("external.status probe follow-up foreground_world_state was invalid.")
-        if not any(
-            isinstance(item, dict)
-            and item.get("state_type") == "external_service"
-            and item.get("summary_text") == status_text
-            for item in foreground_world_state
-        ):
-            raise SmokeError("external.status probe follow-up external_service world_state was not reflected.")
-        followup_result_trace = followup_trace.get("result_trace", {})
-        if not isinstance(followup_result_trace, dict):
-            raise SmokeError("external.status probe follow-up result_trace was invalid.")
-        capability_result_followup_summary = followup_result_trace.get("capability_result_followup_summary", {})
-        if not isinstance(capability_result_followup_summary, dict):
-            raise SmokeError("external.status probe follow-up summary was invalid.")
-        if capability_result_followup_summary.get("capability_id") != "external.status":
-            raise SmokeError("external.status probe follow-up summary capability_id was invalid.")
-        source_request_summary = capability_result_followup_summary.get("source_request_summary", {})
-        if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
-            raise SmokeError("external.status probe follow-up source_request_summary was invalid.")
-        followup_result_summary = capability_result_followup_summary.get("followup_result_summary", {})
-        if not isinstance(followup_result_summary, dict) or followup_result_summary.get("result_kind") != "speech":
-            raise SmokeError("external.status probe follow-up result summary was invalid.")
-        transition_summary = capability_result_followup_summary.get("transition_summary", {})
-        if not isinstance(transition_summary, dict):
-            raise SmokeError("external.status probe follow-up transition summary was invalid.")
-        if transition_summary.get("reason_code") != "followup_speech":
-            raise SmokeError("external.status probe follow-up reason_code was invalid.")
-        if transition_summary.get("final_state") != "completed":
-            raise SmokeError("external.status probe follow-up final_state was invalid.")
-
-    def _assert_schedule_status_probe_trace(
-        self,
-        conversation_trace: Any,
-        followup_trace: Any,
-    ) -> None:
-        if not isinstance(conversation_trace, dict):
-            raise SmokeError("schedule.status probe conversation trace was not collected.")
-        if not isinstance(followup_trace, dict):
-            raise SmokeError("schedule.status probe follow-up trace was not collected.")
-
-        result_trace = conversation_trace.get("result_trace", {})
-        if not isinstance(result_trace, dict):
-            raise SmokeError("schedule.status probe conversation result_trace was invalid.")
-        capability_request_summary = result_trace.get("capability_request_summary", {})
-        if not isinstance(capability_request_summary, dict):
-            raise SmokeError("schedule.status probe conversation capability_request_summary was invalid.")
-        if capability_request_summary.get("capability_id") != "schedule.status":
-            raise SmokeError("schedule.status probe conversation capability_id was invalid.")
-        if capability_request_summary.get("status") != "dispatched":
-            raise SmokeError("schedule.status probe conversation capability_request status was invalid.")
-        self._assert_capability_request_readiness_digest(
-            capability_request_summary,
-            "schedule.status",
-            "schedule.status probe conversation",
-        )
-        request_id = capability_request_summary.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            raise SmokeError("schedule.status probe conversation request_id was not recorded.")
-
-        followup_cycle_summary = followup_trace.get("cycle_summary", {})
-        if not isinstance(followup_cycle_summary, dict):
-            raise SmokeError("schedule.status probe follow-up cycle_summary was invalid.")
-        if followup_cycle_summary.get("trigger_kind") != "capability_result":
-            raise SmokeError("schedule.status probe follow-up trigger_kind was invalid.")
-        if followup_cycle_summary.get("result_kind") != "speech":
-            raise SmokeError("schedule.status probe follow-up result_kind was invalid.")
-        input_trace = followup_trace.get("input_trace", {})
-        if not isinstance(input_trace, dict):
-            raise SmokeError("schedule.status probe follow-up input_trace was invalid.")
-        observation_summary = input_trace.get("observation_summary", {})
-        if not isinstance(observation_summary, dict):
-            raise SmokeError("schedule.status probe follow-up observation_summary was invalid.")
-        if observation_summary.get("capability_id") != "schedule.status":
-            raise SmokeError("schedule.status probe follow-up observation capability_id was invalid.")
-        schedule_summary = observation_summary.get("schedule_summary")
-        if not isinstance(schedule_summary, str) or "LongSmokeScheduleStatusProbeMarker" not in schedule_summary:
-            raise SmokeError("schedule.status probe follow-up schedule_summary was invalid.")
-        schedule_slots = observation_summary.get("schedule_slots")
-        if not isinstance(schedule_slots, list) or not schedule_slots:
-            raise SmokeError("schedule.status probe follow-up schedule_slots were invalid.")
-        self._assert_capability_observation_readiness_digest(
-            observation_summary,
-            "schedule.status",
-            "schedule.status probe follow-up",
-        )
-        self._assert_status_client_context_source(observation_summary, "schedule.status probe follow-up")
-
-        world_state_trace = followup_trace.get("world_state_trace", {})
-        if not isinstance(world_state_trace, dict):
-            raise SmokeError("schedule.status probe follow-up world_state_trace was invalid.")
-        source_pack_contexts = world_state_trace.get("source_pack_contexts", {})
-        if not isinstance(source_pack_contexts, dict):
-            raise SmokeError("schedule.status probe follow-up source_pack_contexts was invalid.")
-        schedule_context = source_pack_contexts.get("schedule_context", {})
-        if not isinstance(schedule_context, dict):
-            raise SmokeError("schedule.status probe follow-up schedule_context was invalid.")
-        context_slots = schedule_context.get("schedule_slots")
-        if not isinstance(context_slots, list) or not context_slots:
-            raise SmokeError("schedule.status probe follow-up schedule_context.schedule_slots was invalid.")
-        if context_slots[0].get("summary_source") != "capability_result.schedule_slots":
-            raise SmokeError("schedule.status probe follow-up slot summary_source was invalid.")
-        state_type_hooks = world_state_trace.get("source_pack_state_type_hooks", {})
-        if not isinstance(state_type_hooks, dict):
-            raise SmokeError("schedule.status probe follow-up source_pack_state_type_hooks was invalid.")
-        schedule_hook = state_type_hooks.get("schedule", {})
-        if not isinstance(schedule_hook, dict):
-            raise SmokeError("schedule.status probe follow-up schedule hook was invalid.")
-        if schedule_hook.get("capability_id") != "schedule.status":
-            raise SmokeError("schedule.status probe follow-up schedule hook capability_id was invalid.")
-        if schedule_hook.get("summary_source") != "capability_result.schedule_summary":
-            raise SmokeError("schedule.status probe follow-up schedule hook summary_source was invalid.")
-        if schedule_hook.get("real_schedule_slot_count") != 1:
-            raise SmokeError("schedule.status probe follow-up schedule hook slot count was invalid.")
-
-        normalized_candidate_policies = world_state_trace.get("normalized_candidate_policies", [])
-        if not isinstance(normalized_candidate_policies, list):
-            raise SmokeError("schedule.status probe follow-up normalized_candidate_policies was invalid.")
-        slot_policy = next(
-            (
-                item
-                for item in normalized_candidate_policies
-                if isinstance(item, dict) and item.get("integration_key") == "schedule:long-smoke-schedule"
-            ),
-            None,
-        )
-        if not isinstance(slot_policy, dict):
-            raise SmokeError("schedule.status probe follow-up schedule slot policy was invalid.")
-        if slot_policy.get("integration_mode") != "schedule_slot":
-            raise SmokeError("schedule.status probe follow-up schedule slot integration_mode was invalid.")
-        if slot_policy.get("summary_source") != "capability_result.schedule_slots":
-            raise SmokeError("schedule.status probe follow-up schedule slot summary_source was invalid.")
-        if slot_policy.get("effective_ttl_seconds") != 10800:
-            raise SmokeError("schedule.status probe follow-up schedule slot TTL was invalid.")
-
-        followup_result_trace = followup_trace.get("result_trace", {})
-        if not isinstance(followup_result_trace, dict):
-            raise SmokeError("schedule.status probe follow-up result_trace was invalid.")
-        capability_result_followup_summary = followup_result_trace.get("capability_result_followup_summary", {})
-        if not isinstance(capability_result_followup_summary, dict):
-            raise SmokeError("schedule.status probe follow-up summary was invalid.")
-        if capability_result_followup_summary.get("capability_id") != "schedule.status":
-            raise SmokeError("schedule.status probe follow-up summary capability_id was invalid.")
-        source_request_summary = capability_result_followup_summary.get("source_request_summary", {})
-        if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
-            raise SmokeError("schedule.status probe follow-up source_request_summary was invalid.")
-        followup_result_summary = capability_result_followup_summary.get("followup_result_summary", {})
-        if not isinstance(followup_result_summary, dict) or followup_result_summary.get("result_kind") != "speech":
-            raise SmokeError("schedule.status probe follow-up result summary was invalid.")
-        transition_summary = capability_result_followup_summary.get("transition_summary", {})
-        if not isinstance(transition_summary, dict):
-            raise SmokeError("schedule.status probe follow-up transition summary was invalid.")
-        if transition_summary.get("reason_code") != "followup_speech":
-            raise SmokeError("schedule.status probe follow-up reason_code was invalid.")
-        if transition_summary.get("final_state") != "completed":
-            raise SmokeError("schedule.status probe follow-up final_state was invalid.")
-
-    def _assert_device_status_probe_trace(
-        self,
-        conversation_trace: Any,
-        followup_trace: Any,
-        *,
-        marker: str = "LongSmokeDeviceStatusProbeMarker",
-    ) -> None:
-        if not isinstance(conversation_trace, dict):
-            raise SmokeError("device.status probe conversation trace was not collected.")
-        if not isinstance(followup_trace, dict):
-            raise SmokeError("device.status probe follow-up trace was not collected.")
-
-        result_trace = conversation_trace.get("result_trace", {})
-        if not isinstance(result_trace, dict):
-            raise SmokeError("device.status probe conversation result_trace was invalid.")
-        capability_request_summary = result_trace.get("capability_request_summary", {})
-        if not isinstance(capability_request_summary, dict):
-            raise SmokeError("device.status probe conversation capability_request_summary was invalid.")
-        if capability_request_summary.get("capability_id") != "device.status":
-            raise SmokeError("device.status probe conversation capability_id was invalid.")
-        if capability_request_summary.get("status") != "dispatched":
-            raise SmokeError("device.status probe conversation capability_request status was invalid.")
-        self._assert_capability_request_readiness_digest(
-            capability_request_summary,
-            "device.status",
-            "device.status probe conversation",
-        )
-        request_id = capability_request_summary.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            raise SmokeError("device.status probe conversation request_id was not recorded.")
-
-        followup_cycle_summary = followup_trace.get("cycle_summary", {})
-        if not isinstance(followup_cycle_summary, dict):
-            raise SmokeError("device.status probe follow-up cycle_summary was invalid.")
-        if followup_cycle_summary.get("trigger_kind") != "capability_result":
-            raise SmokeError("device.status probe follow-up trigger_kind was invalid.")
-        if followup_cycle_summary.get("result_kind") != "speech":
-            raise SmokeError("device.status probe follow-up result_kind was invalid.")
-        input_trace = followup_trace.get("input_trace", {})
-        if not isinstance(input_trace, dict):
-            raise SmokeError("device.status probe follow-up input_trace was invalid.")
-        observation_summary = input_trace.get("observation_summary", {})
-        if not isinstance(observation_summary, dict):
-            raise SmokeError("device.status probe follow-up observation_summary was invalid.")
-        if observation_summary.get("capability_id") != "device.status":
-            raise SmokeError("device.status probe follow-up observation capability_id was invalid.")
-        device_state_summary = observation_summary.get("device_state_summary")
-        if not isinstance(device_state_summary, str) or marker not in device_state_summary:
-            raise SmokeError("device.status probe follow-up device_state_summary was invalid.")
-        self._assert_capability_observation_readiness_digest(
-            observation_summary,
-            "device.status",
-            "device.status probe follow-up",
-        )
-        self._assert_status_client_context_source(observation_summary, "device.status probe follow-up")
-
-        world_state_trace = followup_trace.get("world_state_trace", {})
-        if not isinstance(world_state_trace, dict):
-            raise SmokeError("device.status probe follow-up world_state_trace was invalid.")
-        source_pack_contexts = world_state_trace.get("source_pack_contexts", {})
-        if not isinstance(source_pack_contexts, dict):
-            raise SmokeError("device.status probe follow-up source_pack_contexts was invalid.")
-        device_context = source_pack_contexts.get("device_context", {})
-        if not isinstance(device_context, dict):
-            raise SmokeError("device.status probe follow-up device_context was invalid.")
-        if device_context.get("summary_source_hint") != "capability_result.device_state_summary":
-            raise SmokeError("device.status probe follow-up summary_source_hint was invalid.")
-        state_type_hooks = world_state_trace.get("source_pack_state_type_hooks", {})
-        if not isinstance(state_type_hooks, dict):
-            raise SmokeError("device.status probe follow-up source_pack_state_type_hooks was invalid.")
-        device_hook = state_type_hooks.get("device", {})
-        if not isinstance(device_hook, dict):
-            raise SmokeError("device.status probe follow-up device hook was invalid.")
-        if device_hook.get("capability_id") != "device.status":
-            raise SmokeError("device.status probe follow-up device hook capability_id was invalid.")
-        if device_hook.get("summary_source") != "capability_result.device_state_summary":
-            raise SmokeError("device.status probe follow-up device hook summary_source was invalid.")
-
-        normalized_candidate_policies = world_state_trace.get("normalized_candidate_policies", [])
-        if not isinstance(normalized_candidate_policies, list):
-            raise SmokeError("device.status probe follow-up normalized_candidate_policies was invalid.")
-        device_policy = next(
-            (
-                item
-                for item in normalized_candidate_policies
-                if isinstance(item, dict) and item.get("state_type") == "device"
-            ),
-            None,
-        )
-        if not isinstance(device_policy, dict):
-            raise SmokeError("device.status probe follow-up device policy was invalid.")
-        if device_policy.get("summary_source") != "capability_result.device_state_summary":
-            raise SmokeError("device.status probe follow-up device policy summary_source was invalid.")
-
-        followup_result_trace = followup_trace.get("result_trace", {})
-        if not isinstance(followup_result_trace, dict):
-            raise SmokeError("device.status probe follow-up result_trace was invalid.")
-        capability_result_followup_summary = followup_result_trace.get("capability_result_followup_summary", {})
-        if not isinstance(capability_result_followup_summary, dict):
-            raise SmokeError("device.status probe follow-up summary was invalid.")
-        if capability_result_followup_summary.get("capability_id") != "device.status":
-            raise SmokeError("device.status probe follow-up summary capability_id was invalid.")
-        source_request_summary = capability_result_followup_summary.get("source_request_summary", {})
-        if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
-            raise SmokeError("device.status probe follow-up source_request_summary was invalid.")
-        transition_summary = capability_result_followup_summary.get("transition_summary", {})
-        if not isinstance(transition_summary, dict):
-            raise SmokeError("device.status probe follow-up transition summary was invalid.")
-        if transition_summary.get("reason_code") != "followup_speech":
-            raise SmokeError("device.status probe follow-up reason_code was invalid.")
-        if transition_summary.get("final_state") != "completed":
-            raise SmokeError("device.status probe follow-up final_state was invalid.")
-
-    def _assert_body_status_probe_trace(
-        self,
-        conversation_trace: Any,
-        followup_trace: Any,
-        *,
-        marker: str = "LongSmokeBodyStatusProbeMarker",
-    ) -> None:
-        if not isinstance(conversation_trace, dict):
-            raise SmokeError("body.status probe conversation trace was not collected.")
-        if not isinstance(followup_trace, dict):
-            raise SmokeError("body.status probe follow-up trace was not collected.")
-
-        result_trace = conversation_trace.get("result_trace", {})
-        if not isinstance(result_trace, dict):
-            raise SmokeError("body.status probe conversation result_trace was invalid.")
-        capability_request_summary = result_trace.get("capability_request_summary", {})
-        if not isinstance(capability_request_summary, dict):
-            raise SmokeError("body.status probe conversation capability_request_summary was invalid.")
-        if capability_request_summary.get("capability_id") != "body.status":
-            raise SmokeError("body.status probe conversation capability_id was invalid.")
-        if capability_request_summary.get("status") != "dispatched":
-            raise SmokeError("body.status probe conversation capability_request status was invalid.")
-        self._assert_capability_request_readiness_digest(
-            capability_request_summary,
-            "body.status",
-            "body.status probe conversation",
-        )
-        request_id = capability_request_summary.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            raise SmokeError("body.status probe conversation request_id was not recorded.")
-
-        followup_cycle_summary = followup_trace.get("cycle_summary", {})
-        if not isinstance(followup_cycle_summary, dict):
-            raise SmokeError("body.status probe follow-up cycle_summary was invalid.")
-        if followup_cycle_summary.get("trigger_kind") != "capability_result":
-            raise SmokeError("body.status probe follow-up trigger_kind was invalid.")
-        if followup_cycle_summary.get("result_kind") != "speech":
-            raise SmokeError("body.status probe follow-up result_kind was invalid.")
-        input_trace = followup_trace.get("input_trace", {})
-        if not isinstance(input_trace, dict):
-            raise SmokeError("body.status probe follow-up input_trace was invalid.")
-        observation_summary = input_trace.get("observation_summary", {})
-        if not isinstance(observation_summary, dict):
-            raise SmokeError("body.status probe follow-up observation_summary was invalid.")
-        if observation_summary.get("capability_id") != "body.status":
-            raise SmokeError("body.status probe follow-up observation capability_id was invalid.")
-        body_state_summary = observation_summary.get("body_state_summary")
-        if not isinstance(body_state_summary, str) or marker not in body_state_summary:
-            raise SmokeError("body.status probe follow-up body_state_summary was invalid.")
-        self._assert_capability_observation_readiness_digest(
-            observation_summary,
-            "body.status",
-            "body.status probe follow-up",
-        )
-        self._assert_status_client_context_source(observation_summary, "body.status probe follow-up")
-
-        world_state_trace = followup_trace.get("world_state_trace", {})
-        if not isinstance(world_state_trace, dict):
-            raise SmokeError("body.status probe follow-up world_state_trace was invalid.")
-        source_pack_contexts = world_state_trace.get("source_pack_contexts", {})
-        if not isinstance(source_pack_contexts, dict):
-            raise SmokeError("body.status probe follow-up source_pack_contexts was invalid.")
-        body_context = source_pack_contexts.get("body_context", {})
-        if not isinstance(body_context, dict):
-            raise SmokeError("body.status probe follow-up body_context was invalid.")
-        if body_context.get("summary_source_hint") != "capability_result.body_state_summary":
-            raise SmokeError("body.status probe follow-up summary_source_hint was invalid.")
-        state_type_hooks = world_state_trace.get("source_pack_state_type_hooks", {})
-        if not isinstance(state_type_hooks, dict):
-            raise SmokeError("body.status probe follow-up source_pack_state_type_hooks was invalid.")
-        body_hook = state_type_hooks.get("body", {})
-        if not isinstance(body_hook, dict):
-            raise SmokeError("body.status probe follow-up body hook was invalid.")
-        if body_hook.get("capability_id") != "body.status":
-            raise SmokeError("body.status probe follow-up body hook capability_id was invalid.")
-        if body_hook.get("summary_source") != "capability_result.body_state_summary":
-            raise SmokeError("body.status probe follow-up body hook summary_source was invalid.")
-
-        normalized_candidate_policies = world_state_trace.get("normalized_candidate_policies", [])
-        if not isinstance(normalized_candidate_policies, list):
-            raise SmokeError("body.status probe follow-up normalized_candidate_policies was invalid.")
-        body_policy = next(
-            (
-                item
-                for item in normalized_candidate_policies
-                if isinstance(item, dict) and item.get("state_type") == "body"
-            ),
-            None,
-        )
-        if not isinstance(body_policy, dict):
-            raise SmokeError("body.status probe follow-up body policy was invalid.")
-        if body_policy.get("summary_source") != "capability_result.body_state_summary":
-            raise SmokeError("body.status probe follow-up body policy summary_source was invalid.")
-
-        followup_result_trace = followup_trace.get("result_trace", {})
-        if not isinstance(followup_result_trace, dict):
-            raise SmokeError("body.status probe follow-up result_trace was invalid.")
-        capability_result_followup_summary = followup_result_trace.get("capability_result_followup_summary", {})
-        if not isinstance(capability_result_followup_summary, dict):
-            raise SmokeError("body.status probe follow-up summary was invalid.")
-        if capability_result_followup_summary.get("capability_id") != "body.status":
-            raise SmokeError("body.status probe follow-up summary capability_id was invalid.")
-        source_request_summary = capability_result_followup_summary.get("source_request_summary", {})
-        if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
-            raise SmokeError("body.status probe follow-up source_request_summary was invalid.")
-        transition_summary = capability_result_followup_summary.get("transition_summary", {})
-        if not isinstance(transition_summary, dict):
-            raise SmokeError("body.status probe follow-up transition summary was invalid.")
-        if transition_summary.get("reason_code") != "followup_speech":
-            raise SmokeError("body.status probe follow-up reason_code was invalid.")
-        if transition_summary.get("final_state") != "completed":
-            raise SmokeError("body.status probe follow-up final_state was invalid.")
-
-    def _assert_social_status_probe_trace(
-        self,
-        conversation_trace: Any,
-        followup_trace: Any,
-        *,
-        marker: str = "LongSmokeSocialStatusProbeMarker",
-    ) -> None:
-        if not isinstance(conversation_trace, dict):
-            raise SmokeError("social.status probe conversation trace was not collected.")
-        if not isinstance(followup_trace, dict):
-            raise SmokeError("social.status probe follow-up trace was not collected.")
-
-        result_trace = conversation_trace.get("result_trace", {})
-        if not isinstance(result_trace, dict):
-            raise SmokeError("social.status probe conversation result_trace was invalid.")
-        capability_request_summary = result_trace.get("capability_request_summary", {})
-        if not isinstance(capability_request_summary, dict):
-            raise SmokeError("social.status probe conversation capability_request_summary was invalid.")
-        if capability_request_summary.get("capability_id") != "social.status":
-            raise SmokeError("social.status probe conversation capability_id was invalid.")
-        if capability_request_summary.get("status") != "dispatched":
-            raise SmokeError("social.status probe conversation capability_request status was invalid.")
-        self._assert_capability_request_readiness_digest(
-            capability_request_summary,
-            "social.status",
-            "social.status probe conversation",
-        )
-        request_id = capability_request_summary.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            raise SmokeError("social.status probe conversation request_id was not recorded.")
-
-        followup_cycle_summary = followup_trace.get("cycle_summary", {})
-        if not isinstance(followup_cycle_summary, dict):
-            raise SmokeError("social.status probe follow-up cycle_summary was invalid.")
-        if followup_cycle_summary.get("trigger_kind") != "capability_result":
-            raise SmokeError("social.status probe follow-up trigger_kind was invalid.")
-        if followup_cycle_summary.get("result_kind") != "speech":
-            raise SmokeError("social.status probe follow-up result_kind was invalid.")
-        input_trace = followup_trace.get("input_trace", {})
-        if not isinstance(input_trace, dict):
-            raise SmokeError("social.status probe follow-up input_trace was invalid.")
-        observation_summary = input_trace.get("observation_summary", {})
-        if not isinstance(observation_summary, dict):
-            raise SmokeError("social.status probe follow-up observation_summary was invalid.")
-        if observation_summary.get("capability_id") != "social.status":
-            raise SmokeError("social.status probe follow-up observation capability_id was invalid.")
-        social_context_summary = observation_summary.get("social_context_summary")
-        if not isinstance(social_context_summary, str) or marker not in social_context_summary:
-            raise SmokeError("social.status probe follow-up social_context_summary was invalid.")
-        self._assert_capability_observation_readiness_digest(
-            observation_summary,
-            "social.status",
-            "social.status probe follow-up",
-        )
-        self._assert_status_client_context_source(observation_summary, "social.status probe follow-up")
-
-        world_state_trace = followup_trace.get("world_state_trace", {})
-        if not isinstance(world_state_trace, dict):
-            raise SmokeError("social.status probe follow-up world_state_trace was invalid.")
-        source_pack_contexts = world_state_trace.get("source_pack_contexts", {})
-        if not isinstance(source_pack_contexts, dict):
-            raise SmokeError("social.status probe follow-up source_pack_contexts was invalid.")
-        social_context = source_pack_contexts.get("social_context_context", {})
-        if not isinstance(social_context, dict):
-            raise SmokeError("social.status probe follow-up social_context_context was invalid.")
-        if social_context.get("summary_source_hint") != "capability_result.social_context_summary":
-            raise SmokeError("social.status probe follow-up summary_source_hint was invalid.")
-        state_type_hooks = world_state_trace.get("source_pack_state_type_hooks", {})
-        if not isinstance(state_type_hooks, dict):
-            raise SmokeError("social.status probe follow-up source_pack_state_type_hooks was invalid.")
-        social_hook = state_type_hooks.get("social_context", {})
-        if not isinstance(social_hook, dict):
-            raise SmokeError("social.status probe follow-up social_context hook was invalid.")
-        if social_hook.get("capability_id") != "social.status":
-            raise SmokeError("social.status probe follow-up social_context hook capability_id was invalid.")
-        if social_hook.get("summary_source") != "capability_result.social_context_summary":
-            raise SmokeError("social.status probe follow-up social_context hook summary_source was invalid.")
-
-        normalized_candidate_policies = world_state_trace.get("normalized_candidate_policies", [])
-        if not isinstance(normalized_candidate_policies, list):
-            raise SmokeError("social.status probe follow-up normalized_candidate_policies was invalid.")
-        social_policy = next(
-            (
-                item
-                for item in normalized_candidate_policies
-                if isinstance(item, dict) and item.get("state_type") == "social_context"
-            ),
-            None,
-        )
-        if not isinstance(social_policy, dict):
-            raise SmokeError("social.status probe follow-up social_context policy was invalid.")
-        if social_policy.get("summary_source") != "capability_result.social_context_summary":
-            raise SmokeError("social.status probe follow-up social_context policy summary_source was invalid.")
-
-        followup_result_trace = followup_trace.get("result_trace", {})
-        if not isinstance(followup_result_trace, dict):
-            raise SmokeError("social.status probe follow-up result_trace was invalid.")
-        capability_result_followup_summary = followup_result_trace.get("capability_result_followup_summary", {})
-        if not isinstance(capability_result_followup_summary, dict):
-            raise SmokeError("social.status probe follow-up summary was invalid.")
-        if capability_result_followup_summary.get("capability_id") != "social.status":
-            raise SmokeError("social.status probe follow-up summary capability_id was invalid.")
-        source_request_summary = capability_result_followup_summary.get("source_request_summary", {})
-        if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
-            raise SmokeError("social.status probe follow-up source_request_summary was invalid.")
-        transition_summary = capability_result_followup_summary.get("transition_summary", {})
-        if not isinstance(transition_summary, dict):
-            raise SmokeError("social.status probe follow-up transition summary was invalid.")
-        if transition_summary.get("reason_code") != "followup_speech":
-            raise SmokeError("social.status probe follow-up reason_code was invalid.")
-        if transition_summary.get("final_state") != "completed":
-            raise SmokeError("social.status probe follow-up final_state was invalid.")
-
-    def _assert_environment_status_probe_trace(
-        self,
-        conversation_trace: Any,
-        followup_trace: Any,
-        *,
-        marker: str = "LongSmokeEnvironmentStatusProbeMarker",
-    ) -> None:
-        if not isinstance(conversation_trace, dict):
-            raise SmokeError("environment.status probe conversation trace was not collected.")
-        if not isinstance(followup_trace, dict):
-            raise SmokeError("environment.status probe follow-up trace was not collected.")
-
-        result_trace = conversation_trace.get("result_trace", {})
-        if not isinstance(result_trace, dict):
-            raise SmokeError("environment.status probe conversation result_trace was invalid.")
-        capability_request_summary = result_trace.get("capability_request_summary", {})
-        if not isinstance(capability_request_summary, dict):
-            raise SmokeError("environment.status probe conversation capability_request_summary was invalid.")
-        if capability_request_summary.get("capability_id") != "environment.status":
-            raise SmokeError("environment.status probe conversation capability_id was invalid.")
-        if capability_request_summary.get("status") != "dispatched":
-            raise SmokeError("environment.status probe conversation capability_request status was invalid.")
-        self._assert_capability_request_readiness_digest(
-            capability_request_summary,
-            "environment.status",
-            "environment.status probe conversation",
-        )
-        request_id = capability_request_summary.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            raise SmokeError("environment.status probe conversation request_id was not recorded.")
-
-        followup_cycle_summary = followup_trace.get("cycle_summary", {})
-        if not isinstance(followup_cycle_summary, dict):
-            raise SmokeError("environment.status probe follow-up cycle_summary was invalid.")
-        if followup_cycle_summary.get("trigger_kind") != "capability_result":
-            raise SmokeError("environment.status probe follow-up trigger_kind was invalid.")
-        if followup_cycle_summary.get("result_kind") != "speech":
-            raise SmokeError("environment.status probe follow-up result_kind was invalid.")
-        input_trace = followup_trace.get("input_trace", {})
-        if not isinstance(input_trace, dict):
-            raise SmokeError("environment.status probe follow-up input_trace was invalid.")
-        observation_summary = input_trace.get("observation_summary", {})
-        if not isinstance(observation_summary, dict):
-            raise SmokeError("environment.status probe follow-up observation_summary was invalid.")
-        if observation_summary.get("capability_id") != "environment.status":
-            raise SmokeError("environment.status probe follow-up observation capability_id was invalid.")
-        environment_summary = observation_summary.get("environment_summary")
-        if not isinstance(environment_summary, str) or marker not in environment_summary:
-            raise SmokeError("environment.status probe follow-up environment_summary was invalid.")
-        self._assert_capability_observation_readiness_digest(
-            observation_summary,
-            "environment.status",
-            "environment.status probe follow-up",
-        )
-        self._assert_status_client_context_source(observation_summary, "environment.status probe follow-up")
-
-        world_state_trace = followup_trace.get("world_state_trace", {})
-        if not isinstance(world_state_trace, dict):
-            raise SmokeError("environment.status probe follow-up world_state_trace was invalid.")
-        source_pack_contexts = world_state_trace.get("source_pack_contexts", {})
-        if not isinstance(source_pack_contexts, dict):
-            raise SmokeError("environment.status probe follow-up source_pack_contexts was invalid.")
-        environment_context = source_pack_contexts.get("environment_context", {})
-        if not isinstance(environment_context, dict):
-            raise SmokeError("environment.status probe follow-up environment_context was invalid.")
-        if environment_context.get("summary_source_hint") != "capability_result.environment_summary":
-            raise SmokeError("environment.status probe follow-up summary_source_hint was invalid.")
-        state_type_hooks = world_state_trace.get("source_pack_state_type_hooks", {})
-        if not isinstance(state_type_hooks, dict):
-            raise SmokeError("environment.status probe follow-up source_pack_state_type_hooks was invalid.")
-        environment_hook = state_type_hooks.get("environment", {})
-        if not isinstance(environment_hook, dict):
-            raise SmokeError("environment.status probe follow-up environment hook was invalid.")
-        if environment_hook.get("capability_id") != "environment.status":
-            raise SmokeError("environment.status probe follow-up environment hook capability_id was invalid.")
-        if environment_hook.get("summary_source") != "capability_result.environment_summary":
-            raise SmokeError("environment.status probe follow-up environment hook summary_source was invalid.")
-
-        normalized_candidate_policies = world_state_trace.get("normalized_candidate_policies", [])
-        if not isinstance(normalized_candidate_policies, list):
-            raise SmokeError("environment.status probe follow-up normalized_candidate_policies was invalid.")
-        environment_policy = next(
-            (
-                item
-                for item in normalized_candidate_policies
-                if isinstance(item, dict) and item.get("state_type") == "environment"
-            ),
-            None,
-        )
-        if not isinstance(environment_policy, dict):
-            raise SmokeError("environment.status probe follow-up environment policy was invalid.")
-        if environment_policy.get("summary_source") != "capability_result.environment_summary":
-            raise SmokeError("environment.status probe follow-up environment policy summary_source was invalid.")
-
-        followup_result_trace = followup_trace.get("result_trace", {})
-        if not isinstance(followup_result_trace, dict):
-            raise SmokeError("environment.status probe follow-up result_trace was invalid.")
-        capability_result_followup_summary = followup_result_trace.get("capability_result_followup_summary", {})
-        if not isinstance(capability_result_followup_summary, dict):
-            raise SmokeError("environment.status probe follow-up summary was invalid.")
-        if capability_result_followup_summary.get("capability_id") != "environment.status":
-            raise SmokeError("environment.status probe follow-up summary capability_id was invalid.")
-        source_request_summary = capability_result_followup_summary.get("source_request_summary", {})
-        if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
-            raise SmokeError("environment.status probe follow-up source_request_summary was invalid.")
-        transition_summary = capability_result_followup_summary.get("transition_summary", {})
-        if not isinstance(transition_summary, dict):
-            raise SmokeError("environment.status probe follow-up transition summary was invalid.")
-        if transition_summary.get("reason_code") != "followup_speech":
-            raise SmokeError("environment.status probe follow-up reason_code was invalid.")
-        if transition_summary.get("final_state") != "completed":
-            raise SmokeError("environment.status probe follow-up final_state was invalid.")
-
-    def _assert_location_status_probe_trace(
-        self,
-        conversation_trace: Any,
-        followup_trace: Any,
-        *,
-        marker: str = "LongSmokeLocationStatusProbeMarker",
-    ) -> None:
-        if not isinstance(conversation_trace, dict):
-            raise SmokeError("location.status probe conversation trace was not collected.")
-        if not isinstance(followup_trace, dict):
-            raise SmokeError("location.status probe follow-up trace was not collected.")
-
-        result_trace = conversation_trace.get("result_trace", {})
-        if not isinstance(result_trace, dict):
-            raise SmokeError("location.status probe conversation result_trace was invalid.")
-        capability_request_summary = result_trace.get("capability_request_summary", {})
-        if not isinstance(capability_request_summary, dict):
-            raise SmokeError("location.status probe conversation capability_request_summary was invalid.")
-        if capability_request_summary.get("capability_id") != "location.status":
-            raise SmokeError("location.status probe conversation capability_id was invalid.")
-        if capability_request_summary.get("status") != "dispatched":
-            raise SmokeError("location.status probe conversation capability_request status was invalid.")
-        self._assert_capability_request_readiness_digest(
-            capability_request_summary,
-            "location.status",
-            "location.status probe conversation",
-        )
-        request_id = capability_request_summary.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            raise SmokeError("location.status probe conversation request_id was not recorded.")
-
-        followup_cycle_summary = followup_trace.get("cycle_summary", {})
-        if not isinstance(followup_cycle_summary, dict):
-            raise SmokeError("location.status probe follow-up cycle_summary was invalid.")
-        if followup_cycle_summary.get("trigger_kind") != "capability_result":
-            raise SmokeError("location.status probe follow-up trigger_kind was invalid.")
-        if followup_cycle_summary.get("result_kind") != "speech":
-            raise SmokeError("location.status probe follow-up result_kind was invalid.")
-        input_trace = followup_trace.get("input_trace", {})
-        if not isinstance(input_trace, dict):
-            raise SmokeError("location.status probe follow-up input_trace was invalid.")
-        observation_summary = input_trace.get("observation_summary", {})
-        if not isinstance(observation_summary, dict):
-            raise SmokeError("location.status probe follow-up observation_summary was invalid.")
-        if observation_summary.get("capability_id") != "location.status":
-            raise SmokeError("location.status probe follow-up observation capability_id was invalid.")
-        location_summary = observation_summary.get("location_summary")
-        if not isinstance(location_summary, str) or marker not in location_summary:
-            raise SmokeError("location.status probe follow-up location_summary was invalid.")
-        self._assert_capability_observation_readiness_digest(
-            observation_summary,
-            "location.status",
-            "location.status probe follow-up",
-        )
-        self._assert_status_client_context_source(observation_summary, "location.status probe follow-up")
-
-        world_state_trace = followup_trace.get("world_state_trace", {})
-        if not isinstance(world_state_trace, dict):
-            raise SmokeError("location.status probe follow-up world_state_trace was invalid.")
-        source_pack_contexts = world_state_trace.get("source_pack_contexts", {})
-        if not isinstance(source_pack_contexts, dict):
-            raise SmokeError("location.status probe follow-up source_pack_contexts was invalid.")
-        location_context = source_pack_contexts.get("location_context", {})
-        if not isinstance(location_context, dict):
-            raise SmokeError("location.status probe follow-up location_context was invalid.")
-        if location_context.get("summary_source_hint") != "capability_result.location_summary":
-            raise SmokeError("location.status probe follow-up summary_source_hint was invalid.")
-        state_type_hooks = world_state_trace.get("source_pack_state_type_hooks", {})
-        if not isinstance(state_type_hooks, dict):
-            raise SmokeError("location.status probe follow-up source_pack_state_type_hooks was invalid.")
-        location_hook = state_type_hooks.get("location", {})
-        if not isinstance(location_hook, dict):
-            raise SmokeError("location.status probe follow-up location hook was invalid.")
-        if location_hook.get("capability_id") != "location.status":
-            raise SmokeError("location.status probe follow-up location hook capability_id was invalid.")
-        if location_hook.get("summary_source") != "capability_result.location_summary":
-            raise SmokeError("location.status probe follow-up location hook summary_source was invalid.")
-
-        normalized_candidate_policies = world_state_trace.get("normalized_candidate_policies", [])
-        if not isinstance(normalized_candidate_policies, list):
-            raise SmokeError("location.status probe follow-up normalized_candidate_policies was invalid.")
-        location_policy = next(
-            (
-                item
-                for item in normalized_candidate_policies
-                if isinstance(item, dict) and item.get("state_type") == "location"
-            ),
-            None,
-        )
-        if not isinstance(location_policy, dict):
-            raise SmokeError("location.status probe follow-up location policy was invalid.")
-        if location_policy.get("summary_source") != "capability_result.location_summary":
-            raise SmokeError("location.status probe follow-up location policy summary_source was invalid.")
-
-        followup_result_trace = followup_trace.get("result_trace", {})
-        if not isinstance(followup_result_trace, dict):
-            raise SmokeError("location.status probe follow-up result_trace was invalid.")
-        capability_result_followup_summary = followup_result_trace.get("capability_result_followup_summary", {})
-        if not isinstance(capability_result_followup_summary, dict):
-            raise SmokeError("location.status probe follow-up summary was invalid.")
-        if capability_result_followup_summary.get("capability_id") != "location.status":
-            raise SmokeError("location.status probe follow-up summary capability_id was invalid.")
-        source_request_summary = capability_result_followup_summary.get("source_request_summary", {})
-        if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
-            raise SmokeError("location.status probe follow-up source_request_summary was invalid.")
-        transition_summary = capability_result_followup_summary.get("transition_summary", {})
-        if not isinstance(transition_summary, dict):
-            raise SmokeError("location.status probe follow-up transition summary was invalid.")
-        if transition_summary.get("reason_code") != "followup_speech":
-            raise SmokeError("location.status probe follow-up reason_code was invalid.")
-        if transition_summary.get("final_state") != "completed":
-            raise SmokeError("location.status probe follow-up final_state was invalid.")
-
     def _write_summary(self, summary: dict[str, Any]) -> None:
         self.summary_path.write_text(
             json.dumps(summary, ensure_ascii=False, indent=2),
@@ -7581,20 +4306,6 @@ class LongSmokeRunner:
         )
         if self.args.profile == "real-llm-smoke":
             conversation_summary = (summary.get("conversation_trace") or {}).get("cycle_summary") or {}
-            external_summary = (summary.get("external_status_conversation_trace") or {}).get("cycle_summary") or {}
-            external_followup_summary = (summary.get("external_status_followup_trace") or {}).get("cycle_summary") or {}
-            schedule_summary = (summary.get("schedule_status_conversation_trace") or {}).get("cycle_summary") or {}
-            schedule_followup_summary = (summary.get("schedule_status_followup_trace") or {}).get("cycle_summary") or {}
-            device_summary = (summary.get("device_status_conversation_trace") or {}).get("cycle_summary") or {}
-            device_followup_summary = (summary.get("device_status_followup_trace") or {}).get("cycle_summary") or {}
-            body_summary = (summary.get("body_status_conversation_trace") or {}).get("cycle_summary") or {}
-            body_followup_summary = (summary.get("body_status_followup_trace") or {}).get("cycle_summary") or {}
-            environment_summary = (summary.get("environment_status_conversation_trace") or {}).get("cycle_summary") or {}
-            environment_followup_summary = (summary.get("environment_status_followup_trace") or {}).get("cycle_summary") or {}
-            location_summary = (summary.get("location_status_conversation_trace") or {}).get("cycle_summary") or {}
-            location_followup_summary = (summary.get("location_status_followup_trace") or {}).get("cycle_summary") or {}
-            social_summary = (summary.get("social_status_conversation_trace") or {}).get("cycle_summary") or {}
-            social_followup_summary = (summary.get("social_status_followup_trace") or {}).get("cycle_summary") or {}
             initiative_cycle_ids = summary.get("real_llm_initiative_probe_cycle_ids") or {}
             initiative_case_results = summary.get("real_llm_initiative_probe_case_results") or {}
             capability_result_cycle_ids = summary.get("real_llm_capability_result_probe_cycle_ids") or {}
@@ -7636,13 +4347,6 @@ class LongSmokeRunner:
             log(
                 "summary"
                 f" conversation={conversation_summary.get('result_kind')}"
-                f" external_status={external_summary.get('result_kind')}/{external_followup_summary.get('result_kind')}"
-                f" schedule_status={schedule_summary.get('result_kind')}/{schedule_followup_summary.get('result_kind')}"
-                f" device_status={device_summary.get('result_kind')}/{device_followup_summary.get('result_kind')}"
-                f" body_status={body_summary.get('result_kind')}/{body_followup_summary.get('result_kind')}"
-                f" environment_status={environment_summary.get('result_kind')}/{environment_followup_summary.get('result_kind')}"
-                f" location_status={location_summary.get('result_kind')}/{location_followup_summary.get('result_kind')}"
-                f" social_status={social_summary.get('result_kind')}/{social_followup_summary.get('result_kind')}"
                 f" initiative_cases={len(initiative_cycle_ids) if isinstance(initiative_cycle_ids, dict) else 0}"
                 f" initiative_results={initiative_result_log}"
                 f" capability_result_cases={len(capability_result_cycle_ids) if isinstance(capability_result_cycle_ids, dict) else 0}"
@@ -7667,7 +4371,6 @@ class LongSmokeRunner:
             f" captures={summary['capture_request_count']}"
             f" camera_ptz={summary['camera_ptz_request_count']}"
             f" camera_captures={summary['camera_capture_response_count']}"
-            f" external_status={summary['external_status_request_count']}"
             f" empty_result={len(summary['capture_empty_result_request_ids'])}"
             f" mismatch={len(summary['capture_mismatch_request_ids'])}"
             f" invalid_images={len(summary['capture_invalid_images_request_ids'])}"

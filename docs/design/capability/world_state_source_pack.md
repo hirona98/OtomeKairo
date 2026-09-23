@@ -21,14 +21,7 @@ raw payload 保存、長い OCR、配送先 client の露出は入れない。
 - `client_context.environment_summary`
 - `client_context.location_summary`
 - `client_context.external_service_summary`
-- `external.status` result から得た `service / status_text`
 - 成功した `mcp.call_tool` result から得た `client_context.mcp_result_summary / mcp_server_id / tool_name`
-- `schedule.status` result から得た `schedule_summary / schedule_slots`
-- `device.status` result から得た `device_state_summary`
-- `body.status` result から得た `body_state_summary`
-- `environment.status` result から得た `environment_summary`
-- `location.status` result から得た `location_summary`
-- `social.status` result から得た `social_context_summary`
 - capability result の `client_context` から得た `social_context_summary`
 - capability result の `client_context` から得た `body_state_summary`
 - capability result の `client_context` から得た `device_state_summary`
@@ -49,62 +42,28 @@ source pack 例:
 ```json
 {
   "trigger_kind": "background_thinking",
-  "current_input_summary": "定期思考。いま保留中の会話候補を再評価したい。",
+  "current_input_summary": "定期思考。いまの文脈を再評価したい。",
   "source_kind": "client_context",
   "source_ref": "cycle:...",
   "time_context": "2026年4月25日 土曜日 9時00分（日本時間）",
+  "current_person_ref": "person:external-123",
   "client_context": {
-    "source": "background_thinking_scheduler"
+    "source": "example_client"
   },
   "state_sources": [
-    {
-      "candidate_ref": "state_source:visual_context",
-      "state_type": "visual_context",
-      "scope_type": "topic",
-      "scope_key": "topic:current_work",
-      "evidence_summary": "チャットツールの general チャンネルが視覚前景で、やり取りが見えている。"
-    },
     {
       "candidate_ref": "state_source:social_context",
       "state_type": "social_context",
       "scope_type": "relationship",
       "scope_key": "self|person:external-123",
-      "evidence_summary": "Slack 上のやり取りが近い判断文脈として前景にある。"
+      "evidence_summary": "チャットでのやり取りが近い判断文脈にある。"
     },
     {
       "candidate_ref": "state_source:environment",
       "state_type": "environment",
       "scope_type": "world",
       "scope_key": "world",
-      "evidence_summary": "作業部屋は静かで、机上環境が整っている。"
-    },
-    {
-      "candidate_ref": "state_source:location",
-      "state_type": "location",
-      "scope_type": "world",
-      "scope_key": "world",
-      "evidence_summary": "自宅デスクで作業している。"
-    },
-    {
-      "candidate_ref": "state_source:external_service",
-      "state_type": "external_service",
-      "scope_type": "world",
-      "scope_key": "world",
-      "evidence_summary": "GitHub の通知に未確認レビューが 1 件ある。"
-    },
-    {
-      "candidate_ref": "state_source:body",
-      "state_type": "body",
-      "scope_type": "self",
-      "scope_key": "self",
-      "evidence_summary": "肩や首に疲れがありそう。"
-    },
-    {
-      "candidate_ref": "state_source:device",
-      "state_type": "device",
-      "scope_type": "world",
-      "scope_key": "world",
-      "evidence_summary": "接続機器は正常に応答している。"
+      "evidence_summary": "作業部屋は静かである。"
     },
     {
       "candidate_ref": "state_source:schedule",
@@ -114,61 +73,17 @@ source pack 例:
       "evidence_summary": "このあとレビュー確認を続ける予定が近い。"
     }
   ],
-  "visual_context": {
-    "summary_text": "チャットツールの general チャンネルが視覚前景で、やり取りが見えている。",
-    "visual_summary_text": "チャットツールの general チャンネルが視覚前景で、やり取りが見えている。",
-    "image_interpreted": true,
-    "visual_confidence_hint": "medium",
-    "image_count": 1,
-    "capability_id": "vision.capture",
-    "vision_source_id": "vision_source:main_display",
-    "source_kind": "desktop",
-    "source_label": "メイン画面",
-    "source_owner": "user_environment"
-  },
   "social_context_context": {
-    "summary_text": "Slack 上のやり取りが近い判断文脈として前景にある。",
-    "social_context_summary": "Slack 上のやり取りが近い判断文脈として前景にある。",
-    "capability_id": "social.status"
+    "summary_text": "チャットでのやり取りが近い判断文脈にある。",
+    "social_context_summary": "チャットでのやり取りが近い判断文脈にある。"
   },
   "environment_context": {
-    "summary_text": "作業部屋は静かで、机上環境が整っている。",
-    "environment_summary": "作業部屋は静かで、机上環境が整っている。",
-    "capability_id": "environment.status"
-  },
-  "location_context": {
-    "summary_text": "自宅デスクで作業している。",
-    "location_summary": "自宅デスクで作業している。",
-    "capability_id": "location.status"
-  },
-  "external_service_context": {
-    "summary_text": "GitHub の通知に未確認レビューが 1 件ある。",
-    "service": "github",
-    "status_text": "GitHub の通知に未確認レビューが 1 件ある。",
-    "capability_id": "external.status"
-  },
-  "body_context": {
-    "summary_text": "肩や首に疲れがありそう。",
-    "body_state_summary": "肩や首に疲れがありそう。",
-    "capability_id": "body.status"
-  },
-  "device_context": {
-    "summary_text": "接続機器は正常に応答している。",
-    "device_state_summary": "接続機器は正常に応答している。",
-    "capability_id": "device.status"
+    "summary_text": "作業部屋は静かである。",
+    "environment_summary": "作業部屋は静かである。"
   },
   "schedule_context": {
     "summary_text": "このあとレビュー確認を続ける予定が近い。",
     "schedule_summary": "このあとレビュー確認を続ける予定が近い。",
-    "capability_id": "schedule.status",
-    "schedule_slots": [
-      {
-        "slot_key": "calendar:review",
-        "summary_text": "12:20 にレビュー確認がある。",
-        "not_before": "2026-04-25T12:20:00+09:00",
-        "expires_at": "2026-04-25T12:35:00+09:00"
-      }
-    ],
     "pending_intent": {
       "intent_kind": "conversation_follow_up",
       "intent_summary": "レビュー状況に合わせてまた声をかける。",
@@ -192,20 +107,10 @@ LLM は `state_sources` に存在しない候補を生成しない。
 `current_input_summary` は入力意図と、人が明示した状態値だけを補助する。
 確認依頼だけの入力から現在場所、身体状態、端末状態、周囲環境、対人文脈を推測して state 候補を作らない。
 `social_context_context / environment_context / location_context` は、`client_context` から取った summary をそのまま dedicated context へ写す。
-`social.status` result は、`social_context_context.summary_text / social_context_summary` へ投影する。
-`external.status` のような capability result は、`external_service_context.summary_text` に加えて `service / status_text` を載せる。
 `mcp.call_tool` result は、`status=completed`、`is_error=false`、`error` が空、`client_context.mcp_result_summary` が非空のときだけ `external_service_context` を作る。
 この context は `summary_text / result_summary_text` に `mcp_result_summary`、`service` に `<mcp_server_id>/<tool_name>`、`mcp_server_id / tool_name` に各識別子、`summary_source_hint` に `capability_result.client_context.mcp_result_summary`、`capability_id` に `mcp.call_tool` を載せる。
 LLM は結果要約が現在も成立する外部サービスの条件を表す場合に `external_service` 候補へ採用し、単発処理の完了を表す場合は候補を返さない。
-`schedule.status` result は、`schedule_context.summary_text / schedule_summary / schedule_slots` へ投影する。
-`device.status` result は、`device_context.summary_text / device_state_summary` へ投影する。
-`body.status` result は、`body_context.summary_text / body_state_summary` へ投影する。
-`environment.status` result は、`environment_context.summary_text / environment_summary` へ投影する。
-`location.status` result は、`location_context.summary_text / location_summary` へ投影する。
-同時に client 側 summary もあるときは、`client_summary_text / result_summary_text / summary_source_hint` を追加して境界を残す。
-`body_context / device_context / schedule_context` でも、capability result 由来のときは `capability_id` と state-type 別 summary field を載せる。
-client summary と result summary が両方あるときは、同様に `client_summary_text / result_summary_text / summary_source_hint` を追加する。
-real schedule source が複数あるときは、`schedule_context.schedule_slots` に複数 slot を載せる。
+`client_context.schedule_slots` が複数あるときは、`schedule_context.schedule_slots` に複数 slot を載せる。
 前回の foreground `world_state` は LLM source pack に載せない。
 既存状態との置換や inspection のため、コード側の `world_state_trace.previous_foreground_world_state` だけに残す。
 
@@ -215,16 +120,8 @@ real schedule source が複数あるときは、`schedule_context.schedule_slots
 - `vision.capture` result の visual summary、`visual_observation_id`、`vision_source_id / source_kind / source_label` を `visual_context` へ投影する
 - `vision.capture` result follow-up では異なる `vision_source_id` の `visual_context` を判断入力から除外する
 - `client_context.social_context_summary / environment_summary / location_summary` を対応する dedicated context へ投影する
-- `social.status` result の `social_context_summary` を `social_context_context` へ投影する
-- `external.status` result の `service / status_text` を `external_service_context` へ投影する
 - 成功した `mcp.call_tool` result の `mcp_result_summary` と server/tool 複合識別を `external_service_context` へ投影する
-- `schedule.status` result の `schedule_summary / schedule_slots` を `schedule_context` へ投影する
-- `device.status` result の `device_state_summary` を `device_context` へ投影する
-- `body.status` result の `body_state_summary` を `body_context` へ投影する
-- `environment.status` result の `environment_summary` を `environment_context` へ投影する
-- `location.status` result の `location_summary` を `location_context` へ投影する
-- capability result の `body_state_summary / device_state_summary / schedule_summary / social_context_summary / environment_summary / location_summary` を対応する state-type context へ投影する
-- `summary_source` が `capability_result.<field>` と `client_context.<field>` を区別できるように context へ source hint を残す
+- `summary_source` が `capability_result.client_context.<field>` と `client_context.<field>` を区別できるように context へ source hint を残す
 - `schedule_context.schedule_slots` があるときは deterministic な slot state を追加し、`schedule:self` と `schedule:<slot_key>` を併存させる
 - wake の selected pending-intent があるときだけ `schedule_context.pending_intent` を作り、`slot_key` を付ける
 - 対応 structured context が無い状態種別は `state_sources` に追加しない

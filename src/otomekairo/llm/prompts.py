@@ -2093,7 +2093,7 @@ def _build_world_state_system_prompt() -> str:
         "画像由来の判断は source pack にある visual_summary_text を根拠にしてください。\n"
         "state_sources の evidence_summary と、対応する visual_context / external_service_context / body_context / device_context / schedule_context / social_context_context / environment_context / location_context の補助 field だけを根拠に使ってください。\n"
         "現在状態は source pack の context summary、capability result、client context、observation summary を根拠にしてください。\n"
-        "visual_context.visual_summary_text は視覚前景の詳細な補助説明として使い、world_state candidate の summary_text は現在判断に効く短い状態要約にしてください。external_service_context.status_text / service は外部状態の補助情報として使ってください。\n"
+        "visual_context.visual_summary_text は視覚前景の詳細な補助説明として使い、world_state candidate の summary_text は現在判断に効く短い状態要約にしてください。external_service_context の service / mcp_server_id / tool_name は外部サービスの識別に使ってください。\n"
         "external_service_context / body_context / device_context / schedule_context に client_summary_text や result_summary_text があるときは、summary_text と整合する補助比較用としてだけ使ってください。\n"
         "external_service_context.capability_id=mcp.call_tool の result_summary_text は、結果が現在も成立する外部サービスの条件を表す場合だけ external_service 候補にしてください。単発処理の完了を表す結果は実行履歴として扱い、state_candidates には採用しません。\n"
         "schedule_context.schedule_slots があるときは、各 slot の summary_text / slot_key / not_before / expires_at を短期予定の補助根拠として使ってください。\n"

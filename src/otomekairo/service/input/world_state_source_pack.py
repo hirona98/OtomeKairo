@@ -458,37 +458,21 @@ class ServiceInputWorldStateSourcePackMixin:
             return self._build_world_state_mcp_external_service_context(observation_summary)
 
         client_summary_text = self._client_context_text(client_context.get("external_service_summary"), limit=160)
-        summary_text = client_summary_text
-        result_summary_text = None
-        service = None
+        if client_summary_text is None:
+            return None
         capability_id_text = None
         if isinstance(observation_summary, dict):
-            result_summary_text = self._client_context_text(observation_summary.get("status_text"), limit=160)
-            if result_summary_text is not None:
-                summary_text = result_summary_text
-            service = self._client_context_text(observation_summary.get("service"), limit=80)
             capability_id = observation_summary.get("capability_id")
             if isinstance(capability_id, str) and capability_id.strip():
                 capability_id_text = capability_id.strip()
-        has_external_signal = summary_text is not None or result_summary_text is not None or service is not None
-        if not has_external_signal:
-            return None
-        summary_source_hint = None
-        if result_summary_text is not None:
-            summary_source_hint = "capability_result.status_text"
-        elif client_summary_text is not None:
-            summary_source_hint = self._world_state_client_context_summary_source(
-                source_kind=source_kind,
-                field_name="external_service_summary",
-            )
         return WorldStateExternalServiceContext(
-            summary_text=summary_text or result_summary_text or service or "",
+            summary_text=client_summary_text,
             external_service_summary=client_summary_text,
             client_summary_text=client_summary_text,
-            result_summary_text=result_summary_text,
-            status_text=result_summary_text,
-            service=service,
-            summary_source_hint=summary_source_hint,
+            summary_source_hint=self._world_state_client_context_summary_source(
+                source_kind=source_kind,
+                field_name="external_service_summary",
+            ),
             capability_id=capability_id_text,
         )
 
@@ -566,7 +550,7 @@ class ServiceInputWorldStateSourcePackMixin:
         observation_summary: dict[str, Any] | None,
         source_kind: str,
         client_summary_key: str,
-        observation_summary_key: str,
+        observation_summary_key: str | None,
         explicit_field_name: str,
     ) -> WorldStateNamedSummaryContext | None:
         client_summary_text = self._client_context_text(client_context.get(client_summary_key), limit=160)
@@ -574,7 +558,8 @@ class ServiceInputWorldStateSourcePackMixin:
         capability_id_text = None
         observation_text = None
         if isinstance(observation_summary, dict):
-            observation_text = self._client_context_text(observation_summary.get(observation_summary_key), limit=160)
+            if observation_summary_key is not None:
+                observation_text = self._client_context_text(observation_summary.get(observation_summary_key), limit=160)
             if observation_text is not None:
                 summary_text = observation_text
             capability_id = observation_summary.get("capability_id")
@@ -618,7 +603,7 @@ class ServiceInputWorldStateSourcePackMixin:
             observation_summary=observation_summary,
             source_kind=source_kind,
             client_summary_key="social_context_summary",
-            observation_summary_key="social_context_summary",
+            observation_summary_key=None,
             explicit_field_name="social_context_summary",
         )
 
@@ -634,7 +619,7 @@ class ServiceInputWorldStateSourcePackMixin:
             observation_summary=observation_summary,
             source_kind=source_kind,
             client_summary_key="environment_summary",
-            observation_summary_key="environment_summary",
+            observation_summary_key=None,
             explicit_field_name="environment_summary",
         )
 
@@ -650,7 +635,7 @@ class ServiceInputWorldStateSourcePackMixin:
             observation_summary=observation_summary,
             source_kind=source_kind,
             client_summary_key="location_summary",
-            observation_summary_key="location_summary",
+            observation_summary_key=None,
             explicit_field_name="location_summary",
         )
 
@@ -668,7 +653,6 @@ class ServiceInputWorldStateSourcePackMixin:
         observation_text = None
         schedule_slots = self._build_world_state_schedule_slots(
             client_context=client_context,
-            observation_summary=observation_summary,
             source_kind=source_kind,
         )
         if isinstance(observation_summary, dict):
@@ -698,9 +682,6 @@ class ServiceInputWorldStateSourcePackMixin:
             summary_source_hint = self._world_state_client_context_summary_source(
                 source_kind=source_kind,
                 field_name="schedule_slots",
-                from_observation=isinstance(observation_summary, dict)
-                and isinstance(observation_summary.get("schedule_slots"), list)
-                and bool(observation_summary.get("schedule_slots")),
             )
         pending_intent = self._build_world_state_pending_intent_context(selected_candidate)
         if summary_text is None and pending_intent is None and not schedule_slots:
@@ -720,17 +701,9 @@ class ServiceInputWorldStateSourcePackMixin:
         self,
         *,
         client_context: dict[str, Any],
-        observation_summary: dict[str, Any] | None,
         source_kind: str,
     ) -> tuple[WorldStateScheduleSlot, ...]:
-        raw_slots: Any = None
-        from_observation = False
-        if isinstance(observation_summary, dict):
-            raw_slots = observation_summary.get("schedule_slots")
-            from_observation = isinstance(raw_slots, list)
-        if not isinstance(raw_slots, list):
-            raw_slots = client_context.get("schedule_slots")
-            from_observation = False
+        raw_slots = client_context.get("schedule_slots")
         if not isinstance(raw_slots, list):
             return ()
         normalized_slots: list[WorldStateScheduleSlot] = []
@@ -738,7 +711,6 @@ class ServiceInputWorldStateSourcePackMixin:
         summary_source = self._world_state_client_context_summary_source(
             source_kind=source_kind,
             field_name="schedule_slots",
-            from_observation=from_observation,
         )
         for item in raw_slots:
             if not isinstance(item, dict):
@@ -802,10 +774,7 @@ class ServiceInputWorldStateSourcePackMixin:
         *,
         source_kind: str,
         field_name: str,
-        from_observation: bool = False,
     ) -> str:
-        if source_kind == "capability_result" and from_observation:
-            return f"capability_result.{field_name}"
         if source_kind == "capability_result":
             return f"capability_result.client_context.{field_name}"
         return f"client_context.{field_name}"
@@ -816,11 +785,6 @@ class ServiceInputWorldStateSourcePackMixin:
     ) -> WorldStateCapabilityResultSummary | None:
         if not isinstance(observation_summary, dict):
             return None
-        schedule_slots = self._build_world_state_schedule_slots(
-            client_context={},
-            observation_summary=observation_summary,
-            source_kind="capability_result",
-        )
         payload = WorldStateCapabilityResultSummary(
             capability_id=self._client_context_text(observation_summary.get("capability_id"), limit=80),
             image_count=(
@@ -835,15 +799,10 @@ class ServiceInputWorldStateSourcePackMixin:
             ),
             visual_summary_text=self._client_context_text(observation_summary.get("visual_summary_text"), limit=160),
             visual_confidence_hint=self._client_context_text(observation_summary.get("visual_confidence_hint"), limit=24),
-            service=self._client_context_text(observation_summary.get("service"), limit=80),
             status_text=self._client_context_text(observation_summary.get("status_text"), limit=160),
-            social_context_summary=self._client_context_text(observation_summary.get("social_context_summary"), limit=160),
             body_state_summary=self._client_context_text(observation_summary.get("body_state_summary"), limit=160),
             device_state_summary=self._client_context_text(observation_summary.get("device_state_summary"), limit=160),
             schedule_summary=self._client_context_text(observation_summary.get("schedule_summary"), limit=160),
-            environment_summary=self._client_context_text(observation_summary.get("environment_summary"), limit=160),
-            location_summary=self._client_context_text(observation_summary.get("location_summary"), limit=160),
-            schedule_slots=schedule_slots,
             error=self._client_context_text(observation_summary.get("error"), limit=240),
         )
         if not payload.to_prompt_payload():

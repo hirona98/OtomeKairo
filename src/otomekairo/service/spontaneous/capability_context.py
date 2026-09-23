@@ -41,9 +41,6 @@ class ServiceSpontaneousCapabilityContextMixin:
         return summary
 
     def _capability_result_schedule_slots(self, capability_response: dict[str, Any]) -> list[dict[str, Any]] | None:
-        raw_slots = capability_response.get("schedule_slots")
-        if isinstance(raw_slots, list):
-            return self._normalize_capability_result_summary_schedule_slots(raw_slots)
         client_context = capability_response.get("client_context", {})
         if not isinstance(client_context, dict):
             return None
@@ -127,10 +124,6 @@ class ServiceSpontaneousCapabilityContextMixin:
                     summary[field] = normalized
                 elif isinstance(value, (int, float, bool)):
                     summary[field] = value
-                elif field == "schedule_slots" and isinstance(value, list):
-                    normalized_slots = self._normalize_capability_result_summary_schedule_slots(value)
-                    if normalized_slots is not None:
-                        summary[field] = normalized_slots
         readiness_digest = capability_readiness_result_digest(capability_id, summary)
         if isinstance(readiness_digest, dict):
             summary["readiness_digest"] = readiness_digest
@@ -165,48 +158,6 @@ class ServiceSpontaneousCapabilityContextMixin:
             )
         elif hook_name == "camera_ptz":
             client_context, observation_summary, input_text = self._prepare_camera_ptz_result_context(
-                client_context=client_context,
-                observation_summary=observation_summary,
-                capability_response=capability_response,
-            )
-        elif hook_name == "external_status":
-            client_context, observation_summary, input_text = self._prepare_external_status_result_context(
-                client_context=client_context,
-                observation_summary=observation_summary,
-                capability_response=capability_response,
-            )
-        elif hook_name == "schedule_status":
-            client_context, observation_summary, input_text = self._prepare_schedule_status_result_context(
-                client_context=client_context,
-                observation_summary=observation_summary,
-                capability_response=capability_response,
-            )
-        elif hook_name == "device_status":
-            client_context, observation_summary, input_text = self._prepare_device_status_result_context(
-                client_context=client_context,
-                observation_summary=observation_summary,
-                capability_response=capability_response,
-            )
-        elif hook_name == "body_status":
-            client_context, observation_summary, input_text = self._prepare_body_status_result_context(
-                client_context=client_context,
-                observation_summary=observation_summary,
-                capability_response=capability_response,
-            )
-        elif hook_name == "environment_status":
-            client_context, observation_summary, input_text = self._prepare_environment_status_result_context(
-                client_context=client_context,
-                observation_summary=observation_summary,
-                capability_response=capability_response,
-            )
-        elif hook_name == "location_status":
-            client_context, observation_summary, input_text = self._prepare_location_status_result_context(
-                client_context=client_context,
-                observation_summary=observation_summary,
-                capability_response=capability_response,
-            )
-        elif hook_name == "social_status":
-            client_context, observation_summary, input_text = self._prepare_social_status_result_context(
                 client_context=client_context,
                 observation_summary=observation_summary,
                 capability_response=capability_response,
@@ -261,151 +212,6 @@ class ServiceSpontaneousCapabilityContextMixin:
             value = enriched_client_context.get(key)
             if isinstance(value, str) and value.strip():
                 enriched_observation_summary[key] = value.strip()
-        input_text = self._build_capability_result_input_text(
-            client_context=enriched_client_context,
-            capability_response=capability_response,
-        )
-        return enriched_client_context, enriched_observation_summary, input_text
-
-    def _prepare_external_status_result_context(
-        self,
-        *,
-        client_context: dict[str, Any],
-        observation_summary: dict[str, Any],
-        capability_response: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any], str]:
-        status_text = self._capability_result_status_text(capability_response)
-        enriched_client_context = dict(client_context)
-        if status_text is not None and self._client_context_text(enriched_client_context.get("external_service_summary"), limit=160) is None:
-            enriched_client_context["external_service_summary"] = status_text
-        enriched_observation_summary = dict(observation_summary)
-        if status_text is not None:
-            enriched_observation_summary["status_text"] = status_text
-        input_text = self._build_capability_result_input_text(
-            client_context=enriched_client_context,
-            capability_response=capability_response,
-        )
-        return enriched_client_context, enriched_observation_summary, input_text
-
-    def _prepare_schedule_status_result_context(
-        self,
-        *,
-        client_context: dict[str, Any],
-        observation_summary: dict[str, Any],
-        capability_response: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any], str]:
-        schedule_summary = self._client_context_text(capability_response.get("schedule_summary"), limit=160)
-        schedule_slots = self._capability_result_schedule_slots(capability_response)
-        enriched_client_context = dict(client_context)
-        if schedule_summary is not None:
-            enriched_client_context["schedule_summary"] = schedule_summary
-        if schedule_slots is not None:
-            enriched_client_context["schedule_slots"] = schedule_slots
-        enriched_observation_summary = dict(observation_summary)
-        if schedule_summary is not None:
-            enriched_observation_summary["schedule_summary"] = schedule_summary
-        if schedule_slots is not None:
-            enriched_observation_summary["schedule_slots"] = schedule_slots
-        input_text = self._build_capability_result_input_text(
-            client_context=enriched_client_context,
-            capability_response=capability_response,
-        )
-        return enriched_client_context, enriched_observation_summary, input_text
-
-    def _prepare_device_status_result_context(
-        self,
-        *,
-        client_context: dict[str, Any],
-        observation_summary: dict[str, Any],
-        capability_response: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any], str]:
-        device_state_summary = self._client_context_text(capability_response.get("device_state_summary"), limit=160)
-        enriched_client_context = dict(client_context)
-        if device_state_summary is not None:
-            enriched_client_context["device_state_summary"] = device_state_summary
-        enriched_observation_summary = dict(observation_summary)
-        if device_state_summary is not None:
-            enriched_observation_summary["device_state_summary"] = device_state_summary
-        input_text = self._build_capability_result_input_text(
-            client_context=enriched_client_context,
-            capability_response=capability_response,
-        )
-        return enriched_client_context, enriched_observation_summary, input_text
-
-    def _prepare_body_status_result_context(
-        self,
-        *,
-        client_context: dict[str, Any],
-        observation_summary: dict[str, Any],
-        capability_response: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any], str]:
-        body_state_summary = self._client_context_text(capability_response.get("body_state_summary"), limit=160)
-        enriched_client_context = dict(client_context)
-        if body_state_summary is not None:
-            enriched_client_context["body_state_summary"] = body_state_summary
-        enriched_observation_summary = dict(observation_summary)
-        if body_state_summary is not None:
-            enriched_observation_summary["body_state_summary"] = body_state_summary
-        input_text = self._build_capability_result_input_text(
-            client_context=enriched_client_context,
-            capability_response=capability_response,
-        )
-        return enriched_client_context, enriched_observation_summary, input_text
-
-    def _prepare_environment_status_result_context(
-        self,
-        *,
-        client_context: dict[str, Any],
-        observation_summary: dict[str, Any],
-        capability_response: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any], str]:
-        environment_summary = self._client_context_text(capability_response.get("environment_summary"), limit=160)
-        enriched_client_context = dict(client_context)
-        if environment_summary is not None:
-            enriched_client_context["environment_summary"] = environment_summary
-        enriched_observation_summary = dict(observation_summary)
-        if environment_summary is not None:
-            enriched_observation_summary["environment_summary"] = environment_summary
-        input_text = self._build_capability_result_input_text(
-            client_context=enriched_client_context,
-            capability_response=capability_response,
-        )
-        return enriched_client_context, enriched_observation_summary, input_text
-
-    def _prepare_location_status_result_context(
-        self,
-        *,
-        client_context: dict[str, Any],
-        observation_summary: dict[str, Any],
-        capability_response: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any], str]:
-        location_summary = self._client_context_text(capability_response.get("location_summary"), limit=160)
-        enriched_client_context = dict(client_context)
-        if location_summary is not None:
-            enriched_client_context["location_summary"] = location_summary
-        enriched_observation_summary = dict(observation_summary)
-        if location_summary is not None:
-            enriched_observation_summary["location_summary"] = location_summary
-        input_text = self._build_capability_result_input_text(
-            client_context=enriched_client_context,
-            capability_response=capability_response,
-        )
-        return enriched_client_context, enriched_observation_summary, input_text
-
-    def _prepare_social_status_result_context(
-        self,
-        *,
-        client_context: dict[str, Any],
-        observation_summary: dict[str, Any],
-        capability_response: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any], str]:
-        social_context_summary = self._client_context_text(capability_response.get("social_context_summary"), limit=160)
-        enriched_client_context = dict(client_context)
-        if social_context_summary is not None:
-            enriched_client_context["social_context_summary"] = social_context_summary
-        enriched_observation_summary = dict(observation_summary)
-        if social_context_summary is not None:
-            enriched_observation_summary["social_context_summary"] = social_context_summary
         input_text = self._build_capability_result_input_text(
             client_context=enriched_client_context,
             capability_response=capability_response,
@@ -475,65 +281,6 @@ class ServiceSpontaneousCapabilityContextMixin:
             amount = observation_summary.get("amount")
             if isinstance(status, str) and isinstance(operation, str) and isinstance(amount, str):
                 return f"カメラ制御結果: status={status.strip()} operation={operation.strip()} amount={amount.strip()}"
-            return None
-        if hook_name == "external_status":
-            status_text = None
-            service = None
-            if isinstance(observation_summary, dict):
-                status_text = observation_summary.get("status_text")
-                service = observation_summary.get("service")
-            if isinstance(status_text, str) and status_text.strip():
-                if isinstance(service, str) and service.strip():
-                    return f"{service.strip()} の状態要約: {status_text.strip()}"
-                return status_text.strip()
-            return None
-        if hook_name == "schedule_status":
-            schedule_summary = None
-            slot_count = None
-            if isinstance(observation_summary, dict):
-                schedule_summary = observation_summary.get("schedule_summary")
-                schedule_slots = observation_summary.get("schedule_slots")
-                if isinstance(schedule_slots, list):
-                    slot_count = len(schedule_slots)
-            if isinstance(schedule_summary, str) and schedule_summary.strip():
-                return f"予定要約: {schedule_summary.strip()}"
-            if isinstance(slot_count, int) and slot_count > 0:
-                return f"近い予定が {slot_count} 件ある。"
-            return None
-        if hook_name == "device_status":
-            device_state_summary = None
-            if isinstance(observation_summary, dict):
-                device_state_summary = observation_summary.get("device_state_summary")
-            if isinstance(device_state_summary, str) and device_state_summary.strip():
-                return f"端末状態: {device_state_summary.strip()}"
-            return None
-        if hook_name == "body_status":
-            body_state_summary = None
-            if isinstance(observation_summary, dict):
-                body_state_summary = observation_summary.get("body_state_summary")
-            if isinstance(body_state_summary, str) and body_state_summary.strip():
-                return f"身体状態: {body_state_summary.strip()}"
-            return None
-        if hook_name == "environment_status":
-            environment_summary = None
-            if isinstance(observation_summary, dict):
-                environment_summary = observation_summary.get("environment_summary")
-            if isinstance(environment_summary, str) and environment_summary.strip():
-                return f"環境状態: {environment_summary.strip()}"
-            return None
-        if hook_name == "location_status":
-            location_summary = None
-            if isinstance(observation_summary, dict):
-                location_summary = observation_summary.get("location_summary")
-            if isinstance(location_summary, str) and location_summary.strip():
-                return f"場所状態: {location_summary.strip()}"
-            return None
-        if hook_name == "social_status":
-            social_context_summary = None
-            if isinstance(observation_summary, dict):
-                social_context_summary = observation_summary.get("social_context_summary")
-            if isinstance(social_context_summary, str) and social_context_summary.strip():
-                return f"対人文脈: {social_context_summary.strip()}"
             return None
         if hook_name == "mcp_call_tool":
             if not isinstance(observation_summary, dict):
@@ -611,45 +358,6 @@ class ServiceSpontaneousCapabilityContextMixin:
                 parts.append("カメラ制御結果を受け取った。")
             if vision_source_id is not None:
                 parts.append(f"必要なら同じ vision_source_id={vision_source_id} を vision.capture で見て確認したい。")
-        elif capability_id == "schedule.status":
-            schedule_summary = self._client_context_text(capability_response.get("schedule_summary"), limit=160)
-            if schedule_summary is not None:
-                parts.append(f"予定要約は {schedule_summary}")
-            else:
-                parts.append("予定確認の結果を踏まえて返答や次の行動を決めたい。")
-        elif capability_id == "device.status":
-            device_state_summary = self._client_context_text(capability_response.get("device_state_summary"), limit=160)
-            if device_state_summary is not None:
-                parts.append(f"端末状態要約は {device_state_summary}")
-            else:
-                parts.append("端末状態確認の結果を踏まえて返答や次の行動を決めたい。")
-        elif capability_id == "body.status":
-            body_state_summary = self._client_context_text(capability_response.get("body_state_summary"), limit=160)
-            if body_state_summary is not None:
-                parts.append(f"身体状態要約は {body_state_summary}")
-            else:
-                parts.append("身体状態確認の結果を踏まえて返答や次の行動を決めたい。")
-        elif capability_id == "environment.status":
-            environment_summary = self._client_context_text(capability_response.get("environment_summary"), limit=160)
-            if environment_summary is not None:
-                parts.append(f"環境状態要約は {environment_summary}")
-            else:
-                parts.append("環境状態確認の結果を踏まえて返答や次の行動を決めたい。")
-        elif capability_id == "location.status":
-            location_summary = self._client_context_text(capability_response.get("location_summary"), limit=160)
-            if location_summary is not None:
-                parts.append(f"場所状態要約は {location_summary}")
-            else:
-                parts.append("場所状態確認の結果を踏まえて返答や次の行動を決めたい。")
-        elif capability_id == "social.status":
-            social_context_summary = self._client_context_text(
-                capability_response.get("social_context_summary"),
-                limit=160,
-            )
-            if social_context_summary is not None:
-                parts.append(f"対人文脈要約は {social_context_summary}")
-            else:
-                parts.append("対人文脈確認の結果を踏まえて返答や次の行動を決めたい。")
         elif capability_id == "mcp.call_tool":
             mcp_server_id = self._client_context_text(capability_response.get("mcp_server_id"), limit=80)
             tool_name = self._client_context_text(capability_response.get("tool_name"), limit=120)

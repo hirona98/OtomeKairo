@@ -252,7 +252,7 @@ server -> client の代表例（capability request 1 件と通知系）:
 
 少なくとも次の event type を持つ。
 
-- capability 実行要求: `vision.capture_request`、`camera.ptz_request`、`external.status_request`、`schedule.status_request`、`device.status_request`、`body.status_request`、`environment.status_request`、`location.status_request`、`social.status_request`、`mcp.call_tool_request`（payload の正本は [実行連携.md](実行連携.md)）
+- capability 実行要求: `vision.capture_request`、`camera.ptz_request`、`mcp.call_tool_request`（payload の正本は [実行連携.md](実行連携.md)）
 - `conversation_input`: 確定したユーザー発話を購読 client に表示する
 - `assistant_message`: server が生成した assistant 発話を表示する
 - `system_notice`: 安全境界と運用上の定型通知を表示する

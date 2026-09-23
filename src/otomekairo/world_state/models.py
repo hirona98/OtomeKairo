@@ -113,7 +113,6 @@ class WorldStateExternalServiceContext:
     external_service_summary: str | None = None
     client_summary_text: str | None = None
     result_summary_text: str | None = None
-    status_text: str | None = None
     service: str | None = None
     mcp_server_id: str | None = None
     tool_name: str | None = None
@@ -123,8 +122,6 @@ class WorldStateExternalServiceContext:
     def hook_summary_source(self) -> str:
         if isinstance(self.summary_source_hint, str) and self.summary_source_hint.strip():
             return self.summary_source_hint
-        if isinstance(self.status_text, str) and self.status_text.strip():
-            return "status_text"
         return "external_service_summary"
 
     def signal_fields(self) -> list[str]:
@@ -133,7 +130,6 @@ class WorldStateExternalServiceContext:
             ("service", self.service),
             ("mcp_server_id", self.mcp_server_id),
             ("tool_name", self.tool_name),
-            ("status_text", self.status_text),
             ("external_service_summary", self.external_service_summary),
         ):
             if isinstance(value, str) and value.strip():
@@ -148,7 +144,6 @@ class WorldStateExternalServiceContext:
             ("external_service_summary", self.external_service_summary),
             ("client_summary_text", self.client_summary_text),
             ("result_summary_text", self.result_summary_text),
-            ("status_text", self.status_text),
             ("service", self.service),
             ("mcp_server_id", self.mcp_server_id),
             ("tool_name", self.tool_name),
@@ -272,15 +267,10 @@ class WorldStateCapabilityResultSummary:
     image_interpreted: bool | None = None
     visual_summary_text: str | None = None
     visual_confidence_hint: str | None = None
-    service: str | None = None
     status_text: str | None = None
-    social_context_summary: str | None = None
     body_state_summary: str | None = None
     device_state_summary: str | None = None
     schedule_summary: str | None = None
-    environment_summary: str | None = None
-    location_summary: str | None = None
-    schedule_slots: tuple[WorldStateScheduleSlot, ...] = field(default_factory=tuple)
     error: str | None = None
 
     def to_prompt_payload(self) -> dict[str, Any]:
@@ -289,14 +279,10 @@ class WorldStateCapabilityResultSummary:
             ("capability_id", self.capability_id),
             ("visual_summary_text", self.visual_summary_text),
             ("visual_confidence_hint", self.visual_confidence_hint),
-            ("service", self.service),
             ("status_text", self.status_text),
-            ("social_context_summary", self.social_context_summary),
             ("body_state_summary", self.body_state_summary),
             ("device_state_summary", self.device_state_summary),
             ("schedule_summary", self.schedule_summary),
-            ("environment_summary", self.environment_summary),
-            ("location_summary", self.location_summary),
             ("error", self.error),
         ):
             if isinstance(value, str) and value.strip():
@@ -305,8 +291,6 @@ class WorldStateCapabilityResultSummary:
             payload["image_count"] = self.image_count
         if isinstance(self.image_interpreted, bool):
             payload["image_interpreted"] = self.image_interpreted
-        if self.schedule_slots:
-            payload["schedule_slots"] = [slot.to_prompt_payload() for slot in self.schedule_slots]
         return payload
 
 

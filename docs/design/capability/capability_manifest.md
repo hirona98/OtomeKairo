@@ -82,11 +82,10 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
 ## Manifest 例
 
 `vision.capture` の manifest は次の形を基準にする。
-concrete capability は `vision.capture`、`camera.ptz`、`external.status`、`schedule.status`、`device.status`、`body.status`、`environment.status`、`location.status`、`social.status`、`agent_skill.run_script`、`mcp.call_tool` である。
-`external.status` は短い外部状態要約、`schedule.status` は短い予定要約と deterministic な schedule slot、`device.status` は短い端末状態要約、`body.status` は短い身体状態要約、`environment.status` は短い周囲環境要約、`location.status` は短い場所状態要約、`social.status` は短い対人文脈要約を result として返す。
+concrete capability は `vision.capture`、`camera.ptz`、`agent_skill.run_script`、`mcp.call_tool` である。
 `mcp.call_tool` は接続中 MCP server の許可済み tool catalog から、指定 tool を呼び出す汎用 external-service capability である。
 `agent_skill.run_script` は選択中の trusted Agent Skill package に含まれる script を専用 runner process で実行する local capability である。信頼境界は [Agent Skills 統合](../integration/AgentSkills統合.md#script-実行と信頼境界) を正本とする。
-各 capability の `client_context.body_state_summary / device_state_summary / schedule_summary / environment_summary / location_summary / social_context_summary`、`schedule.status.schedule_slots`、`device.status.device_state_summary`、`body.status.body_state_summary`、`environment.status.environment_summary`、`location.status.location_summary`、`social.status.social_context_summary` は inspection_fields 経由で短い観測要約へ投影する。
+各 capability の `client_context` に含まれる現在状態の短い要約は、[world_state source pack](world_state_source_pack.md) の境界で判断文脈へ投影する。
 `mcp.call_tool` result は `client_context.mcp_result_summary` を follow-up 判断と inspection に使う。
 `world_state` source pack への投影境界は [world_state_source_pack.md](world_state_source_pack.md) を正本とする。
 server は MCP raw `content` と `structured_content` を永続化せず、件数と有無だけを `client_context` に保存する。
@@ -347,8 +346,8 @@ server は manifest、binding、state、権限で提案を検証する。
 busy、権限不足、動的一時 unavailable は decision view の `available: false` に反映する。
 直近成功、直近失敗は inspection の `CapabilityState` へ残し、明示的な capability 要求まで一律に遮断する理由にはしない。
 `readiness` は manifest の `decision_readiness` から作る。
-`readiness.family` は `visual_observation / camera_control / external_status / schedule_status / device_status / body_status / environment_status / location_status / social_status / mcp_tool` のいずれかである。
-`readiness.world_state_type` は status family の不足判定と result 投影先を揃えるための正本である。
+`readiness.family` は `visual_observation / camera_control / mcp_tool` のいずれかである。
+`readiness.world_state_type` は観測結果を対応する世界状態へ結び付ける。
 `readiness.input_keys` は LLM が capability 固有入力を組み立てる最小 key を表す。
 `readiness.result_summary_keys` と `readiness.result_item_keys` は result が判断・記憶・inspection へ投影される要約 key を表す。
 `required_input` は `input_schema.required` の全 key を順序どおり要約し、件数で省略しない。
@@ -370,7 +369,7 @@ server は `camera.ptz` の decision view に、対象 camera source ごとの `
 `camera.ptz` result follow-up では、同じ `vision_source_id` の `vision.capture` request だけを許可された follow-up capability request として扱う。
 通常会話では `fresh_world_state_by_vision_source` を付けない。
 現在入力に対して capability を実行するか、既存文脈から発話するかは `decision_generation` が判断し、server はユーザー発話の意味から特定 capability の実行を強制しない。
-自律判断で強い `drive_state` が特定の status family を要求し、対応 state type が不足または古い場合、server は `initiative_context.candidate_families` の selected autonomous entry に capability 提案として `preferred_result_kind=capability_request` と対応 `preferred_capability_id` を入れる。
+自律判断で現在情報の取得が必要な場合、利用可能な capability と現在の文脈を比較して実行を提案する。
 
 inspection の `CapabilityState` は少なくとも次を持つ。
 

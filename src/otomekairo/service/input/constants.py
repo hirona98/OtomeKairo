@@ -37,21 +37,18 @@ WORLD_STATE_TTL_SECONDS_BY_TYPE = {
         "summary_text": {"short": 600, "medium": 900, "long": 1800},
     },
     "environment": {
-        "capability_result.environment_summary": {"short": 900, "medium": 2400, "long": 7200},
         "client_context.environment_summary": {"short": 900, "medium": 2400, "long": 7200},
         "capability_result.client_context.environment_summary": {"short": 900, "medium": 2400, "long": 7200},
         "environment_summary": {"short": 900, "medium": 2400, "long": 7200},
         "summary_text": {"short": 900, "medium": 2400, "long": 7200},
     },
     "location": {
-        "capability_result.location_summary": {"short": 1800, "medium": 3600, "long": 14400},
         "client_context.location_summary": {"short": 1800, "medium": 3600, "long": 14400},
         "capability_result.client_context.location_summary": {"short": 1800, "medium": 3600, "long": 14400},
         "location_summary": {"short": 1800, "medium": 3600, "long": 14400},
         "summary_text": {"short": 1800, "medium": 3600, "long": 14400},
     },
     "external_service": {
-        "capability_result.status_text": {"short": 1800, "medium": 7200, "long": 21600},
         "capability_result.client_context.mcp_result_summary": {
             "short": 1200,
             "medium": 3600,
@@ -59,7 +56,6 @@ WORLD_STATE_TTL_SECONDS_BY_TYPE = {
         },
         "client_context.external_service_summary": {"short": 1200, "medium": 3600, "long": 10800},
         "capability_result.client_context.external_service_summary": {"short": 1200, "medium": 3600, "long": 10800},
-        "status_text": {"short": 1800, "medium": 7200, "long": 21600},
         "external_service_summary": {"short": 1200, "medium": 3600, "long": 10800},
         "summary_text": {"short": 1200, "medium": 3600, "long": 10800},
     },
@@ -78,7 +74,6 @@ WORLD_STATE_TTL_SECONDS_BY_TYPE = {
         "summary_text": {"short": 900, "medium": 2400, "long": 7200},
     },
     "schedule": {
-        "capability_result.schedule_slots": {"short": 3600, "medium": 10800, "long": 21600},
         "capability_result.client_context.schedule_slots": {"short": 3600, "medium": 10800, "long": 21600},
         "client_context.schedule_slots": {"short": 2400, "medium": 7200, "long": 18000},
         "capability_result.schedule_summary": {"short": 1800, "medium": 5400, "long": 14400},
@@ -89,7 +84,6 @@ WORLD_STATE_TTL_SECONDS_BY_TYPE = {
         "summary_text": {"short": 1800, "medium": 5400, "long": 14400},
     },
     "social_context": {
-        "capability_result.social_context_summary": {"short": 900, "medium": 2400, "long": 7200},
         "client_context.social_context_summary": {"short": 900, "medium": 2400, "long": 7200},
         "capability_result.client_context.social_context_summary": {"short": 900, "medium": 2400, "long": 7200},
         "social_context_summary": {"short": 900, "medium": 2400, "long": 7200},
