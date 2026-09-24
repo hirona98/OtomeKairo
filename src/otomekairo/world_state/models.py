@@ -267,7 +267,6 @@ class WorldStateCapabilityResultSummary:
     image_interpreted: bool | None = None
     visual_summary_text: str | None = None
     visual_confidence_hint: str | None = None
-    status_text: str | None = None
     body_state_summary: str | None = None
     device_state_summary: str | None = None
     schedule_summary: str | None = None
@@ -279,7 +278,6 @@ class WorldStateCapabilityResultSummary:
             ("capability_id", self.capability_id),
             ("visual_summary_text", self.visual_summary_text),
             ("visual_confidence_hint", self.visual_confidence_hint),
-            ("status_text", self.status_text),
             ("body_state_summary", self.body_state_summary),
             ("device_state_summary", self.device_state_summary),
             ("schedule_summary", self.schedule_summary),

@@ -515,14 +515,10 @@ class DecisionContractTests(unittest.TestCase):
 
     def test_decision_repairs_unavailable_capability(self) -> None:
         invalid = _capability_decision(
-            "agent_skill.run_script",
+            "vision.capture",
             {
-                "source_id": "elyth-skills",
-                "skill_id": "elyth-follow",
-                "skill_sha256": "digest",
-                "script_path": "scripts/run.py",
-                "args": [],
-                "stdin_text": None,
+                "vision_source_id": "vision_source:desktop",
+                "mode": "still",
             },
         )
         valid = _capability_decision(
@@ -535,7 +531,7 @@ class DecisionContractTests(unittest.TestCase):
         )
         capability_view = [
             {
-                "id": "agent_skill.run_script",
+                "id": "vision.capture",
                 "available": False,
                 "unavailable_reason": "no_binding",
             },
@@ -557,27 +553,18 @@ class DecisionContractTests(unittest.TestCase):
 
     def test_decision_repairs_missing_manifest_input(self) -> None:
         invalid = _capability_decision(
-            "agent_skill.run_script",
+            "mcp.call_tool",
             {
-                "source_id": "test-source",
-                "skill_id": "echo-skill",
-                "skill_sha256": "digest",
-                "script_path": "scripts/echo.py",
-                "stdin_text": None,
+                "mcp_server_id": "elyth",
+                "tool_name": "get_notifications",
             },
         )
         valid_input = {
             **invalid["capability_request"]["input"],
-            "args": [],
+            "arguments": {},
         }
-        valid = _capability_decision("agent_skill.run_script", valid_input)
-        capability_view = [
-            {
-                "id": "agent_skill.run_script",
-                "available": True,
-                "unavailable_reason": None,
-            }
-        ]
+        valid = _capability_decision("mcp.call_tool", valid_input)
+        capability_view = _mcp_capability_view()
 
         with patch(
             "otomekairo.llm.client.complete_text",

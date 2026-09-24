@@ -250,7 +250,6 @@ class ServiceInputActivityMixin:
             ("social_context_summary", 200),
             ("environment_summary", 200),
             ("location_summary", 200),
-            ("status_text", 200),
             ("error", 160),
         ):
             value = self._client_context_text(observation_summary.get(key), limit=limit)

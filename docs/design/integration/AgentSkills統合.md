@@ -1,6 +1,6 @@
 # Agent Skills 統合
 
-Agent Skills の発見、選択、文脈適用、resource 読込、script 実行に関する意味境界の正本。
+Agent Skills の発見、選択、文脈適用、resource 読込に関する意味境界の正本。
 設定の HTTP wire は [状態と設定](../api/状態と設定.md)、capability wire は [実行連携](../api/実行連携.md) を正本とする。
 
 ## 目的
@@ -18,7 +18,7 @@ Agent Skill は人格設定や記憶の代替ではない。現在の個が特�
 - `SKILL.md` は UTF-8 とし、YAML frontmatter の `name / description` を必須にする
 - `name` は Agent Skills specification の形式に従い、package directory 名と一致させる
 - loader が受理する任意 frontmatter field は `license / compatibility / metadata / allowed-tools` とする
-- package 内の通常 file を resource とし、`scripts/` 配下または executable bit を持つ file を script と分類する
+- package 内の file を resource として catalog に載せる
 - source root、package directory、file、参照先の symlink と source root 外への path escape を拒否する
 - enabled source が読めない、skill がない、frontmatter や参照が不正、enabled source 間で `name` が重複する場合は、別 source へ切り替えず明示的に失敗する
 
@@ -39,7 +39,7 @@ skill の適用可否は固定文字列や keyword 表では決めない。通�
 
 1. 全 skill の `name / description / source_id / digest` と、その catalog から作った `allowed_skill_ids` から必要な skill を選ぶ。capability catalog は必要性の判断材料とし、capability id を skill id として返さない
 2. 選択した `SKILL.md` 本文と resource catalog、本文から直接参照された sibling skill 候補を提示する
-3. LLM が `allowed_additional_skill_ids` と `allowed_resource_reads` から必要な追加 skill と UTF-8 text resource だけを選ぶ。すでに `active_skills` にある skill_id を `additional_skill_ids` に含めた場合は追加済みとして扱い、候補外とはしない。選択した resource 本文と追加 skill 本文を次の選択へ渡し、両方の選択結果が空になるまで段階的に読む。sibling `SKILL.md` へのリンクは追加 skill 候補であり resource path として扱わず、script と binary resource は本文読込候補に含めない
+3. LLM が `allowed_additional_skill_ids` と `allowed_resource_reads` から必要な追加 skill と UTF-8 text resource だけを選ぶ。すでに `active_skills` にある skill_id を `additional_skill_ids` に含めた場合は追加済みとして扱い、候補外とはしない。選択した resource 本文と追加 skill 本文を次の選択へ渡し、両方の選択結果が空になるまで段階的に読む。sibling `SKILL.md` へのリンクは追加 skill 候補であり resource path として扱わず、binary resource は本文読込候補に含めない
 4. 選択済み instructions と resource を trusted Agent Skill system context として decision、expression、autonomous step に渡す。選択は利用候補の提示であり、実行の決定は行動判断が現在入力と作業目的に基づいて行う。専門手順が不要なら、現在の目的を満たす判断や表現をそのまま行う
 
 capability request と autonomous run の起点には instructions 本文ではなく `source_id / skill_id / digest` の activation summary を残す。result follow-up と次 run step の選択 LLM へこの summary を前回文脈として渡し、現在の catalog と目的を基に再選択させる。古い本文を暗黙再利用しない。
@@ -66,23 +66,9 @@ skill が Human の明示依頼、trusted host policy、trusted workflow を求�
 
 `current_individual_decision` は、skill が求める trusted host policy / trusted workflow である。Human の明示依頼が無いことだけを理由に公開や送信を見送らない。送信前チェック、catalog、host の出力契約、秘密情報の境界は上書きしない。公開は今この判断の範囲で一度だけ行う。
 
-## script 実行と信頼境界
+## source の信頼境界
 
-source の `enabled=true` は、その root 全体を instructions、resource、code execution まで信頼する明示設定である。script 実行を source 有効化から分けない。個別 script の都度承認は設けない。
-
-script は `agent_skill.run_script` capability からだけ実行する。これは skill の管理軸ではなく、MCP の `mcp.call_tool` と同じ実行の入口である。server process 内で import や eval をせず、専用 runner process が次を再検証して実行する。
-
-- source、skill、package digest、script resource が現在の registry snapshot と一致する
-- source が enabled であり、registry に載っている
-- package を request 固有の `agent-skill-runs/<request-id>/workspace/` へコピーし、copy 内の script を実行する
-- 実行 interpreter は OtomeKairo ホストの Python（`sys.executable`）に固定する。source ごとの runtime 選択は設けない
-- child environment は `PATH / LANG / LC_ALL` だけにする
-- wall time、CPU time、address space、process 数、open file 数、file size、合計 output bytes の **固定上限** を runner が適用する（source 設定には持たない）
-- stdout/stderr は UTF-8 とし、上限超過、timeout、非ゼロ終了を明示的な failed result にする。出力を途中で切って成功扱いしない
-
-stdout/stderr は後続判断に必要な capability result として cycle trace に残り得る。skill とその入力には、結果へ秘密情報を出さないものだけを使用する。server log は内容を記録せず文字数だけを記録する。
-
-専用 process は障害と resource 使用を server process から分けるが、OS user や filesystem 権限を分離する sandbox ではない。enabled root 内の code は OtomeKairo process と同等の権限で任意の外部作用を行えるものとして信頼する。固定上限は信頼の代替ではなく、暴走 script の fail-fast 用である。source ごとの上限・runtime 調整は設けない。
+source の `enabled=true` は、その root の instructions と resource を判断文脈へ渡す設定である。source 内の file を OtomeKairo は実行しない。外部への操作は選択した Skill の手順と現在の capability catalog に基づき、通常の capability request として判断する。
 
 ## ELYTH の登録例
 
@@ -97,7 +83,7 @@ git clone https://github.com/Divedesign/elyth-remote-mcp-skills.git /opt/elyth-r
 
 - 名前（`source_id`）: `elyth-skills`
 - root path: `/opt/elyth-remote-mcp-skills/skills`
-- 有効: `false`（既定）。有効化は root 内の script 実行も含む信頼確認である
+- 有効: `false`（既定）。有効化前に root 内の instructions と resource を確認する
 
 checkout 後にブラウザ UI の「Agent Skills」で source を有効にする。
 path を変えた場合は `root_path` を合わせて更新する。

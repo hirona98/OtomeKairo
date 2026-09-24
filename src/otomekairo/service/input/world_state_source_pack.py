@@ -799,7 +799,6 @@ class ServiceInputWorldStateSourcePackMixin:
             ),
             visual_summary_text=self._client_context_text(observation_summary.get("visual_summary_text"), limit=160),
             visual_confidence_hint=self._client_context_text(observation_summary.get("visual_confidence_hint"), limit=24),
-            status_text=self._client_context_text(observation_summary.get("status_text"), limit=160),
             body_state_summary=self._client_context_text(observation_summary.get("body_state_summary"), limit=160),
             device_state_summary=self._client_context_text(observation_summary.get("device_state_summary"), limit=160),
             schedule_summary=self._client_context_text(observation_summary.get("schedule_summary"), limit=160),

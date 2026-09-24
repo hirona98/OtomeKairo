@@ -82,9 +82,8 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
 ## Manifest 例
 
 `vision.capture` の manifest は次の形を基準にする。
-concrete capability は `vision.capture`、`camera.ptz`、`agent_skill.run_script`、`mcp.call_tool` である。
+concrete capability は `vision.capture`、`camera.ptz`、`mcp.call_tool` である。
 `mcp.call_tool` は接続中 MCP server の許可済み tool catalog から、指定 tool を呼び出す汎用 external-service capability である。
-`agent_skill.run_script` は選択中の trusted Agent Skill package に含まれる script を専用 runner process で実行する local capability である。信頼境界は [Agent Skills 統合](../integration/AgentSkills統合.md#script-実行と信頼境界) を正本とする。
 各 capability の `client_context` に含まれる現在状態の短い要約は、[world_state source pack](world_state_source_pack.md) の境界で判断文脈へ投影する。
 `mcp.call_tool` result は `client_context.mcp_result_summary` を follow-up 判断と inspection に使う。
 `world_state` source pack への投影境界は [world_state_source_pack.md](world_state_source_pack.md) を正本とする。

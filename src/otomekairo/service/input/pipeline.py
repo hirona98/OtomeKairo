@@ -1147,7 +1147,7 @@ class ServiceInputPipelineMixin:
                 "capability_id": source_capability_id,
             }
             if isinstance(observation_summary, dict):
-                for key in ("status", "status_text", "error", "result_status"):
+                for key in ("status", "error", "result_status"):
                     value = observation_summary.get(key)
                     if value is not None:
                         agency_entry[key] = value
@@ -1405,7 +1405,7 @@ class ServiceInputPipelineMixin:
                 "source_capability_id": capability_result_context.get("source_capability_id"),
             }
             if isinstance(observation_summary, dict):
-                for key in ("status", "status_text", "error", "result_status"):
+                for key in ("status", "error", "result_status"):
                     value = observation_summary.get(key)
                     if value is not None:
                         signal[key] = value
@@ -1535,7 +1535,7 @@ class ServiceInputPipelineMixin:
             kind="capability_result",
             source="capability_result_context",
             item=capability_result_context,
-            summary_keys=("status_text", "result_summary_text", "summary_text", "error"),
+            summary_keys=("result_summary_text", "summary_text", "error"),
             metadata_keys=("capability_id", "request_id", "result_status", "response_target_refs"),
         )
         activity_topics = (
@@ -1749,7 +1749,7 @@ class ServiceInputPipelineMixin:
                         kind="self_state",
                         source=f"self_state_context.{source_key}",
                         item=entry,
-                        summary_keys=("summary_text", "status_text", "error", "confidence_hint"),
+                        summary_keys=("summary_text", "error", "confidence_hint"),
                         metadata_keys=("channel", "source", "capability_id", "image_interpreted", "source_owner"),
                     )
             focus_stability = self_state_context.get("focus_stability")
@@ -1812,7 +1812,7 @@ class ServiceInputPipelineMixin:
                         kind="prediction_error",
                         source="prediction_error_context.signals",
                         item=signal,
-                        summary_keys=("summary_text", "status_text", "error"),
+                        summary_keys=("summary_text", "error"),
                         metadata_keys=("changed", "previous_count", "current_count", "source_capability_id"),
                     )
         if isinstance(default_mode_context, dict):

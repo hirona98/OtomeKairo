@@ -256,9 +256,3 @@ class ServiceSpontaneousCapabilityPayloadMixin:
         if not isinstance(images, list):
             return None
         return len(images)
-
-    def _capability_result_status_text(self, capability_response: dict[str, Any]) -> str | None:
-        status_text = capability_response.get("status_text")
-        if not isinstance(status_text, str) or not status_text.strip():
-            return None
-        return status_text.strip()

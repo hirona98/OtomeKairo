@@ -345,10 +345,7 @@ class ServiceSpontaneousCapabilityContextMixin:
             parts.append(vision_capture_skip_reason_summary(skip_reason))
         elif isinstance(error, str) and error.strip():
             parts.append(f"結果は error だった。 error={error.strip()}")
-        status_text = self._capability_result_status_text(capability_response)
-        if status_text is not None:
-            parts.append(f"結果要約は {status_text}")
-        elif capability_id == "camera.ptz":
+        if capability_id == "camera.ptz":
             status = self._client_context_text(capability_response.get("status"), limit=32)
             operation = self._client_context_text(capability_response.get("operation"), limit=32)
             amount = self._client_context_text(capability_response.get("amount"), limit=32)

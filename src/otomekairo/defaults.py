@@ -419,7 +419,7 @@ def build_default_estat_mcp_server() -> dict:
 
 def build_default_elyth_agent_skill_source() -> dict:
     # ELYTH Remote MCP Skills の配置例。disabled のため path 未配置でも起動できる。
-    # 有効化は root 全体（script 実行を含む）の信頼確認である。
+    # 有効化すると root の instructions と resource を判断文脈へ渡す。
     return {
         "source_id": DEFAULT_ELYTH_AGENT_SKILL_SOURCE_ID,
         "enabled": False,

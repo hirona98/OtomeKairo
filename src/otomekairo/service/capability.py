@@ -196,20 +196,6 @@ class ServiceCapabilityMixin:
                 else None
             ),
         )
-        if capability_id == "agent_skill.run_script":
-            return self._dispatch_agent_skill_script_capability(
-                memory_set_id=memory_set_id,
-                input_payload=input_payload,
-                current_time=current_time,
-                goal_summary=goal_summary,
-                wait_for_response=wait_for_response,
-                manifest=manifest,
-                source_current_input=source_current_input,
-                assistant_message_target_client_id=assistant_message_target_client_id,
-                track_ongoing_action=track_ongoing_action,
-                autonomous_run_id=autonomous_run_id,
-            )
-
         # binding と ongoing_action を検証し、内部実行記録を作る。
         try:
             target = self._select_capability_target(
@@ -1741,11 +1727,6 @@ class ServiceCapabilityMixin:
                     reason_code="result_error",
                     result_error=True,
                 )
-        if capability_id == "agent_skill.run_script" and result_payload.get("status") == "failed":
-            return self._capability_terminal_transition_reason_summary(
-                reason_code="result_error",
-                result_error=True,
-            )
         if capability_id == "mcp.call_tool":
             if result_payload.get("status") == "failed" or result_payload.get("is_error") is True:
                 return self._capability_terminal_transition_reason_summary(
@@ -1765,8 +1746,6 @@ class ServiceCapabilityMixin:
             return f"{capability_id} が error で終了した。"
         if capability_id == "camera.ptz" and result_payload.get("status") in {"rejected", "failed"}:
             return f"{capability_id} が {result_payload.get('status')} で終了した。"
-        if capability_id == "agent_skill.run_script" and result_payload.get("status") == "failed":
-            return "Agent Skill script が failed で終了した。"
         if capability_id == "mcp.call_tool" and (
             result_payload.get("status") == "failed" or result_payload.get("is_error") is True
         ):

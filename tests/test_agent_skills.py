@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import sys
 import tempfile
 import threading
 import unittest
@@ -41,19 +38,14 @@ def _source_definition(root: Path, *, enabled: bool = True) -> dict:
 
 def _write_skill(root: Path) -> Path:
     skill_dir = root / "echo-skill"
-    scripts_dir = skill_dir / "scripts"
-    scripts_dir.mkdir(parents=True)
+    materials_dir = skill_dir / "materials"
+    materials_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
         "---\nname: echo-skill\ndescription: Echo structured input for tests.\n---\n"
-        "Run scripts/echo.py when an exact echo is needed.\n",
+        "Read materials/echo.md when an exact echo is needed.\n",
         encoding="utf-8",
     )
-    script = scripts_dir / "echo.py"
-    script.write_text(
-        "import json, sys\nprint(json.dumps({'args': sys.argv[1:], 'stdin': sys.stdin.read()}))\n",
-        encoding="utf-8",
-    )
-    script.chmod(0o755)
+    (materials_dir / "echo.md").write_text("Echo reference for tests.\n", encoding="utf-8")
     return skill_dir
 
 
@@ -75,13 +67,13 @@ class AgentSkillRegistryTests(unittest.TestCase):
         self.assertEqual(registry.catalog(), [])
         self.assertEqual(registry.inspection_payload()["skill_count"], 0)
 
-    def test_rejects_leftover_script_execution_field(self) -> None:
+    def test_rejects_extra_source_field(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory) / "skills"
             root.mkdir()
             _write_skill(root)
             definition = _source_definition(root)
-            definition["script_execution"] = {"enabled": False}
+            definition["unexpected"] = True
 
             with self.assertRaises(AgentSkillError) as raised:
                 AgentSkillRegistry.load({"test-source": definition})
@@ -99,7 +91,7 @@ class AgentSkillRegistryTests(unittest.TestCase):
 
             skill = registry.require_skill("echo-skill")
             self.assertIn("exact echo", skill.body)
-            self.assertEqual(skill.resources["scripts/echo.py"].kind, "script")
+            self.assertEqual(skill.resources["materials/echo.md"].text_content, "Echo reference for tests.\n")
             self.assertEqual(registry.catalog()[0]["skill_id"], "echo-skill")
 
     def test_rejects_symlinked_source_root(self) -> None:
@@ -116,83 +108,6 @@ class AgentSkillRegistryTests(unittest.TestCase):
                 AgentSkillRegistry.load({"test-source": definition})
 
             self.assertEqual(raised.exception.code, "agent_skill_symlink_forbidden")
-
-    def test_dedicated_runner_executes_snapshot(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            base = Path(temporary_directory)
-            root = base / "skills"
-            root.mkdir()
-            _write_skill(root)
-            definition = _source_definition(root, enabled=True)
-            registry = AgentSkillRegistry.load({"test-source": definition})
-            skill = registry.require_skill("echo-skill")
-            request = {
-                "source_definition": definition,
-                "source_id": "test-source",
-                "skill_id": "echo-skill",
-                "skill_sha256": skill.sha256,
-                "script_path": "scripts/echo.py",
-                "args": ["one", "two"],
-                "stdin_text": "hello",
-                "run_dir": str(base / "run"),
-            }
-
-            completed = subprocess.run(
-                [sys.executable, "-m", "otomekairo.agent_skill_runner"],
-                input=json.dumps(request),
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=10,
-                check=True,
-                env={
-                    "PATH": os.environ.get("PATH", ""),
-                    "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
-                },
-            )
-            result = json.loads(completed.stdout)
-
-            self.assertEqual(completed.stderr, "")
-            self.assertEqual(result["status"], "completed")
-            self.assertEqual(result["exit_code"], 0)
-            self.assertIn('"args": ["one", "two"]', result["stdout"])
-            self.assertIn('"stdin": "hello"', result["stdout"])
-
-    def test_runner_rejects_disabled_source(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            base = Path(temporary_directory)
-            root = base / "skills"
-            root.mkdir()
-            _write_skill(root)
-            definition = _source_definition(root, enabled=False)
-            request = {
-                "source_definition": definition,
-                "source_id": "test-source",
-                "skill_id": "echo-skill",
-                "skill_sha256": "unused",
-                "script_path": "scripts/echo.py",
-                "args": [],
-                "stdin_text": None,
-                "run_dir": str(base / "run"),
-            }
-
-            completed = subprocess.run(
-                [sys.executable, "-m", "otomekairo.agent_skill_runner"],
-                input=json.dumps(request),
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=10,
-                check=True,
-                env={
-                    "PATH": os.environ.get("PATH", ""),
-                    "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
-                },
-            )
-            result = json.loads(completed.stdout)
-
-            self.assertEqual(result["status"], "failed")
-            self.assertIn("source is not enabled", result["error"])
 
     def test_config_api_replaces_and_reloads_registry_atomically(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -240,9 +155,6 @@ class AgentSkillRegistryTests(unittest.TestCase):
             (references / "guide.md").write_text("selected guide", encoding="utf-8")
             (references / "other.md").write_text("unselected guide", encoding="utf-8")
             (references / "binary.dat").write_bytes(b"\xff\xfe")
-            scripts = root_skill / "scripts"
-            scripts.mkdir()
-            (scripts / "helper.py").write_text("print('helper')\n", encoding="utf-8")
             child = root / "child-skill"
             child.mkdir()
             (child / "SKILL.md").write_text(
@@ -634,55 +546,6 @@ class AgentSkillRegistryTests(unittest.TestCase):
 
         self.assertEqual(complete.call_count, 2)
 
-    def test_run_script_capability_uses_local_runner_binding(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            base = Path(temporary_directory)
-            root = base / "skills"
-            root.mkdir()
-            _write_skill(root)
-            service = OtomeKairoService(base / "data")
-            state = service.store.read_state()
-            state["console_access_token"] = "token"
-            service.store.write_state(state)
-            definition = _source_definition(root, enabled=True)
-            service.replace_agent_skill_sources_editor_state(
-                "token",
-                {"agent_skill_sources": [definition]},
-            )
-            state = service.store.read_state()
-            skill = service._agent_skill_registry.require_skill("echo-skill")
-            current_time = service._now_iso()
-
-            decision_view = service._build_capability_decision_view(
-                state=state,
-                current_time=current_time,
-            )
-            result = service._dispatch_capability_request(
-                memory_set_id=state["selected_memory_set_id"],
-                capability_id="agent_skill.run_script",
-                input_payload={
-                    "source_id": "test-source",
-                    "skill_id": "echo-skill",
-                    "skill_sha256": skill.sha256,
-                    "script_path": "scripts/echo.py",
-                    "args": ["capability"],
-                    "stdin_text": "input",
-                },
-                current_time=current_time,
-                goal_summary="test runner",
-                wait_for_response=True,
-                component="Test",
-                track_ongoing_action=False,
-            )
-
-            capability = next(item for item in decision_view if item["id"] == "agent_skill.run_script")
-            self.assertTrue(capability["available"])
-            self.assertEqual(
-                capability["required_input"],
-                "source_id, skill_id, skill_sha256, script_path, args, stdin_text",
-            )
-            self.assertEqual(result["status"], "completed")
-            self.assertIn('"args": ["capability"]', result["stdout"])
 
 
 class AgentSkillHostAuthorizationTests(unittest.TestCase):

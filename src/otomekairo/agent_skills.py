@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import stat
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,8 +37,6 @@ class AgentSkillError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class AgentSkillResource:
     relative_path: str
-    absolute_path: Path
-    kind: str
     size_bytes: int
     sha256: str
     text_content: str | None
@@ -47,7 +44,6 @@ class AgentSkillResource:
     def catalog_entry(self) -> dict[str, Any]:
         return {
             "path": self.relative_path,
-            "kind": self.kind,
             "size_bytes": self.size_bytes,
             "sha256": self.sha256,
             "text_available": self.text_content is not None,
@@ -57,12 +53,9 @@ class AgentSkillResource:
 @dataclass(frozen=True, slots=True)
 class AgentSkill:
     source_id: str
-    source_root: Path
     name: str
     description: str
     body: str
-    skill_dir: Path
-    skill_md_path: Path
     sha256: str
     license: str | None
     compatibility: str | None
@@ -284,12 +277,9 @@ def _load_skill(*, source_id: str, source_root: Path, skill_dir: Path) -> AgentS
         package_digest.update(resource.sha256.encode("ascii"))
     return AgentSkill(
         source_id=source_id,
-        source_root=source_root,
         name=str(metadata["name"]),
         description=str(metadata["description"]).strip(),
         body=body.strip(),
-        skill_dir=skill_dir,
-        skill_md_path=skill_md,
         sha256=package_digest.hexdigest(),
         license=_optional_text(metadata.get("license")),
         compatibility=_optional_text(metadata.get("compatibility")),
@@ -319,12 +309,8 @@ def _load_skill_resources(*, skill_dir: Path, source_root: Path) -> dict[str, Ag
                 text_content = raw.decode("utf-8")
             except UnicodeDecodeError:
                 text_content = None
-            file_mode = path.stat().st_mode
-            kind = "script" if relative_path.startswith("scripts/") or bool(file_mode & stat.S_IXUSR) else "resource"
             resources[relative_path] = AgentSkillResource(
                 relative_path=relative_path,
-                absolute_path=path,
-                kind=kind,
                 size_bytes=len(raw),
                 sha256=hashlib.sha256(raw).hexdigest(),
                 text_content=text_content,
