@@ -680,6 +680,8 @@ class ServiceInputTraceBuildMixin:
         if isinstance(decision.get("target_stances"), list):
             trace["target_stances"] = decision["target_stances"]
         separated_summary = self._summarize_separated_comparisons(decision)
+        if isinstance(decision.get("activity_alignment_reviews"), list):
+            trace["activity_alignment_reviews"] = decision["activity_alignment_reviews"]
         if separated_summary is not None:
             trace["separated_comparisons"] = separated_summary
             internal_context = trace.get("internal_context_summary")

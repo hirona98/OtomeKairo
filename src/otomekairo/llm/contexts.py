@@ -288,6 +288,7 @@ class DecisionContext:
     reference_context: dict[str, Any] | None = None
     people_context: list[dict[str, str]] | None = None
     pre_send_check_feedback: str | None = None
+    activity_alignment_feedback: dict[str, Any] | None = None
     agent_skill_context: dict[str, Any] | None = None
     comparison_scope: str = "full"
     recent_interactions: list[dict[str, Any]] | None = None

@@ -91,6 +91,8 @@ server は既存 run との意味的な近さを文字列一致で判定しな�
 
 ## 開始前意味検証
 
+分離した自身の活動判断から始まる run は、保存前に [判断と行動.md](判断と行動.md) の目的条件の整合審査も通る。この審査は判断直後、外向き比較前に行い、ここで定める開始前意味検証とは問いを分ける。
+
 server は run の保存・置換・初回stepより前に `autonomous_start_review` を行う。検証には開始起点の current input（sender_kind / source_kind / text / response_target_refs）、候補decision（kind / reason_summary / autonomous_run）、同じ記憶集合の全非terminal run要約を渡す。独立した検証として人格本文は渡さない。
 
 `allow_start` は独立した追加目的、または対象runの中核目的の変更が必要で、操作と理由が一致している場合を表す。既存runの維持・結果待ち・タイマー待機の継続だけなら `reject_start` とする。定期思考トピックから始める作業の範囲・完了条件、継続観測の必要性・終了または再評価条件も検証する。

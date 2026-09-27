@@ -5,6 +5,7 @@ from typing import Any
 
 from otomekairo.llm.contexts import CurrentInput, DecisionContext, InitiativeContext
 from otomekairo.llm.contracts import (
+    LLMError,
     _initiative_has_self_activity,
     _workspace_has_self_activity,
 )
@@ -47,6 +48,45 @@ class ServiceInputDecisionComparisonMixin:
             persona_context=kwargs["persona_context"],
             context=self_context,
         )
+        alignment_reviews: list[dict[str, Any]] = []
+        if self_decision.get("kind") == "autonomous_run":
+            review = self._review_self_activity_alignment(
+                model_config=kwargs["model_config"],
+                context=self_context,
+                decision=self_decision,
+            )
+            alignment_reviews.append({
+                "attempt": 1,
+                "outcome": review["outcome"],
+                "reason_summary": review["reason_summary"],
+            })
+            if review["outcome"] == "reject":
+                self_context = replace(
+                    self_context,
+                    activity_alignment_feedback={
+                        "instruction": "主根拠の活動に即して自身の活動だけを判断し直す。目的の条件と見送り理由もその活動との関係から書く。",
+                        "rejected_decision": self_decision,
+                        "review_reason_summary": review["reason_summary"],
+                    },
+                )
+                self_decision = self.llm.generate_decision(
+                    model_config=kwargs["model_config"],
+                    persona_context=kwargs["persona_context"],
+                    context=self_context,
+                )
+                if self_decision.get("kind") == "autonomous_run":
+                    review = self._review_self_activity_alignment(
+                        model_config=kwargs["model_config"],
+                        context=self_context,
+                        decision=self_decision,
+                    )
+                    alignment_reviews.append({
+                        "attempt": 2,
+                        "outcome": review["outcome"],
+                        "reason_summary": review["reason_summary"],
+                    })
+                    if review["outcome"] == "reject":
+                        raise LLMError("自身の活動の再判断も目的と主根拠の整合審査に通らなかった。")
         outward_context = self._build_outward_speech_decision_context(**kwargs)
         outward_decision = self.llm.generate_decision(
             model_config=kwargs["model_config"],
@@ -57,6 +97,8 @@ class ServiceInputDecisionComparisonMixin:
             self_decision=self_decision,
             outward_decision=outward_decision,
         )
+        if alignment_reviews:
+            composed["activity_alignment_reviews"] = alignment_reviews
         debug_log(
             "Pipeline",
             (
@@ -65,6 +107,63 @@ class ServiceInputDecisionComparisonMixin:
             ),
         )
         return composed
+
+    def _review_self_activity_alignment(
+        self, *, model_config: dict[str, Any], context: DecisionContext, decision: dict[str, Any],
+    ) -> dict[str, Any]:
+        selection = decision.get("foreground_selection") or {}
+        if not isinstance(selection, dict):
+            raise LLMError("自身の活動の主根拠が不正です。")
+        workspace = context.workspace_context or {}
+        candidates = workspace.get("workspace_candidates") or []
+        by_ref = {
+            item["factor_ref"]: item
+            for item in candidates
+            if isinstance(item, dict) and isinstance(item.get("factor_ref"), str)
+        }
+        primary_ref = selection.get("primary_factor_ref")
+        if decision.get("kind") in SELF_ACTIVITY_EXECUTE_KINDS and primary_ref not in by_ref:
+            raise LLMError("進める自身の活動に対応する主根拠候補が見つからない。")
+
+        def selected_candidate(factor_ref: Any) -> dict[str, Any] | None:
+            candidate = by_ref.get(factor_ref)
+            if not isinstance(candidate, dict):
+                return None
+            metadata = candidate.get("metadata") or {}
+            scopes = {
+                key: metadata[key]
+                for key in ("focus_scope_type", "focus_scope_key", "target_scope_type", "target_scope_key")
+                if key in metadata
+            } if isinstance(metadata, dict) else {}
+            return {
+                "factor_ref": candidate.get("factor_ref"),
+                "kind": candidate.get("kind"),
+                "summary_text": candidate.get("summary_text"),
+                "scopes": scopes,
+            }
+
+        selected_refs = {primary_ref, *(selection.get("supporting_factor_refs") or [])}
+        review_context = {
+            "current_input": context.current_input.to_prompt_payload(),
+            "decision": decision,
+            "primary_candidate": selected_candidate(primary_ref),
+            "supporting_candidates": [
+                selected_candidate(ref)
+                for ref in selection.get("supporting_factor_refs") or []
+            ],
+            "periodic_thought_topics": [
+                selected_candidate(item.get("factor_ref"))
+                for item in self._workspace_periodic_thought_topics(workspace)
+                if item.get("factor_ref") in selected_refs
+            ],
+        }
+        review = self.llm.generate_autonomous_activity_alignment_review(
+            model_config=model_config,
+            review_context=review_context,
+        )
+        if not isinstance(review, dict) or review.get("outcome") not in {"allow", "reject"}:
+            raise LLMError("自身の活動の整合審査結果が不正です。")
+        return review
 
     def _self_activity_current_input(
         self,
@@ -465,17 +564,21 @@ class ServiceInputDecisionComparisonMixin:
                         family,
                         available=True,
                         selected=True,
-                        reason_summary=self._initiative_autonomous_family_reason(
-                            drive_summaries=drive_summaries,
-                            foreground_drive_summaries=foreground_drives,
-                            strongest_drive=strongest_drive,
-                            world_state_summary=world_state_summary,
-                            recent_turn_summary=[],
-                            initiative_entry_summary=None,
-                            visual_signals=[],
-                            suppression_summary={},
-                            capability_summary=capability_summary,
-                            due_periodic_thought_topics=due_periodic_thought_topics,
+                        reason_summary=(
+                            "設定された活動が今回の活動候補にある。"
+                            if due_periodic_thought_topics
+                            else self._initiative_autonomous_family_reason(
+                                drive_summaries=drive_summaries,
+                                foreground_drive_summaries=foreground_drives,
+                                strongest_drive=strongest_drive,
+                                world_state_summary=world_state_summary,
+                                recent_turn_summary=[],
+                                initiative_entry_summary=None,
+                                visual_signals=[],
+                                suppression_summary={},
+                                capability_summary=capability_summary,
+                                due_periodic_thought_topics=due_periodic_thought_topics,
+                            )
                         ),
                         preferred_result_kind=None,
                         preferred_result_reason_summary=None,

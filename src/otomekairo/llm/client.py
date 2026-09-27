@@ -25,6 +25,7 @@ from otomekairo.llm.contracts import (
     validate_answer_contract_contract,
     validate_autonomous_completion_review_contract,
     validate_autonomous_start_review_contract,
+    validate_autonomous_activity_alignment_review_contract,
     validate_autonomous_step_contract,
     validate_decision_contract,
     validate_disclosure_review_contract,
@@ -48,6 +49,7 @@ from otomekairo.llm.schemas import (
     agent_skill_selection_response_format,
     autonomous_completion_review_response_format,
     autonomous_start_review_response_format,
+    autonomous_activity_alignment_review_response_format,
     autonomous_step_response_format,
     decision_response_format,
     disclosure_review_response_format,
@@ -73,6 +75,8 @@ from otomekairo.llm.prompts import (
     build_autonomous_completion_review_messages,
     build_autonomous_start_review_messages,
     build_autonomous_start_review_repair_prompt,
+    build_autonomous_activity_alignment_review_messages,
+    build_autonomous_activity_alignment_review_repair_prompt,
     build_autonomous_completion_review_repair_prompt,
     build_autonomous_step_messages,
     build_autonomous_step_repair_prompt,
@@ -1119,6 +1123,23 @@ class LLMClient:
             failure_message="AutonomousStartReview の生成に失敗しました。",
             response_format=autonomous_start_review_response_format(),
             operation="autonomous_start_review",
+        )
+
+    def generate_autonomous_activity_alignment_review(
+        self, *, model_config: dict, review_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._is_mock_model_config(model_config):
+            raise LLMError(
+                "AutonomousActivityAlignmentReview requires an explicit reviewer test double for mock models."
+            )
+        return self._generate_structured_payload(
+            model_config=model_config,
+            messages=build_autonomous_activity_alignment_review_messages(review_context=review_context),
+            validator=validate_autonomous_activity_alignment_review_contract,
+            repair_prompt_builder=build_autonomous_activity_alignment_review_repair_prompt,
+            failure_message="AutonomousActivityAlignmentReview の生成に失敗しました。",
+            response_format=autonomous_activity_alignment_review_response_format(),
+            operation="autonomous_activity_alignment_review",
         )
 
     def generate_autonomous_completion_review(

@@ -133,6 +133,18 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             self.assertEqual(result["autonomous_run"]["status"], "active")
             service._execute_autonomous_run_step.assert_called_once()
 
+    def test_saved_source_factors_are_not_forwarded_to_run_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
+            run["source_factors"] = [{
+                "factor_ref": "drive_state:other", "kind": "drive_state",
+                "summary_text": "別の主体への配慮。",
+            }]
+            summary = service._autonomous_run_prompt_summary(run)
+            self.assertNotIn("source_factors", summary)
+
     def test_run_coordination_preserves_topic_suppression_only_for_replaced_runs(self) -> None:
         for mode in ("replace_existing", "create_new"):
             for select_new_topic in (False, True):
@@ -161,6 +173,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                     now = "2026-09-22T12:00:00+09:00"
                     workspace = {"workspace_candidates": ([{
                         "kind": "periodic_thought_topic", "factor_ref": "periodic_thought_topic:new",
+                        "summary_text": "公開の会話を読み、必要なら応じる。",
                         "metadata": {"topic_id": "new"},
                     }] if select_new_topic else [])}
                     result = service._start_autonomous_run_from_decision(
@@ -183,6 +196,11 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                     if select_new_topic:
                         expected.add("new")
                     self.assertEqual(replacement.get("periodic_thought_topic_ids", []), sorted(expected))
+                    service.llm.generate_autonomous_start_review.assert_called_once()
+                    review_context = service.llm.generate_autonomous_start_review.call_args.kwargs["review_context"]
+                    self.assertNotIn("periodic_thought_topic_ids", review_context)
+                    self.assertNotIn("source_factors", replacement)
+                    self.assertNotIn("periodic_thought_topic_ids", service._autonomous_run_prompt_summary(replacement))
                     self.assertEqual(
                         [item["topic_id"] for item in service._due_periodic_thought_topics(state=state, current_time=now)],
                         [] if select_new_topic else ["new"],

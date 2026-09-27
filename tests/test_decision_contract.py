@@ -16,11 +16,13 @@ from otomekairo.llm.contracts import (
     LLMError,
     build_decision_target_stances_for_kind,
     validate_autonomous_completion_review_contract,
+    validate_autonomous_activity_alignment_review_contract,
     validate_decision_contract,
 )
 from otomekairo.llm.prompts import (
     _build_speech_system_prompt,
     build_autonomous_completion_review_messages,
+    build_autonomous_activity_alignment_review_messages,
     build_autonomous_step_messages,
     build_autonomous_step_repair_prompt,
     build_decision_messages,
@@ -841,6 +843,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("capability_request / autonomous_run / pending_intent / noop", system)
         self.assertIn("活動と CapabilityDecisionView の catalog から autonomous_run を始めてよい", system)
         self.assertIn("autonomous_run.objective_summary は今回の関与の範囲と完了条件を、個の言葉で書きます", system)
+        self.assertIn("一度の能力実行とその結果判断で済むなら capability_request", system)
         self.assertIn("capability_request.input の自然文は、その能力の先の場へ向けた個の表現です", system)
         self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です", system)
         self.assertIn("使わない排他キーもキーとして残し、値は null にします", system)
@@ -1221,3 +1224,38 @@ class AutonomousStartReviewTests(unittest.TestCase):
     def test_mock_start_review_requires_explicit_test_double(self) -> None:
         with self.assertRaises(LLMError):
             LLMClient().generate_autonomous_start_review(model_config={"model": "mock-test"}, review_context={})
+
+
+class AutonomousActivityAlignmentReviewTests(unittest.TestCase):
+    def test_review_contract_and_prompt(self) -> None:
+        review_context = {
+            "current_input": {"sender_kind": "system"},
+            "decision": {"autonomous_run": {"objective_summary": "活動を確認する。"}},
+            "primary_candidate": {"kind": "periodic_thought_topic"},
+            "supporting_candidates": [{"kind": "drive_state", "scopes": {"focus_scope_type": "person"}}],
+            "periodic_thought_topics": [],
+        }
+        messages = build_autonomous_activity_alignment_review_messages(review_context=review_context)
+        self.assertIn("補助候補は背景材料", messages[0]["content"])
+        self.assertIn("primary_candidate", messages[1]["content"])
+        validate_autonomous_activity_alignment_review_contract(
+            {"outcome": "reject", "reason_summary": "活動に無関係な条件がある。"}
+        )
+        with self.assertRaises(LLMError):
+            validate_autonomous_activity_alignment_review_contract(
+                {"outcome": "allow_start", "reason_summary": "契約外。"}
+            )
+
+    def test_review_uses_structured_transport_and_mock_fails_closed(self) -> None:
+        with patch("otomekairo.llm.client.complete_text", return_value=json.dumps(
+            {"outcome": "allow", "reason_summary": "活動の範囲に沿う。"}
+        )) as complete:
+            result = LLMClient().generate_autonomous_activity_alignment_review(
+                model_config={"model": "real-model"}, review_context={"decision": {}}
+            )
+        self.assertEqual(result["outcome"], "allow")
+        self.assertEqual(complete.call_count, 1)
+        with self.assertRaises(LLMError):
+            LLMClient().generate_autonomous_activity_alignment_review(
+                model_config={"model": "mock-test"}, review_context={}
+            )

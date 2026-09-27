@@ -586,13 +586,41 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertIn("mcp.call_tool", [item["id"] for item in isolated.capability_summary.get("unavailable_items", [])])
         self.assertIsNotNone(family)
         self.assertTrue(family.available)
-        self.assertIn("設定された活動 1 件", family.reason_summary)
+        self.assertEqual(family.reason_summary, "設定された活動が今回の活動候補にある。")
         self.assertNotIn("現在観測候補", family.reason_summary)
         self.assertNotIn("available capability", family.reason_summary)
         self.assertIsNone(family.preferred_capability_id)
         self.assertNotIn("available capability", initiative_candidate["summary_text"])
         self.assertNotIn("現在観測候補", initiative_candidate["summary_text"])
         self.assertIsNone(initiative_candidate["metadata"]["preferred_capability_id"])
+
+    def test_periodic_topic_keeps_drive_separate_from_initiative_summary(self) -> None:
+        service = DummyInputService()
+        drive = {
+            "summary_text": "別の人への配慮を重視する。",
+            "signal_strength": 1.0,
+        }
+        initiative = _initiative_context(
+            drive_summaries=[drive],
+            candidate_families=[InitiativeCandidateFamily(
+                family="autonomous", available=True, selected=True, priority_score=1.0,
+                reason_summary="元の要約。",
+            )],
+        )
+        workspace = {"workspace_candidates": [
+            {"factor_ref": "periodic_thought_topic:elyth", "kind": "periodic_thought_topic",
+             "summary_text": "ELYTH での活動。"},
+            {"factor_ref": "drive_state:other", "kind": "drive_state",
+             "summary_text": drive["summary_text"]},
+        ]}
+        with_topic = service._self_activity_initiative_context(initiative, workspace_context=workspace)
+        drive_only = service._self_activity_initiative_context(
+            initiative, workspace_context={"workspace_candidates": workspace["workspace_candidates"][1:]},
+        )
+        self.assertEqual(with_topic.selected_family_entry().reason_summary,
+                         "設定された活動が今回の活動候補にある。")
+        self.assertEqual(with_topic.drive_summaries, [drive])
+        self.assertIn(drive["summary_text"], drive_only.selected_family_entry().reason_summary)
 
     def test_self_activity_initiative_does_not_keep_visual_only_autonomous(self) -> None:
         service = DummyInputService()
@@ -924,6 +952,10 @@ class WakeInterventionLoadTests(unittest.TestCase):
                         "kind": "autonomous_run",
                         "reason_code": "visit",
                         "reason_summary": "関わる。",
+                        "foreground_selection": {
+                            "primary_factor_ref": "periodic_thought_topic:elyth",
+                            "supporting_factor_refs": [],
+                        },
                         "target_stances": [
                             {
                                 "target": "self_activity",
@@ -945,6 +977,10 @@ class WakeInterventionLoadTests(unittest.TestCase):
                     ],
                 }
 
+            def generate_autonomous_activity_alignment_review(self, *, model_config, review_context):
+                _ = model_config, review_context
+                return {"outcome": "allow", "reason_summary": "活動の範囲に沿う。"}
+
         class DualCallService(DummyInputService):
             def __init__(self) -> None:
                 super().__init__()
@@ -959,7 +995,18 @@ class WakeInterventionLoadTests(unittest.TestCase):
                 from types import SimpleNamespace
 
                 _ = kwargs
-                return SimpleNamespace(comparison_scope="self_activity")
+                return SimpleNamespace(
+                    comparison_scope="self_activity",
+                    workspace_context={"workspace_candidates": [{
+                        "factor_ref": "periodic_thought_topic:elyth",
+                        "kind": "periodic_thought_topic",
+                        "summary_text": "ELYTH に関わる。",
+                    }]},
+                    current_input=CurrentInput(
+                        sender_kind="system", sender_ref=None, source_kind="background_thinking",
+                        response_target_refs=(), interaction_context=None, text="自己評価。",
+                    ),
+                )
 
             def _build_outward_speech_decision_context(self, **kwargs):
                 from types import SimpleNamespace
@@ -1242,6 +1289,10 @@ class WakeInterventionLoadTests(unittest.TestCase):
             "separated_comparisons": {
                 "self_activity": {
                     "kind": "autonomous_run",
+                    "foreground_selection": {
+                        "primary_factor_ref": "current_input:current",
+                        "supporting_factor_refs": [],
+                    },
                     "autonomous_run": {
                         "objective_summary": "向きへ関わる。",
                         "initial_step_summary": "最初の一手。",
@@ -1278,6 +1329,11 @@ class WakeInterventionLoadTests(unittest.TestCase):
             prediction_error_context=None,
             workspace_context={
                 "workspace_candidates": [
+                    {
+                        "factor_ref": "current_input:current",
+                        "kind": "current_input",
+                        "summary_text": current_input.text,
+                    },
                     {
                         "factor_ref": "periodic_thought_topic:elyth",
                         "kind": "periodic_thought_topic",
