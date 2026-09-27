@@ -882,6 +882,8 @@ class ServiceInputTraceBuildMixin:
             trace["disclosure_review"] = speech_payload["disclosure_review"]
         elif isinstance(decision.get("disclosure_review"), dict):
             trace["disclosure_review"] = decision["disclosure_review"]
+        if isinstance(speech_payload, dict) and isinstance(speech_payload.get("grounding_review"), dict):
+            trace["grounding_review"] = speech_payload["grounding_review"]
         if isinstance(capability_request_summary, dict):
             trace["capability_request_summary"] = capability_request_summary
         if isinstance(ongoing_action_transition_summary, dict):

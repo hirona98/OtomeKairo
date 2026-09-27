@@ -29,6 +29,8 @@ from otomekairo.llm.contracts import (
     validate_autonomous_step_contract,
     validate_decision_contract,
     validate_disclosure_review_contract,
+    validate_speech_grounding_review_contract,
+    validate_future_action_alignment_review_contract,
     validate_event_evidence_contract,
     validate_initiative_entry_check_contract,
 
@@ -54,6 +56,8 @@ from otomekairo.llm.schemas import (
     autonomous_step_response_format,
     decision_response_format,
     disclosure_review_response_format,
+    speech_grounding_review_response_format,
+    future_action_alignment_review_response_format,
     event_evidence_response_format,
     initiative_entry_check_response_format,
     input_interpretation_response_format,
@@ -87,6 +91,10 @@ from otomekairo.llm.prompts import (
     build_decision_repair_prompt,
     build_disclosure_review_messages,
     build_disclosure_review_repair_prompt,
+    build_speech_grounding_review_messages,
+    build_speech_grounding_review_repair_prompt,
+    build_future_action_alignment_review_messages,
+    build_future_action_alignment_review_repair_prompt,
     build_event_evidence_messages,
     build_event_evidence_repair_prompt,
     build_initiative_entry_check_messages,
@@ -416,7 +424,7 @@ class LLMClient:
                 context=context,
             )
 
-            return self._generate_structured_payload(
+            payload = self._generate_structured_payload(
                 model_config=model_config,
                 messages=messages,
                 validator=lambda payload: self._validate_decision_contract_for_context(
@@ -431,9 +439,72 @@ class LLMClient:
                 response_format=decision_response_format(comparison_scope=context.comparison_scope),
                 operation=operation,
             )
+            if (
+                context.comparison_scope != "full"
+                or context.current_input.sender_kind != "person"
+                or not context.current_input.response_target_refs
+                or payload["kind"] == "autonomous_run"
+            ):
+                return payload
+            review = self.generate_future_action_alignment_review(
+                model_config=model_config,
+                review_context={
+                    "persona_context": persona_context.to_prompt_payload(),
+                    "current_input": context.current_input.to_prompt_payload(),
+                    "recent_turns": context.recent_turns,
+                    "autonomous_run_summaries": context.autonomous_run_summaries or [],
+                    "ongoing_action_summary": context.ongoing_action_summary,
+                    "candidate_decision": {
+                        "kind": payload["kind"],
+                        "reason_summary": payload["reason_summary"],
+                    },
+                },
+            )
+            if review["outcome"] == "aligned":
+                return payload
+            retry_messages = [
+                *messages,
+                {"role": "assistant", "content": json.dumps(payload, ensure_ascii=False)},
+                {"role": "user", "content": (
+                    "前の判断は、現在の人物発話が求める応答後のAI行動を実行できません。"
+                    "現在の run と ongoing action を確認し、新しい未来行動を始める autonomous_run として判断を作り直してください。"
+                    f"審査理由: {review['reason_summary']}"
+                )},
+            ]
+            corrected = self._generate_structured_payload(
+                model_config=model_config,
+                messages=retry_messages,
+                validator=lambda item: self._validate_decision_contract_for_context(
+                    payload=item, context=context,
+                ),
+                repair_prompt_builder=lambda error: build_decision_repair_prompt(
+                    error, context.comparison_scope,
+                ),
+                failure_message="未来行動の依頼に沿う判断の生成に失敗しました。",
+                response_format=decision_response_format(comparison_scope=context.comparison_scope),
+                operation="decision_future_action_retry",
+            )
+            if corrected["kind"] != "autonomous_run":
+                raise LLMError("未来行動の依頼に対し autonomous_run を開始する判断が得られませんでした。")
+            return corrected
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc, level='ERROR')}", level="ERROR")
             raise
+
+    def generate_future_action_alignment_review(
+        self, *, model_config: dict, review_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._is_mock_model_config(model_config):
+            return {"outcome": "aligned", "reason_summary": "mock decision を維持する。"}
+        return self._generate_structured_payload(
+            model_config=model_config,
+            messages=build_future_action_alignment_review_messages(review_context=review_context),
+            validator=validate_future_action_alignment_review_contract,
+            repair_prompt_builder=build_future_action_alignment_review_repair_prompt,
+            failure_message="FutureActionAlignmentReview の生成に失敗しました。",
+            response_format=future_action_alignment_review_response_format(),
+            operation="future_action_alignment_review",
+        )
 
     def _validate_decision_contract_for_context(
         self,
@@ -1057,6 +1128,19 @@ class LLMClient:
                 "speech_style_notes": f"model={model_config.get('model')}",
                 "confidence_note": "litellm_model",
             }
+            review = self.generate_speech_grounding_review(
+                model_config=model_config,
+                persona_context=persona_context,
+                context=context,
+                candidate_speech=speech_text,
+            )
+            payload["speech_text"] = (
+                speech_text if review["outcome"] == "allow" else review["speech_text"].strip()
+            )
+            payload["grounding_review"] = {
+                "outcome": review["outcome"],
+                "reason_summary": review["reason_summary"],
+            }
             debug_log(
                 "LLM",
                 (
@@ -1069,6 +1153,30 @@ class LLMClient:
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc, level='ERROR')}", level="ERROR")
             raise
+
+    def generate_speech_grounding_review(
+        self,
+        *,
+        model_config: dict,
+        persona_context: PersonaContext,
+        context: SpeechContext,
+        candidate_speech: str,
+    ) -> dict[str, Any]:
+        if self._is_mock_model_config(model_config):
+            return {"outcome": "allow", "speech_text": None, "reason_summary": "mock speech を維持する。"}
+        return self._generate_structured_payload(
+            model_config=model_config,
+            messages=build_speech_grounding_review_messages(
+                context=context,
+                persona_context=persona_context,
+                candidate_speech=candidate_speech,
+            ),
+            validator=validate_speech_grounding_review_contract,
+            repair_prompt_builder=build_speech_grounding_review_repair_prompt,
+            failure_message="SpeechGroundingReview の生成に失敗しました。",
+            response_format=speech_grounding_review_response_format(),
+            operation="speech_grounding_review",
+        )
 
     def generate_disclosure_review(
         self,
@@ -1241,6 +1349,12 @@ class LLMClient:
         candidate_count = len(review_context["candidates"])
         if self._is_mock_model_config(model_config):
             payload = {
+                "episode_review": {
+                    "summary_text": review_context["episode"]["summary_text"],
+                    "outcome_text": review_context["episode"]["outcome_text"],
+                    "open_loops": review_context["episode"]["open_loops"],
+                    "reason_summary": "mock episode を維持する。",
+                },
                 "decisions": [
                     {"index": index, "outcome": "keep", "reason_summary": "mock candidate を維持する。"}
                     for index in range(candidate_count)

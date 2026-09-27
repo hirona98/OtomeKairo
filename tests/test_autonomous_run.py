@@ -13,6 +13,35 @@ from otomekairo.service.capability import PreSendCheckWithheldError
 
 
 class AutonomousRunRecoveryTests(unittest.TestCase):
+    def test_autonomous_speech_receives_run_objective(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            service._build_speech_context = Mock(return_value=object())
+            service._build_selected_persona_context = Mock(return_value=object())
+            service.llm = Mock()
+            service.llm.generate_speech.return_value = {"speech_text": "そろそろ作業に戻りましょう。"}
+            objective = "読書を終えて作業に戻るよう声をかける。"
+            step_context = SimpleNamespace(
+                run={"objective_summary": objective},
+                current_input=CurrentInput(
+                    sender_kind="system", sender_ref="self", source_kind="autonomous_run",
+                    response_target_refs=("person:master",), interaction_context=None,
+                    text="タイマーが満了した。",
+                ),
+                recent_turns=[], time_context={}, foreground_world_state=None,
+                activity_context=None, ongoing_action_summary=None, people_context=[],
+                agent_skill_context=None,
+            )
+
+            service._generate_autonomous_run_speech(
+                state={}, selected_preset={"model": "mock-test"},
+                step_context=step_context,
+                step={"action": {"speech": {"reason_summary": "1分が経過した。"}}},
+            )
+
+            decision = service._build_speech_context.call_args.kwargs["decision"]
+            self.assertEqual(decision["run_objective_summary"], objective)
+
     def _use_mock_model(self, service: OtomeKairoService, state: dict) -> dict:
         preset_id = state["selected_model_preset_id"]
         state["model_presets"][preset_id]["model"] = "mock-test"

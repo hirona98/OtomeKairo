@@ -144,6 +144,37 @@ def _capability_decision(capability_id: str, input_payload: dict) -> dict:
 
 
 class DecisionContractTests(unittest.TestCase):
+    def setUp(self) -> None:
+        review_patch = patch.object(
+            LLMClient, "generate_future_action_alignment_review",
+            return_value={"outcome": "aligned", "reason_summary": "このテストの判断は現在の応答で完結する。"},
+        )
+        review_patch.start()
+        self.addCleanup(review_patch.stop)
+
+    def test_future_action_request_cannot_finish_as_speech(self) -> None:
+        text = "1分後に読書を終えて作業へ戻るよう声をかけて。"
+        context = replace(
+            _decision_context([]),
+            input_text=text,
+            current_input=replace(_current_input(), text=text),
+        )
+        initial = {"kind": "speech", "reason_summary": "後で声をかけると伝える。"}
+        corrected = {"kind": "autonomous_run", "reason_summary": "1分後の声かけを実行する。"}
+        with patch.object(
+            LLMClient, "_generate_structured_payload", side_effect=[initial, corrected],
+        ) as generate, patch.object(
+            LLMClient, "generate_future_action_alignment_review",
+            return_value={"outcome": "requires_autonomous_run", "reason_summary": "未来の声かけ依頼。"},
+        ):
+            result = LLMClient().generate_decision(
+                model_config={"model": "real-test"},
+                persona_context=_persona_context(), context=context,
+            )
+
+        self.assertEqual(result["kind"], "autonomous_run")
+        self.assertEqual(generate.call_count, 2)
+
     def test_decision_contract_requires_foreground_selection(self) -> None:
         payload = {
             "kind": "speech",

@@ -274,6 +274,27 @@ def disclosure_review_response_format() -> dict[str, Any]:
     )
 
 
+def speech_grounding_review_response_format() -> dict[str, Any]:
+    return structured_response_format(
+        "speech_grounding_review",
+        closed_object({
+            "outcome": string_enum(["allow", "rewrite"]),
+            "speech_text": nullable({"type": "string"}),
+            "reason_summary": {"type": "string"},
+        }),
+    )
+
+
+def future_action_alignment_review_response_format() -> dict[str, Any]:
+    return structured_response_format(
+        "future_action_alignment_review",
+        closed_object({
+            "outcome": string_enum(["aligned", "requires_autonomous_run"]),
+            "reason_summary": {"type": "string"},
+        }),
+    )
+
+
 def pre_send_check_response_format() -> dict[str, Any]:
     return structured_response_format(
         "pre_send_check",
@@ -322,6 +343,12 @@ def memory_candidate_review_response_format() -> dict[str, Any]:
     return structured_response_format(
         "memory_candidate_review",
         closed_object({
+            "episode_review": closed_object({
+                "summary_text": {"type": "string"},
+                "outcome_text": nullable({"type": "string"}),
+                "open_loops": string_array(),
+                "reason_summary": {"type": "string"},
+            }),
             "decisions": {
                 "type": "array",
                 "items": closed_object({
@@ -590,6 +617,8 @@ def all_response_formats() -> dict[str, dict[str, Any]]:
         "decision_outward_speech": decision_response_format(comparison_scope="outward_speech"),
         "autonomous_step": autonomous_step_response_format(),
         "disclosure_review": disclosure_review_response_format(),
+        "speech_grounding_review": speech_grounding_review_response_format(),
+        "future_action_alignment_review": future_action_alignment_review_response_format(),
         "pre_send_check": pre_send_check_response_format(),
         "autonomous_completion_review": autonomous_completion_review_response_format(),
         "autonomous_start_review": autonomous_start_review_response_format(),

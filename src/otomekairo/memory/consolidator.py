@@ -260,8 +260,6 @@ class MemoryConsolidator:
         interpretation: dict[str, Any],
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         candidates = interpretation["candidate_memory_units"]
-        if not candidates:
-            return [], {"reviewed_count": 0, "kept_count": 0, "dropped_count": 0}
         review = self.llm.generate_memory_candidate_review(
             model_config=selected_preset,
             review_context={
@@ -285,6 +283,14 @@ class MemoryConsolidator:
             },
         )
         decisions = {item["index"]: item for item in review["decisions"]}
+        episode = interpretation["episode"]
+        episode_review = review["episode_review"]
+        episode_changed = any(
+            episode[key] != episode_review[key]
+            for key in ("summary_text", "outcome_text", "open_loops")
+        )
+        for key in ("summary_text", "outcome_text", "open_loops"):
+            episode[key] = episode_review[key]
         kept_indices = [index for index in range(len(candidates)) if decisions[index]["outcome"] == "keep"]
         if len(kept_indices) != len(candidates) and interpretation.get("correction_status") == "selected":
             raise ValueError("Memory candidate review dropped a candidate during correction selection.")
@@ -294,6 +300,10 @@ class MemoryConsolidator:
                 "reviewed_count": len(candidates),
                 "kept_count": len(kept_indices),
                 "dropped_count": len(candidates) - len(kept_indices),
+                "episode_review": {
+                    "changed": episode_changed,
+                    "reason_summary": episode_review["reason_summary"],
+                },
                 "dropped_reasons": [
                     {"index": index, "reason_summary": decisions[index]["reason_summary"]}
                     for index in range(len(candidates))

@@ -503,6 +503,27 @@ def validate_disclosure_review_contract(payload: dict[str, Any]) -> None:
         raise LLMError("DisclosureReview.reason_code は空にできません。")
 
 
+def validate_speech_grounding_review_contract(payload: dict[str, Any]) -> None:
+    _validate_exact_keys(payload, {"outcome", "speech_text", "reason_summary"}, "SpeechGroundingReview")
+    if payload["outcome"] not in {"allow", "rewrite"}:
+        raise LLMError("SpeechGroundingReview.outcome が不正です。")
+    if payload["outcome"] == "allow":
+        if payload["speech_text"] is not None:
+            raise LLMError("SpeechGroundingReview.outcome=allow の speech_text は null です。")
+    elif not isinstance(payload["speech_text"], str) or not payload["speech_text"].strip():
+        raise LLMError("SpeechGroundingReview.outcome=rewrite には speech_text が必要です。")
+    if not isinstance(payload["reason_summary"], str) or not payload["reason_summary"].strip():
+        raise LLMError("SpeechGroundingReview.reason_summary は空にできません。")
+
+
+def validate_future_action_alignment_review_contract(payload: dict[str, Any]) -> None:
+    _validate_exact_keys(payload, {"outcome", "reason_summary"}, "FutureActionAlignmentReview")
+    if payload["outcome"] not in {"aligned", "requires_autonomous_run"}:
+        raise LLMError("FutureActionAlignmentReview.outcome が不正です。")
+    if not isinstance(payload["reason_summary"], str) or not payload["reason_summary"].strip():
+        raise LLMError("FutureActionAlignmentReview.reason_summary は空にできません。")
+
+
 def validate_pre_send_check_contract(payload: dict[str, Any]) -> None:
     # 外部送信は許可か保留の二値とし、reviewer に本文を書き換えさせない。
     _validate_exact_keys(
@@ -534,7 +555,22 @@ def validate_autonomous_activity_alignment_review_contract(payload: dict[str, An
 
 
 def validate_memory_candidate_review_contract(payload: dict[str, Any], *, candidate_count: int) -> None:
-    _validate_exact_keys(payload, {"decisions"}, "MemoryCandidateReview")
+    _validate_exact_keys(payload, {"episode_review", "decisions"}, "MemoryCandidateReview")
+    episode = payload["episode_review"]
+    _validate_exact_keys(
+        episode, {"summary_text", "outcome_text", "open_loops", "reason_summary"},
+        "MemoryCandidateReview.episode_review",
+    )
+    if not isinstance(episode["summary_text"], str) or not episode["summary_text"].strip():
+        raise LLMError("MemoryCandidateReview.episode_review.summary_text は空にできません。")
+    if episode["outcome_text"] is not None and not isinstance(episode["outcome_text"], str):
+        raise LLMError("MemoryCandidateReview.episode_review.outcome_text が不正です。")
+    if not isinstance(episode["open_loops"], list) or not all(
+        isinstance(item, str) and item.strip() for item in episode["open_loops"]
+    ):
+        raise LLMError("MemoryCandidateReview.episode_review.open_loops が不正です。")
+    if not isinstance(episode["reason_summary"], str) or not episode["reason_summary"].strip():
+        raise LLMError("MemoryCandidateReview.episode_review.reason_summary は空にできません。")
     decisions = payload["decisions"]
     if not isinstance(decisions, list) or len(decisions) != candidate_count:
         raise LLMError("MemoryCandidateReview.decisions は候補ごとに1件必要です。")

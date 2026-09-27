@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from otomekairo.llm.client import LLMClient
 from otomekairo.llm.contexts import CurrentInput, PersonaContext, SpeechContext
-from otomekairo.llm.contracts import LLMError
+from otomekairo.llm.contracts import LLMError, validate_speech_grounding_review_contract
 from otomekairo.llm.transport import complete_text
 
 
@@ -38,6 +38,15 @@ def _current_input() -> CurrentInput:
 
 
 class LLMTransportTests(unittest.TestCase):
+    def test_speech_grounding_review_allow_has_no_duplicate_speech(self) -> None:
+        validate_speech_grounding_review_contract({
+            "outcome": "allow", "speech_text": None, "reason_summary": "根拠と一致。",
+        })
+        with self.assertRaises(LLMError):
+            validate_speech_grounding_review_contract({
+                "outcome": "allow", "speech_text": "書き換えた本文", "reason_summary": "根拠と一致。",
+            })
+
     def test_openrouter_structured_call_requires_parameters_and_keeps_reasoning(self) -> None:
         captured: dict = {}
 
@@ -160,7 +169,10 @@ class LLMTransportTests(unittest.TestCase):
             recall_pack={},
             decision={"kind": "speech"},
         )
-        with patch("otomekairo.llm.client.complete_text", return_value="こんにちは") as complete:
+        with patch("otomekairo.llm.client.complete_text", return_value="こんにちは") as complete, patch.object(
+            LLMClient, "_generate_structured_payload",
+            return_value={"outcome": "allow", "speech_text": None, "reason_summary": "根拠と一致。"},
+        ) as review:
             LLMClient().generate_speech(
                 model_config={"model": "openrouter/google/gemini-3.5-flash-lite"},
                 persona_context=_persona_context(),
@@ -169,3 +181,4 @@ class LLMTransportTests(unittest.TestCase):
 
         kwargs = complete.call_args.kwargs
         self.assertNotIn("response_format", kwargs)
+        self.assertEqual(review.call_args.kwargs["operation"], "speech_grounding_review")

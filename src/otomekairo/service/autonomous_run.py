@@ -1583,6 +1583,7 @@ class ServiceAutonomousRunMixin:
             "kind": "speech",
             "reason_code": str(speech_action.get("reason_code") or "autonomous_run_speech").strip(),
             "reason_summary": reason_summary,
+            "run_objective_summary": step_context.run["objective_summary"],
             "requires_confirmation": False,
             "pending_intent": None,
             "capability_request": None,
