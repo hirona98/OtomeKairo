@@ -819,6 +819,34 @@ class DecisionContractTests(unittest.TestCase):
             self.assertIn("decision parse_failed", message)
             self.assertIn("content=これは JSON ではありません。", message)
 
+    def test_decision_error_log_keeps_full_exception_text(self) -> None:
+        long_message = "Invalid schema for response_format " + ("x" * 400) + "TAIL"
+        logs: list[tuple[str, str, str]] = []
+
+        def capture(component: str, message: str, *, level: str = "INFO") -> None:
+            logs.append((level, component, message))
+
+        with (
+            patch("otomekairo.llm.client.debug_log", side_effect=capture),
+            patch("otomekairo.llm.client.complete_text", side_effect=LLMError(long_message)),
+        ):
+            with self.assertRaises(LLMError):
+                LLMClient().generate_decision(
+                    model_config={"model": "real-model"},
+                    persona_context=_persona_context(),
+                    context=_decision_context([]),
+                )
+
+        errors = [message for level, component, message in logs if level == "ERROR" and component == "LLM"]
+        self.assertEqual(errors, [f"decision failed error=LLMError: {long_message}"])
+
+    def test_warning_debug_error_stays_character_limited(self) -> None:
+        message = "schema " + ("y" * 400) + "TAIL"
+        text = LLMClient()._debug_error(LLMError(message), level="WARNING")
+        self.assertEqual(len(text), 240)
+        self.assertTrue(text.endswith("…"))
+        self.assertNotIn("TAIL", text)
+
     def test_rejected_payload_redacts_secret_fields(self) -> None:
         compact = LLMClient()._debug_rejected_payload(
             {

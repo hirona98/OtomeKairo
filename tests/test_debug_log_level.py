@@ -58,3 +58,58 @@ def test_debug_log_min_level_invalid_raises(monkeypatch) -> None:
     monkeypatch.setenv("OTOMEKAIRO_DEBUG_LOG_MIN_LEVEL", "TRACE")
     with pytest.raises(SystemExit, match="OTOMEKAIRO_DEBUG_LOG_MIN_LEVEL"):
         common.debug_log("Test", "should fail", level="ERROR")
+
+
+def test_format_debug_log_text_error_keeps_full_text() -> None:
+    text = "HEAD\n" + ("あ" * 400) + "TAIL"
+    formatted = common.format_debug_log_text(text, level="ERROR")
+    assert formatted.startswith("HEAD ")
+    assert formatted.endswith("TAIL")
+    assert "\n" not in formatted
+    assert "…" not in formatted
+
+
+def test_format_debug_log_text_warning_stays_limited() -> None:
+    formatted = common.format_debug_log_text("a" * 300, level="WARNING", limit=160)
+    assert len(formatted) == 160
+    assert formatted.endswith("…")
+    assert "a" * 300 not in formatted
+
+
+def test_format_debug_log_text_non_error_requires_positive_limit() -> None:
+    with pytest.raises(ValueError, match="positive integer"):
+        common.format_debug_log_text("text", level="INFO")
+    with pytest.raises(ValueError, match="positive integer"):
+        common.format_debug_log_text("text", level="WARNING", limit=True)  # type: ignore[arg-type]
+
+
+def test_format_debug_log_text_rejects_unknown_level() -> None:
+    with pytest.raises(ValueError, match="DEBUG, INFO, WARNING, ERROR"):
+        common.format_debug_log_text("text", level="TRACE")
+
+
+def test_input_failure_error_log_keeps_full_reason() -> None:
+    from otomekairo.service.input.logging import ServiceInputLoggingMixin
+
+    class Host(ServiceInputLoggingMixin):
+        def _short_cycle_id(self, cycle_id: str) -> str:
+            return "abc"
+
+        def _now_iso(self) -> str:
+            return "2026-09-27T12:00:00+09:00"
+
+        def _emit_live_logs(self, logs: list[dict]) -> None:
+            self.logs = logs
+
+    host = Host()
+    host._emit_input_failure_logs(
+        cycle_id="cycle:abc",
+        trigger_kind="user_message",
+        input_text="hello",
+        failure_reason="HEAD\n" + ("あ" * 400) + "TAIL",
+    )
+    message = host.logs[0]["msg"]
+    assert host.logs[0]["level"] == "ERROR"
+    assert message.startswith("abc internal_failure reason=HEAD ")
+    assert message.endswith("TAIL")
+    assert "\n" not in message

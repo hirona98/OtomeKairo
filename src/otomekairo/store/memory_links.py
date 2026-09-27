@@ -5,7 +5,7 @@ import sqlite3
 import uuid
 from typing import Any
 
-from otomekairo.service.common import debug_log
+from otomekairo.service.common import debug_log, format_debug_log_text
 
 
 INACTIVE_MEMORY_LINK_TARGET_STATUSES = {"revoked", "superseded"}
@@ -34,7 +34,12 @@ class StoreMemoryLinksMixin:
                     memory_actions=memory_actions,
                 )
             except Exception as exc:  # noqa: BLE001
-                debug_log("Store", f"entity_registry update failed after memory_actions error={exc}", level="ERROR")
+                debug_log(
+                    "Store",
+                    "entity_registry update failed after memory_actions "
+                    f"error={format_debug_log_text(str(exc), level='ERROR')}",
+                    level="ERROR",
+                )
 
         # 結果
         return self._memory_link_update_summary(memory_link_records)

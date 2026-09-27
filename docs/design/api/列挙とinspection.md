@@ -636,7 +636,8 @@ response:
 - 認証: 必要
 - 役割: `CocoroConsole` のログビューアーと Web UI ログ画面向けに、`debug_log` の出力を WebSocket で流す
 - client から送る message は不要
-- 接続時には、直近の短いログを replay する
+- 接続時には、直近ログを replay する
+- `msg` の文字数規則は [../runtime/デバッグ可能性.md](../runtime/デバッグ可能性.md) を正とする
 - `ts` は OtomeKairo のローカルタイムゾーンに属する offset 付き timestamp で返す
 - 通常会話では、ユーザー入力と実際にユーザーへ表示する assistant 発話の短い抜粋を流す
 - 会話本文の抜粋は最初の改行までを流し、それ以降の行を流さない

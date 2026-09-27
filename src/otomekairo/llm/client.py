@@ -110,7 +110,7 @@ from otomekairo.llm.prompts import (
 )
 from otomekairo.world_state.models import WorldStateSourcePack
 from otomekairo.llm.transport import complete_text, generate_embeddings as transport_generate_embeddings
-from otomekairo.service.common import debug_log
+from otomekairo.service.common import debug_log, format_debug_log_text
 
 DEBUG_REJECTED_TEXT_LIMIT = 2000
 DEBUG_REJECTED_STRING_LIMIT = 200
@@ -373,7 +373,7 @@ class LLMClient:
                 "answer_contract": answer_contract,
             }
         except Exception as exc:
-            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
+            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc, level='ERROR')}", level="ERROR")
             raise
 
     def _validate_input_interpretation_contract(self, payload: dict[str, Any]) -> None:
@@ -428,7 +428,7 @@ class LLMClient:
                 operation=operation,
             )
         except Exception as exc:
-            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
+            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc, level='ERROR')}", level="ERROR")
             raise
 
     def _validate_decision_contract_for_context(
@@ -596,7 +596,7 @@ class LLMClient:
             )
             return payload
         except Exception as exc:
-            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
+            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc, level='ERROR')}", level="ERROR")
             raise
 
     def _coerce_decision_to_noop_for_fresh_visual_context_reuse(
@@ -1063,7 +1063,7 @@ class LLMClient:
             )
             return payload
         except Exception as exc:
-            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
+            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc, level='ERROR')}", level="ERROR")
             raise
 
     def generate_disclosure_review(
@@ -1528,10 +1528,9 @@ class LLMClient:
             return "-"
         return model.strip()
 
-    def _debug_error(self, exc: BaseException) -> str:
-        # 長い応答本文をログへ出しすぎない。
-        message = str(exc).replace("\n", " ").strip()
-        return self._debug_clip(message, 240)
+    def _debug_error(self, exc: BaseException, *, level: str) -> str:
+        # ERROR は文字数で切らない。それ以外は長い例外文を短くする。
+        return format_debug_log_text(str(exc), level=level, limit=240)
 
     def _debug_payload_keys(self, payload: dict[str, Any]) -> str:
         # payload の中身ではなくキーだけを出す。
@@ -1637,7 +1636,7 @@ class LLMClient:
                         "LLM",
                         (
                             f"{operation} validation_failed attempt={attempt + 1} "
-                            f"error={self._debug_error(last_error)} "
+                            f"error={self._debug_error(last_error, level='WARNING')} "
                             f"payload={self._debug_rejected_payload(payload)}"
                         ),
                         level="WARNING",
@@ -1648,7 +1647,7 @@ class LLMClient:
                     "LLM",
                     (
                         f"{operation} parse_failed attempt={attempt + 1} "
-                        f"error={self._debug_error(exc)} "
+                        f"error={self._debug_error(exc, level='WARNING')} "
                         f"content={self._debug_rejected_content(content)}"
                     ),
                     level="WARNING",
@@ -1672,7 +1671,7 @@ class LLMClient:
             ]
 
         if last_error is not None:
-            debug_log("LLM", f"{operation} failed error={self._debug_error(last_error)}", level="ERROR")
+            debug_log("LLM", f"{operation} failed error={self._debug_error(last_error, level='ERROR')}", level="ERROR")
             raise last_error
         debug_log("LLM", f"{operation} failed error={failure_message}", level="ERROR")
         raise LLMError(failure_message)

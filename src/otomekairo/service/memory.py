@@ -5,7 +5,7 @@ import threading
 import uuid
 from typing import Any
 
-from otomekairo.service.common import debug_log
+from otomekairo.service.common import debug_log, format_debug_log_text
 
 
 class ServiceMemoryMixin:
@@ -174,7 +174,7 @@ class ServiceMemoryMixin:
             failure_reason = str(exc)
             debug_log(
                 "MemoryWorker",
-                f"job failed cycle={self._short_cycle_id(started_job['cycle_id'])} error={type(exc).__name__}: {failure_reason}",
+                f"job failed cycle={self._short_cycle_id(started_job['cycle_id'])} error={type(exc).__name__}: {format_debug_log_text(failure_reason, level='ERROR')}",
                 level="ERROR",
             )
             self._update_memory_trace_postprocess(
@@ -327,7 +327,7 @@ class ServiceMemoryMixin:
         except Exception as exc:  # noqa: BLE001
             debug_log(
                 "Memory",
-                f"turn consolidation failed cycle={self._short_cycle_id(cycle_id)} error={type(exc).__name__}: {exc}",
+                f"turn consolidation failed cycle={self._short_cycle_id(cycle_id)} error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}",
                 level="ERROR",
             )
             memory_trace = self._failed_memory_trace(str(exc))
@@ -358,7 +358,7 @@ class ServiceMemoryMixin:
         except Exception as exc:  # noqa: BLE001
             debug_log(
                 "Memory",
-                f"postprocess queue failed cycle={self._short_cycle_id(cycle_id)} error={type(exc).__name__}: {exc}",
+                f"postprocess queue failed cycle={self._short_cycle_id(cycle_id)} error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}",
                 level="ERROR",
             )
             failed_postprocess_trace = {

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.memory.utils import display_local_iso
-from otomekairo.service.common import debug_log
+from otomekairo.service.common import debug_log, format_debug_log_text
 
 
 class ServiceInputLoggingMixin:
@@ -111,7 +111,7 @@ class ServiceInputLoggingMixin:
             component="Failure",
             message=(
                 f"{self._short_cycle_id(cycle_id)} internal_failure "
-                f"reason={self._clamp(failure_reason)}"
+                f"reason={format_debug_log_text(failure_reason, level='ERROR')}"
             ),
         )
 

@@ -8,6 +8,7 @@ from otomekairo.llm.client import LLMContractError, LLMError
 from otomekairo.service.common import (
     PENDING_INTENT_EXPIRES_HOURS,
     debug_log,
+    format_debug_log_text,
 )
 
 
@@ -111,7 +112,7 @@ class ServiceSpontaneousPendingIntentMixin:
             trace["failure_reason"] = str(exc)
             debug_log(
                 "PendingIntent",
-                f"selection failed trigger={trigger_kind} stage=build_source_pack error={self._clamp(str(exc))}",
+                f"selection failed trigger={trigger_kind} stage=build_source_pack error={format_debug_log_text(str(exc), level='ERROR')}",
                 level="ERROR",
             )
             raise PendingIntentSelectionError(
@@ -134,7 +135,7 @@ class ServiceSpontaneousPendingIntentMixin:
             trace["failure_reason"] = str(exc)
             debug_log(
                 "PendingIntent",
-                f"selection failed trigger={trigger_kind} stage=contract_validation error={self._clamp(str(exc))}",
+                f"selection failed trigger={trigger_kind} stage=contract_validation error={format_debug_log_text(str(exc), level='ERROR')}",
                 level="ERROR",
             )
             raise PendingIntentSelectionError(
@@ -147,7 +148,7 @@ class ServiceSpontaneousPendingIntentMixin:
             trace["failure_reason"] = str(exc)
             debug_log(
                 "PendingIntent",
-                f"selection failed trigger={trigger_kind} stage=llm_generation error={self._clamp(str(exc))}",
+                f"selection failed trigger={trigger_kind} stage=llm_generation error={format_debug_log_text(str(exc), level='ERROR')}",
                 level="ERROR",
             )
             raise PendingIntentSelectionError(
@@ -168,7 +169,7 @@ class ServiceSpontaneousPendingIntentMixin:
             trace["failure_reason"] = str(exc)
             debug_log(
                 "PendingIntent",
-                f"selection failed trigger={trigger_kind} stage=apply_selection error={self._clamp(str(exc))}",
+                f"selection failed trigger={trigger_kind} stage=apply_selection error={format_debug_log_text(str(exc), level='ERROR')}",
                 level="ERROR",
             )
             raise PendingIntentSelectionError(

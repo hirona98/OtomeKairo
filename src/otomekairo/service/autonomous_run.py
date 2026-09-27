@@ -15,7 +15,7 @@ from otomekairo.service.capability import (
     PreSendCheckFailureError,
     PreSendCheckWithheldError,
 )
-from otomekairo.service.common import ServiceError, debug_log
+from otomekairo.service.common import ServiceError, debug_log, format_debug_log_text
 from otomekairo.service.periodic_thought_topics import (
     selected_periodic_thought_topic_ids,
     periodic_thought_topic_ids_from_runs,
@@ -265,7 +265,7 @@ class ServiceAutonomousRunMixin:
         except ValueError:
             debug_log(
                 "AutonomousRun",
-                f"invalid next_run_at run={run.get('run_id')} next_run_at={self._clamp(next_run_at)}",
+                f"invalid next_run_at run={run.get('run_id')} next_run_at={format_debug_log_text(next_run_at, level='ERROR')}",
                 level="ERROR",
             )
             return False
@@ -504,7 +504,7 @@ class ServiceAutonomousRunMixin:
             except Exception as exc:  # noqa: BLE001
                 debug_log(
                     "AutonomousRun",
-                    f"scheduler iteration failed error={type(exc).__name__}: {self._clamp(str(exc))}",
+                    f"scheduler iteration failed error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}",
                     level="ERROR",
                 )
 
@@ -1193,7 +1193,7 @@ class ServiceAutonomousRunMixin:
                 )
             debug_log(
                 "AutonomousRun",
-                f"step failed run={run_id} error={type(exc).__name__}: {self._clamp(str(exc))}",
+                f"step failed run={run_id} error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}",
                 level="ERROR",
             )
             return {
@@ -1947,7 +1947,7 @@ class ServiceAutonomousRunMixin:
                     "AutonomousRun",
                     (
                         f"result cycle crashed request={request_label} run={run_id or '-'} "
-                        f"error={type(exc).__name__}: {self._clamp(str(exc))}"
+                        f"error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}"
                     ),
                     level="ERROR",
                 )
@@ -2157,7 +2157,7 @@ class ServiceAutonomousRunMixin:
             )
             debug_log(
                 "AutonomousRun",
-                f"result cycle failed run={run_id} error={type(exc).__name__}: {self._clamp(str(exc))}",
+                f"result cycle failed run={run_id} error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}",
                 level="ERROR",
             )
 
@@ -2709,7 +2709,7 @@ class ServiceAutonomousRunMixin:
             }
             debug_log(
                 "AutonomousRun",
-                f"commitment resolution failed run={run.get('run_id')} error={type(exc).__name__}: {self._clamp(str(exc))}",
+                f"commitment resolution failed run={run.get('run_id')} error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}",
                 level="ERROR",
             )
 
@@ -2893,7 +2893,7 @@ class ServiceAutonomousRunMixin:
         except Exception as exc:  # noqa: BLE001
             debug_log(
                 "AutonomousRun",
-                f"terminal consolidation failed run={run.get('run_id')} error={type(exc).__name__}: {self._clamp(str(exc))}",
+                f"terminal consolidation failed run={run.get('run_id')} error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}",
                 level="ERROR",
             )
             consolidation = {

@@ -9,7 +9,7 @@ from otomekairo.service.capability import (
     CapabilityResultValidationError,
     PreSendCheckFailureError,
 )
-from otomekairo.service.common import ServiceError, debug_log
+from otomekairo.service.common import ServiceError, debug_log, format_debug_log_text
 from otomekairo.service.spontaneous.capability_payload import capability_result_has_error
 
 
@@ -97,7 +97,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
                     "CapabilityResult",
                     (
                         f"async cycle crashed request={request_label} capability={capability_id} "
-                        f"error={type(exc).__name__}: {self._clamp(str(exc))}"
+                        f"error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}"
                     ),
                     level="ERROR",
                 )
@@ -257,7 +257,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 "CapabilityResult",
                 (
                     f"{self._short_cycle_id(cycle_id)} failed stage={exc.failure_stage} "
-                    f"error={type(exc).__name__}: {self._clamp(str(exc))}"
+                    f"error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}"
                 ),
                 level="ERROR",
             )
@@ -336,7 +336,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
                     )
             debug_log(
                 "CapabilityResult",
-                f"{self._short_cycle_id(cycle_id)} failed error={type(exc).__name__}: {self._clamp(str(exc))}",
+                f"{self._short_cycle_id(cycle_id)} failed error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}",
                 level="ERROR",
             )
             self._persist_cycle_failure(

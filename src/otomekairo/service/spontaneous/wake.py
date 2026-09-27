@@ -12,6 +12,7 @@ from otomekairo.service.common import (
     BACKGROUND_THINKING_POLL_SECONDS,
     WAKE_RECENT_DEDUPE_WINDOW_MINUTES,
     debug_log,
+    format_debug_log_text,
 )
 from otomekairo.service.spontaneous.pending_intent import PendingIntentSelectionError
 
@@ -263,7 +264,7 @@ class ServiceSpontaneousWakeMixin:
                     "Wake",
                     (
                         f"{self._short_cycle_id(cycle_id)} failed stage={exc.failure_stage} "
-                        f"error={type(exc).__name__}: {self._clamp(str(exc))}"
+                        f"error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}"
                     ),
                     level="ERROR",
                 )
@@ -291,7 +292,7 @@ class ServiceSpontaneousWakeMixin:
                     "Wake",
                     (
                         f"{self._short_cycle_id(cycle_id)} failed stage={exc.failure_stage} "
-                        f"error={type(exc).__name__}: {self._clamp(str(exc))}"
+                        f"error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}"
                     ),
                     level="ERROR",
                 )
@@ -325,7 +326,7 @@ class ServiceSpontaneousWakeMixin:
                 )
                 debug_log(
                     "Wake",
-                    f"{self._short_cycle_id(cycle_id)} failed error={type(exc).__name__}: {self._clamp(str(exc))}",
+                    f"{self._short_cycle_id(cycle_id)} failed error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}",
                     level="ERROR",
                 )
                 review_notice = (
@@ -393,7 +394,7 @@ class ServiceSpontaneousWakeMixin:
                     continue
                 self._execute_scheduled_background_thinking(state=state)
             except Exception as exc:  # noqa: BLE001
-                debug_log("Wake", f"background thinking loop error={type(exc).__name__}: {self._clamp(str(exc))}", level="ERROR")
+                debug_log("Wake", f"background thinking loop error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}", level="ERROR")
                 self._wait_background_thinking_delay(timeout=BACKGROUND_THINKING_POLL_SECONDS)
 
     def _wait_background_thinking_delay(self, *, timeout: float) -> None:

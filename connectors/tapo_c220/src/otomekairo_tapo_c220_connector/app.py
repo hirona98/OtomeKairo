@@ -40,7 +40,7 @@ class TapoC220Connector:
             )
         except Exception as exc:  # noqa: BLE001
             failed = True
-            self._log(f"onvif_ptz_capability=failed error={self._short_error(exc)}", level="ERROR")
+            self._log(f"onvif_ptz_capability=failed error={self._redacted_error(exc)}", level="ERROR")
 
         try:
             image = self.capture.capture_data_uri(timeout_seconds=self.config.camera.rtsp_open_timeout_seconds)
@@ -48,7 +48,7 @@ class TapoC220Connector:
             self._log(f"rtsp_capture=ok prefix={prefix} bytes={len(image)}", level="INFO")
         except Exception as exc:  # noqa: BLE001
             failed = True
-            self._log(f"rtsp_capture=failed error={self._short_error(exc)}", level="ERROR")
+            self._log(f"rtsp_capture=failed error={self._redacted_error(exc)}", level="ERROR")
 
         return 1 if failed else 0
 
@@ -112,7 +112,7 @@ class TapoC220Connector:
             }
             self._post_result(request_id=request_id, capability_id="vision.capture", result=result)
             self._log(
-                f"vision.capture_result failed request_id={request_id} error={self._short_error(exc)}",
+                f"vision.capture_result failed request_id={request_id} error={self._redacted_error(exc)}",
                 level="ERROR",
             )
 
@@ -155,7 +155,7 @@ class TapoC220Connector:
             }
             self._post_result(request_id=request_id, capability_id="camera.ptz", result=result)
             self._log(
-                f"camera.ptz_result failed request_id={request_id} error={self._short_error(exc)}",
+                f"camera.ptz_result failed request_id={request_id} error={self._redacted_error(exc)}",
                 level="ERROR",
             )
 
@@ -170,7 +170,7 @@ class TapoC220Connector:
             self.http.post("/api/capability/result", payload)
         except HttpError as exc:
             self._log(
-                f"capability result post failed request_id={request_id} error={self._short_error(exc)}",
+                f"capability result post failed request_id={request_id} error={self._redacted_error(exc)}",
                 level="ERROR",
             )
 
@@ -198,7 +198,7 @@ class TapoC220Connector:
             return value.strip()
         return default
 
-    def _short_error(self, exc: BaseException) -> str:
+    def _redacted_error(self, exc: BaseException) -> str:
         text = str(exc).strip() or exc.__class__.__name__
         for secret in (
             self.config.server.access_token,
@@ -208,7 +208,10 @@ class TapoC220Connector:
         ):
             if secret:
                 text = text.replace(secret, "***")
-        return text.replace("\n", " ")[:120]
+        return text.replace("\r", " ").replace("\n", " ")
+
+    def _short_error(self, exc: BaseException) -> str:
+        return self._redacted_error(exc)[:120]
 
     def _log(self, message: str, *, level: str = "INFO") -> None:
         emit_log("tapo-c220-connector", message, level=level, stream=sys.stderr)

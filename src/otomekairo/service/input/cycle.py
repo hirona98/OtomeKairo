@@ -6,7 +6,7 @@ from otomekairo.llm.client import LLMError
 from otomekairo.interaction import InteractionContext, normalize_interaction_context
 from otomekairo.recall.builder import RecallPackSelectionError
 from otomekairo.service.capability import PreSendCheckFailureError
-from otomekairo.service.common import ServiceError, debug_log
+from otomekairo.service.common import ServiceError, debug_log, format_debug_log_text
 
 
 PRE_SEND_CHECK_FAILURE_NOTICE = (
@@ -204,7 +204,7 @@ class ServiceInputCycleMixin:
                 "Conversation",
                 (
                     f"{self._short_cycle_id(cycle_id)} failed stage={exc.failure_stage} "
-                    f"error={type(exc).__name__}: {self._clamp(str(exc))}"
+                    f"error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}"
                 ),
                 level="ERROR",
             )
@@ -257,7 +257,7 @@ class ServiceInputCycleMixin:
         except (LLMError, KeyError, ValueError) as exc:
             debug_log(
                 "Conversation",
-                f"{self._short_cycle_id(cycle_id)} failed error={type(exc).__name__}: {self._clamp(str(exc))}",
+                f"{self._short_cycle_id(cycle_id)} failed error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}",
                 level="ERROR",
             )
             capability_request_summary, ongoing_action_transition_summary = self._exception_capability_dispatch_trace(

@@ -39,7 +39,7 @@ class TapoC220Watcher:
                 runtime = self._fetch_runtime_config()
                 self._run_runtime(runtime)
             except (HttpError, CaptureError, OSError, RuntimeError, ValueError, ConfigError) as exc:
-                self._log(f"watch loop failed error={self._short_error(exc)}", level="ERROR")
+                self._log(f"watch loop failed error={self._redacted_error(exc)}", level="ERROR")
                 time.sleep(self.config.server.reconnect_delay_seconds)
 
     def _refresh_watcher_identity(self) -> None:
@@ -231,12 +231,12 @@ class TapoC220Watcher:
             raise ValueError(f"{key} must be a number.")
         return float(value)
 
-    def _short_error(self, exc: BaseException) -> str:
+    def _redacted_error(self, exc: BaseException) -> str:
         text = str(exc).strip() or exc.__class__.__name__
         for secret in self.redaction_values:
             if secret:
                 text = text.replace(secret, "***")
-        return text.replace("\n", " ")[:160]
+        return text.replace("\r", " ").replace("\n", " ")
 
     def _log(self, message: str, *, level: str = "INFO") -> None:
         emit_log("tapo-c220-watcher", message, level=level, stream=sys.stderr)

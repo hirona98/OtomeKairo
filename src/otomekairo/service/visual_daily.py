@@ -6,7 +6,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from otomekairo.memory.utils import local_now
-from otomekairo.service.common import debug_log
+from otomekairo.service.common import debug_log, format_debug_log_text
 
 
 VISUAL_DAILY_CHECK_INTERVAL_SECONDS = 3600.0
@@ -63,7 +63,7 @@ class ServiceVisualDailyMixin:
             try:
                 self._run_due_visual_daily_digests()
             except Exception as exc:  # noqa: BLE001
-                debug_log("VisualDaily", f"loop error={type(exc).__name__}: {exc}", level="ERROR")
+                debug_log("VisualDaily", f"loop error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}", level="ERROR")
             stop_event.wait(VISUAL_DAILY_CHECK_INTERVAL_SECONDS)
 
     def _run_due_visual_daily_digests(self) -> None:
@@ -386,7 +386,7 @@ class ServiceVisualDailyMixin:
                 failure_reason=str(exc),
                 relation_index_sync=None,
             )
-            debug_log("VisualDaily", f"promotion persist failed digest={digest['digest_id']} error={type(exc).__name__}: {exc}", level="ERROR")
+            debug_log("VisualDaily", f"promotion persist failed digest={digest['digest_id']} error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}", level="ERROR")
             return
 
         auxiliary_failures: list[str] = []

@@ -105,6 +105,23 @@ def _read_debug_log_min_level() -> str:
     return normalized
 
 
+def format_debug_log_text(text: str, *, level: str, limit: int | None = None) -> str:
+    # ERROR は文字数で切らない。それ以外は limit で切る。
+    normalized_level = level.strip().upper() if isinstance(level, str) else ""
+    if normalized_level not in DEBUG_LOG_LEVELS:
+        raise ValueError("debug log level must be one of DEBUG, INFO, WARNING, ERROR.")
+    if not isinstance(text, str):
+        raise ValueError("debug log text must be a string.")
+    normalized = text.replace("\r", " ").replace("\n", " ").strip()
+    if normalized_level == "ERROR":
+        return normalized
+    if type(limit) is not int or limit < 1:
+        raise ValueError("debug log text limit must be a positive integer.")
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 1] + "…"
+
+
 def debug_log(component: str, message: str, *, level: str = "INFO") -> None:
     timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
     normalized_level = level.strip().upper() if isinstance(level, str) else "INFO"
