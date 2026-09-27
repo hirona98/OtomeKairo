@@ -104,6 +104,19 @@ def _decision_context(capability_decision_view: list[dict]) -> DecisionContext:
     )
 
 
+def _wire_response(payload: dict) -> str:
+    wire = json.loads(json.dumps(payload))
+    request = wire.get("capability_request")
+    if isinstance(request, dict) and isinstance(request.get("input"), dict):
+        request["input"] = json.dumps(request["input"], ensure_ascii=False)
+    action = wire.get("action")
+    if isinstance(action, dict):
+        nested = action.get("capability_request")
+        if isinstance(nested, dict) and isinstance(nested.get("input"), dict):
+            nested["input"] = json.dumps(nested["input"], ensure_ascii=False)
+    return json.dumps(wire)
+
+
 def _capability_decision(capability_id: str, input_payload: dict) -> dict:
     return {
         "kind": "capability_request",
@@ -504,7 +517,7 @@ class DecisionContractTests(unittest.TestCase):
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            side_effect=[json.dumps(invalid), json.dumps(valid)],
+            side_effect=[_wire_response(invalid), _wire_response(valid)],
         ) as complete:
             actual = LLMClient().generate_decision(
                 model_config={"model": "real-model"},
@@ -542,7 +555,7 @@ class DecisionContractTests(unittest.TestCase):
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            side_effect=[json.dumps(invalid), json.dumps(valid)],
+            side_effect=[_wire_response(invalid), _wire_response(valid)],
         ) as complete:
             actual = LLMClient().generate_decision(
                 model_config={"model": "real-model"},
@@ -570,7 +583,7 @@ class DecisionContractTests(unittest.TestCase):
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            side_effect=[json.dumps(invalid), json.dumps(valid)],
+            side_effect=[_wire_response(invalid), _wire_response(valid)],
         ) as complete:
             actual = LLMClient().generate_decision(
                 model_config={"model": "real-model"},
@@ -608,7 +621,7 @@ class DecisionContractTests(unittest.TestCase):
                 invalid = _capability_decision("mcp.call_tool", invalid_input)
                 with patch(
                     "otomekairo.llm.client.complete_text",
-                    side_effect=[json.dumps(invalid), json.dumps(valid)],
+                    side_effect=[_wire_response(invalid), _wire_response(valid)],
                 ) as complete:
                     actual = LLMClient().generate_decision(
                         model_config={"model": "real-model"},
@@ -703,7 +716,7 @@ class DecisionContractTests(unittest.TestCase):
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            side_effect=[json.dumps(invalid), json.dumps(valid)],
+            side_effect=[_wire_response(invalid), _wire_response(valid)],
         ) as complete:
             actual = LLMClient().generate_autonomous_step(
                 model_config={"model": "real-model"},
@@ -719,7 +732,7 @@ class DecisionContractTests(unittest.TestCase):
 
         with patch(
             "otomekairo.llm.client.complete_text",
-            return_value=json.dumps(invalid),
+            return_value=_wire_response(invalid),
         ) as complete:
             with self.assertRaisesRegex(LLMError, "CapabilityDecisionView"):
                 LLMClient().generate_decision(
@@ -845,7 +858,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("autonomous_run.objective_summary は今回の関与の範囲と完了条件を、個の言葉で書きます", system)
         self.assertIn("一度の能力実行とその結果判断で済むなら capability_request", system)
         self.assertIn("capability_request.input の自然文は、その能力の先の場へ向けた個の表現です", system)
-        self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です", system)
+        self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する JSON object を 1 個の JSON 文字列として書いてください。", system)
         self.assertIn("使わない排他キーもキーとして残し、値は null にします", system)
         self.assertIn("kind が capability_request のとき capability_request は object、pending_intent と autonomous_run は null です", system)
         self.assertIn("その活動に関われる手段が CapabilityDecisionView に available=true であるときだけ", system)
@@ -889,7 +902,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("載っている self_activity は hold です。対話の継続は outward_speech です。", system)
         self.assertIn("Agent Skill の skill_id は capability_id でも MCP tool_name でもありません。", system)
         self.assertIn("使わない排他キーもキーとして残し、値は null にします", system)
-        self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です", system)
+        self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する JSON object を 1 個の JSON 文字列として書いてください。", system)
         self.assertIn("AffectContext の affect_states と recent_episode_affects は WorkspaceContext の affect 候補です。", system)
         self.assertIn("同じ作用を複数回行う、または観測のあとに同じ作用を繰り返す依頼は継続実行です", system)
         self.assertIn("複合依頼を単発の capability_request にする理由にはしません", system)
@@ -906,7 +919,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("capability_request / autonomous_run / pending_intent / noop", self_repair)
         self.assertIn("target_stances は self_activity を 1 件だけ持ちます", self_repair)
         self.assertIn("使わない排他キーもキーとして残し、値は null にします", self_repair)
-        self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です", self_repair)
+        self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する JSON object を 1 個の JSON 文字列として書いてください。", self_repair)
         self.assertNotIn("outward_speech は毎回必須です", self_repair)
         self.assertIn("speech / noop / pending_intent", outward_repair)
         self.assertIn("target_stances は outward_speech を 1 件だけ持ちます", outward_repair)
@@ -1043,11 +1056,11 @@ class DecisionPromptScopeTests(unittest.TestCase):
             messages[0]["content"],
         )
         self.assertIn(
-            "capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です",
+            "capability_request.input は required_input と readiness.input_keys に対応する JSON object を 1 個の JSON 文字列として書いてください。",
             messages[0]["content"],
         )
         self.assertIn(
-            "arguments など入れ子も object のまま書きます",
+            "arguments など入れ子も、その object の中に書きます。",
             messages[0]["content"],
         )
 
@@ -1056,10 +1069,10 @@ class DecisionPromptScopeTests(unittest.TestCase):
             "AutonomousStep action.capability_request.input は object である必要があります。"
         )
         self.assertIn(
-            "capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です",
+            "capability_request.input は required_input と readiness.input_keys に対応する JSON object を 1 個の JSON 文字列として書いてください。",
             repair,
         )
-        self.assertIn("arguments など入れ子も object のまま書きます", repair)
+        self.assertIn("arguments など入れ子も、その object の中に書きます。", repair)
 
     def test_completed_mcp_tool_followup_rejects_same_tool(self) -> None:
         client = LLMClient()
@@ -1148,7 +1161,7 @@ class AutonomousCompletionReviewContractTests(unittest.TestCase):
         }
         with patch(
             "otomekairo.llm.client.complete_text",
-            side_effect=[json.dumps(invalid), json.dumps(valid)],
+            side_effect=[_wire_response(invalid), _wire_response(valid)],
         ) as complete:
             actual = LLMClient().generate_autonomous_completion_review(
                 model_config={"model": "real-model"},

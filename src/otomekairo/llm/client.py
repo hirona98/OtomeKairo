@@ -58,6 +58,7 @@ from otomekairo.llm.schemas import (
     input_interpretation_response_format,
     memory_interpretation_response_format,
     memory_reflection_summary_response_format,
+    materialize_provider_open_maps,
     pending_intent_selection_response_format,
     pre_send_check_response_format,
     recall_pack_selection_response_format,
@@ -1617,6 +1618,7 @@ class LLMClient:
             try:
                 payload = parse_json_object(content)
                 try:
+                    materialize_provider_open_maps(payload, schema_name=schema_name)
                     validator(payload)
                     debug_log(
                         "LLM",

@@ -133,6 +133,7 @@ server は run の保存・置換・初回stepより前に `autonomous_start_rev
 `action.kind` は `capability_request / speech / none` のいずれかである。
 使わない `capability_request` と `speech` は `null` にする。
 `capability_request.input` は `required_input` と `readiness.input_keys` に対応する入れ子の JSON object とする。
+provider schema 上の表し方は [../llm/LLM構造化出力transport.md](../llm/LLM構造化出力transport.md) を正とする。
 `transition.kind` は `continue / wait_until / complete / cancel` のいずれかである。
 `transition` は `kind / next_run_at` の 2 キーだけを持つ。
 `capability_request` action 以外で `wait_until` を使う場合、`next_run_at` を必ず持つ。

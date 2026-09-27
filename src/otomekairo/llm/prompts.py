@@ -44,8 +44,19 @@ def _person_reference_instruction() -> str:
 
 def _capability_request_input_shape_instruction() -> str:
     return (
-        "capability_request.input は required_input と readiness.input_keys に対応する入れ子の JSON object です。"
-        "arguments など入れ子も object のまま書きます。"
+        "capability_request.input は required_input と readiness.input_keys に対応する JSON object を"
+        " 1 個の JSON 文字列として書いてください。"
+        "arguments など入れ子も、その object の中に書きます。"
+    )
+
+
+def _qualifiers_hint_shape_instruction() -> str:
+    return (
+        "qualifiers_hint は補助情報の JSON object を表す 1 個の文字列です。"
+        '空のときは "{}" です。'
+        "object には必要なら source=explicit_statement|explicit_confirmation|explicit_correction|assistant_response|inference, "
+        "negates_previous, replace_prior, allow_parallel, polarity, commitment_actor, scope_duration, "
+        "commitment_focus, valid_from, valid_to を入れます。"
     )
 
 
@@ -718,6 +729,8 @@ def build_memory_interpretation_repair_prompt(validation_error: str) -> str:
         "target_candidates が無いときは correction_status=no_correction、selected_targets=[] にしてください。\n"
         "episode には episode_type, episode_series_id, primary_scope_type, primary_scope_key, summary_text, outcome_text, open_loops, salience だけを入れてください。\n"
         "candidate_memory_units の各要素には memory_type, scope, subject_hint, predicate_hint, object_hint, qualifiers_hint, summary_text, evidence_text, confidence_hint だけを入れてください。\n"
+        + _qualifiers_hint_shape_instruction()
+        + "\n"
         "candidate_memory_units[].object_hint は目的語または値がある場合は非空文字列、ない場合は JSON null にしてください。欠損は JSON null だけで表してください。\n"
         "episode_affects の各要素には target_scope_type, target_scope_key, affect_label, vad, intensity, confidence, summary_text だけを入れてください。\n"
         "episode_affects.vad は v, a, d の 3 キーを持つ object です。\n"
@@ -1938,10 +1951,11 @@ def _build_memory_interpretation_system_prompt() -> str:
         "episode.open_loops も、自己履行の残りを相手の指示待ちとして書かないでください。\n"
         "AI 側の返答に含まれる「控える」「見守る」「必要な時だけ支援する」は、その場の支援姿勢として扱ってください。\n"
         "ユーザーの短い相槌や了承で成立する AI の待機姿勢は、その場の文脈として episode.open_loops または episode.summary_text に留めてください。\n"
+        + _qualifiers_hint_shape_instruction()
+        + "\n"
         "一時的な支援姿勢をどうしても commitment 候補にする場合は qualifiers_hint.source=assistant_response、commitment_actor=self、scope_duration=session、commitment_focus=support_posture を入れてください。\n"
         "明示訂正で以前の理解を置き換えるなら、置換後の候補メモを返し qualifiers_hint.negates_previous=true を付けてください。\n"
         "弱い単発推測や event に留めるべき断片は candidate_memory_units に入れず、結果として noop になってよいです。\n"
-        "qualifiers_hint には必要なら source=explicit_statement|explicit_confirmation|explicit_correction|assistant_response|inference, negates_previous, replace_prior, allow_parallel, polarity, commitment_actor, scope_duration, commitment_focus, valid_from, valid_to を入れてください。\n"
         "memory_type は fact, preference, relation, commitment, interpretation, summary のいずれかです。\n"
         "candidate_memory_units は DB 行候補ではなく、意味ヒントだけを持つ記憶候補メモです。\n"
         "episode.primary_scope_type, candidate_memory_units[].scope, episode_affects[].target_scope_type は self, entity, topic, relationship, world のいずれかだけを使ってください。\n"

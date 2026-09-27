@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from otomekairo.llm.contracts import (
@@ -14,6 +15,7 @@ from otomekairo.llm.contracts import (
     DECISION_TARGET_VALUES,
     DISCLOSURE_REVIEW_OUTCOMES,
     INITIATIVE_ENTRY_BASIS_VALUES,
+    LLMError,
     MEMORY_CORRECTION_KIND_VALUES,
     MEMORY_CORRECTION_STATUS_VALUES,
     MEMORY_TYPE_VALUES,
@@ -141,8 +143,8 @@ def decision_response_format(*, comparison_scope: str = "full") -> dict[str, Any
         closed_object(
             {
                 "capability_id": {"type": "string"},
-                "input": open_object(
-                    description="capability の request-local input。object であり、JSON 文字列ではない。"
+                "input": json_object_text(
+                    description="required_input に対応する JSON object を表す文字列。"
                 ),
             }
         )
@@ -226,11 +228,8 @@ def autonomous_step_response_format() -> dict[str, Any]:
                             closed_object(
                                 {
                                     "capability_id": {"type": "string"},
-                                    "input": open_object(
-                                        description=(
-                                            "capability の request-local input。"
-                                            "object であり、JSON 文字列ではない。"
-                                        )
+                                    "input": json_object_text(
+                                        description="required_input に対応する JSON object を表す文字列。"
                                     ),
                                 }
                             )
@@ -354,8 +353,8 @@ def memory_interpretation_response_format() -> dict[str, Any]:
                             },
                             "predicate_hint": {"type": "string"},
                             "object_hint": nullable({"type": "string"}),
-                            "qualifiers_hint": open_object(
-                                description="記憶ヒントの付加情報。object であり、null ではない。"
+                            "qualifiers_hint": json_object_text(
+                                description="補助情報の JSON object を表す文字列。空の object は {}。"
                             ),
                             "summary_text": {"type": "string"},
                             "evidence_text": {"type": "string"},
@@ -604,14 +603,68 @@ def closed_object(properties: dict[str, Any], *, description: str | None = None)
     return schema
 
 
-def open_object(*, description: str | None = None) -> dict[str, Any]:
-    schema: dict[str, Any] = {
-        "type": "object",
-        "additionalProperties": True,
+def json_object_text(*, description: str) -> dict[str, Any]:
+    return {
+        "type": "string",
+        "description": description,
     }
-    if description is not None:
-        schema["description"] = description
-    return schema
+
+
+_DECISION_SCHEMA_NAMES = frozenset(
+    {
+        "decision",
+        "decision_self_activity",
+        "decision_outward_speech",
+    }
+)
+
+
+def materialize_provider_open_maps(payload: dict[str, Any], *, schema_name: str) -> None:
+    # strict structured output は開いた object を受けない。文字列で受けた map を意味検証の前に object へ戻す。
+    if schema_name in _DECISION_SCHEMA_NAMES:
+        _materialize_capability_request_input(
+            payload.get("capability_request"),
+            label="Decision capability_request.input",
+        )
+        return
+    if schema_name == "autonomous_step":
+        action = payload.get("action")
+        if isinstance(action, dict):
+            _materialize_capability_request_input(
+                action.get("capability_request"),
+                label="AutonomousStep action.capability_request.input",
+            )
+        return
+    if schema_name != "memory_interpretation":
+        return
+    units = payload.get("candidate_memory_units")
+    if not isinstance(units, list):
+        return
+    for index, unit in enumerate(units):
+        if not isinstance(unit, dict) or "qualifiers_hint" not in unit:
+            continue
+        unit["qualifiers_hint"] = _json_object_text_to_dict(
+            unit["qualifiers_hint"],
+            label=f"MemoryInterpretation candidate_memory_units[{index}].qualifiers_hint",
+        )
+
+
+def _materialize_capability_request_input(request: Any, *, label: str) -> None:
+    if not isinstance(request, dict) or "input" not in request:
+        return
+    request["input"] = _json_object_text_to_dict(request["input"], label=label)
+
+
+def _json_object_text_to_dict(value: Any, *, label: str) -> dict[str, Any]:
+    if not isinstance(value, str):
+        raise LLMError(f"{label} は JSON object を表す文字列である必要があります。")
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise LLMError(f"{label} は JSON object として読めません。") from exc
+    if not isinstance(parsed, dict):
+        raise LLMError(f"{label} は JSON object である必要があります。")
+    return parsed
 
 
 def nullable(schema: dict[str, Any]) -> dict[str, Any]:

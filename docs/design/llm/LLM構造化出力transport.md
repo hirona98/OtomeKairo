@@ -51,9 +51,14 @@ schema が担う範囲は次である。
 schema は request ごとの動的 enum を持たない。
 例外は `decision.kind` だけで、`comparison_scope` に応じた許可集合へ絞る。
 
-閉じた object は `additionalProperties: false` とし、その object の全 property を `required` にする。
+schema 内の object はすべて `additionalProperties: false` とし、その object の全 property を `required` にする。
 任意に見える欄もキーは常に出し、値を `null` または空配列にする。
-開いた map は `capability_request.input` と `qualifiers_hint` だけである。これらは `additionalProperties: true` の object とし、JSON 文字列へはしない。
+
+`capability_request.input` と `qualifiers_hint` は、key が呼び出しごとに開く map である。
+strict structured output は開いた object を受け取らないため、provider schema ではこれらを JSON object を表す文字列にする。
+server は role validator の前にその文字列を object へ戻す。
+文字列が JSON object として読めない場合は、その生成の契約違反として repair する。
+意味検証と後段が受け取る値は object である。
 
 `pattern`、`if` / `then`、ルートの巨大な `anyOf`、`$ref` は使わない。
 
