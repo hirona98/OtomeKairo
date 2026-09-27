@@ -227,6 +227,8 @@ LLM の出力は JSON object 1 個に固定する。
 - `candidate_refs` は section をまたいで重複しない
 - candidate は元の所属 section から移動させない
 - `conflict_summaries` の `conflict_ref` も source pack 内に存在する ref だけを使う
+- `conflict_summaries` は source pack の `conflicts` にある各 `conflict_ref` を 1 回ずつ含む。`conflicts` が空なら `conflict_summaries` は空配列にする
+- candidate 本文に訂正前後の値が併記されていても、`conflicts` にない競合を作らず、`candidate_ref` を `conflict_ref` として使わない
 - `summary_text` は簡潔にし、改行なし、内部識別子なし、固定文の繰り返しではない
 
 最終的な `RecallPack` では、コード側が ref を実 candidate へ戻し、同じ shape に射影する。
@@ -244,9 +246,11 @@ system prompt では、少なくとも次を明示する。
 - `primary_recall_focus=commitment` では open loop や active commitment を重く見やすくする
 - `primary_recall_focus=episodic` や `time_reference=past` では `episodic_evidence` を前へ置きやすくする
 - `conflicts.summary_text` では、何が競合しているかを短く説明する
+- `conflicts` が空なら `conflict_summaries` を空配列にする
 - 比較不能なら候補を広く並べるより、少なく選ぶ
 
 user prompt では、入力文、`RecallHint`、constraint、候補 sections、conflicts をそのまま構造化で渡す。
+`conflict_ref` の検証失敗時は、今回の `conflicts` にある有効な参照を validator error に示す。空の場合は `conflict_summaries=[]` を明示し、同じ source pack での repair に渡す。
 
 ## 処理フロー
 

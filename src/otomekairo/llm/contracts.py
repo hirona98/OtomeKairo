@@ -1552,6 +1552,10 @@ def validate_recall_pack_selection_contract(payload: dict[str, Any], *, source_p
     # source pack refs
     valid_candidate_refs_by_section = _recall_pack_candidate_refs_by_section(source_pack)
     valid_conflict_refs = _recall_pack_conflict_refs(source_pack)
+    if valid_conflict_refs:
+        conflict_ref_guidance = f"今回の有効な conflict_ref: {', '.join(sorted(valid_conflict_refs))}。"
+    else:
+        conflict_ref_guidance = "今回の source_pack.conflicts は空です。conflict_summaries は空配列 [] にしてください。"
 
     # section_selection
     section_selection = payload["section_selection"]
@@ -1608,7 +1612,10 @@ def validate_recall_pack_selection_contract(payload: dict[str, Any], *, source_p
             raise LLMError("RecallPackSelection conflict_ref が不正です。")
         normalized_ref = conflict_ref.strip()
         if normalized_ref not in valid_conflict_refs:
-            raise LLMError("RecallPackSelection conflict_ref は source_pack に存在している必要があります。")
+            raise LLMError(
+                "RecallPackSelection conflict_ref は source_pack.conflicts に存在する必要があります。"
+                + conflict_ref_guidance
+            )
         if normalized_ref in seen_conflict_refs:
             raise LLMError("RecallPackSelection conflict_ref は重複してはいけません。")
         seen_conflict_refs.add(normalized_ref)
@@ -1624,7 +1631,10 @@ def validate_recall_pack_selection_contract(payload: dict[str, Any], *, source_p
         if INTERNAL_IDENTIFIER_PATTERN.search(normalized_summary) is not None:
             raise LLMError("RecallPackSelection summary_text に内部識別子を含めてはいけません。")
     if seen_conflict_refs != valid_conflict_refs:
-        raise LLMError("RecallPackSelection conflict_summaries はすべての conflict_ref を網羅する必要があります。")
+        raise LLMError(
+            "RecallPackSelection conflict_summaries はすべての conflict_ref を網羅する必要があります。"
+            + conflict_ref_guidance
+        )
 
 
 def _pending_intent_selection_candidate_refs(source_pack: dict[str, Any]) -> set[str]:
