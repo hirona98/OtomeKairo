@@ -361,6 +361,40 @@ def memory_candidate_review_response_format() -> dict[str, Any]:
     )
 
 
+def _episode_affect_schema() -> dict[str, Any]:
+    return closed_object({
+        "target_scope_type": string_enum(SCOPE_TYPE_VALUES),
+        "target_scope_key": {"type": "string"},
+        "affect_label": {"type": "string"},
+        "vad": closed_object({
+            "v": {"type": "number", "minimum": -1, "maximum": 1},
+            "a": {"type": "number", "minimum": -1, "maximum": 1},
+            "d": {"type": "number", "minimum": -1, "maximum": 1},
+        }),
+        "intensity": {"type": "number", "minimum": 0, "maximum": 1},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "summary_text": {"type": "string"},
+    })
+
+
+def affect_review_response_format() -> dict[str, Any]:
+    return structured_response_format(
+        "affect_review",
+        closed_object({
+            "self_reaction": closed_object({
+                "affect": nullable(_episode_affect_schema()),
+                "reason_summary": {"type": "string"},
+            }),
+            "other_affects": {
+                "type": "array",
+                "maxItems": 4,
+                "items": _episode_affect_schema(),
+            },
+            "reason_summary": {"type": "string"},
+        }),
+    )
+
+
 def memory_interpretation_response_format() -> dict[str, Any]:
     return structured_response_format(
         "memory_interpretation",
@@ -408,23 +442,7 @@ def memory_interpretation_response_format() -> dict[str, Any]:
                 "episode_affects": {
                     "type": "array",
                     "maxItems": 4,
-                    "items": closed_object(
-                        {
-                            "target_scope_type": string_enum(SCOPE_TYPE_VALUES),
-                            "target_scope_key": {"type": "string"},
-                            "affect_label": {"type": "string"},
-                            "vad": closed_object(
-                                {
-                                    "v": {"type": "number"},
-                                    "a": {"type": "number"},
-                                    "d": {"type": "number"},
-                                }
-                            ),
-                            "intensity": {"type": "number", "minimum": 0, "maximum": 1},
-                            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                            "summary_text": {"type": "string"},
-                        }
-                    ),
+                    "items": _episode_affect_schema(),
                 },
                 "correction_status": string_enum(MEMORY_CORRECTION_STATUS_VALUES),
                 "selected_targets": {
@@ -625,6 +643,7 @@ def all_response_formats() -> dict[str, dict[str, Any]]:
         "autonomous_activity_alignment_review": autonomous_activity_alignment_review_response_format(),
         "memory_interpretation": memory_interpretation_response_format(),
         "memory_candidate_review": memory_candidate_review_response_format(),
+        "affect_review": affect_review_response_format(),
         "memory_reflection_summary": memory_reflection_summary_response_format(),
         "event_evidence": event_evidence_response_format(),
         "recall_pack_selection": recall_pack_selection_response_format(),

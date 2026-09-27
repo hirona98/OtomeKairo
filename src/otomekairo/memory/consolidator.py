@@ -97,6 +97,15 @@ class MemoryConsolidator:
             interpretation_context=interpretation_context,
             interpretation=interpretation,
         )
+        reviewed_affects, affect_review_trace = self._review_episode_affects(
+            selected_preset=selected_preset,
+            selected_persona=selected_persona,
+            input_text=input_text,
+            decision=decision,
+            speech_text=speech_payload["speech_text"] if speech_payload else None,
+            interpretation_context=interpretation_context,
+            interpretation=interpretation,
+        )
         provenance = self._turn_provenance(events=events, memory_context=memory_context)
 
         # Episode要約
@@ -138,7 +147,7 @@ class MemoryConsolidator:
                 finished_at=finished_at,
                 payload=episode_affect,
             )
-            for episode_affect in interpretation["episode_affects"]
+            for episode_affect in reviewed_affects
         ]
 
         # 永続化
@@ -159,6 +168,7 @@ class MemoryConsolidator:
                 "open_loops": episode.get("open_loops", []),
                 "memory_action_count": len(memory_actions),
                 "memory_candidate_review": candidate_review_trace,
+                "affect_review": affect_review_trace,
                 "correction_reconciliation": correction_prepared["trace"],
                 "episode_affect_count": len(episode_affects),
                 "updated_memory_unit_ids": [
@@ -311,6 +321,44 @@ class MemoryConsolidator:
                 ],
             },
         )
+
+    def _review_episode_affects(
+        self,
+        *,
+        selected_preset: dict[str, Any],
+        selected_persona: dict[str, Any],
+        input_text: str,
+        decision: dict[str, Any],
+        speech_text: str | None,
+        interpretation_context: dict[str, Any],
+        interpretation: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        candidates = interpretation["episode_affects"]
+        review = self.llm.generate_affect_review(
+            model_config=selected_preset,
+            review_context={
+                "persona_context": build_persona_context(
+                    selected_persona, role="affect_review",
+                ).to_prompt_payload(),
+                "input_text": input_text,
+                "decision": decision,
+                "speech_text": speech_text,
+                "episode": interpretation["episode"],
+                "people_context": interpretation_context.get("people_context", []),
+                "events": interpretation_context.get("events", []),
+                "candidate_episode_affects": candidates,
+            },
+        )
+        self_affect = review["self_reaction"]["affect"]
+        reviewed = ([self_affect] if self_affect is not None else []) + review["other_affects"]
+        return reviewed, {
+            "changed": reviewed != candidates,
+            "original_count": len(candidates),
+            "reviewed_count": len(reviewed),
+            "self_reaction_present": self_affect is not None,
+            "self_reason_summary": review["self_reaction"]["reason_summary"],
+            "reason_summary": review["reason_summary"],
+        }
 
     def resolve_autonomous_run_commitments(
         self,

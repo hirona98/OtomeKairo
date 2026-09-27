@@ -711,8 +711,10 @@ def _validate_vad(value: Any, label: str) -> None:
     # 値
     for axis in ("v", "a", "d"):
         axis_value = value[axis]
-        if not isinstance(axis_value, (int, float)):
+        if isinstance(axis_value, bool) or not isinstance(axis_value, (int, float)):
             raise LLMError(f"{label}.{axis} は数値である必要があります。")
+        if not math.isfinite(float(axis_value)) or not -1.0 <= float(axis_value) <= 1.0:
+            raise LLMError(f"{label}.{axis} は -1.0 以上 1.0 以下である必要があります。")
 
 
 # recall_hint検証
@@ -1262,11 +1264,14 @@ def validate_memory_interpretation_contract(
             raise LLMError("MemoryInterpretation candidate_memory_unit.confidence_hint が不正です。")
 
     # episode affect検証
-    episode_affects = payload["episode_affects"]
+    _validate_episode_affects(payload["episode_affects"], label="MemoryInterpretation")
+
+
+def _validate_episode_affects(episode_affects: Any, *, label: str) -> None:
     if not isinstance(episode_affects, list):
-        raise LLMError("MemoryInterpretation episode_affects は配列である必要があります。")
+        raise LLMError(f"{label} episode_affects は配列である必要があります。")
     if len(episode_affects) > 4:
-        raise LLMError("MemoryInterpretation episode_affects は最大 4 件までである必要があります。")
+        raise LLMError(f"{label} episode_affects は最大 4 件までである必要があります。")
 
     seen_episode_affects: set[tuple[str, str, str]] = set()
     for episode_affect in episode_affects:
@@ -1279,25 +1284,25 @@ def validate_memory_interpretation_contract(
             "confidence",
             "summary_text",
         }
-        _validate_exact_keys(episode_affect, required_affect_keys, "MemoryInterpretation episode_affect")
+        _validate_exact_keys(episode_affect, required_affect_keys, f"{label} episode_affect")
         _validate_scope_identity(
             scope_type=episode_affect["target_scope_type"],
             scope_key=episode_affect["target_scope_key"],
-            label="MemoryInterpretation episode_affect",
+            label=f"{label} episode_affect",
         )
         if not isinstance(episode_affect["affect_label"], str) or not episode_affect["affect_label"].strip():
-            raise LLMError("MemoryInterpretation episode_affect.affect_label が不正です。")
+            raise LLMError(f"{label} episode_affect.affect_label が不正です。")
         if not isinstance(episode_affect["summary_text"], str) or not episode_affect["summary_text"].strip():
-            raise LLMError("MemoryInterpretation episode_affect.summary_text が不正です。")
-        _validate_vad(episode_affect["vad"], "MemoryInterpretation episode_affect.vad")
+            raise LLMError(f"{label} episode_affect.summary_text が不正です。")
+        _validate_vad(episode_affect["vad"], f"{label} episode_affect.vad")
         if isinstance(episode_affect["intensity"], bool) or not isinstance(episode_affect["intensity"], (int, float)):
-            raise LLMError("MemoryInterpretation episode_affect.intensity は数値である必要があります。")
+            raise LLMError(f"{label} episode_affect.intensity は数値である必要があります。")
         if isinstance(episode_affect["confidence"], bool) or not isinstance(episode_affect["confidence"], (int, float)):
-            raise LLMError("MemoryInterpretation episode_affect.confidence は数値である必要があります。")
+            raise LLMError(f"{label} episode_affect.confidence は数値である必要があります。")
         if not 0.0 <= float(episode_affect["intensity"]) <= 1.0:
-            raise LLMError("MemoryInterpretation episode_affect.intensity は 0.0 以上 1.0 以下である必要があります。")
+            raise LLMError(f"{label} episode_affect.intensity は 0.0 以上 1.0 以下である必要があります。")
         if not 0.0 <= float(episode_affect["confidence"]) <= 1.0:
-            raise LLMError("MemoryInterpretation episode_affect.confidence は 0.0 以上 1.0 以下である必要があります。")
+            raise LLMError(f"{label} episode_affect.confidence は 0.0 以上 1.0 以下である必要があります。")
 
         affect_key = (
             episode_affect["target_scope_type"],
@@ -1305,8 +1310,28 @@ def validate_memory_interpretation_contract(
             episode_affect["affect_label"].strip(),
         )
         if affect_key in seen_episode_affects:
-            raise LLMError("MemoryInterpretation episode_affects に重複した target/label の組を含めてはいけません。")
+            raise LLMError(f"{label} episode_affects に重複した target/label の組を含めてはいけません。")
         seen_episode_affects.add(affect_key)
+
+
+def validate_affect_review_contract(payload: dict[str, Any]) -> None:
+    _validate_exact_keys(payload, {"self_reaction", "other_affects", "reason_summary"}, "AffectReview")
+    self_reaction = payload["self_reaction"]
+    _validate_exact_keys(self_reaction, {"affect", "reason_summary"}, "AffectReview.self_reaction")
+    if not isinstance(self_reaction["reason_summary"], str) or not self_reaction["reason_summary"].strip():
+        raise LLMError("AffectReview.self_reaction.reason_summary は空にできません。")
+    if not isinstance(payload["reason_summary"], str) or not payload["reason_summary"].strip():
+        raise LLMError("AffectReview.reason_summary は空にできません。")
+    other_affects = payload["other_affects"]
+    if not isinstance(other_affects, list):
+        raise LLMError("AffectReview.other_affects は配列である必要があります。")
+    self_affect = self_reaction["affect"]
+    reviewed_affects = ([self_affect] if self_affect is not None else []) + other_affects
+    _validate_episode_affects(reviewed_affects, label="AffectReview")
+    if self_affect is not None and self_affect["target_scope_type"] != "self":
+        raise LLMError("AffectReview.self_reaction.affect は self である必要があります。")
+    if any(affect["target_scope_type"] == "self" for affect in other_affects):
+        raise LLMError("AffectReview.other_affects に self を含めてはいけません。")
 
 
 def validate_memory_reflection_summary_text(summary_text: Any, *, label: str = "MemoryReflectionSummary") -> str:

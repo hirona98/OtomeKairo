@@ -18,6 +18,7 @@
 - `event_evidence_generation`
 - `memory_interpretation`
 - `memory_candidate_review`
+- `affect_review`
 - `speech_grounding_review`
 - `future_action_alignment_review`
 - `memory_reflection_summary`

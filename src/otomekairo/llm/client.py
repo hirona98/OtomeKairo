@@ -36,6 +36,7 @@ from otomekairo.llm.contracts import (
 
     validate_memory_interpretation_contract,
     validate_memory_candidate_review_contract,
+    validate_affect_review_contract,
     validate_memory_reflection_summary_contract,
     validate_pre_send_check_contract,
     validate_pending_intent_selection_contract,
@@ -63,6 +64,7 @@ from otomekairo.llm.schemas import (
     input_interpretation_response_format,
     memory_interpretation_response_format,
     memory_candidate_review_response_format,
+    affect_review_response_format,
     memory_reflection_summary_response_format,
     materialize_provider_open_maps,
     pending_intent_selection_response_format,
@@ -105,6 +107,8 @@ from otomekairo.llm.prompts import (
     build_memory_interpretation_messages,
     build_memory_candidate_review_messages,
     build_memory_candidate_review_repair_prompt,
+    build_affect_review_messages,
+    build_affect_review_repair_prompt,
     build_memory_interpretation_repair_prompt,
     build_memory_reflection_summary_messages,
     build_memory_reflection_summary_repair_prompt,
@@ -1372,6 +1376,37 @@ class LLMClient:
             failure_message="MemoryCandidateReview の生成に失敗しました。",
             response_format=memory_candidate_review_response_format(),
             operation="memory_candidate_review",
+        )
+
+    def generate_affect_review(
+        self,
+        *,
+        model_config: dict,
+        review_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._is_mock_model_config(model_config):
+            affects = review_context["candidate_episode_affects"]
+            self_affects = [affect for affect in affects if affect["target_scope_type"] == "self"]
+            if len(self_affects) > 1:
+                raise LLMError("Mock affect_review に複数の self 反応があります。")
+            payload = {
+                "self_reaction": {
+                    "affect": self_affects[0] if self_affects else None,
+                    "reason_summary": "mock self reaction を維持する。",
+                },
+                "other_affects": [affect for affect in affects if affect["target_scope_type"] != "self"],
+                "reason_summary": "mock affect を維持する。",
+            }
+            validate_affect_review_contract(payload)
+            return payload
+        return self._generate_structured_payload(
+            model_config=model_config,
+            messages=build_affect_review_messages(review_context=review_context),
+            validator=validate_affect_review_contract,
+            repair_prompt_builder=build_affect_review_repair_prompt,
+            failure_message="AffectReview の生成に失敗しました。",
+            response_format=affect_review_response_format(),
+            operation="affect_review",
         )
 
     def generate_memory_reflection_summary(
