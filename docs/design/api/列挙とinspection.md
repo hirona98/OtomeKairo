@@ -265,6 +265,7 @@ inspection の短縮表示は表示専用であり、LLM 入力、検索 index�
   - `unit_limit`（省略時 `12`、上限 `30`）
   - `episode_limit`（省略時 `8`、上限 `20`）
 - `memory_units` は salience 降順
+- `memory_units` は `status=confirmed / inferred` の継続理解を表示し、`dormant / superseded / revoked` は含めない
 - `episodes` は open loop と salience を踏まえた recall 向け順
 
 response:
@@ -278,12 +279,12 @@ response:
     "memory_units": [
       {
         "memory_unit_id": "memory_unit:...",
-        "memory_type": "person_model",
-        "summary_text": "田中さんとは落ち着いた距離感で話している。",
-        "status": "active",
+        "memory_type": "preference",
+        "summary_text": "田中さんは紅茶を好む。",
+        "status": "confirmed",
         "salience": 0.82,
         "confidence": 0.7,
-        "scope_type": "person",
+        "scope_type": "entity",
         "scope_key": "person:tanaka",
         "formed_at": "2026-03-30T12:00:00+09:00",
         "last_confirmed_at": "2026-03-31T08:00:00+09:00",

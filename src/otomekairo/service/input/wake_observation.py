@@ -504,7 +504,10 @@ class ServiceInputWakeObservationMixin:
             "source_label",
             "active_app",
             "window_title",
+            "visual_observation_id",
+            "image_input_kind",
             "visual_summary_text",
+            "visual_confidence_hint",
             "change_state",
             "change_basis",
             "change_reason_summary",
@@ -517,6 +520,8 @@ class ServiceInputWakeObservationMixin:
         image_count = observation_summary.get("image_count")
         if isinstance(image_count, int):
             payload["image_count"] = image_count
+        if observation_summary.get("image_interpreted") is True:
+            payload["image_interpreted"] = True
         if isinstance(capability_request_summary, dict):
             payload["capability_request_summary"] = capability_request_summary
         return payload

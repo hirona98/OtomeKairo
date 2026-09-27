@@ -68,7 +68,7 @@ class ServiceConfigInspectionMixin:
         memory_units = self.store.list_memory_units_for_recall(
             memory_set_id=memory_set_id,
             current_time=generated_at,
-            statuses=["active", "dormant"],
+            statuses=["confirmed", "inferred"],
             limit=safe_unit_limit,
         )
         episodes = self.store.list_episodes_for_recall(

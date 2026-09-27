@@ -903,6 +903,7 @@ class ServiceAutonomousRunMixin:
                         speech_payload=speech_payload,
                     )
                     speech_event = self._persist_autonomous_run_speech_event(
+                        state=state,
                         run=run,
                         speech_payload=speech_payload,
                         created_at=current_time,
@@ -1013,6 +1014,7 @@ class ServiceAutonomousRunMixin:
                                 speech_payload=speech_payload,
                             )
                             speech_event = self._persist_autonomous_run_speech_event(
+                                state=state,
                                 run=run,
                                 speech_payload=speech_payload,
                                 created_at=current_time,
@@ -2506,12 +2508,28 @@ class ServiceAutonomousRunMixin:
     def _persist_autonomous_run_speech_event(
         self,
         *,
+        state: dict[str, Any],
         run: dict[str, Any],
         speech_payload: dict[str, Any],
         created_at: str,
         step: dict[str, Any],
         transition: dict[str, Any],
     ) -> dict[str, Any]:
+        interaction_ref = run.get("origin_interaction_ref")
+        participant_refs = run.get("participant_refs")
+        if interaction_ref is None:
+            if participant_refs not in (None, []):
+                raise ValueError("Autonomous run speech has participants without an interaction.")
+            participant_refs = []
+        elif (
+            not isinstance(interaction_ref, str)
+            or not interaction_ref.strip()
+            or not isinstance(participant_refs, list)
+            or not participant_refs
+            or any(not isinstance(ref, str) or not ref.strip() for ref in participant_refs)
+        ):
+            raise ValueError("Autonomous run speech has an invalid interaction context.")
+        persona_id = state["selected_persona_id"]
         event = {
             "event_id": f"event:{uuid.uuid4().hex}",
             "cycle_id": self._autonomous_run_event_cycle_id(run),
@@ -2519,6 +2537,9 @@ class ServiceAutonomousRunMixin:
             "kind": "speech",
             "role": "assistant",
             "text": speech_payload["speech_text"],
+            "interaction_ref": interaction_ref,
+            "participant_refs": participant_refs,
+            "display_name": state["personas"][persona_id]["display_name"],
             "created_at": created_at,
             "source_kind": "autonomous_run",
             "run_id": run.get("run_id"),

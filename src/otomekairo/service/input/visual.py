@@ -102,6 +102,10 @@ class ServiceInputVisualMixin:
         enriched_observation_summary = {
             **observation_summary,
             "visual_observation_id": f"visual_observation:{uuid.uuid4().hex}",
+            "image_input_kind": self._visual_observation_input_kind(
+                trigger_kind=trigger_kind,
+                observation_summary=observation_summary,
+            ),
             "image_interpreted": True,
             "visual_summary_text": visual_summary_text,
             "visual_confidence_hint": visual_confidence_hint,

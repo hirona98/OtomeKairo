@@ -71,6 +71,10 @@ class MemoryConsolidator:
         ]
 
         # 解釈
+        interpretation_context = self._build_memory_interpretation_context(
+            memory_context=memory_context,
+            events=events,
+        )
         interpretation = self.llm.generate_memory_interpretation(
             model_config=selected_preset,
             persona_context=build_persona_context(
@@ -81,12 +85,17 @@ class MemoryConsolidator:
             recall_hint=recall_hint,
             decision=decision,
             speech_text=speech_payload["speech_text"] if speech_payload else None,
-            memory_context=self._build_memory_interpretation_context(
-                memory_context=memory_context,
-                events=events,
-            ),
+            memory_context=interpretation_context,
             current_time=finished_at,
             correction_targets=correction_targets or None,
+        )
+        reviewed_candidates, candidate_review_trace = self._review_memory_candidates(
+            selected_preset=selected_preset,
+            selected_persona=selected_persona,
+            input_text=input_text,
+            recall_hint=recall_hint,
+            interpretation_context=interpretation_context,
+            interpretation=interpretation,
         )
         provenance = self._turn_provenance(events=events, memory_context=memory_context)
 
@@ -103,7 +112,7 @@ class MemoryConsolidator:
 
         # 記憶アクション群
         memory_actions: list[dict[str, Any]] = []
-        for candidate_payload in interpretation["candidate_memory_units"]:
+        for candidate_payload in reviewed_candidates:
             candidate = deepcopy(candidate_payload)
             if provenance:
                 candidate["qualifiers_hint"] = {
@@ -149,6 +158,7 @@ class MemoryConsolidator:
                 "episode_series_id": episode.get("episode_series_id"),
                 "open_loops": episode.get("open_loops", []),
                 "memory_action_count": len(memory_actions),
+                "memory_candidate_review": candidate_review_trace,
                 "correction_reconciliation": correction_prepared["trace"],
                 "episode_affect_count": len(episode_affects),
                 "updated_memory_unit_ids": [
@@ -237,6 +247,59 @@ class MemoryConsolidator:
                     interpretation=interpretation,
                 ),
             ),
+        )
+
+    def _review_memory_candidates(
+        self,
+        *,
+        selected_preset: dict[str, Any],
+        selected_persona: dict[str, Any],
+        input_text: str,
+        recall_hint: dict[str, Any],
+        interpretation_context: dict[str, Any],
+        interpretation: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        candidates = interpretation["candidate_memory_units"]
+        if not candidates:
+            return [], {"reviewed_count": 0, "kept_count": 0, "dropped_count": 0}
+        review = self.llm.generate_memory_candidate_review(
+            model_config=selected_preset,
+            review_context={
+                "persona_context": build_persona_context(
+                    selected_persona, role="memory_candidate_review",
+                ).to_prompt_payload(),
+                "input_text": input_text,
+                "episode": interpretation["episode"],
+                "recall_hint": recall_hint,
+                "memory_context": interpretation_context,
+                "candidates": [
+                    {
+                        "index": index,
+                        "memory_type": candidate["memory_type"],
+                        "summary_text": candidate["summary_text"],
+                        "evidence_text": candidate["evidence_text"],
+                        "qualifiers_hint": candidate["qualifiers_hint"],
+                    }
+                    for index, candidate in enumerate(candidates)
+                ],
+            },
+        )
+        decisions = {item["index"]: item for item in review["decisions"]}
+        kept_indices = [index for index in range(len(candidates)) if decisions[index]["outcome"] == "keep"]
+        if len(kept_indices) != len(candidates) and interpretation.get("correction_status") == "selected":
+            raise ValueError("Memory candidate review dropped a candidate during correction selection.")
+        return (
+            [candidates[index] for index in kept_indices],
+            {
+                "reviewed_count": len(candidates),
+                "kept_count": len(kept_indices),
+                "dropped_count": len(candidates) - len(kept_indices),
+                "dropped_reasons": [
+                    {"index": index, "reason_summary": decisions[index]["reason_summary"]}
+                    for index in range(len(candidates))
+                    if index not in kept_indices
+                ],
+            },
         )
 
     def resolve_autonomous_run_commitments(

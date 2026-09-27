@@ -33,6 +33,7 @@ from otomekairo.llm.contracts import (
     validate_initiative_entry_check_contract,
 
     validate_memory_interpretation_contract,
+    validate_memory_candidate_review_contract,
     validate_memory_reflection_summary_contract,
     validate_pre_send_check_contract,
     validate_pending_intent_selection_contract,
@@ -57,6 +58,7 @@ from otomekairo.llm.schemas import (
     initiative_entry_check_response_format,
     input_interpretation_response_format,
     memory_interpretation_response_format,
+    memory_candidate_review_response_format,
     memory_reflection_summary_response_format,
     materialize_provider_open_maps,
     pending_intent_selection_response_format,
@@ -93,6 +95,8 @@ from otomekairo.llm.prompts import (
     build_input_interpretation_repair_prompt,
 
     build_memory_interpretation_messages,
+    build_memory_candidate_review_messages,
+    build_memory_candidate_review_repair_prompt,
     build_memory_interpretation_repair_prompt,
     build_memory_reflection_summary_messages,
     build_memory_reflection_summary_repair_prompt,
@@ -1227,6 +1231,34 @@ class LLMClient:
             payload.setdefault("correction_status", "no_correction")
             payload.setdefault("selected_targets", [])
         return payload
+
+    def generate_memory_candidate_review(
+        self,
+        *,
+        model_config: dict,
+        review_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        candidate_count = len(review_context["candidates"])
+        if self._is_mock_model_config(model_config):
+            payload = {
+                "decisions": [
+                    {"index": index, "outcome": "keep", "reason_summary": "mock candidate を維持する。"}
+                    for index in range(candidate_count)
+                ],
+            }
+            validate_memory_candidate_review_contract(payload, candidate_count=candidate_count)
+            return payload
+        return self._generate_structured_payload(
+            model_config=model_config,
+            messages=build_memory_candidate_review_messages(review_context=review_context),
+            validator=lambda payload: validate_memory_candidate_review_contract(
+                payload, candidate_count=candidate_count,
+            ),
+            repair_prompt_builder=build_memory_candidate_review_repair_prompt,
+            failure_message="MemoryCandidateReview の生成に失敗しました。",
+            response_format=memory_candidate_review_response_format(),
+            operation="memory_candidate_review",
+        )
 
     def generate_memory_reflection_summary(
         self,

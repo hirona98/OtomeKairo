@@ -142,7 +142,7 @@ LLM の出力は JSON object 1 個に固定する。
 1. 画像入力を受ける
 2. raw image を保存せず、LLM へ multimodal input として渡す
 3. LLM が詳細な `summary_text` と構造化した視覚変化判定を返す
-4. `observation_summary.image_interpreted=true` と `visual_summary_text` を付ける
+4. `observation_summary.image_interpreted=true`、`image_input_kind`、`visual_observation_id`、`visual_summary_text` を付ける
 5. `visual_summary_text` を `visual_observation_record.detailed_summary_text` として保存する
 6. `scene_entities / activity_labels / environment_labels` と検索用 index を派生する
 7. `VisualObservationContext` として `recall_hint / recall_pack / decision / speech` に渡す

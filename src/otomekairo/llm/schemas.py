@@ -318,6 +318,22 @@ def autonomous_completion_review_response_format() -> dict[str, Any]:
     )
 
 
+def memory_candidate_review_response_format() -> dict[str, Any]:
+    return structured_response_format(
+        "memory_candidate_review",
+        closed_object({
+            "decisions": {
+                "type": "array",
+                "items": closed_object({
+                    "index": {"type": "integer"},
+                    "outcome": string_enum(["keep", "drop"]),
+                    "reason_summary": {"type": "string"},
+                }),
+            },
+        }),
+    )
+
+
 def memory_interpretation_response_format() -> dict[str, Any]:
     return structured_response_format(
         "memory_interpretation",
@@ -579,6 +595,7 @@ def all_response_formats() -> dict[str, dict[str, Any]]:
         "autonomous_start_review": autonomous_start_review_response_format(),
         "autonomous_activity_alignment_review": autonomous_activity_alignment_review_response_format(),
         "memory_interpretation": memory_interpretation_response_format(),
+        "memory_candidate_review": memory_candidate_review_response_format(),
         "memory_reflection_summary": memory_reflection_summary_response_format(),
         "event_evidence": event_evidence_response_format(),
         "recall_pack_selection": recall_pack_selection_response_format(),

@@ -524,29 +524,61 @@ class ServiceInputTracePersistMixin:
         client_context: dict[str, Any],
         observation_summary: dict[str, Any] | None,
     ) -> list[dict[str, Any]]:
+        summaries: list[dict[str, Any]] = []
+        if isinstance(observation_summary, dict):
+            summaries.append(observation_summary)
+        wake_trace = client_context.get("wake_observation_trace")
+        if isinstance(wake_trace, dict):
+            wake_observations = wake_trace.get("wake_observations")
+            if isinstance(wake_observations, list):
+                summaries.extend(item for item in wake_observations if isinstance(item, dict))
+
+        records: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for summary in summaries:
+            record = self._build_visual_observation_record(
+                cycle_id=cycle_id,
+                memory_set_id=memory_set_id,
+                observed_at=observed_at,
+                client_context=client_context,
+                observation_summary=summary,
+            )
+            if record is None or record["visual_observation_id"] in seen_ids:
+                continue
+            seen_ids.add(record["visual_observation_id"])
+            records.append(record)
+        return records
+
+    def _build_visual_observation_record(
+        self,
+        *,
+        cycle_id: str,
+        memory_set_id: str,
+        observed_at: str,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any],
+    ) -> dict[str, Any] | None:
         # 視覚説明が成功している入力だけ永続視覚記録にする。
-        if not isinstance(observation_summary, dict):
-            return []
         if observation_summary.get("image_interpreted") is not True:
-            return []
+            return None
         detailed_summary_text = observation_summary.get("visual_summary_text")
         if not isinstance(detailed_summary_text, str) or not detailed_summary_text.strip():
-            return []
+            raise ValueError("Interpreted visual observation has no detailed summary.")
 
         image_input_kind = observation_summary.get("image_input_kind")
         if not isinstance(image_input_kind, str) or not image_input_kind.strip():
-            return []
+            raise ValueError("Interpreted visual observation has no image input kind.")
 
         source_kind = observation_summary.get("source_kind")
         if not isinstance(source_kind, str) or not source_kind.strip():
             source_value = observation_summary.get("source")
             if not isinstance(source_value, str) or not source_value.strip():
-                return []
+                raise ValueError("Interpreted visual observation has no source kind.")
             source_kind = source_value
 
         visual_observation_id = observation_summary.get("visual_observation_id")
         if not isinstance(visual_observation_id, str) or not visual_observation_id.strip():
-            return []
+            raise ValueError("Interpreted visual observation has no observation ID.")
 
         source_label = observation_summary.get("source_label")
         vision_source_id = observation_summary.get("vision_source_id")
@@ -604,7 +636,7 @@ class ServiceInputTracePersistMixin:
                 "window_title": window_title.strip() if isinstance(window_title, str) and window_title.strip() else None,
             },
         }
-        return [record]
+        return record
 
     def _visual_observation_importance_score(
         self,

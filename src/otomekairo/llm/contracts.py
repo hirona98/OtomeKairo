@@ -533,6 +533,24 @@ def validate_autonomous_activity_alignment_review_contract(payload: dict[str, An
         raise LLMError("AutonomousActivityAlignmentReview.reason_summary は空にできません。")
 
 
+def validate_memory_candidate_review_contract(payload: dict[str, Any], *, candidate_count: int) -> None:
+    _validate_exact_keys(payload, {"decisions"}, "MemoryCandidateReview")
+    decisions = payload["decisions"]
+    if not isinstance(decisions, list) or len(decisions) != candidate_count:
+        raise LLMError("MemoryCandidateReview.decisions は候補ごとに1件必要です。")
+    seen_indices: set[int] = set()
+    for decision in decisions:
+        _validate_exact_keys(decision, {"index", "outcome", "reason_summary"}, "MemoryCandidateReview.decision")
+        index = decision["index"]
+        if type(index) is not int or not 0 <= index < candidate_count or index in seen_indices:
+            raise LLMError("MemoryCandidateReview.index が不正または重複しています。")
+        seen_indices.add(index)
+        if decision["outcome"] not in {"keep", "drop"}:
+            raise LLMError("MemoryCandidateReview.outcome が不正です。")
+        if not isinstance(decision["reason_summary"], str) or not decision["reason_summary"].strip():
+            raise LLMError("MemoryCandidateReview.reason_summary は空にできません。")
+
+
 def validate_autonomous_completion_review_contract(payload: dict[str, Any]) -> None:
     _validate_exact_keys(
         payload,
