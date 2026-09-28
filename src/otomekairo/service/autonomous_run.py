@@ -2897,6 +2897,7 @@ class ServiceAutonomousRunMixin:
                 events=events,
                 pipeline={
                     "recall_hint": recall_hint,
+                    "recall_pack": self._empty_recall_pack(),
                     "decision": decision,
                     "speech_payload": speech_payload,
                     "current_input": current_input.to_prompt_payload(),

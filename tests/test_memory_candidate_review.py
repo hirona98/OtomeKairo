@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 from otomekairo.llm.contracts import LLMError, validate_memory_candidate_review_contract
 from otomekairo.memory.consolidator import MemoryConsolidator
+from otomekairo.memory.correction import MemoryCorrectionReconciler
 
 
 class MemoryCandidateReviewTests(unittest.TestCase):
@@ -145,6 +146,82 @@ class MemoryCandidateReviewTests(unittest.TestCase):
                 },
                 correction_targets=[{"revision_id": "revision:1", "summary_text": "訂正前。"}],
             )
+
+    def test_review_preserves_episode_when_interpretation_missed_correction(self) -> None:
+        consolidator = MemoryConsolidator.__new__(MemoryConsolidator)
+        consolidator.llm = Mock()
+        consolidator.llm.generate_memory_candidate_review.return_value = {
+            "episode_review": {
+                "summary_text": "先の飲み物の説明を訂正した。", "outcome_text": None,
+                "open_loops": [], "reason_summary": "本人が先の説明の誤りを明示した。",
+            },
+            "correction_review": {
+                "prior_claim_assessment": "contradicted", "reason_summary": "先の主張は当時から誤り。",
+            },
+            "decisions": [{"index": 0, "outcome": "keep", "reason_summary": "継続理解。"}],
+        }
+        interpretation = {
+            "episode": {"summary_text": "飲み物の話。", "outcome_text": None, "open_loops": []},
+            "candidate_memory_units": [{
+                "memory_type": "fact", "summary_text": "訂正後の理解。",
+                "evidence_text": "本人が訂正した。", "qualifiers_hint": {},
+            }],
+            "correction_status": "no_correction", "selected_targets": [],
+        }
+        selected, trace = consolidator._review_memory_candidates(
+            selected_preset={}, selected_persona={}, input_text="さっきの説明は間違いだった。",
+            recall_hint={}, interpretation_context={}, interpretation=interpretation,
+            correction_targets=[],
+        )
+        self.assertEqual(selected, [])
+        self.assertTrue(trace["correction_selection_missed"])
+        self.assertEqual(trace["suppressed_count"], 1)
+        self.assertEqual(interpretation["episode"]["summary_text"], "先の飲み物の説明を訂正した。")
+        context = consolidator._build_correction_job_context(
+            input_text="さっきの説明は間違いだった。", speech_payload=None,
+            decision={"reason_summary": "訂正を受け止める。"}, event_ids=[], cycle_id="cycle:1",
+            prepared={"targets": []}, interpretation=interpretation, candidate_review_trace=trace,
+        )
+        self.assertIsNotNone(context)
+        actions, result = MemoryCorrectionReconciler.__new__(MemoryCorrectionReconciler).run(
+            context=context, finished_at="2026-09-28T12:00:00+09:00",
+        )
+        self.assertEqual(actions, [])
+        self.assertEqual(result["result_status"], "failed")
+        self.assertEqual(result["failure_reason"], "記憶候補審査が過去の主張の誤りを認めましたが、記憶解釈は訂正対象を選定しませんでした。")
+
+    def test_review_allows_revocation_without_new_memory_candidate(self) -> None:
+        consolidator = MemoryConsolidator.__new__(MemoryConsolidator)
+        consolidator.llm = Mock()
+        consolidator.llm.generate_memory_candidate_review.return_value = {
+            "episode_review": {
+                "summary_text": "先の好みを訂正した。", "outcome_text": None,
+                "open_loops": [], "reason_summary": "本人の訂正に一致。",
+            },
+            "correction_review": {
+                "prior_claim_assessment": "contradicted", "reason_summary": "以前の習慣という説明は誤り。",
+            },
+            "decisions": [{"index": 0, "outcome": "drop", "reason_summary": "一度だけの飲用。"}],
+        }
+        selected, trace = consolidator._review_memory_candidates(
+            selected_preset={}, selected_persona={}, input_text="昨日初めて飲んだだけ。",
+            recall_hint={}, interpretation_context={}, interpretation={
+                "episode": {"summary_text": "訂正。", "outcome_text": None, "open_loops": []},
+                "candidate_memory_units": [{
+                    "memory_type": "fact", "summary_text": "昨日初めて飲んだ。",
+                    "evidence_text": "本人の発話。", "qualifiers_hint": {},
+                }],
+                "correction_status": "selected",
+                "selected_targets": [{
+                    "revision_id": "revision:1", "memory_unit_id": "memory_unit:1",
+                    "correction_kind": "revoke_created", "reason_summary": "誤作成。",
+                }],
+            },
+            correction_targets=[{"revision_id": "revision:1", "summary_text": "毎晩飲む。"}],
+        )
+        self.assertEqual(selected, [])
+        self.assertEqual(trace["dropped_count"], 1)
+        self.assertFalse(trace["correction_selection_missed"])
 
     def test_review_corrects_episode_even_without_memory_candidates(self) -> None:
         consolidator = MemoryConsolidator.__new__(MemoryConsolidator)

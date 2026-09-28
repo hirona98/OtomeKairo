@@ -46,6 +46,7 @@ class MemoryConsolidator:
         finished_at: str,
         input_text: str,
         recall_hint: dict[str, Any],
+        recalled_memory_unit_ids: list[str],
         decision: dict[str, Any],
         speech_payload: dict[str, Any] | None,
         events: list[dict[str, Any]],
@@ -62,6 +63,7 @@ class MemoryConsolidator:
             memory_set_id=selected_memory_set_id,
             cycle_id=cycle_id,
             finished_at=finished_at,
+            recalled_memory_unit_ids=recalled_memory_unit_ids,
         )
 
         correction_targets = [
@@ -256,6 +258,7 @@ class MemoryConsolidator:
                     cycle_id=cycle_id,
                     prepared=correction_prepared,
                     interpretation=interpretation,
+                    candidate_review_trace=candidate_review_trace,
                 ),
             ),
         )
@@ -309,6 +312,7 @@ class MemoryConsolidator:
         for key in ("summary_text", "outcome_text", "open_loops"):
             episode[key] = episode_review[key]
         correction_review = review["correction_review"]
+        correction_selection_missed = False
         if interpretation.get("correction_status") == "selected":
             if correction_review["prior_claim_assessment"] == "not_reviewed":
                 raise ValueError("Memory candidate review did not review selected correction.")
@@ -316,16 +320,27 @@ class MemoryConsolidator:
                 interpretation["correction_status"] = "no_correction"
                 interpretation["selected_targets"] = []
         elif correction_review["prior_claim_assessment"] == "contradicted":
-            raise ValueError("Memory candidate review selected a correction absent from interpretation.")
+            correction_selection_missed = True
         kept_indices = [index for index in range(len(candidates)) if decisions[index]["outcome"] == "keep"]
         if len(kept_indices) != len(candidates) and interpretation.get("correction_status") == "selected":
-            raise ValueError("Memory candidate review dropped a candidate during correction selection.")
+            revocation_only = (
+                not kept_indices
+                and bool(interpretation.get("selected_targets"))
+                and all(
+                    item.get("correction_kind") == "revoke_created"
+                    for item in interpretation["selected_targets"]
+                )
+            )
+            if not revocation_only:
+                raise ValueError("Memory candidate review dropped a candidate during correction selection.")
         return (
-            [candidates[index] for index in kept_indices],
+            [] if correction_selection_missed else [candidates[index] for index in kept_indices],
             {
                 "reviewed_count": len(candidates),
                 "kept_count": len(kept_indices),
                 "dropped_count": len(candidates) - len(kept_indices),
+                "suppressed_count": len(kept_indices) if correction_selection_missed else 0,
+                "correction_selection_missed": correction_selection_missed,
                 "correction_review": correction_review,
                 "episode_review": {
                     "changed": episode_changed,
@@ -746,10 +761,14 @@ class MemoryConsolidator:
         cycle_id: str,
         prepared: dict[str, Any],
         interpretation: dict[str, Any],
+        candidate_review_trace: dict[str, Any],
     ) -> dict[str, Any] | None:
         # 候補なし
         targets = prepared.get("targets", [])
-        if not isinstance(targets, list) or not targets:
+        correction_selection_missed = candidate_review_trace["correction_selection_missed"]
+        if not isinstance(targets, list):
+            raise ValueError("Correction targets must be a list.")
+        if not targets and not correction_selection_missed:
             return None
 
         # job context
@@ -760,7 +779,8 @@ class MemoryConsolidator:
             "event_ids": event_ids,
             "cycle_ids": [cycle_id],
             "targets": targets,
-            "selection": self._memory_interpretation_correction_selection(interpretation),
+            "selection": None if correction_selection_missed else self._memory_interpretation_correction_selection(interpretation),
+            "selection_review_issue": "review_found_unselected_correction" if correction_selection_missed else None,
         }
 
     def _memory_interpretation_correction_selection(

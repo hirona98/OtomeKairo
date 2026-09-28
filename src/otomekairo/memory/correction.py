@@ -27,6 +27,7 @@ class MemoryCorrectionReconciler:
         memory_set_id: str,
         cycle_id: str,
         finished_at: str,
+        recalled_memory_unit_ids: list[str],
     ) -> dict[str, Any]:
         # 直近候補
         targets = self.store.list_recent_memory_revision_targets_for_correction(
@@ -35,6 +36,7 @@ class MemoryCorrectionReconciler:
             exclude_cycle_id=cycle_id,
             cycle_limit=CORRECTION_CYCLE_LIMIT,
             limit=CORRECTION_TARGET_LIMIT,
+            recalled_memory_unit_ids=recalled_memory_unit_ids,
         )
         return {
             "targets": targets,
@@ -87,6 +89,14 @@ class MemoryCorrectionReconciler:
             return [], self.skipped_trace(reason="no_context")
 
         targets = context.get("targets")
+        if context.get("selection_review_issue") == "review_found_unselected_correction":
+            return [], {
+                **self.skipped_trace(reason="review_found_unselected_correction"),
+                "result_status": "failed",
+                "selection_status": "failed",
+                "target_candidate_count": len(targets) if isinstance(targets, list) else 0,
+                "failure_reason": "記憶候補審査が過去の主張の誤りを認めましたが、記憶解釈は訂正対象を選定しませんでした。",
+            }
         if not isinstance(targets, list) or not targets:
             return [], self.skipped_trace(reason="no_targets")
 

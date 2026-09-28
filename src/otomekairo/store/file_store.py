@@ -132,10 +132,14 @@ class SQLiteMemoryStore(
         exclude_cycle_id: str,
         cycle_limit: int,
         limit: int,
+        recalled_memory_unit_ids: list[str],
     ) -> list[dict[str, Any]]:
         # 入力検証
         if cycle_limit <= 0 or limit <= 0:
             return []
+        recalled_ids = list(dict.fromkeys(
+            value for value in recalled_memory_unit_ids if isinstance(value, str) and value
+        ))[:limit]
 
         # トランザクション
         with self._memory_db() as conn:
@@ -152,7 +156,7 @@ class SQLiteMemoryStore(
                 """,
                 (memory_set_id, exclude_cycle_id, before_finished_at, cycle_limit),
             ).fetchall()
-            if not cycle_rows:
+            if not cycle_rows and not recalled_ids:
                 return []
 
             cycle_payloads = [
@@ -176,11 +180,36 @@ class SQLiteMemoryStore(
                   AND cycle_id IN ({placeholders})
                 """,
                 (memory_set_id, *recent_cycle_ids),
-            ).fetchall()
+            ).fetchall() if recent_cycle_ids else []
             event_cycle_ids = {
                 row["event_id"]: row["cycle_id"]
                 for row in event_rows
             }
+
+            recalled_rows = []
+            for memory_unit_id in recalled_ids:
+                row = conn.execute(
+                    """
+                    SELECT
+                        rev.payload_json AS revision_payload_json,
+                        unit.payload_json AS unit_payload_json,
+                        rev.operation AS operation,
+                        rev.occurred_at AS occurred_at
+                    FROM revisions AS rev
+                    JOIN memory_units AS unit
+                      ON unit.memory_set_id = rev.memory_set_id
+                     AND unit.memory_unit_id = rev.memory_unit_id
+                    WHERE rev.memory_set_id = ?
+                      AND rev.memory_unit_id = ?
+                      AND rev.operation IN ('create', 'reinforce', 'refine', 'supersede', 'revoke', 'dormant')
+                      AND rev.occurred_at < ?
+                    ORDER BY rev.occurred_at DESC, rev.rowid DESC
+                    LIMIT 1
+                    """,
+                    (memory_set_id, memory_unit_id, before_finished_at),
+                ).fetchone()
+                if row is not None:
+                    recalled_rows.append(row)
 
             revision_rows = conn.execute(
                 """
@@ -212,7 +241,7 @@ class SQLiteMemoryStore(
             # 最新revisionだけを候補にする。
             targets: list[dict[str, Any]] = []
             seen_memory_unit_ids: set[str] = set()
-            for row in revision_rows:
+            for row in [*recalled_rows, *revision_rows]:
                 revision = json.loads(row["revision_payload_json"])
                 unit = json.loads(row["unit_payload_json"])
                 memory_unit_id = revision.get("memory_unit_id")
@@ -228,6 +257,11 @@ class SQLiteMemoryStore(
                     event_cycle_ids=event_cycle_ids,
                     cycle_by_id=cycle_by_id,
                 )
+                if not source_cycle_ids and memory_unit_id in recalled_ids:
+                    source_cycle_ids = [
+                        cycle_id for cycle_id in unit.get("evidence_cycle_ids", [])
+                        if isinstance(cycle_id, str) and cycle_id
+                    ]
                 if not source_cycle_ids:
                     continue
 

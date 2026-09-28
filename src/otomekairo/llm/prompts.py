@@ -489,12 +489,12 @@ def build_memory_candidate_review_messages(*, review_context: dict[str, Any]) ->
             "review_context.candidates の全 index に1件ずつ decisions を返します。候補が空でも episode_review を返します。"
             "各 decision は index, outcome, reason_summary の3キーで、outcome は keep または drop です。"
             "decisions の reason_summary は根拠の継続性を短く説明してください。"
-            "correction_selection に selected_targets がある場合は、対象の元の主張が述べられた時点で真だったかを、本人の新しい発話と照らして審査します。"
+            "correction_selection の selected_targets と target_candidates、memory_context にある先の主張を、本人の新しい発話と照らして審査します。元の解釈が対象を選定しなかった回も、先の主張が確認できれば評価します。"
             "まず prior_claim_assessment を決めます。当時の主張が誤りと明示されたら contradicted、当時は真で後から状況が変わったなら consistent、判断材料が足りなければ undetermined です。"
             "例:『さっき窓を開けていると言ったが、本当は開けていなかった』なら contradicted。"
             "例:『さっきは窓を開けていた。今は閉めた』なら consistent。過去の『開けていた』は今閉まっていても正しいままです。"
             "例:『メモを整理中だった。今は終えて休憩中』なら consistent。完了は先の整理中という事実を誤りにしません。"
-            "選定対象がない回は not_reviewed です。reason_summary には元の主張が当時真だったかを短く書きます。"
+            "照合できる先の主張がない回だけ not_reviewed です。reason_summary には元の主張が当時真だったかを短く書きます。"
             "correction_review は prior_claim_assessment, reason_summary を持ち、全体は episode_review, decisions, correction_review の3キーです。"
         )},
         {"role": "user", "content": _format_named_json_prompt_payload(

@@ -307,6 +307,7 @@ class ServiceMemoryMixin:
                 finished_at=finished_at,
                 input_text=input_text,
                 recall_hint=pipeline["recall_hint"],
+                recalled_memory_unit_ids=pipeline["recall_pack"]["selected_memory_ids"],
                 decision=pipeline["decision"],
                 speech_payload=pipeline["speech_payload"],
                 events=events,
