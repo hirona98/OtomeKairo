@@ -85,6 +85,7 @@
 
 `world_state` 更新 LLM は、状態化できる source がある場合だけ呼ぶ。
 `capability_result` は常に更新 LLM の対象にする。
+`autonomous_run` に属する非同期 capability result も、次の step を判断する前に同じ更新経路へ渡す。更新成否と更新・置換件数は、その result の event に記録する。
 `observation_summary` がある入力、または source pack に `visual_context / external_service_context / body_context / device_context / schedule_context / social_context_context / environment_context / location_context / capability_result_summary` のいずれかがある入力は更新 LLM の対象にする。
 それ以外の通常会話入力では更新 LLM を呼ばず、既存 foreground `world_state` だけを判断へ渡す。
 スキップした cycle は `world_state_trace.result_status=skipped` として残す。

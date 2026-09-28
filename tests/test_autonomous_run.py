@@ -857,10 +857,17 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 },
                 input_text="MCP tool は elyth/get_notifications。",
                 created_at="2026-08-13T20:52:46+09:00",
+                world_state_update={
+                    "result_status": "succeeded",
+                    "updated_state_count": 1,
+                    "replaced_state_count": 0,
+                    "failure_reason": None,
+                },
             )
             self.assertEqual(event["kind"], "capability_result")
             self.assertEqual(event["tool_name"], "get_notifications")
             self.assertEqual(event["observed_person_refs"], ["person:mcp:elyth:rin_ichinose"])
+            self.assertEqual(event["world_state_update"]["result_status"], "succeeded")
 
             updated = service._apply_autonomous_step_transition(
                 run={
@@ -888,6 +895,82 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             )
             self.assertEqual(updated["status"], "completed")
             self.assertEqual(updated["last_result_context"]["source_capability_id"], "mcp.call_tool")
+
+    def test_autonomous_result_refreshes_notification_state_before_next_step(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = self._use_mock_model(service, service.store.read_state())
+            persona_context = service._build_selected_persona_context(state=state, role="world_state")
+            old_observation = {
+                "capability_id": "mcp.call_tool", "status": "completed", "is_error": False,
+                "error": None, "mcp_server_id": "elyth", "tool_name": "get_notifications",
+                "mcp_result_summary": '{"data":{"scope_unread_count":1}}',
+            }
+            old_trace, _ = service._refresh_world_state_context(
+                state=state, started_at="2026-09-28T22:00:00+09:00",
+                input_text="未読通知を取得した。", trigger_kind="capability_result",
+                client_context={}, cycle_id=None, selected_candidate=None,
+                observation_summary=old_observation,
+                capability_request_summary={"request_id": "mcp_call_tool_request:old"},
+                persona_context=persona_context, current_person_ref=None,
+            )
+            self.assertEqual(old_trace.result_status, "succeeded")
+
+            run = self._run_record(
+                status="waiting_result", waiting_request_id="mcp_call_tool_request:new",
+            )
+            run["participant_refs"] = []
+            service.store.upsert_autonomous_run(autonomous_run=run)
+            new_observation = {
+                **old_observation,
+                "mcp_result_summary": '{"data":{"scope_unread_count":0}}',
+            }
+            service._capability_result_capability_id = Mock(return_value="mcp.call_tool")
+            service._capability_request_summary = Mock(return_value={
+                "request_id": "mcp_call_tool_request:new", "capability_id": "mcp.call_tool",
+            })
+            service._activate_capability_ongoing_action = Mock()
+            service._capability_result_active_step_summary = Mock(return_value="通知取得結果を確認中。")
+            service._build_capability_result_client_context = Mock(return_value={})
+            service._capability_result_observation_summary = Mock(return_value=new_observation)
+            service._build_capability_result_input_text = Mock(return_value="未読通知を取得した。")
+            service._prepare_capability_result_context = Mock(
+                return_value=({}, new_observation, "未読通知を取得した。"),
+            )
+            service._build_capability_result_decision_context = Mock(return_value={
+                "source_capability_id": "mcp.call_tool", "observation_summary": new_observation,
+            })
+            service._autonomous_run_after_result_schedule = Mock(return_value=("active", None, None))
+            service._user_response_cycle_active = Mock(return_value=False)
+            service._now_iso = Mock(return_value="2026-09-28T22:01:00+09:00")
+
+            def verify_before_next_step(**_kwargs: object) -> None:
+                states = service._list_current_world_states(
+                    state=state, current_time="2026-09-28T22:01:00+09:00", limit=20,
+                )
+                notification_states = [
+                    item for item in states
+                    if item.get("integration_key") == "external_service:elyth:get_notifications"
+                ]
+                self.assertEqual(len(notification_states), 1)
+                self.assertIn("scope_unread_count", notification_states[0]["summary_text"])
+                self.assertIn("0", notification_states[0]["summary_text"])
+                self.assertEqual(notification_states[0]["source_ref"], "mcp_call_tool_request:new")
+
+            service._execute_autonomous_run_step = Mock(side_effect=verify_before_next_step)
+            service._execute_autonomous_capability_result_cycle_inner(
+                state=state,
+                capability_response={
+                    "request_record": {
+                        "request_id": "mcp_call_tool_request:new", "autonomous_run_id": run["run_id"],
+                    },
+                },
+                started_at="2026-09-28T22:01:00+09:00",
+            )
+            service._execute_autonomous_run_step.assert_called_once()
+            stored_run = service.store.get_autonomous_run(run_id=run["run_id"])
+            self.assertEqual(stored_run["result_events"][-1]["world_state_update"]["result_status"], "succeeded")
+            self.assertEqual(stored_run["result_events"][-1]["world_state_update"]["replaced_state_count"], 1)
 
     def test_observed_result_summary_keeps_completion_status(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

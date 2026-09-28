@@ -2023,6 +2023,31 @@ class ServiceAutonomousRunMixin:
                 input_text=input_text,
                 capability_response=capability_response,
             )
+            participant_refs = run.get("participant_refs")
+            current_person_ref = (
+                participant_refs[0]
+                if isinstance(participant_refs, list) and participant_refs
+                else None
+            )
+            world_state_trace, _ = self._refresh_world_state_context(
+                state=state,
+                started_at=started_at,
+                input_text=input_text,
+                trigger_kind="capability_result",
+                client_context=client_context,
+                cycle_id=None,
+                selected_candidate=None,
+                observation_summary=observation_summary,
+                capability_request_summary=capability_request_summary,
+                persona_context=self._build_selected_persona_context(state=state, role="world_state"),
+                current_person_ref=current_person_ref,
+            )
+            world_state_update = {
+                "result_status": world_state_trace.result_status,
+                "updated_state_count": world_state_trace.updated_state_count,
+                "replaced_state_count": world_state_trace.replaced_state_count,
+                "failure_reason": world_state_trace.failure_reason,
+            }
             last_result_context = self._build_capability_result_decision_context(
                 trigger_kind="capability_result",
                 observation_summary=observation_summary,
@@ -2034,6 +2059,7 @@ class ServiceAutonomousRunMixin:
                 observation_summary=observation_summary,
                 input_text=input_text,
                 created_at=started_at,
+                world_state_update=world_state_update,
             )
             self._register_mcp_observed_persons(
                 state=state,
@@ -2172,6 +2198,7 @@ class ServiceAutonomousRunMixin:
         observation_summary: dict[str, Any] | None,
         input_text: str,
         created_at: str,
+        world_state_update: dict[str, Any],
     ) -> dict[str, Any]:
         observed_persons = self._observed_persons_from_mcp_observation(observation_summary)
         event = {
@@ -2205,6 +2232,7 @@ class ServiceAutonomousRunMixin:
             "interaction_ref": run.get("origin_interaction_ref"),
             "speaker_ref": None,
             "participant_refs": run.get("participant_refs") or [],
+            "world_state_update": world_state_update,
         }
         self.store.append_events(events=[event])
         return event
