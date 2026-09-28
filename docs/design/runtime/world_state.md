@@ -130,7 +130,7 @@ real schedule source がある場合は `schedule_slots` を持ち、各 slot �
 `visual_context` は `vision.capture` のような現在の視覚状態を観測する source から作る。
 `source_owner=self` の `visual_context` は OtomeKairo 自身の視覚根拠として扱える。
 採用済み camera source の `visual_context` は `source_owner=self` とする。
-`source_owner=user_environment` の `visual_context` はユーザー側の画面、仮想 source の観測であり、AI 本体の一人称行動として発話しない。
+`source_owner=user_environment` の `visual_context` はユーザー側の画面、仮想 source の観測であり、OtomeKairo 自身の一人称行動として発話しない。
 詳細な視覚説明は `visual_observation_record` に保存し、`visual_context` には現在判断に効く短い状態要約だけを入れる。
 `vision.capture` 由来の `visual_context` は `vision_source_id` 単位で統合する。
 `vision.capture` result の follow-up では、判断入力の `foreground_world_state` に同じ `vision_source_id` の `visual_context` だけを載せる。

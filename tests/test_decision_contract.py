@@ -914,9 +914,9 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("今、候補に出ている活動や継続中の自身の活動へ関わるか", system)
         self.assertIn("capability_request / autonomous_run / pending_intent / noop", system)
         self.assertIn("活動と CapabilityDecisionView の catalog から autonomous_run を始めてよい", system)
-        self.assertIn("autonomous_run.objective_summary は今回の関与の範囲と完了条件を、個の言葉で書きます", system)
+        self.assertIn("autonomous_run.objective_summary は今回の関与の範囲と完了条件を、現在の個の言葉で書きます", system)
         self.assertIn("一度の能力実行とその結果判断で済むなら capability_request", system)
-        self.assertIn("capability_request.input の自然文は、その能力の先の場へ向けた個の表現です", system)
+        self.assertIn("capability_request.input の自然文は、その能力の先の場へ向けた現在の個の表現です", system)
         self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する JSON object を 1 個の JSON 文字列として書いてください。", system)
         self.assertIn("使わない排他キーもキーとして残し、値は null にします", system)
         self.assertIn("kind が capability_request のとき capability_request は object、pending_intent と autonomous_run は null です", system)
@@ -1111,7 +1111,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
             ),
         )
         self.assertIn(
-            "capability_request.input の自然文は、その能力の先の場へ向けた個の表現です",
+            "capability_request.input の自然文は、その能力の先の場へ向けた現在の個の表現です",
             messages[0]["content"],
         )
         self.assertIn(

@@ -18,7 +18,7 @@ OtomeKairo は、対話入力、API起床要求、観測能力や外部サービ
 - ユーザーが現在している活動の推定
 - ユーザーが直前までしていた活動の推定
 - 活動内容、活動対象、現在活動か直前活動かの短い状態
-- 活動主体。人物の活動は `person`、AI 本体の ongoing action と構造的に分かる場合だけ `self`
+- 活動主体。人物の活動は `person`、OtomeKairo 自身の ongoing action と構造的に分かる場合だけ `self`
 - 推定の確からしさ、更新時刻、失効時刻
 - 推定に使った source kind と source ref の要約
 

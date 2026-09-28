@@ -1165,16 +1165,14 @@ class ServiceInputPipelineMixin:
                 ),
             }
 
-        payload: dict[str, Any] = {
-            "state_boundary": "self_state_context は AI 本体側の感覚信頼度、働きかけやすさ、継続行動の安定を表す短期派生 view であり、mood_state と統合しない。",
-        }
+        payload: dict[str, Any] = {}
         if sensory_confidence:
             payload["sensory_confidence"] = sensory_confidence
         if agency_confidence:
             payload["agency_confidence"] = agency_confidence
         if focus_stability:
             payload["focus_stability"] = focus_stability
-        return payload if len(payload) > 1 else None
+        return payload or None
 
     def _build_relationship_context(
         self,

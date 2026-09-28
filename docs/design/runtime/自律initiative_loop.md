@@ -101,7 +101,7 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 `activity_context.previous_activity` は直前活動の参照情報として扱う。
 `activity_context.current_activity.transition` は直前活動に対する `start / continue / switch / end / none` の推定として扱う。
 `activity_context.current_activity / previous_activity` の `started_age_label / duration_label / ended_age_label` は、活動がいつ始まりどの程度続いたかを生活文脈で比較するための判断材料である。
-`activity_context.current_activity.actor` は活動主体を表す。`actor=person` は `actor_ref` の人物側の活動、`actor=self` は AI 本体の活動である。
+`activity_context.current_activity.actor` は活動主体を表す。`actor=person` は `actor_ref` の人物側の活動、`actor=self` は OtomeKairo 自身の活動である。
 activity の `label / target` は自然文として LLM へ渡す。
 タイミング判断と結果選択は、activity を含む `initiative_context` 全体で行う。
 
