@@ -96,6 +96,7 @@ class MemoryConsolidator:
             recall_hint=recall_hint,
             interpretation_context=interpretation_context,
             interpretation=interpretation,
+            correction_targets=correction_targets,
         )
         reviewed_affects, affect_review_trace = self._review_episode_affects(
             selected_preset=selected_preset,
@@ -268,6 +269,7 @@ class MemoryConsolidator:
         recall_hint: dict[str, Any],
         interpretation_context: dict[str, Any],
         interpretation: dict[str, Any],
+        correction_targets: list[dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         candidates = interpretation["candidate_memory_units"]
         review = self.llm.generate_memory_candidate_review(
@@ -280,6 +282,11 @@ class MemoryConsolidator:
                 "episode": interpretation["episode"],
                 "recall_hint": recall_hint,
                 "memory_context": interpretation_context,
+                "correction_selection": {
+                    "correction_status": interpretation.get("correction_status"),
+                    "selected_targets": interpretation.get("selected_targets"),
+                    "target_candidates": correction_targets,
+                },
                 "candidates": [
                     {
                         "index": index,
@@ -301,6 +308,15 @@ class MemoryConsolidator:
         )
         for key in ("summary_text", "outcome_text", "open_loops"):
             episode[key] = episode_review[key]
+        correction_review = review["correction_review"]
+        if interpretation.get("correction_status") == "selected":
+            if correction_review["prior_claim_assessment"] == "not_reviewed":
+                raise ValueError("Memory candidate review did not review selected correction.")
+            if correction_review["prior_claim_assessment"] != "contradicted":
+                interpretation["correction_status"] = "no_correction"
+                interpretation["selected_targets"] = []
+        elif correction_review["prior_claim_assessment"] == "contradicted":
+            raise ValueError("Memory candidate review selected a correction absent from interpretation.")
         kept_indices = [index for index in range(len(candidates)) if decisions[index]["outcome"] == "keep"]
         if len(kept_indices) != len(candidates) and interpretation.get("correction_status") == "selected":
             raise ValueError("Memory candidate review dropped a candidate during correction selection.")
@@ -310,6 +326,7 @@ class MemoryConsolidator:
                 "reviewed_count": len(candidates),
                 "kept_count": len(kept_indices),
                 "dropped_count": len(candidates) - len(kept_indices),
+                "correction_review": correction_review,
                 "episode_review": {
                     "changed": episode_changed,
                     "reason_summary": episode_review["reason_summary"],

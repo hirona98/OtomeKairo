@@ -471,6 +471,7 @@ def build_memory_candidate_review_messages(*, review_context: dict[str, Any]) ->
             "memory_context に過去の本人発話がある場合だけ、独立した反復の根拠にできます。assistant の発話や候補自身の evidence_text は、本人の発話にない継続性の証拠にはなりません。"
             "各候補が、その出来事の後も成り立つ好み、役割、継続中の状況、習慣、約束などの理解なら keep にします。"
             "今回限りの行動、失敗、感情、結果は、明示された事実でも episode に残るため drop にします。"
+            "今この場で進めている作業や換気など、終了が近い現在状態は world_state と activity_state および episode で扱い、日付付きの事実にしても記憶候補は drop にします。"
             "本人が普段の好みや現在も続く状態を明示した候補は、その述べた範囲で keep にします。"
             "一度の食事や行動を『よかった』『ちょうどよかった』と評価しても、今後も同じ選択を好むとは限りません。"
             "その場の満足を『いつも好む』『〜する際は好む』へ広げた候補は drop にし、出来事は episode に残します。"
@@ -487,7 +488,14 @@ def build_memory_candidate_review_messages(*, review_context: dict[str, Any]) ->
             "習慣や性質の一般化は drop にします。記憶の重要度だけで keep を選びません。"
             "review_context.candidates の全 index に1件ずつ decisions を返します。候補が空でも episode_review を返します。"
             "各 decision は index, outcome, reason_summary の3キーで、outcome は keep または drop です。"
-            "reason_summary は根拠の継続性を短く説明してください。episode_review と decisions の2キーを持つJSONオブジェクト1個だけを返します。"
+            "decisions の reason_summary は根拠の継続性を短く説明してください。"
+            "correction_selection に selected_targets がある場合は、対象の元の主張が述べられた時点で真だったかを、本人の新しい発話と照らして審査します。"
+            "まず prior_claim_assessment を決めます。当時の主張が誤りと明示されたら contradicted、当時は真で後から状況が変わったなら consistent、判断材料が足りなければ undetermined です。"
+            "例:『さっき窓を開けていると言ったが、本当は開けていなかった』なら contradicted。"
+            "例:『さっきは窓を開けていた。今は閉めた』なら consistent。過去の『開けていた』は今閉まっていても正しいままです。"
+            "例:『メモを整理中だった。今は終えて休憩中』なら consistent。完了は先の整理中という事実を誤りにしません。"
+            "選定対象がない回は not_reviewed です。reason_summary には元の主張が当時真だったかを短く書きます。"
+            "correction_review は prior_claim_assessment, reason_summary を持ち、全体は episode_review, decisions, correction_review の3キーです。"
         )},
         {"role": "user", "content": _format_named_json_prompt_payload(
             "MEMORY_CANDIDATE_REVIEW_CONTEXT", review_context
@@ -497,9 +505,10 @@ def build_memory_candidate_review_messages(*, review_context: dict[str, Any]) ->
 
 def build_memory_candidate_review_repair_prompt(validation_error: str) -> str:
     return (
-        "MemoryCandidateReview 契約に従い、episode_review と decisions を返してください。"
+        "MemoryCandidateReview 契約に従い、episode_review, decisions, correction_review を返してください。"
         "episode_review は summary_text, outcome_text, open_loops, reason_summary を含みます。"
         "各候補 index に1件ずつ index, outcome, reason_summary を含む decisions を返してください。\n"
+        "correction_review は prior_claim_assessment=contradicted|consistent|undetermined|not_reviewed と reason_summary を含みます。\n"
         f"validator_error: {validation_error}"
     )
 
@@ -2122,6 +2131,7 @@ def _build_memory_interpretation_system_prompt() -> str:
         "キー名は完全一致させ、余計なキーを足してはいけません。\n"
         "candidate_memory_units は、その時点以降も成り立ち、今後の会話や判断に持ち越す価値がある継続理解だけを入れてください。\n"
         "その日限りの行動、失敗、感情、結果は、本人が明示した事実でも episode に記録してください。翌日も成り立つ好み、役割、継続中の状況と区別してください。\n"
+        "その場で行っている作業や換気など短時間で終わる現在状態は world_state、activity_state と episode に置いてください。日付を付けて過去形でも真になることは、長期記憶候補にする理由になりません。\n"
         "episode.summary_text でも、今夜の予定を普段の習慣へ、検討中の行動を完了済みの行動へ言い換えず、本人の発話にある時期と確定度を保ってください。\n"
         "継続する生活状況、習慣、役割、現在の継続状態は fact を優先してください。習慣や性質の継続性は、本人の明示または独立した出来事の反復に根拠がある範囲だけ記述してください。\n"
         "各 candidate_memory_units の summary_text と evidence_text を元の出来事に照らし、出来事の回数、期間、明示性を超えない主張にしてください。\n"
@@ -2172,6 +2182,7 @@ def _build_memory_interpretation_system_prompt() -> str:
         "correction_kind は revoke_created, restore_previous, supersede_compensation のいずれかです。\n"
         "対象は target_candidates に含まれる revision_id だけから選んでください。\n"
         "対象不明、単なる話題継続、相槌、曖昧な否定なら no_correction を返してください。"
+        "作業の完了や環境の変化など、時間の経過による通常の状態遷移も no_correction です。先の説明や記憶が当時から誤っていたことを本人が示した場合だけ selected にしてください。"
     )
 
 

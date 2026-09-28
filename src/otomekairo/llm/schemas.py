@@ -357,6 +357,10 @@ def memory_candidate_review_response_format() -> dict[str, Any]:
                     "reason_summary": {"type": "string"},
                 }),
             },
+            "correction_review": closed_object({
+                "prior_claim_assessment": string_enum(["contradicted", "consistent", "undetermined", "not_reviewed"]),
+                "reason_summary": {"type": "string"},
+            }),
         }),
     )
 

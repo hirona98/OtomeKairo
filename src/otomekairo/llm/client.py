@@ -1363,6 +1363,10 @@ class LLMClient:
                     {"index": index, "outcome": "keep", "reason_summary": "mock candidate を維持する。"}
                     for index in range(candidate_count)
                 ],
+                "correction_review": {
+                    "prior_claim_assessment": "contradicted" if review_context["correction_selection"]["correction_status"] == "selected" else "not_reviewed",
+                    "reason_summary": "mock correction selection を維持する。",
+                },
             }
             validate_memory_candidate_review_contract(payload, candidate_count=candidate_count)
             return payload

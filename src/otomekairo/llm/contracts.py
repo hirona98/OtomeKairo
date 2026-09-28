@@ -555,7 +555,15 @@ def validate_autonomous_activity_alignment_review_contract(payload: dict[str, An
 
 
 def validate_memory_candidate_review_contract(payload: dict[str, Any], *, candidate_count: int) -> None:
-    _validate_exact_keys(payload, {"episode_review", "decisions"}, "MemoryCandidateReview")
+    _validate_exact_keys(payload, {"episode_review", "decisions", "correction_review"}, "MemoryCandidateReview")
+    correction_review = payload["correction_review"]
+    _validate_exact_keys(
+        correction_review, {"prior_claim_assessment", "reason_summary"}, "MemoryCandidateReview.correction_review",
+    )
+    if correction_review["prior_claim_assessment"] not in {"contradicted", "consistent", "undetermined", "not_reviewed"}:
+        raise LLMError("MemoryCandidateReview.correction_review.prior_claim_assessment が不正です。")
+    if not isinstance(correction_review["reason_summary"], str) or not correction_review["reason_summary"].strip():
+        raise LLMError("MemoryCandidateReview.correction_review.reason_summary は空にできません。")
     episode = payload["episode_review"]
     _validate_exact_keys(
         episode, {"summary_text", "outcome_text", "open_loops", "reason_summary"},
