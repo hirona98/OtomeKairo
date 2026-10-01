@@ -151,6 +151,16 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
         )
         self.assertEqual(service.store.events, [])
 
+    def test_avatar_stt_accepts_logging_engine(self) -> None:
+        # ログありはログなしと同じ stt 項目のまま engine だけで選ぶ。
+        service = DummyService()
+        definition = service.get_avatar_speech_editor_state("token")
+        definition["avatars"][0]["stt"]["engine"] = "amivoice-log"
+
+        response = service.replace_avatar_speech_editor_state("token", definition)
+
+        self.assertEqual(response["avatars"][0]["stt"]["engine"], "amivoice-log")
+
     def test_avatar_stt_rejects_wake_words_field(self) -> None:
         # 音声起動ワードは persona.wake_words。avatar.stt への残存は未対応として拒否する。
         service = DummyService()
@@ -259,6 +269,12 @@ class AvatarSpeechConfigApiTests(unittest.TestCase):
         invalid_profile_id = deepcopy(original)
         invalid_profile_id["avatars"][0]["stt"]["profile_id"] = ":service-profile"
         cases.append(("invalid profile ID", invalid_profile_id, "invalid_stt_settings"))
+
+        invalid_stt_engine = deepcopy(original)
+        invalid_stt_engine["avatars"][0]["stt"]["engine"] = "amivoice-free"
+        cases.append(
+            ("invalid stt engine", invalid_stt_engine, "unsupported_stt_engine")
+        )
 
         duplicate_voicevox_endpoint = deepcopy(original)
         duplicate_voicevox_endpoint["avatars"][0]["tts"]["voicevox_config"][

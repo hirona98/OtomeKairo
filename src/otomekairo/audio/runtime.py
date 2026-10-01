@@ -1129,6 +1129,7 @@ class AudioRuntime:
             item.utterance.amivoice_pcm16le,
             api_key=stt["api_key"],
             profile_id=stt["profile_id"],
+            engine=stt["engine"],
         )
         speaker_future = self._parallel_executor.submit(
             self._timed_outcome,
@@ -1647,7 +1648,7 @@ class AudioRuntime:
 
     def _is_stt_configuration_error(self, error: AmiVoiceError) -> bool:
         return (
-            error.code in {"missing_api_key", "provider_error"}
+            error.code in {"missing_api_key", "provider_error", "unsupported_engine"}
             or error.http_status in {400, 401, 403}
         )
 

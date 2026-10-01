@@ -4,6 +4,7 @@ import math
 import re
 from typing import Any
 
+from otomekairo.audio.amivoice import AMIVOICE_ENDPOINTS
 from otomekairo.capabilities import capability_manifests
 from otomekairo.service.common import ServiceError
 from otomekairo.service.config.constants import (
@@ -561,8 +562,13 @@ class ServiceConfigValidationMixin:
         )
         if not isinstance(definition.get("enabled"), bool):
             raise ServiceError(400, "invalid_stt_settings", "avatar.stt.enabled must be a boolean.")
-        if definition.get("engine") != "amivoice":
-            raise ServiceError(400, "unsupported_stt_engine", "avatar.stt.engine must be amivoice.")
+        if definition.get("engine") not in AMIVOICE_ENDPOINTS:
+            allowed = " or ".join(sorted(AMIVOICE_ENDPOINTS))
+            raise ServiceError(
+                400,
+                "unsupported_stt_engine",
+                f"avatar.stt.engine must be {allowed}.",
+            )
         profile_id = definition.get("profile_id")
         if not isinstance(profile_id, str):
             raise ServiceError(400, "invalid_stt_settings", "avatar.stt.profile_id must be a string.")

@@ -546,9 +546,11 @@
                 <div class="setting-row">
                   <label for="stt-engine">エンジン:</label>
                   <select id="stt-engine" class="field-width-medium">
-                    <option value="amivoice">AmiVoice</option>
+                    <option value="amivoice">AmiVoice（ログなし）</option>
+                    <option value="amivoice-log">AmiVoice（ログあり・無料版）</option>
                   </select>
                 </div>
+                <p class="field-hint field-hint-indent">ログありは音声と認識結果を AmiVoice に保存します。ログなしは保存しません。</p>
                 <div class="setting-row">
                   <label for="stt-profile-id">Profile ID:</label>
                   <input id="stt-profile-id" class="field-width-medium" placeholder="先頭の:は不要">

@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from typing import Any
 
 
-AMIVOICE_ENDPOINT = "https://acp-api.amivoice.com/v1/nolog/recognize"
+# engine が endpoint を一意に決める。未対応の engine は失敗させ、もう一方へ切り替えない。
+AMIVOICE_ENDPOINTS = {
+    "amivoice": "https://acp-api.amivoice.com/v1/nolog/recognize",
+    "amivoice-log": "https://acp-api.amivoice.com/v1/recognize",
+}
 AMIVOICE_TIMEOUT_SECONDS = 30
 
 
@@ -35,25 +39,29 @@ class AmiVoiceResult:
 
 
 class AmiVoiceClient:
-    def __init__(self, endpoint: str = AMIVOICE_ENDPOINT) -> None:
-        self._endpoint = endpoint
-
     def recognize(
         self,
         pcm16le: bytes,
         *,
         api_key: str,
         profile_id: str,
+        engine: str,
     ) -> AmiVoiceResult:
         # 音声と秘密値はログへ出さず、1発話を1回だけ送る。
         if not pcm16le:
             raise AmiVoiceError("empty_audio", "AmiVoice audio is empty.")
         if not api_key:
             raise AmiVoiceError("missing_api_key", "AmiVoice api_key is empty.")
+        endpoint = AMIVOICE_ENDPOINTS.get(engine) if isinstance(engine, str) else None
+        if endpoint is None:
+            raise AmiVoiceError(
+                "unsupported_engine",
+                "AmiVoice engine is not supported.",
+            )
 
         boundary = f"otomekairo-{secrets.token_hex(16)}"
         request = urllib.request.Request(
-            self._endpoint,
+            endpoint,
             data=self._build_multipart_body(
                 boundary=boundary,
                 pcm16le=pcm16le,
