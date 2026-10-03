@@ -37,6 +37,8 @@ connector を起動する。
 
 OtomeKairo access token は、`OTOMEKAIRO_ACCESS_TOKEN`、ローカル `config.db`、bootstrap の順に解決する。MCP server 設定は `GET /api/config/connectors/{client_id}/runtime-config` から取得する。
 
+MCP 接続失敗時の再試行、診断情報、`--print-hello` の終了動作は [外部接続 process 配置方針](../../docs/design/integration/外部接続connector配置方針.md#設定と秘密情報) を参照する。
+
 ## VSCode F5 debug
 
 workspace root の VSCode F5 は OtomeKairo server と MCP client connector を compound debug で同時起動する。

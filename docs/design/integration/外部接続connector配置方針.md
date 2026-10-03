@@ -115,6 +115,8 @@ microphone connector は加えて VAD、STT、音声起動ワード判定、話�
 - MCP client connector の stdio 用 command / args / cwd / env と Streamable HTTP 用 url / headers は本体の `mcp_server` で扱う
 - MCP server 子 process へは launcher 用 `PATH` と当該 `mcp_server.env` だけを渡し、connector process の環境を継承しない
 - MCP tool の意味と入力境界は connector に固定せず、接続中の `tools/list` catalog を本体の判断文脈へ供給する
+- MCP client connector は transport、session 初期化、tool 取得・実行の失敗を `McpSessionError` として明示し、SDK の `ExceptionGroup` は内側の例外種別、HTTP status、MCP error code で原因を示す。通常起動の catalog 取得失敗は hello を送らず、設定された再接続間隔で同じ接続を再試行する。`--print-hello` は標準エラーへ原因を出して終了コード `2` で終了する。取消や process 停止はそのまま伝播させる
+- MCP の失敗メッセージには `mcp_server_id`、transport、上記の機械的な原因だけを含め、SDK の例外本文、URL、header、env、tool arguments、応答本文を転記しない
 - `config.example.json` と repository に秘密値を入れない
 - 通常ログ、debug log、inspection 用 result summary、`client_context` に秘密値を出さない
 - connector / watcher の journal 向け運用ログ最小レベルは本体と同じ `OTOMEKAIRO_DEBUG_LOG_MIN_LEVEL` に従う（既定 `WARNING`）。取りうる値と失敗方針は [../runtime/デバッグ可能性.md](../runtime/デバッグ可能性.md) を正とする

@@ -8,9 +8,14 @@ import httpx
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
+from mcp.shared.exceptions import McpError
 
 from .config import McpServerConfig
 from .observed_persons import content_summary
+
+
+class McpSessionError(RuntimeError):
+    pass
 
 
 async def list_tools(server: McpServerConfig) -> list[dict[str, Any]]:
@@ -59,13 +64,26 @@ async def call_tool(server: McpServerConfig, *, tool_name: str, arguments: dict[
 
 @asynccontextmanager
 async def _client_session(server: McpServerConfig):
+    try:
+        async with _transport_streams(server) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                yield session
+    except Exception as exc:
+        # SDK の TaskGroup も同じ失敗境界で扱い、取消や process 停止は伝播させる。
+        # 例外本文には URL・応答・資格情報が入りうるため、機械的な原因だけを公開する。
+        raise McpSessionError(
+            f"MCP server={server.mcp_server_id} transport={server.transport} failed: {_error_summary(exc)}"
+        ) from exc
+
+
+@asynccontextmanager
+async def _transport_streams(server: McpServerConfig):
     if server.transport == "stdio":
         params = _server_params(server)
         with _working_directory(server):
             async with stdio_client(params) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    yield session
+                yield read, write
         return
     if server.transport != "streamable_http" or server.url is None:
         raise RuntimeError(f"Unsupported MCP transport: {server.transport}")
@@ -76,9 +94,18 @@ async def _client_session(server: McpServerConfig):
         follow_redirects=False,
     ) as http_client:
         async with streamable_http_client(server.url, http_client=http_client) as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                yield session
+            yield read, write
+
+
+def _error_summary(exc: Exception) -> str:
+    if isinstance(exc, ExceptionGroup):
+        return "; ".join(_error_summary(child) for child in exc.exceptions)
+    name = type(exc).__name__
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"{name}(HTTP {exc.response.status_code})"
+    if isinstance(exc, McpError):
+        return f"{name}(code={exc.error.code})"
+    return name
 
 
 def _server_params(server: McpServerConfig) -> StdioServerParameters:
@@ -119,5 +146,4 @@ def _to_plain(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _to_plain(item) for key, item in value.items()}
     return value
-
 

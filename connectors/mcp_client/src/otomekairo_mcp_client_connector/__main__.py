@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .app import McpClientConnector
 from .config import ConfigError, load_config
+from .mcp_bridge import McpSessionError
 
 
 def main() -> int:
@@ -24,6 +25,9 @@ def main() -> int:
         return 0
     except ConfigError as exc:
         print(f"config error: {exc}", file=sys.stderr)
+        return 2
+    except McpSessionError as exc:
+        print(f"mcp error: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         return 130
