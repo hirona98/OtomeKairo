@@ -74,10 +74,10 @@ class InputInterpretationContractTests(unittest.TestCase):
         answer_contract_keys = ", ".join(ANSWER_CONTRACT_REQUIRED_KEYS)
 
         self.assertIn(f"recall_hint は {recall_hint_keys} の 8 キーだけ", system_prompt)
-        self.assertIn(f"answer_contract は {answer_contract_keys} の 5 キーだけ", system_prompt)
+        self.assertIn(f"answer_contract は {answer_contract_keys} の 7 キーだけ", system_prompt)
         self.assertIn("省略せず []", system_prompt)
         self.assertIn(f"recall_hint は {recall_hint_keys} の 8 キーだけ", repair_prompt)
-        self.assertIn(f"answer_contract は {answer_contract_keys} の 5 キーだけ", repair_prompt)
+        self.assertIn(f"answer_contract は {answer_contract_keys} の 7 キーだけ", repair_prompt)
 
 
 if __name__ == "__main__":

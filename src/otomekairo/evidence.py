@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any
 
-from otomekairo.memory.utils import localize_timestamp_fields
+from otomekairo.memory.utils import localize_timestamp_fields, llm_local_time_text
 
 
 # 定数
@@ -108,6 +108,8 @@ class EvidenceResolver:
             boundary=boundary,
             before_iso=current_time,
             limit=EVIDENCE_ITEM_LIMIT,
+            target_person_ref=answer_contract["target_person_ref"],
+            target_interaction_ref=answer_contract["target_interaction_ref"],
         )
         if not records:
             evidence_pack = self._missing_pack(
@@ -129,6 +131,7 @@ class EvidenceResolver:
             evidence_items=[self._event_evidence_item(records[0])],
             speech_guidance=self._boundary_speech_guidance(boundary, records[0]),
         )
+        evidence_pack["boundary_at"] = records[0]["created_at"]
         return self._resolution(
             input_text=input_text,
             current_time=current_time,
@@ -173,6 +176,8 @@ class EvidenceResolver:
             query_terms=query_terms,
             before_iso=current_time,
             limit=EVIDENCE_ITEM_LIMIT,
+            target_person_ref=answer_contract["target_person_ref"],
+            target_interaction_ref=answer_contract["target_interaction_ref"],
         )
         if not records:
             evidence_pack = self._missing_pack(
@@ -226,6 +231,8 @@ class EvidenceResolver:
             boundary=boundary,
             before_iso=current_time,
             limit=EVIDENCE_ITEM_LIMIT,
+            target_person_ref=answer_contract["target_person_ref"],
+            target_interaction_ref=answer_contract["target_interaction_ref"],
         )
         if not boundary_records:
             evidence_pack = self._missing_pack(
@@ -253,6 +260,8 @@ class EvidenceResolver:
                 cycle_id=cycle_id,
                 target_actor=target_actor,
                 limit=EVIDENCE_ITEM_LIMIT,
+                target_person_ref=answer_contract["target_person_ref"],
+                target_interaction_ref=answer_contract["target_interaction_ref"],
             )
         if not cycle_records:
             cycle_records = boundary_records
@@ -474,6 +483,8 @@ class EvidenceResolver:
                 "contract": answer_contract.get("contract"),
                 "boundary": answer_contract.get("boundary"),
                 "target_actor": answer_contract.get("target_actor"),
+                "target_person_ref": answer_contract.get("target_person_ref"),
+                "target_interaction_ref": answer_contract.get("target_interaction_ref"),
                 "reason_codes": list(answer_contract.get("reason_codes") or []),
                 "query_terms": list(answer_contract.get("query_terms") or []),
                 "requires_direct_evidence": bool(answer_contract.get("requires_direct_evidence")),
@@ -678,6 +689,8 @@ class EvidenceResolver:
             "cycle_id": record.get("cycle_id") or payload.get("cycle_id"),
             "kind": record.get("kind") or payload.get("kind"),
             "role": record.get("role") or payload.get("role"),
+            "speaker_ref": record.get("speaker_ref"),
+            "interaction_ref": record.get("interaction_ref"),
             "created_at": created_at,
             "recorded_date": self._recorded_date(created_at),
             "text": self._event_text(text),
@@ -698,15 +711,12 @@ class EvidenceResolver:
         }
 
     def _boundary_speech_guidance(self, boundary: str, record: dict[str, Any]) -> str:
-        item = self._event_evidence_item(record)
-        if boundary == "first":
-            return (
-                "最初の raw event を根拠に答える。"
-                f"日付は recorded_date={item.get('recorded_date')} を使い、text は必要なら原文として引用する。"
-            )
+        canonical_time = llm_local_time_text(record["created_at"]).replace("現在時刻:", "記録日時:").replace("\n", " / ")
+        label = "最初" if boundary == "first" else "最新"
         return (
-            "最新の raw event を根拠に答える。"
-            f"日付は recorded_date={item.get('recorded_date')} を使い、text は必要なら原文として引用する。"
+            f"対象範囲で{label}の会話が起きた日時は boundary_at={record['created_at']}、{canonical_time} である。"
+            "境界日時への回答はこの発生日時を使う。event.text はその会話で話された内容であり、"
+            "本文にある『前回』『昨日』などの日時は、その会話の中で言及した別の出来事として区別する。"
         )
 
     def _payload(self, record: dict[str, Any]) -> dict[str, Any]:

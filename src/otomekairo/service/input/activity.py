@@ -58,13 +58,16 @@ class ServiceInputActivityMixin:
             previous_activity_state=previous_state,
             persona_context=persona_context,
         )
+        retained_context = self._load_activity_context(memory_set_id=memory_set_id, actor_ref=actor_ref, current_time=started_at)
+        if retained_context and "last_known_activity" in retained_context:
+            source_pack["last_known_activity_context"] = {"last_known_activity": retained_context["last_known_activity"]}
         trace: dict[str, Any] = {
             "result_status": "skipped",
             "source_pack_summary": self._summarize_activity_source_pack(source_pack),
             "candidate_count": 0,
             "updated_count": 0,
             "expired_count": 0,
-            "activity_context": self._summarize_activity_context(previous_state, current_time=started_at),
+            "activity_context": self._load_activity_context(memory_set_id=memory_set_id, actor_ref=actor_ref, current_time=started_at),
             "failure_reason": None,
         }
         if not self._should_generate_activity_state(source_pack):
@@ -94,12 +97,7 @@ class ServiceInputActivityMixin:
                 activity_state=activity_state,
                 expired_activity_id=expired_activity_id,
             )
-            current_state = self.store.get_current_activity_state(
-                memory_set_id=memory_set_id,
-                actor_ref=actor_ref,
-                current_time=started_at,
-            )
-            activity_context = self._summarize_activity_context(current_state, current_time=started_at)
+            activity_context = self._load_activity_context(memory_set_id=memory_set_id, actor_ref=actor_ref, current_time=started_at)
             trace.update(
                 {
                     "result_status": "succeeded",
@@ -116,7 +114,7 @@ class ServiceInputActivityMixin:
                 {
                     "result_status": "failed",
                     "failure_reason": str(exc),
-                    "activity_context": self._summarize_activity_context(previous_state, current_time=started_at),
+                    "activity_context": self._load_activity_context(memory_set_id=memory_set_id, actor_ref=actor_ref, current_time=started_at),
                 }
             )
             debug_log("Activity", f"{cycle_label} activity failed reason={self._clamp(str(exc))}", level="WARNING")
@@ -407,16 +405,31 @@ class ServiceInputActivityMixin:
             kinds.append("pre_observation_activity_context")
         return kinds
 
+    def _load_activity_context(
+        self, *, memory_set_id: str, actor_ref: str | None, current_time: str,
+    ) -> dict[str, Any] | None:
+        if actor_ref is None:
+            return None
+        current = self.store.get_current_activity_state(
+            memory_set_id=memory_set_id, actor_ref=actor_ref, current_time=current_time,
+        )
+        last_known = self.store.get_last_known_activity_state(
+            memory_set_id=memory_set_id, actor_ref=actor_ref, current_time=current_time,
+        )
+        return self._summarize_activity_context(
+            current, current_time=current_time, last_known_activity_state=last_known,
+        )
+
     def _summarize_activity_context(
         self,
         activity_state: dict[str, Any] | None,
         *,
         current_time: str,
+        last_known_activity_state: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
-        if not isinstance(activity_state, dict):
-            return None
-        current_activity = self._activity_prompt_summary(activity_state, current_time=current_time)
-        previous = activity_state.get("previous_activity")
+        current_activity = (self._activity_prompt_summary(activity_state, current_time=current_time)
+                            if isinstance(activity_state, dict) else None)
+        previous = activity_state.get("previous_activity") if isinstance(activity_state, dict) else None
         previous_activity = (
             self._activity_previous_prompt_summary(previous)
             if isinstance(previous, dict)
@@ -427,6 +440,11 @@ class ServiceInputActivityMixin:
             payload["current_activity"] = current_activity
         if previous_activity:
             payload["previous_activity"] = previous_activity
+        if isinstance(last_known_activity_state, dict):
+            historical = self._activity_prompt_summary(last_known_activity_state, current_time=current_time)
+            historical.pop("duration_label", None)
+            historical["evidence_kind"] = "inference"
+            payload["last_known_activity"] = historical
         return payload or None
 
     def _activity_prompt_summary(

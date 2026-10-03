@@ -154,3 +154,27 @@ class ActivityContextTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_expired_activity_is_historical_and_keeps_its_actor(tmp_path):
+    from otomekairo.store.file_store import SQLiteMemoryStore
+    service = DummyActivityService()
+    service.store = SQLiteMemoryStore(tmp_path)
+    for person, label, minute in [('person:a', '休憩', 0), ('person:b', '昼食準備', 1)]:
+        observed = f'2026-10-03T09:{minute:02}:00+09:00'
+        service.store.refresh_activity_state(
+            memory_set_id='memory_set:default', actor_ref=person, current_time=observed,
+            activity_state={'activity_id': 'activity:' + person, 'memory_set_id': 'memory_set:default',
+                'actor': 'person', 'actor_ref': person, 'label': label, 'status': 'active',
+                'confidence': .9, 'salience': .8, 'started_at': observed, 'updated_at': observed,
+                'expires_at': '2026-10-03T10:00:00+09:00', 'reason_summary': '本人の報告',
+                'transition': 'start'},
+        )
+    context = service._load_activity_context(
+        memory_set_id='memory_set:default', actor_ref='person:a', current_time='2026-10-04T21:00:00+09:00',
+    )
+    assert 'current_activity' not in context
+    assert context['last_known_activity']['actor_ref'] == 'person:a'
+    assert context['last_known_activity']['label'] == '休憩'
+    assert 'duration_label' not in context['last_known_activity']
+    assert service._load_activity_context(memory_set_id='memory_set:default',actor_ref='person:unknown', current_time='2026-10-04T21:00:00+09:00') is None

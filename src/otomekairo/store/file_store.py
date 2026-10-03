@@ -948,6 +948,8 @@ class SQLiteMemoryStore(
         boundary: str,
         before_iso: str,
         limit: int,
+        target_person_ref: str | None,
+        target_interaction_ref: str | None,
     ) -> list[dict[str, Any]]:
         # 空
         if limit <= 0:
@@ -960,13 +962,15 @@ class SQLiteMemoryStore(
         roles = self._event_roles_for_actor(target_actor)
         if roles:
             self._append_in_clause(clauses, params, "role", roles)
+        self._append_evidence_scope(clauses, params, target_person_ref, target_interaction_ref)
         direction = "ASC" if boundary == "first" else "DESC"
 
         # クエリ
         with self._memory_db() as conn:
             rows = conn.execute(
                 f"""
-                SELECT event_id, cycle_id, memory_set_id, kind, role, text, created_at, payload_json
+                SELECT event_id, cycle_id, memory_set_id, kind, role, text, created_at, payload_json,
+                       interaction_ref, speaker_ref
                 FROM events
                 WHERE {" AND ".join(clauses)}
                 ORDER BY created_at {direction}, rowid {direction}
@@ -986,6 +990,8 @@ class SQLiteMemoryStore(
         query_terms: list[str],
         before_iso: str,
         limit: int,
+        target_person_ref: str | None,
+        target_interaction_ref: str | None,
     ) -> list[dict[str, Any]]:
         # 空
         if limit <= 0:
@@ -998,6 +1004,7 @@ class SQLiteMemoryStore(
         roles = self._event_roles_for_actor(target_actor)
         if roles:
             self._append_in_clause(clauses, params, "role", roles)
+        self._append_evidence_scope(clauses, params, target_person_ref, target_interaction_ref)
         for term in query_terms:
             if not isinstance(term, str) or not term.strip():
                 continue
@@ -1008,7 +1015,8 @@ class SQLiteMemoryStore(
         with self._memory_db() as conn:
             rows = conn.execute(
                 f"""
-                SELECT event_id, cycle_id, memory_set_id, kind, role, text, created_at, payload_json
+                SELECT event_id, cycle_id, memory_set_id, kind, role, text, created_at, payload_json,
+                       interaction_ref, speaker_ref
                 FROM events
                 WHERE {" AND ".join(clauses)}
                 ORDER BY created_at DESC, rowid DESC
@@ -1027,6 +1035,8 @@ class SQLiteMemoryStore(
         cycle_id: str,
         target_actor: str,
         limit: int,
+        target_person_ref: str | None,
+        target_interaction_ref: str | None,
     ) -> list[dict[str, Any]]:
         # 空
         if limit <= 0:
@@ -1039,12 +1049,14 @@ class SQLiteMemoryStore(
         roles = self._event_roles_for_actor(target_actor)
         if roles:
             self._append_in_clause(clauses, params, "role", roles)
+        self._append_evidence_scope(clauses, params, target_person_ref, target_interaction_ref)
 
         # クエリ
         with self._memory_db() as conn:
             rows = conn.execute(
                 f"""
-                SELECT event_id, cycle_id, memory_set_id, kind, role, text, created_at, payload_json
+                SELECT event_id, cycle_id, memory_set_id, kind, role, text, created_at, payload_json,
+                       interaction_ref, speaker_ref
                 FROM events
                 WHERE {" AND ".join(clauses)}
                 ORDER BY created_at ASC, rowid ASC
@@ -1055,6 +1067,23 @@ class SQLiteMemoryStore(
 
         # 結果
         return [dict(row) for row in rows]
+
+    def _append_evidence_scope(
+        self,
+        clauses: list[str],
+        params: list[Any],
+        person_ref: str | None,
+        interaction_ref: str | None,
+    ) -> None:
+        if interaction_ref is not None:
+            clauses.append("interaction_ref = ?")
+            params.append(interaction_ref)
+        if person_ref is not None:
+            clauses.append(
+                "(speaker_ref = ? OR (role = 'assistant' AND EXISTS "
+                "(SELECT 1 FROM json_each(events.participant_refs_json) WHERE value = ?)))"
+            )
+            params.extend((person_ref, person_ref))
 
     def _append_in_clause(
         self,

@@ -61,8 +61,8 @@ class DummyImmediateWakePipeline(ServiceInputWakePipelineMixin):
         _ = state, started_at, cycle_id, for_background_thinking
         return client_context
 
-    def _summarize_activity_context(self, activity_state, *, current_time: str):
-        _ = activity_state, current_time
+    def _load_activity_context(self, *, memory_set_id: str, actor_ref, current_time: str):
+        _ = memory_set_id, actor_ref, current_time
         return None
 
     def _user_response_cycle_active(self) -> bool:

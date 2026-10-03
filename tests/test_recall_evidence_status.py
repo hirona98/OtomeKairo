@@ -5,6 +5,25 @@ from otomekairo.recall.builder import RecallBuilder
 
 
 class RecallEvidenceStatusTests(unittest.TestCase):
+    def test_boundary_answer_projects_occurrence_evidence_without_overwriting_recall(self) -> None:
+        episode = {
+            "episode_type": "conversation", "summary_text": "前回は昨日と回答した。",
+            "primary_scope_type": "relationship", "primary_scope_key": "self|person:test",
+            "formed_at": "2026-10-04T21:00:01+09:00",
+        }
+        pack = {"status": "grounded", "boundary_at": episode["formed_at"], "evidence_items": [{
+            "type": "event", "event_id": "event:latest", "created_at": episode["formed_at"],
+            "text": "前回は昨日と回答した。",
+        }]}
+        recall = {"answer_contract": {"contract": "exact_boundary"},
+                  "episodic_evidence": [episode], "evidence_pack": pack}
+        compact = _compact_recall_pack(recall)
+        self.assertEqual(compact["evidence_pack"], pack)
+        self.assertEqual(compact["episodic_evidence"], [])
+        self.assertEqual(recall["episodic_evidence"], [episode])
+        recall["answer_contract"]["contract"] = "summary"
+        self.assertEqual(_compact_recall_pack(recall)["episodic_evidence"][0]["formed_at"], episode["formed_at"])
+
     def test_current_person_relationship_episodes_remain_eligible_for_preference_focus(self) -> None:
         builder = RecallBuilder.__new__(RecallBuilder)
         scope = builder._build_scope_context({

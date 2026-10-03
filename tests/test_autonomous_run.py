@@ -13,6 +13,30 @@ from otomekairo.service.capability import PreSendCheckWithheldError
 
 
 class AutonomousRunRecoveryTests(unittest.TestCase):
+    def test_completion_context_keeps_the_current_requests_origin_and_time(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            run = self._commitment_run_record(memory_set_id="memory_set:default")
+            run.update({
+                "run_id": "autonomous_run:new-request",
+                "source_cycle_id": "cycle:new-request",
+                "created_at": "2026-10-03T09:05:28+09:00",
+                "next_run_at": "2026-10-03T09:05:28+09:00",
+                "history_summary": "",
+            })
+            context = service._autonomous_run_prompt_summary(run)
+            context["recent_turns"] = [{"run_id": "autonomous_run:previous", "status": "completed"}]
+            review = service._autonomous_completion_review_run_context(context)
+            self.assertEqual(review["run_id"], run["run_id"])
+            self.assertEqual(review["source_cycle_id"], run["source_cycle_id"])
+            self.assertEqual(review["created_at"], run["created_at"])
+            self.assertEqual(review["next_run_at"], run["next_run_at"])
+            self.assertEqual(review["source_current_input"], run["source_current_input"])
+            self.assertEqual(review["history_summary"], "")
+            self.assertNotIn("recent_turns", review)
+            review["source_current_input"]["text"] = "changed"
+            self.assertEqual(run["source_current_input"]["text"], "3分後に声をかけて")
+
     def test_autonomous_speech_receives_run_objective(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))
@@ -483,6 +507,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             service._emit_autonomous_run_assistant_message_event = Mock(
                 side_effect=lambda **_: call_order.append("delivery")
             )
+            service._now_iso = Mock(return_value="2026-08-16T09:45:00+09:00")
             service._persist_autonomous_run_speech_event = Mock(return_value=None)
             service._finalize_autonomous_run_commitments = Mock(
                 side_effect=lambda **kwargs: kwargs["run"]
@@ -501,6 +526,10 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             self.assertEqual(result["speech_payload"]["speech_text"], "投稿が完了しました。")
             self.assertEqual(call_order, ["review", "delivery"])
             review_context = review.call_args.kwargs["review_context"]
+            self.assertEqual(
+                review_context["time_context"],
+                service._build_time_context(current_time=service._now_iso()),
+            )
             self.assertEqual(
                 review_context["run"]["observed_result_summaries"][0]["tool_name"],
                 "create_post",

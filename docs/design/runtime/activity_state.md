@@ -177,9 +177,12 @@ LLM は `status` を出力しない。
 
 判断、発話、自律 initiative へ渡す `activity_context` は、保存 row ではなく前景要約にする。
 `previous_activity` は直前活動だけを表し、現在進行中の活動として扱わない。
+`last_known_activity` はその人物について最後に把握した推定を表し、期限切れ・終了後も保持済みrowから取得する。
+`current_activity` へ過去の状態を代入せず、現在有効な推定と最後の把握記録を別に渡す。
+`last_known_activity` は人物参照、根拠の経過、説明、推定という根拠種類を保持する。現在まで続いた活動区間を表す `duration_label` は含めない。
 判断文脈へ出す `activity_context` には `status` を含めない。
 判断文脈へ出す `activity_context.current_activity.actor` は speech の主体境界に使う。
-`current_activity / previous_activity` の `actor_ref` は、活動の人物との対応を保つため圧縮表現にも残す。
+`current_activity / previous_activity / last_known_activity` の `actor_ref` は、活動の人物との対応を保つため圧縮表現にも残す。
 `actor=person` の活動に触れる発話は、`actor_ref` の人物側の状況へのコメントとして表現する。
 判断文脈へ出す `activity_context.current_activity` には、活動推定 LLM が返した `transition` を含める。
 判断文脈へ出す `activity_context.current_activity / previous_activity` には、時刻そのものではなく `started_age_label / duration_label / ended_age_label` のような生活文脈向けラベルを含める。

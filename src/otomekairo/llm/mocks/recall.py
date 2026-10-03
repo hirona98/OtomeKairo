@@ -24,6 +24,7 @@ class LLMMockRecallMixin:
         current_time: str,
         *,
         persona_context: Any,
+        current_input: Any,
     ) -> dict[str, Any]:
         # model確認
         self._assert_mock_model(model_config)
@@ -69,6 +70,8 @@ class LLMMockRecallMixin:
             "reason_codes": reason_codes,
             "boundary": boundary,
             "target_actor": target_actor,
+            "target_person_ref": current_input.sender_ref if current_input.sender_kind == "person" else None,
+            "target_interaction_ref": getattr(current_input.interaction_context, "interaction_ref", None),
             "query_terms": query_terms,
         }
         validate_answer_contract_contract(payload)

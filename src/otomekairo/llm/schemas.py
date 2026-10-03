@@ -129,6 +129,8 @@ def input_interpretation_response_format() -> dict[str, Any]:
                         "reason_codes": string_array(),
                         "boundary": string_enum(ANSWER_BOUNDARY_VALUES),
                         "target_actor": string_enum(ANSWER_TARGET_ACTOR_VALUES),
+                        "target_person_ref": nullable({"type": "string"}),
+                        "target_interaction_ref": nullable({"type": "string"}),
                         "query_terms": string_array(),
                     }
                 ),

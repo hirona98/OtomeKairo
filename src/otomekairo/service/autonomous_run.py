@@ -1305,6 +1305,7 @@ class ServiceAutonomousRunMixin:
             review = self.llm.generate_autonomous_completion_review(
                 model_config=selected_preset,
                 review_context={
+                    "time_context": self._build_time_context(current_time=current_time),
                     "run": self._autonomous_completion_review_run_context(
                         step_context.run
                     ),
@@ -1375,6 +1376,12 @@ class ServiceAutonomousRunMixin:
         run_summary: dict[str, Any],
     ) -> dict[str, Any]:
         return {
+            "run_id": run_summary.get("run_id"),
+            "status": run_summary.get("status"),
+            "created_at": run_summary.get("created_at"),
+            "next_run_at": run_summary.get("next_run_at"),
+            "source_cycle_id": run_summary.get("source_cycle_id"),
+            "source_current_input": deepcopy(run_summary.get("source_current_input")),
             "objective_summary": run_summary.get("objective_summary"),
             "current_step_summary": run_summary.get("current_step_summary"),
             "history_summary": run_summary.get("history_summary"),
@@ -1566,13 +1573,9 @@ class ServiceAutonomousRunMixin:
         )
         if not participant_refs:
             return None
-        activity_state = self.store.get_current_activity_state(
+        return self._load_activity_context(
             memory_set_id=state["selected_memory_set_id"],
             actor_ref=participant_refs[0],
-            current_time=current_time,
-        )
-        return self._summarize_activity_context(
-            activity_state,
             current_time=current_time,
         )
 
@@ -3096,6 +3099,15 @@ class ServiceAutonomousRunMixin:
             "cooldown_until": run.get("cooldown_until"),
             "created_at": run.get("created_at"),
             "updated_at": run.get("updated_at"),
+            "source_cycle_id": run.get("source_cycle_id"),
+            "source_current_input": {
+                key: deepcopy(run["source_current_input"][key])
+                for key in (
+                    "sender_kind", "sender_ref", "source_kind", "response_target_refs",
+                    "interaction_context", "text",
+                )
+                if key in run.get("source_current_input", {})
+            },
         }
         self._attach_autonomous_observation_summary(summary, run)
         return summary

@@ -153,11 +153,17 @@ server は capability request 以外の complete 候補について、状態遷�
 
 review には次だけを渡す。
 
+- 現在時刻の `TimeContext` と、run の ID、状態、開始時刻、次の実行機会、起点 cycle ID、起点入力
 - run の目的、現在段階、履歴、観測済み capability result 要約
 - complete 候補の `action.kind / run_update`
 - `action.kind=speech` の場合だけ生成済み候補本文
 
 review の結果は `allow_complete / continue_run` のいずれかである。
+
+相対時刻を含む目的は固定した run の開始時刻と起点入力から解釈し、現在時刻と照合する。
+`next_run_at` は次の実行機会であり、開始直後の即時実行は待機を登録する機会となる。
+目的達成は当該 run の履歴・観測実績と候補行為から評価する。同じ内容を持つ過去の依頼の完了は、その過去の run の実績として扱う。
+step 判断にも同じ起点情報を渡し、直近会話の実績と今回の run の実績を区別する。
 
 - `allow_complete` は、観測済みの実行結果または今回の発話行為そのものによって目的が満たされ、候補発話も実績と一致していることを表す
 - `continue_run` は、目的達成にまだ外界作用、観測、待機が必要か、候補発話が未実行の次行動を現在 run の続きとして表していることを表す

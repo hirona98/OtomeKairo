@@ -232,12 +232,9 @@ class ServiceInputPipelineMixin:
             trigger_kind=trigger_kind,
             observation_summary=observation_summary,
         )
-        initial_activity_context = self._summarize_activity_context(
-            self.store.get_current_activity_state(
-                memory_set_id=state["selected_memory_set_id"],
-                actor_ref=current_input.sender_ref,
-                current_time=started_at,
-            ) if current_input.sender_ref is not None else None,
+        initial_activity_context = self._load_activity_context(
+            memory_set_id=state["selected_memory_set_id"],
+            actor_ref=current_input.sender_ref,
             current_time=started_at,
         )
         # モデル選択
@@ -843,6 +840,8 @@ class ServiceInputPipelineMixin:
             "reason_codes": ["visual_observation_direct_entry"],
             "boundary": "none",
             "target_actor": "any",
+            "target_person_ref": None,
+            "target_interaction_ref": None,
             "query_terms": [],
             "requires_direct_evidence": False,
         }

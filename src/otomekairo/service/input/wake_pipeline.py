@@ -55,14 +55,11 @@ class ServiceInputWakePipelineMixin:
                 if interaction_context is not None and interaction_context.participant_refs
                 else None
             )
-            pre_observation_activity_context = self._summarize_activity_context(
-                self.store.get_current_activity_state(
-                    memory_set_id=state["selected_memory_set_id"],
-                    actor_ref=actor_ref,
-                    current_time=started_at,
-                ) if actor_ref is not None else None,
+            pre_observation_activity_context = self._load_activity_context(
+                memory_set_id=state["selected_memory_set_id"],
+                actor_ref=actor_ref,
                 current_time=started_at,
-            )
+            ) if actor_ref is not None else None
             client_context = self._run_wake_policy_observations(
                 state=state,
                 started_at=started_at,
@@ -403,14 +400,11 @@ class ServiceInputWakePipelineMixin:
             },
         }
         actor_ref = self._initiative_entry_actor_ref(recent_turns)
-        activity_context = self._summarize_activity_context(
-            self.store.get_current_activity_state(
-                memory_set_id=state["selected_memory_set_id"],
-                actor_ref=actor_ref,
-                current_time=current_time,
-            ) if actor_ref is not None else None,
+        activity_context = self._load_activity_context(
+            memory_set_id=state["selected_memory_set_id"],
+            actor_ref=actor_ref,
             current_time=current_time,
-        )
+        ) if actor_ref is not None else None
         if isinstance(activity_context, dict):
             source_pack["activity_context"] = activity_context
         return source_pack

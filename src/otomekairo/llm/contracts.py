@@ -223,6 +223,8 @@ ANSWER_CONTRACT_REQUIRED_KEYS = (
     "reason_codes",
     "boundary",
     "target_actor",
+    "target_person_ref",
+    "target_interaction_ref",
     "query_terms",
 )
 INTERNAL_IDENTIFIER_PATTERN = re.compile(
@@ -476,6 +478,11 @@ def validate_answer_contract_contract(payload: dict[str, Any]) -> None:
     target_actor = payload["target_actor"]
     if target_actor not in ANSWER_TARGET_ACTOR_VALUES:
         raise LLMError("AnswerContract.target_actor が不正です。")
+
+    for key, prefix in (("target_person_ref", "person:"), ("target_interaction_ref", "interaction:")):
+        value = payload[key]
+        if value is not None and (not isinstance(value, str) or not value.startswith(prefix) or len(value) == len(prefix)):
+            raise LLMError(f"AnswerContract.{key} は有効な参照IDまたはnullである必要があります。")
 
     # query_terms
     query_terms = payload["query_terms"]

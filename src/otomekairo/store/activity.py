@@ -72,6 +72,19 @@ class StoreActivityMixin:
             return None
         return json.loads(row["payload_json"])
 
+    def get_last_known_activity_state(
+        self, *, memory_set_id: str, actor_ref: str, current_time: str,
+    ) -> dict[str, Any] | None:
+        # Expiry removes current validity, not the previously observed activity.
+        with self._memory_db() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM activity_states "
+                "WHERE memory_set_id = ? AND actor_ref = ? AND updated_at <= ? "
+                "ORDER BY updated_at DESC, rowid DESC LIMIT 1",
+                (memory_set_id, actor_ref, current_time),
+            ).fetchone()
+        return json.loads(row["payload_json"]) if row is not None else None
+
     def list_current_activity_states(
         self,
         *,

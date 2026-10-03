@@ -291,6 +291,8 @@ class ServiceInputMixin(
                 "contract": "summary",
                 "boundary": "none",
                 "target_actor": "any",
+                "target_person_ref": None,
+                "target_interaction_ref": None,
                 "reason_codes": [],
                 "query_terms": [],
                 "requires_direct_evidence": False,

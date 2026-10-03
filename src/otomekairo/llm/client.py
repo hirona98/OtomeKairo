@@ -359,6 +359,7 @@ class LLMClient:
                     recall_hint,
                     current_time,
                     persona_context=persona_context,
+                    current_input=current_input,
                 )
                 answer_contract = normalize_answer_contract_payload(answer_contract)
                 payload = {
