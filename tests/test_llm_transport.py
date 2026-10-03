@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from functools import partial
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -39,6 +40,82 @@ def _current_input() -> CurrentInput:
 
 
 class LLMTransportTests(unittest.TestCase):
+    def test_openai_reasoning_reaches_http_and_api_rejection_remains_failure(self) -> None:
+        import httpx
+        import litellm
+        from openai import OpenAI
+
+        output_format = {
+            "type": "json_schema",
+            "json_schema": {"name": "test", "strict": True, "schema": {"type": "object"}},
+        }
+        for status in (200, 400):
+            for response_format in (None, output_format):
+                with self.subTest(status=status, structured=response_format is not None):
+                    requests = []
+
+                    def respond(request):
+                        requests.append(json.loads(request.content))
+                        if status == 400:
+                            return httpx.Response(400, json={"error": {
+                                "message": "Unsupported reasoning_effort for this model.",
+                                "type": "invalid_request_error",
+                                "param": "reasoning_effort",
+                                "code": "unsupported_parameter",
+                            }})
+                        return httpx.Response(200, json={
+                            "id": "chatcmpl-test", "object": "chat.completion", "created": 0,
+                            "model": "gpt-6-luna",
+                            "choices": [{"index": 0, "finish_reason": "stop",
+                                         "message": {"role": "assistant", "content": "{}"}}],
+                            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                        })
+
+                    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
+                        client = OpenAI(api_key="test-key", base_url="https://test.invalid/v1",
+                                        http_client=http, max_retries=0)
+                        with (
+                            patch("otomekairo.llm.transport._load_litellm_completion",
+                                  return_value=partial(litellm.completion, client=client)),
+                            patch("otomekairo.llm.transport.debug_log"),
+                        ):
+                            request_args = {
+                                "model_config": {"model": "openai/gpt-6-luna", "api_key": "test-key",
+                                                 "reasoning_effort": "max", "max_output_tokens": 32000},
+                                "messages": [{"role": "user", "content": "test"}],
+                                "response_format": response_format,
+                            }
+                            if status == 400:
+                                with self.assertRaisesRegex(LLMError, "Unsupported reasoning_effort"):
+                                    complete_text(**request_args)
+                            else:
+                                self.assertEqual(complete_text(**request_args), "{}")
+                    self.assertEqual(len(requests), 1)
+                    wire = requests[0]
+                    self.assertEqual(wire["reasoning_effort"], "max")
+                    self.assertEqual(wire["max_completion_tokens"], 32000)
+                    self.assertEqual(wire.get("response_format"), response_format)
+                    self.assertNotIn("allowed_openai_params", wire)
+                    self.assertNotIn("drop_params", wire)
+
+    def test_azure_deployment_reasoning_passes_litellm_parameter_validation(self) -> None:
+        from litellm.utils import get_optional_params
+
+        def completion(**kwargs):
+            optional = get_optional_params(
+                model="test-deployment", custom_llm_provider="azure",
+                reasoning_effort=kwargs["reasoning_effort"],
+                allowed_openai_params=kwargs["allowed_openai_params"],
+                drop_params=kwargs["drop_params"],
+            )
+            self.assertEqual(optional["reasoning_effort"], "max")
+            return _completion_response("{}")
+
+        with patch("otomekairo.llm.transport._load_litellm_completion", return_value=completion):
+            self.assertEqual(complete_text(
+                model_config={"model": "azure/test-deployment", "reasoning_effort": "max"}, messages=[],
+            ), "{}")
+
     def test_invalid_output_budget_fails_without_calling_provider(self) -> None:
         for value in (0, -1, True, None, "32000", 32000.5):
             with self.subTest(value=value):

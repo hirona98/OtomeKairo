@@ -60,6 +60,11 @@ def complete_text(
             }
         else:
             request_kwargs["reasoning_effort"] = reasoning_effort
+            if _model_provider_name(model_config) in {"openai", "azure"}:
+                # 新モデルや Azure deployment 名の対応可否は API が判断する。
+                # LiteLLM のモデル名カタログで明示設定を拒否・破棄しない。
+                request_kwargs["allowed_openai_params"] = ["reasoning_effort"]
+                request_kwargs["drop_params"] = False
     if response_format is not None:
         request_kwargs["response_format"] = response_format
         if _model_provider_name(model_config) == "openrouter":
