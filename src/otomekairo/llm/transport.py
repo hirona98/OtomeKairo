@@ -6,8 +6,9 @@ from typing import Any, Callable
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
-from otomekairo.llm.contracts import LLMError
+from otomekairo.llm.contracts import LLMError, LLMGenerationError
 from otomekairo.llm.parsing import extract_embedding_vectors, extract_http_error_detail, extract_response_text
+from otomekairo.service.common import debug_log
 
 
 # 定数
@@ -73,11 +74,18 @@ def complete_text(
     if web_search_options is not None:
         request_kwargs["web_search_options"] = web_search_options
 
-    try:
-        response = completion(**request_kwargs)
-    except Exception as exc:  # noqa: BLE001
-        raise LLMError(f"LiteLLM の呼び出しに失敗しました: {exc}") from exc
-    return extract_response_text(response)
+    for attempt in range(2):
+        try:
+            response = completion(**request_kwargs)
+        except Exception as exc:  # noqa: BLE001
+            raise LLMError(f"LiteLLM の呼び出しに失敗しました: {exc}") from exc
+        try:
+            return extract_response_text(response)
+        except LLMGenerationError:
+            if attempt == 1:
+                raise
+            debug_log("LLM", "provider generation_failed attempt=1 retry=same_request", level="WARNING")
+    raise AssertionError("Completion attempts exhausted without a result.")
 
 
 # embedding を model 差分込みで実行する。

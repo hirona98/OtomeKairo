@@ -18,7 +18,7 @@ OtomeKairo は、対話入力、API起床要求、観測能力や外部サービ
 - ユーザーが現在している活動の推定
 - ユーザーが直前までしていた活動の推定
 - 活動内容、活動対象、現在活動か直前活動かの短い状態
-- 活動主体。人物の活動は `person`、OtomeKairo 自身の ongoing action と構造的に分かる場合だけ `self`
+- 活動主体。`actor_ref` が示す人物の活動として `person` に固定する
 - 推定の確からしさ、更新時刻、失効時刻
 - 推定に使った source kind と source ref の要約
 
@@ -37,6 +37,7 @@ OtomeKairo は、対話入力、API起床要求、観測能力や外部サービ
 `activity_state` はユーザー活動の推定を保持する。
 `ongoing_action` は OtomeKairo 自身の継続中の能力実行を保持する。
 この 3 つを混同しない。
+`source_owner=self` のカメラ観測は、構造化された `observed_persons` が活動主体の `actor_ref` と一致する場合に活動推定へ渡す。未同定または別人の視覚説明は本人の活動根拠から分け、世界の視覚前景には保持する。
 活動推定層と行動判断層の境界は [../llm/プロンプト文脈分離方針.md](../llm/プロンプト文脈分離方針.md) を正とする。
 
 ## 最小構造
@@ -49,7 +50,7 @@ OtomeKairo は、対話入力、API起床要求、観測能力や外部サービ
 | `memory_set_id` | 記憶集合 |
 | `label` | 判断へ渡す短い自然文の活動モード要約 |
 | `actor_ref` | 活動対象の安定参照。人物状態では `person:*` |
-| `actor` | 活動主体の種別。`person / self / unknown` のいずれか |
+| `actor` | 活動主体の種別。`person` |
 | `target` | 活動対象。アプリ名、作品名、相手、作業対象など |
 | `status` | 保存内部の生存状態。`active / ended` のいずれか |
 | `confidence` | 推定の確からしさ |
@@ -73,6 +74,7 @@ activity 推定は LLM 補助契約で行う。
 LLM には、少なくとも次の要約を source pack として渡す。
 
 - `current_input`
+- `activity_subject`（コードが確定した `actor=person` と `actor_ref`）
 - `recent_turns`
 - `time_context`
 - `client_context`
@@ -91,6 +93,7 @@ LLM は複数 source の意味を見て、活動候補を返す。
 文字列比較は同一活動の統合、重複抑制、inspection の補助に限定する。
 `desktop / virtual` の vision source と `source_owner=user_environment` は人物側の環境観測として扱い、人物文脈が確定している場合だけ activity candidate の `actor=person` にする。
 `source_owner=self` の camera 観測は OtomeKairo の視覚根拠として扱い、観測対象の人物参照が確定している場合だけ `actor=person` の activity candidate に使う。
+コードは source pack の `observed_person_refs` と `activity_subject.actor_ref` の一致を検証する。未同定のカメラ人物についての `observation` 候補は会話話者の活動として採用せず、本人の `activity_report` は別に採用できる。
 activity の `label / reason_summary` はユーザー側の観測事実から構成する。
 assistant の直近発話、約束、待機姿勢は activity とは別文脈として扱う。
 activity の `label` は具体的な内容名や対象名ではなく、判断と発話でそのまま使える短い活動モードにする。
@@ -136,7 +139,7 @@ LLM の出力は JSON object 1 個に固定する。
 - `activity_candidates` は最大 1 件の配列にする
 - 候補がない場合は空配列にする
 - 各候補は `actor / label / target / confidence_hint / salience_hint / ttl_hint / transition / reason_summary` だけを持つ
-- `actor` は `person / self / unknown` のいずれかにする
+- `actor` は `person` にする。主体が確定しない場合は候補を返さない
 - `label` は活動内容を自然文で短く表す
 - `confidence_hint`、`salience_hint` は `low / medium / high` のいずれかにする
 - `ttl_hint` は `short / medium / long` のいずれかにする
@@ -144,6 +147,8 @@ LLM の出力は JSON object 1 個に固定する。
 - `label`、`target`、`reason_summary` は短くし、内部識別子を含めない
 
 ## 更新規則
+
+候補が非空の場合は、独立した `activity_state_grounding_review` に source pack と候補を渡す。人物についての根拠がある候補を採用し、現在の個の返答準備などを人物へ移した候補は除く。審査は [状態候補根拠審査](../llm/状態候補根拠審査.md) の共通契約を使う。審査に失敗した場合は更新を失敗させる。
 
 コードは LLM 出力を受けて次を決める。
 
@@ -155,9 +160,10 @@ LLM の出力は JSON object 1 個に固定する。
 - 既存 activity との継続、切替、終了
 - `previous_activity`
 
-`transition=continue` では既存 activity を継続更新する。
+`transition=continue` では既存 activity を継続更新し、`previous_activity` は保持する。継続中の current を終了済み previous に移さない。
 `transition=start` または `switch` では、既存 activity を `previous_activity` に移し、新しい activity を current にする。
 `transition=end` では、既存 activity を `previous_activity` に移し、current を空にする。
+`transition=start` は初めて把握した現在活動の登録を表し、その活動の物理的な開始時刻が報告されたことを要件としない。`continue` は同じ活動の更新、`switch` は別の活動への切り替え、`end` は活動の終了を表す。
 `transition=none` または候補なしでは、既存 activity を保存したまま、期限切れだけを処理する。
 保存内部では、current activity を `active`、終了済み activity を `ended` として扱う。
 current activity は `memory_set_id / actor_ref` ごとに1件を持つ。

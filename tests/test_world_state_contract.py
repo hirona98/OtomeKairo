@@ -31,6 +31,39 @@ class _WorldStateService(ServiceInputWorldStateMixin):
         return stripped or None
 
 
+class UserInputWorldSourceTests(unittest.TestCase):
+    def test_text_is_available_for_llm_state_judgment_without_visual_evidence(self) -> None:
+        service = _WorldStateService()
+        pack = WorldStateSourcePack(
+            trigger_kind="user_message", current_input_summary="窓を閉めて台所に移動した。",
+            source_kind="user_input", source_ref="cycle:test", time_context="現在",
+            client_context=WorldStateClientContext(source="test"), current_person_ref="person:test",
+        )
+        pack.state_sources = tuple(service._build_world_state_source_candidates(source_pack=pack, reported_states=[
+            {"state_type": "environment", "evidence_text": "窓を閉めて"},
+            {"state_type": "location", "evidence_text": "台所に移動した。"},
+        ]))
+        sources = {candidate.state_type: candidate for candidate in pack.state_sources}
+        self.assertIn("environment", sources)
+        self.assertIn("location", sources)
+        self.assertNotIn("visual_context", sources)
+        self.assertEqual(sources["location"].evidence_summary, "台所に移動した。")
+        self.assertTrue(service._should_generate_world_state(
+            trigger_kind="user_message", observation_summary=None, source_pack=pack,
+        ))
+
+    def test_question_is_passed_to_llm_without_code_interpreting_its_meaning(self) -> None:
+        service = _WorldStateService()
+        pack = WorldStateSourcePack(
+            trigger_kind="user_message", current_input_summary="いま何が見える？",
+            source_kind="user_input", source_ref="cycle:test", time_context="現在",
+            client_context=WorldStateClientContext(source="test"), current_person_ref="person:test",
+        )
+        pack.state_sources = tuple(service._build_world_state_source_candidates(source_pack=pack))
+        self.assertFalse(pack.state_sources)
+        validate_world_state_contract({"state_candidates": []}, source_pack=pack)
+
+
 def _source_pack() -> WorldStateSourcePack:
     pack = WorldStateSourcePack(
         trigger_kind="capability_result",

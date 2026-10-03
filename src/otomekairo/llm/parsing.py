@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from otomekairo.llm.contracts import LLMError
+from otomekairo.llm.contracts import LLMError, LLMGenerationError
 
 
 # response から本文 text を取り出す。
@@ -13,6 +13,15 @@ def extract_response_text(response: Any) -> str:
         choices = response.get("choices")
     if not isinstance(choices, list) or not choices:
         raise LLMError("LiteLLM の応答に choices が含まれていません。")
+
+    choice = choices[0]
+    finish_reason = choice.get("finish_reason") if isinstance(choice, dict) else getattr(choice, "finish_reason", None)
+    provider_fields = choice.get("provider_specific_fields") if isinstance(choice, dict) else getattr(choice, "provider_specific_fields", None)
+    native_reason = provider_fields.get("native_finish_reason") if isinstance(provider_fields, dict) else None
+    if native_reason == "error" or finish_reason == "error":
+        raise LLMGenerationError("LLM provider が生成失敗を返しました: finish_reason=error")
+    if finish_reason in {"length", "content_filter"}:
+        raise LLMError(f"LLM の応答が完了していません: finish_reason={finish_reason}")
 
     message = getattr(choices[0], "message", None)
     if message is None and isinstance(choices[0], dict):

@@ -742,7 +742,7 @@ class DecisionContractTests(unittest.TestCase):
             activity_context=None,
             ongoing_action_summary=None,
             capability_decision_view=_mcp_capability_view(),
-            last_result_context=None,
+            last_result_context=None, affect_context={},
         )
 
         with patch(
@@ -785,9 +785,9 @@ class DecisionContractTests(unittest.TestCase):
             "autonomous_run": None,
             "foreground_selection": {
                 "primary_factor_ref": "visual_observation:current",
-                "supporting_factor_refs": ["visual_observation:current"],
+                "supporting_factor_refs": [],
                 "suppressed_factors": [],
-                "summary_text": "同じ観測を主役と補助に置いた。",
+                "summary_text": "候補に存在しない観測を選んだ。",
             },
             "target_stances": build_decision_target_stances_for_kind(
                 "noop",
@@ -808,7 +808,7 @@ class DecisionContractTests(unittest.TestCase):
                 return_value=json.dumps(invalid),
             ),
         ):
-            with self.assertRaisesRegex(LLMError, r"重複=visual_observation:current"):
+            with self.assertRaisesRegex(LLMError, r"不明な参照=visual_observation:current"):
                 LLMClient().generate_decision(
                     model_config={"model": "real-model"},
                     persona_context=_persona_context(),
@@ -819,10 +819,47 @@ class DecisionContractTests(unittest.TestCase):
         self.assertEqual(len(warnings), 2)
         for message in warnings:
             self.assertIn("decision:outward_speech validation_failed", message)
-            self.assertIn("重複=visual_observation:current", message)
+            self.assertIn("不明な参照=visual_observation:current", message)
             self.assertIn("payload=", message)
             self.assertIn('"primary_factor_ref":"visual_observation:current"', message)
-            self.assertIn('"supporting_factor_refs":["visual_observation:current"]', message)
+            self.assertIn('"supporting_factor_refs":[]', message)
+
+    def test_outward_grounding_reconsiders_and_uses_only_person_utterances(self) -> None:
+        context = replace(
+            _decision_context([]), comparison_scope="outward_speech", trigger_kind="wake",
+            recent_turns=[{"role": "user", "text": "様子を教えて"}, {"role": "assistant", "text": "作業が見えます"}],
+            recent_interactions=[{"interaction_ref": "interaction:other", "turns": [{"role": "assistant", "text": "返答しました"}]}],
+            autonomous_run_summaries=[{"run_id": "run:completed", "status": "completed"}],
+        )
+        candidate = {"kind": "noop", "reason_summary": "人物が集中を明示した"}
+        corrected = {"kind": "noop", "reason_summary": "直近で応答済み"}
+        with patch.object(LLMClient, "_generate_structured_payload", side_effect=[
+            {"outcome": "reconsider", "reason_summary": "本人の申告がない"}, corrected,
+            {"outcome": "allow", "reason_summary": "対話履歴に一致"},
+        ]) as generate:
+            result = LLMClient()._ground_outward_decision(
+                model_config={"model": "test"}, persona_context=_persona_context(),
+                context=context, messages=[], candidate=candidate,
+            )
+        self.assertEqual(result, corrected)
+        review_input = json.loads(generate.call_args_list[0].kwargs["messages"][1]["content"])
+        self.assertEqual(review_input["person_utterances"], [{"role": "user", "text": "様子を教えて"}])
+        self.assertEqual(review_input["communication_history"], {"recent_turns": context.recent_turns, "recent_interactions": context.recent_interactions})
+        self.assertEqual(review_input["autonomous_run_summaries"], context.autonomous_run_summaries)
+        self.assertEqual(generate.call_count, 3)
+
+    def test_outward_grounding_fails_when_reconsidered_reason_is_unsupported(self) -> None:
+        context = replace(_decision_context([]), comparison_scope="outward_speech", trigger_kind="wake")
+        candidate = {"kind": "noop", "reason_summary": "根拠のない理由"}
+        with patch.object(LLMClient, "_generate_structured_payload", side_effect=[
+            {"outcome": "reconsider", "reason_summary": "一次根拠がない"}, candidate,
+            {"outcome": "reconsider", "reason_summary": "一次根拠がない"},
+        ]):
+            with self.assertRaises(LLMError):
+                LLMClient()._ground_outward_decision(
+                    model_config={"model": "test"}, persona_context=_persona_context(),
+                    context=context, messages=[], candidate=candidate,
+                )
 
     def test_decision_parse_failed_log_includes_rejected_content(self) -> None:
         logs: list[tuple[str, str, str]] = []
@@ -1107,7 +1144,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
                 activity_context=None,
                 ongoing_action_summary=None,
                 capability_decision_view=[],
-                last_result_context=None,
+                last_result_context=None, affect_context={},
             ),
         )
         self.assertIn(
@@ -1265,7 +1302,7 @@ class AutonomousCompletionReviewContractTests(unittest.TestCase):
             activity_context=None,
             ongoing_action_summary=None,
             capability_decision_view=_mcp_capability_view(),
-            last_result_context=None,
+            last_result_context=None, affect_context={},
             completion_review_feedback="目的に沿う実行を続ける。",
         )
         messages = build_autonomous_step_messages(

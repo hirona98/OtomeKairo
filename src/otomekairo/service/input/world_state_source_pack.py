@@ -77,6 +77,15 @@ class ServiceInputWorldStateSourcePackMixin:
                 persona_context=persona_context,
                 current_person_ref=current_person_ref,
             )
+            if trigger_kind == "user_message" and input_text.strip():
+                reports = self.llm.generate_world_state_source_selection(
+                    model_config=state["model_presets"][state["selected_model_preset_id"]],
+                    persona_context=persona_context,
+                    input_text=input_text,
+                )["reported_states"]
+                source_pack.state_sources = tuple(self._build_world_state_source_candidates(
+                    source_pack=source_pack, reported_states=reports,
+                ))
             source_pack_contexts = self._summarize_world_state_source_pack_contexts(source_pack)
             source_pack_state_type_hooks = self._summarize_world_state_state_type_hooks(source_pack)
             if not self._should_generate_world_state(
@@ -915,13 +924,15 @@ class ServiceInputWorldStateSourcePackMixin:
         self,
         *,
         source_pack: WorldStateSourcePack,
+        reported_states: list[dict[str, str]] | None = None,
     ) -> list[WorldStateSourceCandidate]:
         candidates: list[WorldStateSourceCandidate] = []
+        report_evidence = {report["state_type"]: report["evidence_text"] for report in (reported_states or [])}
         for state_type, context_key in WORLD_STATE_CONTEXT_KEYS_BY_TYPE:
             context = source_pack.context(context_key)
-            if context is None:
-                continue
-            evidence_summary = self._world_state_source_evidence_summary(context)
+            evidence_summary = self._world_state_source_evidence_summary(context) if context is not None else None
+            if state_type in report_evidence:
+                evidence_summary = report_evidence[state_type]
             if evidence_summary is None:
                 continue
             # 対人状態は current_person_ref が示す人物との関係へ結び付ける。

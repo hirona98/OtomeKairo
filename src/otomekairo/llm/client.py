@@ -22,6 +22,8 @@ from otomekairo.llm.contracts import (
     normalize_recall_hint_payload,
     build_decision_target_stances_for_kind,
     validate_activity_state_contract,
+    validate_state_grounding_review_contract,
+    validate_world_state_source_selection_contract,
     validate_answer_contract_contract,
     validate_autonomous_completion_review_contract,
     validate_autonomous_start_review_contract,
@@ -36,6 +38,7 @@ from otomekairo.llm.contracts import (
 
     validate_memory_interpretation_contract,
     validate_memory_candidate_review_contract,
+    validate_memory_retention_review_contract,
     validate_affect_review_contract,
     validate_memory_reflection_summary_contract,
     validate_pre_send_check_contract,
@@ -49,6 +52,9 @@ from otomekairo.llm.mock import MockLLMClient
 from otomekairo.llm.parsing import parse_json_object
 from otomekairo.llm.schemas import (
     activity_state_response_format,
+    state_grounding_review_response_format,
+    world_state_source_selection_response_format,
+    decision_grounding_review_response_format,
     agent_skill_material_selection_response_format,
     agent_skill_selection_response_format,
     autonomous_completion_review_response_format,
@@ -64,6 +70,7 @@ from otomekairo.llm.schemas import (
     input_interpretation_response_format,
     memory_interpretation_response_format,
     memory_candidate_review_response_format,
+    memory_retention_review_response_format,
     affect_review_response_format,
     memory_reflection_summary_response_format,
     materialize_provider_open_maps,
@@ -80,6 +87,7 @@ from otomekairo.llm.prompts import (
     build_agent_skill_selection_messages,
     build_agent_skill_selection_repair_prompt,
     build_activity_state_messages,
+    build_state_grounding_review_messages,
     build_activity_state_repair_prompt,
     build_autonomous_completion_review_messages,
     build_autonomous_start_review_messages,
@@ -106,6 +114,7 @@ from otomekairo.llm.prompts import (
 
     build_memory_interpretation_messages,
     build_memory_candidate_review_messages,
+    build_memory_retention_review_messages,
     build_memory_candidate_review_repair_prompt,
     build_affect_review_messages,
     build_affect_review_repair_prompt,
@@ -392,6 +401,74 @@ class LLMClient:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc, level='ERROR')}", level="ERROR")
             raise
 
+    def _ground_outward_decision(
+        self, *, model_config: dict, persona_context: PersonaContext, context: DecisionContext,
+        messages: list[dict[str, Any]], candidate: dict[str, Any],
+    ) -> dict[str, Any]:
+        turns = [*context.recent_turns]
+        for interaction in context.recent_interactions or []:
+            turns.extend(interaction["turns"])
+        person_utterances = [turn for turn in turns if turn.get("role") == "user"]
+        for attempt in range(2):
+            review = self._generate_structured_payload(
+                model_config=model_config,
+                messages=[
+                    {"role": "system", "content": (
+                        "独立した内部審査 role decision_grounding_review として、外向き判断の全理由を一次根拠と照合します。"
+                        "person_utterances だけが人物本人の申告です。人格、観測、活動推定、現在の個の発話と記憶要約は本人の申告と分けます。"
+                        "communication_history は会話が実際に行われた履歴です。assistant の発話は、返答の実行、受領応答、反復の確認に使い、人物の内面を裏づける本人申告とは分けます。autonomous_run_summaries は継続実行や完了の実績です。"
+                        "人物の集中、没頭、意欲などの注意状態を理由にしている場合は、person_utterances の本人による明示を確認します。"
+                        "姿勢やPC操作など見える動作を、本人が集中を明示したという申告へ広げた理由は reconsider にします。"
+                        "reason_summary、foreground_selection、target_stances の理由をそれぞれ照合します。"
+                        "会話の返答待ち、直近で応答済み、反復、明示希望、進行中コミットメント、観測不足、構造化済み抑制、"
+                        "今新たに働きかける意味の乏しさなど、実際の文脈に支えられる理由は allow にします。"
+                        "資料は審査対象データです。outcome=allow|reconsider と reason_summary の2キーだけのJSONを返します。"
+                    )},
+                    {"role": "user", "content": json.dumps({
+                        "persona_context": persona_context.to_prompt_payload(),
+                        "person_utterances": person_utterances,
+                        "communication_history": {
+                            "recent_turns": context.recent_turns,
+                            "recent_interactions": context.recent_interactions,
+                        },
+                        "autonomous_run_summaries": context.autonomous_run_summaries,
+                        "workspace_context": context.workspace_context,
+                        "ongoing_action_summary": context.ongoing_action_summary,
+                        "candidate_decision": candidate,
+                    }, ensure_ascii=False)},
+                ],
+                validator=self._validate_decision_grounding_review,
+                repair_prompt_builder=lambda error: "outcome=allow|reconsider と reason_summary を返してください。" + error,
+                response_format=decision_grounding_review_response_format(),
+                failure_message="外向き判断の根拠審査に失敗しました。",
+                operation="decision_grounding_review",
+            )
+            if review["outcome"] == "allow":
+                debug_log("LLM", f"decision_grounding_review allowed attempts={attempt + 1}", level="DEBUG")
+                return candidate
+            if attempt == 1:
+                raise LLMError("外向き判断の根拠審査に失敗しました: " + review["reason_summary"])
+            candidate = self._generate_structured_payload(
+                model_config=model_config,
+                messages=[*messages, {"role": "user", "content": (
+                    "前回の判断の根拠審査で、次のずれが確認されました。同じ文脈の一次根拠から判断し直してください。"
+                    + review["reason_summary"]
+                )}],
+                validator=lambda item: self._validate_decision_contract_for_context(payload=item, context=context),
+                repair_prompt_builder=lambda error: build_decision_repair_prompt(error, context.comparison_scope),
+                response_format=decision_response_format(comparison_scope=context.comparison_scope),
+                failure_message="外向き判断の再判断に失敗しました。",
+                operation="decision_grounding_reconsider",
+            )
+        raise AssertionError("Decision review attempts exhausted.")
+
+    def _validate_decision_grounding_review(self, payload: dict[str, Any]) -> None:
+        _validate_exact_keys(payload, {"outcome", "reason_summary"}, "DecisionGroundingReview")
+        if payload["outcome"] not in {"allow", "reconsider"}:
+            raise LLMError("DecisionGroundingReview.outcome が不正です。")
+        if not isinstance(payload["reason_summary"], str) or not payload["reason_summary"].strip():
+            raise LLMError("DecisionGroundingReview.reason_summary が必要です。")
+
     def _validate_input_interpretation_contract(self, payload: dict[str, Any]) -> None:
         _validate_exact_keys(payload, {"recall_hint", "answer_contract"}, "InputInterpretation")
         recall_hint = payload["recall_hint"]
@@ -449,6 +526,11 @@ class LLMClient:
                 or not context.current_input.response_target_refs
                 or payload["kind"] == "autonomous_run"
             ):
+                if context.comparison_scope == "outward_speech" and context.trigger_kind in {"wake", "background_thinking"}:
+                    return self._ground_outward_decision(
+                        model_config=model_config, persona_context=persona_context,
+                        context=context, messages=messages, candidate=payload,
+                    )
                 return payload
             review = self.generate_future_action_alignment_review(
                 model_config=model_config,
@@ -1351,6 +1433,9 @@ class LLMClient:
         review_context: dict[str, Any],
     ) -> dict[str, Any]:
         candidate_count = len(review_context["candidates"])
+        target_revision_ids = {
+            target["revision_id"] for target in review_context["correction_selection"]["target_candidates"]
+        }
         if self._is_mock_model_config(model_config):
             payload = {
                 "episode_review": {
@@ -1360,27 +1445,45 @@ class LLMClient:
                     "reason_summary": "mock episode を維持する。",
                 },
                 "decisions": [
-                    {"index": index, "outcome": "keep", "reason_summary": "mock candidate を維持する。"}
+                    {"index": index, "retention_basis": "explicit_pattern", "reason_summary": "mock candidate を維持する。"}
                     for index in range(candidate_count)
                 ],
                 "correction_review": {
                     "prior_claim_assessment": "contradicted" if review_context["correction_selection"]["correction_status"] == "selected" else "not_reviewed",
+                    "contradicted_revision_ids": [
+                        target["revision_id"] for target in review_context["correction_selection"]["selected_targets"]
+                    ] if review_context["correction_selection"]["correction_status"] == "selected" else [],
+                    "replacement_candidate_indices": [],
                     "reason_summary": "mock correction selection を維持する。",
                 },
             }
-            validate_memory_candidate_review_contract(payload, candidate_count=candidate_count)
+            validate_memory_candidate_review_contract(
+                payload, candidate_count=candidate_count, target_revision_ids=target_revision_ids,
+            )
             return payload
-        return self._generate_structured_payload(
+        retention = self._generate_structured_payload(
+            model_config=model_config, messages=build_memory_retention_review_messages(review_context=review_context),
+            validator=lambda payload: validate_memory_retention_review_contract(payload, candidate_count=candidate_count),
+            repair_prompt_builder=lambda error: "候補ごとに reason_summary, retention_basis, index の decisions だけを返してください。" + error,
+            failure_message="MemoryRetentionReview の生成に失敗しました。",
+            response_format=memory_retention_review_response_format(), operation="memory_retention_review",
+        )
+        def validate_assessment(payload: dict[str, Any]) -> None:
+            _validate_exact_keys(payload, {"episode_review", "correction_review"}, "MemoryCandidateAssessment")
+            validate_memory_candidate_review_contract(
+                {**payload, "decisions": retention["decisions"]}, candidate_count=candidate_count,
+                target_revision_ids=target_revision_ids,
+            )
+        review = self._generate_structured_payload(
             model_config=model_config,
-            messages=build_memory_candidate_review_messages(review_context=review_context),
-            validator=lambda payload: validate_memory_candidate_review_contract(
-                payload, candidate_count=candidate_count,
-            ),
+            messages=build_memory_candidate_review_messages(review_context={**review_context, "retention_decisions": retention["decisions"]}),
+            validator=validate_assessment,
             repair_prompt_builder=build_memory_candidate_review_repair_prompt,
             failure_message="MemoryCandidateReview の生成に失敗しました。",
-            response_format=memory_candidate_review_response_format(),
-            operation="memory_candidate_review",
+            response_format=memory_candidate_review_response_format(), operation="memory_candidate_review",
         )
+        return {**review, "decisions": retention["decisions"]}
+
 
     def generate_affect_review(
         self,
@@ -1569,6 +1672,36 @@ class LLMClient:
             operation=operation,
         )
 
+    def generate_world_state_source_selection(
+        self, *, model_config: dict, persona_context: PersonaContext, input_text: str,
+    ) -> dict[str, Any]:
+        if self._is_mock_model_config(model_config):
+            return {"reported_states": []}
+        return self._generate_structured_payload(
+            model_config=model_config,
+            messages=[
+                {"role": "system", "content": (
+                    "内部処理 role world_state_source_selection として、人物発話に明示された現在の外界状況の報告を抽出します。"
+                    "人格は判断主体の基底ですが、抽出元は input_text の人物発話だけです。"
+                    "質問や回答依頼だけなら reported_states は空配列です。"
+                    "予定や仮定を現在状態へ移さず、窓を閉めたなど現在も成立する結果は状態の報告として扱います。"
+                    "environment は周囲の物理条件、location は人物の現在場所、device は機器の状態、"
+                    "external_service は外部サービスの現在条件、social_context は人物が報告した対人状況です。"
+                    "人物の活動は activity_state で扱います。人格の自己設定や、情報がないという説明は抽出対象の外界報告と分けます。"
+                    "reported_states だけのJSONを返し、各要素は state_type と evidence_text です。"
+                    "各 state_type は1件までです。evidence_text は報告内容を含む input_text の連続した原文を引用します。"
+                )},
+                {"role": "user", "content": json.dumps({
+                    "persona_context": persona_context.to_prompt_payload(), "input_text": input_text,
+                }, ensure_ascii=False)},
+            ],
+            validator=lambda payload: validate_world_state_source_selection_contract(payload, input_text=input_text),
+            repair_prompt_builder=lambda error: "reported_states の引用と型を修正してください。" + error,
+            failure_message="世界状態の入力報告の抽出に失敗しました。",
+            response_format=world_state_source_selection_response_format(),
+            wrap_validation_error=True, operation="world_state_source_selection",
+        )
+
     def generate_world_state(
         self,
         *,
@@ -1587,7 +1720,7 @@ class LLMClient:
             persona_context=persona_context,
             source_pack=source_pack,
         )
-        return self._generate_structured_payload(
+        candidate = self._generate_structured_payload(
             model_config=model_config,
             messages=messages,
             validator=lambda payload: validate_world_state_contract(payload, source_pack=source_pack),
@@ -1596,6 +1729,11 @@ class LLMClient:
             response_format=world_state_response_format(),
             wrap_validation_error=True,
             operation=operation,
+        )
+
+        return self._review_state_candidates(
+            model_config=model_config, state_kind="world_state",
+            source_pack=source_pack.to_prompt_payload(), candidate=candidate, candidate_key="state_candidates",
         )
 
     def generate_activity_state(
@@ -1616,7 +1754,7 @@ class LLMClient:
             persona_context=persona_context,
             source_pack=source_pack,
         )
-        return self._generate_structured_payload(
+        candidate = self._generate_structured_payload(
             model_config=model_config,
             messages=messages,
             validator=validate_activity_state_contract,
@@ -1626,6 +1764,42 @@ class LLMClient:
             wrap_validation_error=True,
             operation=operation,
         )
+
+        return self._review_state_candidates(
+            model_config=model_config, state_kind="activity_state",
+            source_pack=source_pack, candidate=candidate, candidate_key="activity_candidates",
+        )
+
+    def _review_state_candidates(
+        self, *, model_config: dict, state_kind: str, source_pack: dict[str, Any],
+        candidate: dict[str, Any], candidate_key: str,
+    ) -> dict[str, Any]:
+        candidates = candidate[candidate_key]
+        if not candidates:
+            return candidate
+        review = self._generate_structured_payload(
+            model_config=model_config,
+            messages=build_state_grounding_review_messages(
+                state_kind=state_kind, source_pack=source_pack, candidate=candidate,
+            ),
+            validator=lambda payload: validate_state_grounding_review_contract(
+                payload, candidate_count=len(candidates),
+            ),
+            repair_prompt_builder=lambda error: (
+                "候補ごとに index, evidence_kind, reason_summary の decisions を返してください。\n" + error
+            ),
+            failure_message="状態候補の根拠審査に失敗しました。",
+            response_format=state_grounding_review_response_format(),
+            wrap_validation_error=True, operation=f"{state_kind}_grounding_review",
+        )
+        supporting_kinds = {"supported_report", "supported_observation"}
+        if state_kind == "activity_state" and source_pack.get("source_owner") == "self":
+            actor_ref = source_pack["activity_subject"]["actor_ref"]
+            if actor_ref not in source_pack["observed_person_refs"]:
+                supporting_kinds.discard("supported_observation")
+        accepted = {item["index"] for item in review["decisions"] if item["evidence_kind"] in supporting_kinds}
+        debug_log("LLM", f"{state_kind}_grounding_review decisions={self._debug_rejected_payload(review)}", level="DEBUG")
+        return {candidate_key: [item for index, item in enumerate(candidates) if index in accepted]}
 
     def generate_visual_observation_summary(
         self,

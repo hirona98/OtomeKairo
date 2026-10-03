@@ -83,11 +83,11 @@
 人からの入力が状態確認の依頼だけで具体的な状態値を含まない場合、その入力は `world_state` の現在状態 source にしない。
 現在場所、身体状態、端末状態、周囲環境、対人文脈の確認依頼は、観測結果や `client_context` に明示 summary がある場合だけ短期状態へ反映する。
 
-`world_state` 更新 LLM は、状態化できる source がある場合だけ呼ぶ。
+`world_state` 更新 LLM は、状態化を検討する source がある場合に呼ぶ。人物の通常会話入力も対象にし、現在状態の明示があるかを LLM が判断する。本人の報告と直接観測は、要約の出所で区別する。
 `capability_result` は常に更新 LLM の対象にする。
 `autonomous_run` に属する非同期 capability result も、次の step を判断する前に同じ更新経路へ渡す。更新成否と更新・置換件数は、その result の event に記録する。
 `observation_summary` がある入力、または source pack に `visual_context / external_service_context / body_context / device_context / schedule_context / social_context_context / environment_context / location_context / capability_result_summary` のいずれかがある入力は更新 LLM の対象にする。
-それ以外の通常会話入力では更新 LLM を呼ばず、既存 foreground `world_state` だけを判断へ渡す。
+通常会話本文から LLM が明示された状態報告を抽出し、対応する種別の source 枠を作る。具体的な現在状態を含まない質問、仮定、予定では source 枠を作らず、既存 foreground `world_state` を維持する。抽出の wire は [source pack](../capability/world_state_source_pack.md) を正とする。
 スキップした cycle は `world_state_trace.result_status=skipped` として残す。
 
 LLM は、観測や結果から `summary_text` と前景性を整理する。
@@ -96,7 +96,11 @@ LLM は、観測や結果から `summary_text` と前景性を整理する。
 LLM が返した自由文をそのまま正本状態へ入れない。
 コードが source、期限、件数上限、失効を管理する。
 
+判断と発話へ渡す foreground の要約は `source_kind / source_ref` を保持する。人物報告と能力観測の出所を要約時に落とさない。
+
 ## LLM 更新契約
+
+候補が非空の場合は、独立した `world_state_grounding_review` に source pack と候補を渡す。明示された本人報告または観測で支えられる候補を採用し、質問や人格本文から補った状態は除く。審査は [状態候補根拠審査](../llm/状態候補根拠審査.md) の共通契約を使う。審査に失敗した場合は更新を失敗させる。
 
 `world_state` 更新に使う LLM 契約は、観測や実行結果から短期世界状態候補を抽出するための補助契約である。
 専用モデル設定を増やさず、選択中の `model_preset` を使う。論理 role は `input_interpretation` とする。

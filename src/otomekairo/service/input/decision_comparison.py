@@ -64,7 +64,7 @@ class ServiceInputDecisionComparisonMixin:
                 self_context = replace(
                     self_context,
                     activity_alignment_feedback={
-                        "instruction": "主根拠の活動に即して自身の活動だけを判断し直す。目的の条件と見送り理由もその活動との関係から書く。",
+                        "instruction": "主根拠の活動と利用可能な手段を照合し、自身の活動だけを判断し直す。目的の条件と見送り理由もその活動との関係から書く。",
                         "rejected_decision": self_decision,
                         "review_reason_summary": review["reason_summary"],
                     },
@@ -156,6 +156,7 @@ class ServiceInputDecisionComparisonMixin:
                 for item in self._workspace_periodic_thought_topics(workspace)
                 if item.get("factor_ref") in selected_refs
             ],
+            "capability_decision_view": context.capability_decision_view or [],
         }
         review = self.llm.generate_autonomous_activity_alignment_review(
             model_config=model_config,

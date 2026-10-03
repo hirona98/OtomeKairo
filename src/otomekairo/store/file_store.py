@@ -201,7 +201,6 @@ class SQLiteMemoryStore(
                      AND unit.memory_unit_id = rev.memory_unit_id
                     WHERE rev.memory_set_id = ?
                       AND rev.memory_unit_id = ?
-                      AND rev.operation IN ('create', 'reinforce', 'refine', 'supersede', 'revoke', 'dormant')
                       AND rev.occurred_at < ?
                     ORDER BY rev.occurred_at DESC, rev.rowid DESC
                     LIMIT 1
@@ -223,14 +222,6 @@ class SQLiteMemoryStore(
                   ON unit.memory_set_id = rev.memory_set_id
                  AND unit.memory_unit_id = rev.memory_unit_id
                 WHERE rev.memory_set_id = ?
-                  AND rev.operation IN (
-                      'create',
-                      'reinforce',
-                      'refine',
-                      'supersede',
-                      'revoke',
-                      'dormant'
-                  )
                   AND rev.occurred_at < ?
                 ORDER BY rev.occurred_at DESC, rev.rowid DESC
                 LIMIT ?
@@ -250,6 +241,9 @@ class SQLiteMemoryStore(
                 if memory_unit_id in seen_memory_unit_ids:
                     continue
                 seen_memory_unit_ids.add(memory_unit_id)
+                # 最新の訂正済み履歴を飛ばして古い誤更新を再提示しない。
+                if row["operation"] not in {"create", "reinforce", "refine", "supersede", "revoke", "dormant"}:
+                    continue
 
                 source_cycle_ids = self._revision_source_cycle_ids(
                     revision=revision,

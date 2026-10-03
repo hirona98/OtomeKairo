@@ -9,6 +9,7 @@ from otomekairo.llm.client import LLMClient
 from otomekairo.llm.contexts import CurrentInput, PersonaContext, SpeechContext
 from otomekairo.llm.contracts import LLMError, validate_speech_grounding_review_contract
 from otomekairo.llm.transport import complete_text
+from otomekairo.llm.schemas import materialize_provider_open_maps
 
 
 def _completion_response(content: str) -> SimpleNamespace:
@@ -38,6 +39,47 @@ def _current_input() -> CurrentInput:
 
 
 class LLMTransportTests(unittest.TestCase):
+    def test_positive_factor_id_duplicates_are_canonicalized_without_altering_suppression(self) -> None:
+        payload = {"foreground_selection": {
+            "primary_factor_ref": "factor:primary",
+            "supporting_factor_refs": ["factor:primary", "factor:other", "factor:other"],
+            "suppressed_factors": [{"factor_ref": "factor:suppressed", "reason_summary": "保留"}],
+        }}
+        materialize_provider_open_maps(payload, schema_name="decision")
+        self.assertEqual(payload["foreground_selection"]["supporting_factor_refs"], ["factor:other"])
+        self.assertEqual(payload["foreground_selection"]["primary_factor_ref"], "factor:primary")
+        self.assertEqual(payload["foreground_selection"]["suppressed_factors"][0]["factor_ref"], "factor:suppressed")
+
+    def test_provider_failure_normalized_to_stop_is_rejected(self) -> None:
+        response = _completion_response('{"unfinished":')
+        response.choices[0].finish_reason = "stop"
+        response.choices[0].provider_specific_fields = {"native_finish_reason": "error"}
+        with patch("otomekairo.llm.transport._load_litellm_completion", return_value=lambda **_: response):
+            with self.assertRaisesRegex(LLMError, "finish_reason=error"):
+                complete_text(model_config={"model": "openrouter/test"}, messages=[])
+
+    def test_incomplete_completion_is_rejected_even_when_content_is_json(self) -> None:
+        for reason in ("length", "content_filter"):
+            with self.subTest(reason=reason):
+                response = _completion_response('{}')
+                response.choices[0].finish_reason = reason
+                with patch("otomekairo.llm.transport._load_litellm_completion", return_value=lambda **_: response):
+                    with self.assertRaisesRegex(LLMError, reason):
+                        complete_text(model_config={"model": "test"}, messages=[])
+
+    def test_provider_generation_error_retries_same_request_once(self) -> None:
+        failed = _completion_response('{"unfinished":')
+        failed.choices[0].finish_reason = "error"
+        completed = _completion_response('{}')
+        requests = []
+        def completion(**kwargs):
+            requests.append(kwargs)
+            return failed if len(requests) == 1 else completed
+        with patch("otomekairo.llm.transport._load_litellm_completion", return_value=completion):
+            self.assertEqual(complete_text(model_config={"model": "test"}, messages=[]), "{}")
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(requests[0], requests[1])
+
     def test_speech_grounding_review_allow_has_no_duplicate_speech(self) -> None:
         validate_speech_grounding_review_contract({
             "outcome": "allow", "speech_text": None, "reason_summary": "根拠と一致。",

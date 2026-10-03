@@ -102,6 +102,19 @@ class ActivityAlignmentTests(unittest.TestCase):
         self.assertEqual(review["periodic_thought_topics"][0]["factor_ref"], "periodic_thought_topic:elyth")
         self.assertEqual(result["activity_alignment_reviews"][0]["outcome"], "allow")
 
+    def test_review_receives_current_capability_availability(self) -> None:
+        llm = _LLM([], ["reject"])
+        capability_view = [{
+            "id": "mcp.call_tool", "available": False,
+            "unavailable_reason": "no_binding", "mcp_servers": [],
+        }]
+        context = replace(_context(), capability_decision_view=capability_view)
+        review = _Service(llm)._review_self_activity_alignment(
+            model_config={}, context=context, decision=_decision("autonomous_run"),
+        )
+        self.assertEqual(review["outcome"], "reject")
+        self.assertEqual(llm.review_contexts[0]["capability_decision_view"], capability_view)
+
     def test_rejected_run_redecides_self_without_reviewing_noop(self) -> None:
         llm = _LLM(
             [_decision("autonomous_run"), _decision("noop"), _decision("noop")],

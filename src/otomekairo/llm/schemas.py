@@ -24,11 +24,13 @@ from otomekairo.llm.contracts import (
     RECALL_PACK_SECTION_NAMES,
     RISK_FLAG_VALUES,
     SCOPE_TYPE_VALUES,
+    STATE_GROUNDING_EVIDENCE_KINDS,
     TIME_REFERENCE_VALUES,
     VISUAL_OBSERVATION_CHANGE_BASIS_VALUES,
     VISUAL_OBSERVATION_CHANGE_STATE_VALUES,
     WORLD_STATE_HINT_VALUES,
     WORLD_STATE_TTL_HINT_VALUES,
+    USER_WORLD_REPORT_TYPES,
 )
 
 
@@ -278,9 +280,9 @@ def speech_grounding_review_response_format() -> dict[str, Any]:
     return structured_response_format(
         "speech_grounding_review",
         closed_object({
+            "reason_summary": {"type": "string"},
             "outcome": string_enum(["allow", "rewrite"]),
             "speech_text": nullable({"type": "string"}),
-            "reason_summary": {"type": "string"},
         }),
     )
 
@@ -349,20 +351,27 @@ def memory_candidate_review_response_format() -> dict[str, Any]:
                 "open_loops": string_array(),
                 "reason_summary": {"type": "string"},
             }),
-            "decisions": {
-                "type": "array",
-                "items": closed_object({
-                    "index": {"type": "integer"},
-                    "outcome": string_enum(["keep", "drop"]),
-                    "reason_summary": {"type": "string"},
-                }),
-            },
             "correction_review": closed_object({
                 "prior_claim_assessment": string_enum(["contradicted", "consistent", "undetermined", "not_reviewed"]),
+                "contradicted_revision_ids": string_array(),
+                "replacement_candidate_indices": {"type": "array", "items": {"type": "integer"}},
                 "reason_summary": {"type": "string"},
             }),
         }),
     )
+
+
+def memory_retention_review_response_format() -> dict[str, Any]:
+    return structured_response_format("memory_retention_review", closed_object({
+            "decisions": {
+                "type": "array",
+                "items": closed_object({
+                    "reason_summary": {"type": "string"},
+                    "retention_basis": string_enum(["explicit_pattern", "repeated_experience", "future_commitment", "current_episode", "unsupported"]),
+                    "index": {"type": "integer"},
+                }),
+            },
+    }))
 
 
 def _episode_affect_schema() -> dict[str, Any]:
@@ -562,6 +571,33 @@ def initiative_entry_check_response_format() -> dict[str, Any]:
     )
 
 
+def decision_grounding_review_response_format() -> dict[str, Any]:
+    return structured_response_format("decision_grounding_review", closed_object({
+        "outcome": string_enum({"allow", "reconsider"}),
+        "reason_summary": {"type": "string"},
+    }))
+
+
+def world_state_source_selection_response_format() -> dict[str, Any]:
+    return structured_response_format("world_state_source_selection", closed_object({
+        "reported_states": {"type": "array", "maxItems": 5, "items": closed_object({
+            "state_type": string_enum(USER_WORLD_REPORT_TYPES),
+            "evidence_text": {"type": "string"},
+        })},
+    }))
+
+
+def state_grounding_review_response_format() -> dict[str, Any]:
+    return structured_response_format(
+        "state_grounding_review",
+        closed_object({"decisions": {"type": "array", "maxItems": 4, "items": closed_object({
+            "reason_summary": {"type": "string"},
+            "evidence_kind": string_enum(STATE_GROUNDING_EVIDENCE_KINDS),
+            "index": {"type": "integer"},
+        })}}),
+    )
+
+
 def world_state_response_format() -> dict[str, Any]:
     return structured_response_format(
         "world_state",
@@ -647,6 +683,7 @@ def all_response_formats() -> dict[str, dict[str, Any]]:
         "autonomous_activity_alignment_review": autonomous_activity_alignment_review_response_format(),
         "memory_interpretation": memory_interpretation_response_format(),
         "memory_candidate_review": memory_candidate_review_response_format(),
+        "memory_retention_review": memory_retention_review_response_format(),
         "affect_review": affect_review_response_format(),
         "memory_reflection_summary": memory_reflection_summary_response_format(),
         "event_evidence": event_evidence_response_format(),
@@ -691,6 +728,7 @@ _DECISION_SCHEMA_NAMES = frozenset(
 def materialize_provider_open_maps(payload: dict[str, Any], *, schema_name: str) -> None:
     # strict structured output は開いた object を受けない。文字列で受けた map を意味検証の前に object へ戻す。
     if schema_name in _DECISION_SCHEMA_NAMES:
+        _normalize_decision_supporting_refs(payload)
         _materialize_capability_request_input(
             payload.get("capability_request"),
             label="Decision capability_request.input",
@@ -773,6 +811,17 @@ def string_array(
     if max_items is not None:
         schema["maxItems"] = max_items
     return schema
+
+
+def _normalize_decision_supporting_refs(payload: dict[str, Any]) -> None:
+    selection = payload.get("foreground_selection")
+    if not isinstance(selection, dict):
+        return
+    supporting = selection.get("supporting_factor_refs")
+    if not isinstance(supporting, list) or not all(isinstance(ref, str) for ref in supporting):
+        return
+    primary = selection.get("primary_factor_ref")
+    selection["supporting_factor_refs"] = list(dict.fromkeys(ref for ref in supporting if ref != primary))
 
 
 def _schema_name(operation: str) -> str:

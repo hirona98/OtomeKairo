@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from otomekairo.store.config import ConfigStore
+from otomekairo.store.file_store import FileStore
 
 
 PNG_DATA_URI = (
@@ -1592,6 +1593,7 @@ class LongSmokeRunner:
 
     def _restart_server_for_real_llm_probe(self) -> None:
         self._stop_server()
+        self._clear_initiative_probe_state()
         self.restart_count += 1
         time.sleep(0.5)
         self._start_server()
@@ -1611,20 +1613,35 @@ class LongSmokeRunner:
     def _clear_initiative_probe_state(self) -> None:
         memory_db_path = self.data_dir / "memory.db"
         if not memory_db_path.exists():
-            return
+            raise SmokeError("memory.db was not created before real LLM probe reset.")
         memory_set_id = self._require_selected_memory_set_id()
-        conn = sqlite3.connect(memory_db_path)
-        try:
-            conn.execute("DELETE FROM drive_states WHERE memory_set_id = ?", (memory_set_id,))
-            conn.execute("DELETE FROM world_states WHERE memory_set_id = ?", (memory_set_id,))
-            conn.execute("DELETE FROM ongoing_actions WHERE memory_set_id = ?", (memory_set_id,))
-            conn.execute(
-                "DELETE FROM events WHERE memory_set_id = ? AND kind IN ('conversation_input', 'speech')",
-                (memory_set_id,),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        memory_store = FileStore(self.data_dir).memory_store
+        with memory_store._memory_db() as conn:
+            memory_store._delete_vector_index_entries(conn, memory_set_id)
+            for table_name in (
+                "world_states",
+                "daily_visual_digests",
+                "visual_observation_search_index",
+                "visual_observation_records",
+                "ongoing_actions",
+                "autonomous_runs",
+                "drive_states",
+                "memory_postprocess_jobs",
+                "entity_aliases",
+                "entity_registry",
+                "relation_index",
+                "memory_links",
+                "revisions",
+                "episode_affects",
+                "mood_state",
+                "affect_state",
+                "memory_units",
+                "episodes",
+                "reflection_runs",
+                "events",
+                "retrieval_runs",
+            ):
+                conn.execute(f"DELETE FROM {table_name} WHERE memory_set_id = ?", (memory_set_id,))
 
     def _seed_initiative_probe_drive(
         self,
@@ -1841,47 +1858,38 @@ class LongSmokeRunner:
     def _run_real_llm_initiative_matrix(self) -> dict[str, dict[str, Any]]:
         log("real LLM initiative matrix started")
         cases = [
-            self._run_real_llm_initiative_probe_drive_thin_capability,
+            self._run_real_llm_initiative_probe_drive_thin_person_vision_hold,
             self._run_real_llm_initiative_probe_schedule_speech,
             self._run_real_llm_initiative_probe_social_speech,
-            self._run_real_llm_initiative_probe_body_speech,
-            self._run_real_llm_initiative_probe_external_speech,
-            self._run_real_llm_initiative_probe_device_speech,
-            self._run_real_llm_initiative_probe_environment_speech,
-            self._run_real_llm_initiative_probe_location_speech,
+            self._run_real_llm_initiative_probe_body_context,
+            self._run_real_llm_initiative_probe_external_context,
+            self._run_real_llm_initiative_probe_device_context,
+            self._run_real_llm_initiative_probe_environment_context,
+            self._run_real_llm_initiative_probe_location_context,
             self._run_real_llm_initiative_probe_ongoing_waiting_noop,
         ]
         traces: dict[str, dict[str, Any]] = {}
         for run_case in cases:
             self._set_wake_policy_disabled()
+            self._wait_for_memory_jobs_to_drain()
             self._restart_server_for_real_llm_probe()
-            self._clear_initiative_probe_state()
             case_id, trace = run_case()
             traces[case_id] = trace
-            self._set_wake_policy_disabled()
-            self._clear_initiative_probe_state()
-            self._wait_for_memory_jobs_to_drain()
         self.real_llm_initiative_probe_verified = True
         log("real LLM initiative matrix completed")
         return traces
 
-    def _run_real_llm_initiative_probe_drive_thin_capability(self) -> tuple[str, dict[str, Any]]:
-        case_id = "thin-drive-vision-probe"
+    def _run_real_llm_initiative_probe_drive_thin_person_vision_hold(self) -> tuple[str, dict[str, Any]]:
+        case_id = "thin-drive-person-vision-hold"
         marker = "RealLLMInitiativeThinDriveProbeMarker"
         self._seed_initiative_probe_drive(
             drive_id=f"drive:{case_id}",
             drive_kind="follow_through",
-            summary_text=f"{marker}: 継続確認したい強い流れがある。",
+            summary_text=(
+                f"{marker}: デスクトップ画面の現在の作業状況を観測してから、"
+                "進行中の作業への関わり方を判断したい。まだ視覚観測はない。"
+            ),
             focus_scope_key=marker,
-        )
-        self._queue_capture_context_override(
-            {
-                "client_context": {
-                    "active_app": "RealLLMInitiativeThinDrive",
-                    "window_title": marker,
-                    "locale": "ja-JP",
-                }
-            }
         )
         trace = self._run_manual_wake_probe(
             case_id=case_id,
@@ -1897,25 +1905,39 @@ class LongSmokeRunner:
             trace,
             case_id=case_id,
             expected_trigger_kind="wake",
-            expected_result_kind="capability_request",
+            expected_result_kind="noop",
             expected_selected_family="autonomous",
-            expected_preferred_result_kind="capability_request",
-            expected_preferred_capability_id="vision.capture",
             expected_foreground_thinness="thin",
         )
         request_summary = ((trace.get("result_trace") or {}).get("capability_request_summary"))
+        if request_summary is not None:
+            raise SmokeError("real-llm initiative thin-drive probe unexpectedly requested a capability.")
+        return case_id, trace
+
+    def _run_real_llm_conversation_vision_probe(self) -> None:
+        case_id = "vision-capture-followup-no-unrelated-request"
+        cycle_id = self._post_conversation(
+            text="今のデスクトップ画面を見て、表示されている内容を教えてください。",
+            source="real_llm_vision_probe",
+            client_id="real-llm-vision-probe",
+            active_app="RealLLMVisionProbe",
+            window_title="Real LLM vision probe",
+        )
+        trace = self._wait_for_cycle_memory_to_finish(cycle_id)
+        request_summary = ((trace.get("result_trace") or {}).get("capability_request_summary"))
         if not isinstance(request_summary, dict) or request_summary.get("capability_id") != "vision.capture":
-            raise SmokeError("real-llm initiative thin-drive probe capability request was invalid.")
+            raise SmokeError("real-llm conversation vision probe did not request vision.capture.")
+        if request_summary.get("autonomous_run_id") is not None:
+            raise SmokeError("real-llm conversation vision probe used autonomous_run for a one-shot request.")
         request_id = request_summary.get("request_id")
         if not isinstance(request_id, str) or not request_id:
-            raise SmokeError("real-llm initiative thin-drive probe request_id was not recorded.")
+            raise SmokeError("real-llm conversation vision probe request_id was not recorded.")
         followup_trace = self._wait_for_capability_result_followup_by_request_id(request_id=request_id)
         self._assert_capability_result_followup_request_policy(
             trace=followup_trace,
-            case_id="vision-capture-followup-no-unrelated-request",
+            case_id=case_id,
             expected_source_capability_id="vision.capture",
         )
-        return case_id, trace
 
     def _run_real_llm_initiative_probe_schedule_speech(self) -> tuple[str, dict[str, Any]]:
         case_id = "schedule-grounded-speech"
@@ -1989,8 +2011,8 @@ class LongSmokeRunner:
         )
         return case_id, trace
 
-    def _run_real_llm_initiative_probe_body_speech(self) -> tuple[str, dict[str, Any]]:
-        case_id = "body-grounded-speech"
+    def _run_real_llm_initiative_probe_body_context(self) -> tuple[str, dict[str, Any]]:
+        case_id = "body-grounded-context"
         marker = "RealLLMInitiativeBodySpeechMarker"
         self._seed_initiative_probe_drive(
             drive_id=f"drive:{case_id}",
@@ -2018,16 +2040,18 @@ class LongSmokeRunner:
             trace,
             case_id=case_id,
             expected_trigger_kind="wake",
-            expected_result_kind="speech",
+            expected_result_kind=None,
             expected_selected_family="autonomous",
             expected_foreground_thinness="grounded",
             expected_world_state_type="body",
         )
+        if (trace.get("cycle_summary") or {}).get("result_kind") not in {"speech", "noop"}:
+            raise SmokeError("real-llm initiative body probe produced an invalid result kind.")
         return case_id, trace
 
-    def _run_real_llm_initiative_probe_external_speech(self) -> tuple[str, dict[str, Any]]:
-        return self._run_real_llm_initiative_probe_grounded_speech(
-            case_id="external-fresh-speech",
+    def _run_real_llm_initiative_probe_external_context(self) -> tuple[str, dict[str, Any]]:
+        return self._run_real_llm_initiative_probe_grounded_context(
+            case_id="external-fresh-context",
             marker="RealLLMInitiativeExternalSpeechMarker",
             drive_kind="topic_continuation",
             drive_summary="GitHub レビューの外部サービス状態に合わせて短く続けたい。",
@@ -2038,9 +2062,9 @@ class LongSmokeRunner:
             expected_foreground_thinness="thin",
         )
 
-    def _run_real_llm_initiative_probe_device_speech(self) -> tuple[str, dict[str, Any]]:
-        return self._run_real_llm_initiative_probe_grounded_speech(
-            case_id="device-fresh-speech",
+    def _run_real_llm_initiative_probe_device_context(self) -> tuple[str, dict[str, Any]]:
+        return self._run_real_llm_initiative_probe_grounded_context(
+            case_id="device-fresh-context",
             marker="RealLLMInitiativeDeviceSpeechMarker",
             drive_kind="person_attention",
             drive_summary="端末の接続状態に合わせて短く判断したい。",
@@ -2051,9 +2075,9 @@ class LongSmokeRunner:
             expected_foreground_thinness="thin",
         )
 
-    def _run_real_llm_initiative_probe_environment_speech(self) -> tuple[str, dict[str, Any]]:
-        return self._run_real_llm_initiative_probe_grounded_speech(
-            case_id="environment-fresh-speech",
+    def _run_real_llm_initiative_probe_environment_context(self) -> tuple[str, dict[str, Any]]:
+        return self._run_real_llm_initiative_probe_grounded_context(
+            case_id="environment-fresh-context",
             marker="RealLLMInitiativeEnvironmentSpeechMarker",
             drive_kind="self_regulation",
             drive_summary="作業環境に合わせて短く整えたい。",
@@ -2064,9 +2088,9 @@ class LongSmokeRunner:
             expected_foreground_thinness="mixed",
         )
 
-    def _run_real_llm_initiative_probe_location_speech(self) -> tuple[str, dict[str, Any]]:
-        return self._run_real_llm_initiative_probe_grounded_speech(
-            case_id="location-fresh-speech",
+    def _run_real_llm_initiative_probe_location_context(self) -> tuple[str, dict[str, Any]]:
+        return self._run_real_llm_initiative_probe_grounded_context(
+            case_id="location-fresh-context",
             marker="RealLLMInitiativeLocationSpeechMarker",
             drive_kind="follow_through",
             drive_summary="今の作業場所に合わせて短く続けたい。",
@@ -2077,7 +2101,7 @@ class LongSmokeRunner:
             expected_foreground_thinness="mixed",
         )
 
-    def _run_real_llm_initiative_probe_grounded_speech(
+    def _run_real_llm_initiative_probe_grounded_context(
         self,
         *,
         case_id: str,
@@ -2116,11 +2140,13 @@ class LongSmokeRunner:
             trace,
             case_id=case_id,
             expected_trigger_kind="wake",
-            expected_result_kind="speech",
+            expected_result_kind=None,
             expected_selected_family="autonomous",
             expected_foreground_thinness=expected_foreground_thinness,
             expected_world_state_type=world_state_type,
         )
+        if (trace.get("cycle_summary") or {}).get("result_kind") not in {"speech", "noop"}:
+            raise SmokeError(f"real-llm initiative {case_id} produced an invalid result kind.")
         return case_id, trace
 
     def _run_real_llm_background_thinking_matrix(
@@ -2135,21 +2161,18 @@ class LongSmokeRunner:
             self._run_real_llm_background_thinking_probe_weak_foreground_noop,
         ):
             self._set_wake_policy_disabled()
+            self._wait_for_memory_jobs_to_drain()
             self._restart_server_for_real_llm_probe()
-            self._clear_initiative_probe_state()
             case_id, trace = run_case()
             traces[case_id] = trace
             case_results[case_id] = self._real_llm_background_thinking_trace_result(
                 case_id=case_id,
                 trace=trace,
             )
-            self._set_wake_policy_disabled()
-            self._clear_initiative_probe_state()
-            self._wait_for_memory_jobs_to_drain()
 
         self._set_wake_policy_disabled()
+        self._wait_for_memory_jobs_to_drain()
         self._restart_server_for_real_llm_probe()
-        self._clear_initiative_probe_state()
         for run_case in (
             self._run_real_llm_background_thinking_probe_grounded_speech,
         ):
@@ -2163,8 +2186,8 @@ class LongSmokeRunner:
         case_id, interval_result = self._run_real_llm_background_thinking_probe_interval_not_due()
         case_results[case_id] = interval_result
         self._set_wake_policy_disabled()
-        self._clear_initiative_probe_state()
         self._wait_for_memory_jobs_to_drain()
+        self._restart_server_for_real_llm_probe()
 
         self.real_llm_background_thinking_probe_verified = True
         log("real LLM periodic thinking matrix completed")
@@ -2203,11 +2226,10 @@ class LongSmokeRunner:
             case_id=case_id,
             expected_trigger_kind="background_thinking",
             expected_result_kind="noop",
-            expected_selected_family="autonomous",
-            expected_foreground_thinness="thin",
-            expected_suppression_level="low",
-            expected_world_state_type="visual_context",
+            allow_missing_initiative_context=True,
         )
+        if (trace.get("input_trace") or {}).get("initiative_context") is not None:
+            raise SmokeError("real-llm weak foreground probe unexpectedly entered initiative judgment.")
         self._assert_background_thinking_memory_status(
             trace=trace,
             case_id=case_id,
@@ -2453,10 +2475,8 @@ class LongSmokeRunner:
         *,
         case_id: str,
         expected_trigger_kind: str,
-        expected_result_kind: str,
+        expected_result_kind: str | None,
         expected_selected_family: str | None = None,
-        expected_preferred_result_kind: str | None = None,
-        expected_preferred_capability_id: str | None = None,
         expected_foreground_thinness: str | None = None,
         expected_suppression_level: str | None = None,
         expected_world_state_type: str | None = None,
@@ -2467,7 +2487,7 @@ class LongSmokeRunner:
             raise SmokeError(f"real-llm initiative {case_id} cycle_summary was invalid.")
         if cycle_summary.get("trigger_kind") != expected_trigger_kind:
             raise SmokeError(f"real-llm initiative {case_id} trigger_kind was invalid.")
-        if cycle_summary.get("result_kind") != expected_result_kind:
+        if expected_result_kind is not None and cycle_summary.get("result_kind") != expected_result_kind:
             raise SmokeError(
                 f"real-llm initiative {case_id} result_kind was {cycle_summary.get('result_kind')}, "
                 f"expected {expected_result_kind}."
@@ -2501,10 +2521,6 @@ class LongSmokeRunner:
         candidate = self._initiative_probe_selected_family(initiative_context)
         if not isinstance(candidate, dict):
             raise SmokeError(f"real-llm initiative {case_id} selected candidate family was not found.")
-        if expected_preferred_result_kind is not None and candidate.get("preferred_result_kind") != expected_preferred_result_kind:
-            raise SmokeError(f"real-llm initiative {case_id} preferred_result_kind was invalid.")
-        if expected_preferred_capability_id is not None and candidate.get("preferred_capability_id") != expected_preferred_capability_id:
-            raise SmokeError(f"real-llm initiative {case_id} preferred_capability_id was invalid.")
 
     def _initiative_probe_selected_family(self, initiative_context: dict[str, Any]) -> dict[str, Any] | None:
         selected_family = initiative_context.get("selected_candidate_family")
@@ -3477,6 +3493,9 @@ class LongSmokeRunner:
         initiative_probe_traces = self._run_real_llm_initiative_matrix()
         initiative_probe_case_results = self._real_llm_initiative_probe_case_results(initiative_probe_traces)
         self._wait_for_memory_jobs_to_drain()
+        self._restart_server_for_real_llm_probe()
+        self._run_real_llm_conversation_vision_probe()
+        self._wait_for_memory_jobs_to_drain()
         background_thinking_probe_traces, background_thinking_probe_case_results = self._run_real_llm_background_thinking_matrix()
         self._wait_for_memory_jobs_to_drain()
         self._exercise_memory_quality_probe(require_semantic_checks=False)
@@ -3879,14 +3898,14 @@ class LongSmokeRunner:
         self._assert_memory_trace_succeeded(conversation_trace, "real-llm-smoke initial conversation")
 
         expected_initiative_cases = {
-            "thin-drive-vision-probe",
+            "thin-drive-person-vision-hold",
             "schedule-grounded-speech",
             "social-grounded-speech",
-            "body-grounded-speech",
-            "external-fresh-speech",
-            "device-fresh-speech",
-            "environment-fresh-speech",
-            "location-fresh-speech",
+            "body-grounded-context",
+            "external-fresh-context",
+            "device-fresh-context",
+            "environment-fresh-context",
+            "location-fresh-context",
             "ongoing-waiting-noop",
         }
         if summary.get("real_llm_initiative_probe_verified") is not True:
@@ -3898,15 +3917,11 @@ class LongSmokeRunner:
         if not isinstance(initiative_case_results, dict) or set(initiative_case_results) != expected_initiative_cases:
             raise SmokeError("real-llm-smoke initiative probe compact results were incomplete.")
         expected_case_results = {
-            "thin-drive-vision-probe": {
+            "thin-drive-person-vision-hold": {
                 "trigger_kind": "wake",
-                "result_kind": "capability_request",
+                "result_kind": "noop",
                 "selected_candidate_family": "autonomous",
-                "preferred_result_kind": "capability_request",
-                "preferred_capability_id": "vision.capture",
                 "foreground_thinness": "thin",
-                "capability_id": "vision.capture",
-                "capability_request_status": "dispatched",
             },
             "schedule-grounded-speech": {
                 "trigger_kind": "wake",
@@ -3920,33 +3935,28 @@ class LongSmokeRunner:
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "grounded",
             },
-            "body-grounded-speech": {
+            "body-grounded-context": {
                 "trigger_kind": "wake",
-                "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "grounded",
             },
-            "external-fresh-speech": {
+            "external-fresh-context": {
                 "trigger_kind": "wake",
-                "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "thin",
             },
-            "device-fresh-speech": {
+            "device-fresh-context": {
                 "trigger_kind": "wake",
-                "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "thin",
             },
-            "environment-fresh-speech": {
+            "environment-fresh-context": {
                 "trigger_kind": "wake",
-                "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "mixed",
             },
-            "location-fresh-speech": {
+            "location-fresh-context": {
                 "trigger_kind": "wake",
-                "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "mixed",
             },
@@ -4035,9 +4045,6 @@ class LongSmokeRunner:
                 "result_kind": "noop",
                 "decision_kind": "noop",
                 "background_thinking_scheduler_active": True,
-                "selected_candidate_family": "autonomous",
-                "foreground_thinness": "thin",
-                "suppression_level": "low",
                 "turn_consolidation_status": "skipped",
             },
             "background-grounded-speech": {

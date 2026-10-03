@@ -308,11 +308,14 @@ class AutonomousStepContext:
     ongoing_action_summary: dict[str, Any] | None
     capability_decision_view: list[dict[str, Any]] | None
     last_result_context: dict[str, Any] | None
+    affect_context: dict[str, Any]
     observation_context: dict[str, Any] | None = None
     people_context: list[dict[str, str]] | None = None
     pre_send_check_feedback: str | None = None
     completion_review_feedback: str | None = None
     agent_skill_context: dict[str, Any] | None = None
+    self_state_context: dict[str, Any] | None = None
+    drive_state_summary: list[dict[str, Any]] | None = None
 
     def to_prompt_payload(self) -> dict[str, Any]:
         payload = {
@@ -325,6 +328,9 @@ class AutonomousStepContext:
             "ongoing_action_summary": self.ongoing_action_summary,
             "capability_decision_view": self.capability_decision_view,
             "last_result_context": self.last_result_context,
+            "affect_context": self.affect_context,
+            "self_state_context": self.self_state_context,
+            "drive_state_summary": self.drive_state_summary,
             "observation_context": self.observation_context,
             "people_context": self.people_context or [],
         }
@@ -358,3 +364,4 @@ class SpeechContext:
     reference_context: dict[str, Any] | None = None
     people_context: list[dict[str, str]] | None = None
     agent_skill_context: dict[str, Any] | None = None
+    capability_decision_view: list[dict[str, Any]] | None = None

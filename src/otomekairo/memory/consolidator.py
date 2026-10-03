@@ -297,6 +297,9 @@ class MemoryConsolidator:
                         "summary_text": candidate["summary_text"],
                         "evidence_text": candidate["evidence_text"],
                         "qualifiers_hint": candidate["qualifiers_hint"],
+                        **{key: candidate[key] for key in (
+                            "scope", "subject_hint", "predicate_hint", "object_hint",
+                        ) if key in candidate},
                     }
                     for index, candidate in enumerate(candidates)
                 ],
@@ -312,6 +315,8 @@ class MemoryConsolidator:
         for key in ("summary_text", "outcome_text", "open_loops"):
             episode[key] = episode_review[key]
         correction_review = review["correction_review"]
+        contradicted_revision_ids = set(correction_review["contradicted_revision_ids"])
+        selected_targets = interpretation.get("selected_targets", [])
         correction_selection_missed = False
         if interpretation.get("correction_status") == "selected":
             if correction_review["prior_claim_assessment"] == "not_reviewed":
@@ -319,20 +324,19 @@ class MemoryConsolidator:
             if correction_review["prior_claim_assessment"] != "contradicted":
                 interpretation["correction_status"] = "no_correction"
                 interpretation["selected_targets"] = []
-        elif correction_review["prior_claim_assessment"] == "contradicted":
-            correction_selection_missed = True
-        kept_indices = [index for index in range(len(candidates)) if decisions[index]["outcome"] == "keep"]
-        if len(kept_indices) != len(candidates) and interpretation.get("correction_status") == "selected":
-            revocation_only = (
-                not kept_indices
-                and bool(interpretation.get("selected_targets"))
-                and all(
-                    item.get("correction_kind") == "revoke_created"
-                    for item in interpretation["selected_targets"]
-                )
-            )
-            if not revocation_only:
-                raise ValueError("Memory candidate review dropped a candidate during correction selection.")
+            else:
+                interpretation["selected_targets"] = [
+                    target for target in selected_targets if target["revision_id"] in contradicted_revision_ids
+                ]
+                if not interpretation["selected_targets"]:
+                    interpretation["correction_status"] = "no_correction"
+        selected_revision_ids = {target["revision_id"] for target in interpretation.get("selected_targets", [])}
+        correction_selection_missed = bool(contradicted_revision_ids - selected_revision_ids)
+        lasting_bases = {"explicit_pattern", "repeated_experience", "future_commitment"}
+        kept_indices = [index for index in range(len(candidates)) if decisions[index]["retention_basis"] in lasting_bases]
+        if interpretation.get("correction_status") == "selected":
+            if not set(correction_review["replacement_candidate_indices"]).issubset(kept_indices):
+                raise ValueError("Memory candidate review dropped a replacement candidate during correction selection.")
         return (
             [] if correction_selection_missed else [candidates[index] for index in kept_indices],
             {
@@ -341,6 +345,7 @@ class MemoryConsolidator:
                 "dropped_count": len(candidates) - len(kept_indices),
                 "suppressed_count": len(kept_indices) if correction_selection_missed else 0,
                 "correction_selection_missed": correction_selection_missed,
+                "retention_decisions": review["decisions"],
                 "correction_review": correction_review,
                 "episode_review": {
                     "changed": episode_changed,
@@ -532,7 +537,7 @@ class MemoryConsolidator:
 
     def run_postprocess_job(self, *, job: dict[str, Any]) -> dict[str, Any]:
         # job状態
-        state_snapshot = job["state_snapshot"]
+        state_snapshot = self._resolve_postprocess_state(job["state_snapshot"])
         finished_at = job["turn_finished_at"]
         episode = job["episode"]
         memory_actions = job["memory_actions"]
@@ -583,13 +588,27 @@ class MemoryConsolidator:
             updated_at=now_iso(),
         )
 
-        # 結果
         return {
             "vector_index_sync": vector_index_sync,
             "relation_index_sync": relation_index_sync,
             "correction_reconciliation": correction_trace,
             "reflective_consolidation": reflective_result,
         }
+
+    def _resolve_postprocess_state(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        state_snapshot = deepcopy(snapshot)
+        current_state = self.store.read_state()
+        model_id = state_snapshot["selected_model_preset_id"]
+        memory_id = state_snapshot["selected_memory_set_id"]
+        model_config = current_state["model_presets"][model_id]
+        embedding_config = current_state["memory_sets"][memory_id]["embedding"]
+        for snapshot, config in (
+            (state_snapshot["model_presets"][model_id], model_config),
+            (state_snapshot["memory_sets"][memory_id]["embedding"], embedding_config),
+        ):
+            if "api_key" in config:
+                snapshot["api_key"] = config["api_key"]
+        return state_snapshot
 
     def _sync_relation_index(self, *, memory_set_id: str, updated_at: str) -> dict[str, Any]:
         # relation_index failure は正本保存を取り消さない。
@@ -717,13 +736,18 @@ class MemoryConsolidator:
                 },
                 "memory_sets": {
                     selected_memory_set_id: {
-                        "embedding": deepcopy(
-                            state["memory_sets"][selected_memory_set_id]["embedding"]
-                        )
+                        "embedding": {
+                            key: deepcopy(value) for key, value in
+                            state["memory_sets"][selected_memory_set_id]["embedding"].items()
+                            if key != "api_key"
+                        }
                     }
                 },
                 "model_presets": {
-                    selected_model_preset_id: deepcopy(selected_model_preset),
+                    selected_model_preset_id: {
+                        key: deepcopy(value) for key, value in selected_model_preset.items()
+                        if key != "api_key"
+                    },
                 },
             },
             "episode": deepcopy(episode),

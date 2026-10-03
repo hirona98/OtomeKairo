@@ -626,6 +626,8 @@ class ServiceConfigInspectionMixin:
                 "state_type": world_state.get("state_type"),
                 "scope": self._world_state_scope_ref(scope_type=scope_type, scope_key=scope_key),
                 "summary_text": world_state.get("summary_text"),
+                "source_kind": world_state.get("source_kind"),
+                "source_ref": world_state.get("source_ref"),
                 "confidence": world_state.get("confidence"),
                 "salience": world_state.get("salience"),
                 "integration_key": world_state.get("integration_key"),

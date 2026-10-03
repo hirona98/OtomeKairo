@@ -317,6 +317,9 @@ class ServiceMemoryMixin:
                     input_event_role=input_event_role,
                     current_input=pipeline.get("current_input"),
                     people_context=pipeline.get("people_context"),
+                    foreground_world_state=pipeline.get("foreground_world_state"),
+                    visual_observation_context=pipeline.get("visual_observation_context"),
+                    capability_decision_view=pipeline.get("capability_decision_view"),
                     pending_intent_summary=pending_intent_summary,
                     pending_intent_selection=pending_intent_selection,
                     observation_summary=observation_summary,
@@ -422,6 +425,9 @@ class ServiceMemoryMixin:
         capability_request_summary: dict[str, Any] | None,
         followup_capability_request_summary: dict[str, Any] | None,
         ongoing_action_transition_summary: dict[str, Any] | None,
+        foreground_world_state: list[dict[str, Any]] | None = None,
+        visual_observation_context: dict[str, Any] | None = None,
+        capability_decision_view: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "trigger_kind": trigger_kind,
@@ -432,6 +438,9 @@ class ServiceMemoryMixin:
             payload["current_input"] = current_input
         if isinstance(people_context, list) and people_context:
             payload["people_context"] = people_context
+        payload["foreground_world_state"] = foreground_world_state
+        payload["visual_observation_context"] = visual_observation_context
+        payload["capability_decision_view"] = capability_decision_view
         if isinstance(pending_intent_summary, dict):
             payload["pending_intent_summary"] = pending_intent_summary
         compact_pending_selection = self._compact_pending_intent_selection_summary(pending_intent_selection)

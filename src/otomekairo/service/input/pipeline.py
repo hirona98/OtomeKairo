@@ -339,6 +339,7 @@ class ServiceInputPipelineMixin:
             prior_attempts: list[dict[str, Any]] | None = None,
         ) -> dict[str, Any]:
             return self._run_pipeline_output(
+                capability_decision_view=pipeline_contexts["capability_decision_view"],
                 recent_interactions=recent_interactions,
                 state=state,
                 cycle_id=cycle_id,
@@ -2410,6 +2411,7 @@ class ServiceInputPipelineMixin:
         decision: dict[str, Any],
         assistant_message_target_client_id: str | None,
         cycle_label: str,
+        capability_decision_view: list[dict[str, Any]] | None = None,
         pre_send_check_attempt: int = 1,
         pre_send_check_prior_attempts: list[dict[str, Any]] | None = None,
         suppress_outward_speech: bool = False,
@@ -2518,6 +2520,7 @@ class ServiceInputPipelineMixin:
         elif outward_decision.get("kind") == "speech":
             speech_context = self._build_speech_context(
                 input_text=input_text,
+                capability_decision_view=capability_decision_view,
                 current_input=current_input,
                 recent_turns=recent_turns,
                 time_context=time_context,
@@ -2785,9 +2788,11 @@ class ServiceInputPipelineMixin:
         decision: dict[str, Any],
         agent_skill_context: dict[str, Any] | None,
         reference_context: dict[str, Any] | None = None,
+        capability_decision_view: list[dict[str, Any]] | None = None,
     ) -> SpeechContext:
         return SpeechContext(
             input_text=input_text,
+            capability_decision_view=capability_decision_view,
             current_input=current_input,
             recent_turns=recent_turns,
             time_context=time_context,

@@ -158,6 +158,7 @@ class ServiceInputActivityMixin:
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "trigger_kind": trigger_kind,
+            "activity_subject": {"actor": "person", "actor_ref": self._activity_actor_ref(current_input)},
             "persona_context": persona_context.to_prompt_payload(),
             "time_context": self._build_time_context(current_time=started_at),
             "current_input": current_input,
@@ -189,6 +190,32 @@ class ServiceInputActivityMixin:
         )
         if source_owner is not None:
             payload["source_owner"] = source_owner
+        payload["observed_person_refs"] = [
+            person["person_ref"] for person in self._observed_persons_from_structured_source(
+                [visual_observation_context, observation_summary, client_context.get("visual_observation_signals")]
+            )
+        ]
+        # カメラの所有者と、そこに映る人物の同一性は別の境界。
+        # 未同定の人物の動作を本人報告と混ぜてから審査すると、報告由来と
+        # 誤認されるため、人物に結び付かない映像は活動推定の入力から分ける。
+        if source_owner == "self" and payload["activity_subject"]["actor_ref"] not in payload["observed_person_refs"]:
+            payload.pop("visual_observation_context", None)
+            payload.pop("pre_observation_activity_context", None)
+            if "client_context" in payload:
+                payload["client_context"] = {
+                    key: value for key, value in payload["client_context"].items()
+                    if key not in {"wake_observation_summary", "visual_observations"}
+                }
+            if "observation_summary" in payload:
+                payload["observation_summary"] = {
+                    key: value for key, value in payload["observation_summary"].items()
+                    if key not in {"visual_summary_text"}
+                }
+            if "foreground_world_state" in payload:
+                payload["foreground_world_state"] = [
+                    item for item in payload["foreground_world_state"]
+                    if item.get("state_type") != "visual_context"
+                ]
         return payload
 
     def _should_generate_activity_state(self, source_pack: dict[str, Any]) -> bool:
@@ -311,14 +338,19 @@ class ServiceInputActivityMixin:
         transition = str(candidate.get("transition", "none")).strip()
         if transition == "none":
             return None, None
+        if candidate["actor"] != "person":
+            raise ValueError("Person activity must have actor=person.")
         if transition == "end":
             previous_id = previous_state.get("activity_id") if isinstance(previous_state, dict) else None
             return None, previous_id if isinstance(previous_id, str) else None
 
-        previous_activity = self._activity_transition_baseline_previous(
-            source_pack=source_pack,
-            transition=transition,
-        ) or self._activity_previous_summary(previous_state, current_time=started_at)
+        if transition == "continue":
+            previous_activity = previous_state.get("previous_activity") if isinstance(previous_state, dict) else None
+        else:
+            previous_activity = self._activity_transition_baseline_previous(
+                source_pack=source_pack,
+                transition=transition,
+            ) or self._activity_previous_summary(previous_state, current_time=started_at)
         activity_id = previous_state.get("activity_id") if transition == "continue" and isinstance(previous_state, dict) else None
         if not isinstance(activity_id, str) or not activity_id.strip():
             activity_id = f"activity:{uuid.uuid4().hex}"
@@ -443,10 +475,7 @@ class ServiceInputActivityMixin:
         payload = self._activity_prompt_summary(activity_state, current_time=current_time)
         if not payload:
             return None
-        payload["ended_age_label"] = self._activity_age_label(
-            str(activity_state.get("updated_at") or current_time),
-            current_time=current_time,
-        )
+        payload["ended_age_label"] = "直前"
         started_at = activity_state.get("started_at")
         if isinstance(started_at, str) and started_at.strip():
             duration_label = self._activity_duration_label(started_at, current_time)

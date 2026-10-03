@@ -313,28 +313,30 @@ inspection では、少なくとも次を追えるようにする。
 確認対象は LLM の自然文ではなく、`initiative_context`、候補系統、最終 `decision.kind`、capability request の有無である。
 `summary.json` には `real_llm_initiative_probe_case_results` と `real_llm_background_thinking_probe_case_results` を compact digest として残し、case ごとの `trigger_kind / result_kind / selected_candidate_family / foreground_thinness / capability_id / background_thinking_scheduler_active / turn_consolidation_status` を trace 全文なしで確認する。`preferred_result_kind` は capability 提案がある case だけで値を持つ。
 `vision.capture` result follow-up の追加 request 制御は `real_llm_capability_result_probe_case_results` に分け、source capability と異なる capability request が dispatch されていないことを確認する。
-各 probe は `drive_state / world_state / ongoing_action` と recent conversation turns を消してから seed を入れ、直前の会話に判断を引っ張られない状態で実行する。
+各 probe はサーバ停止中に選択中の memory set の記憶・感情・観測・進行中の行動を消してから seed を入れ、直前の判断に引っ張られない状態で実行する。検証結果の照合に使う cycle trace と cycle summary は残す。
 
 API起床の自律判断 matrix は次の 9 件に固定する。
 
 | case | 入力条件 | 期待する構造 |
 | --- | --- | --- |
-| `thin-drive-vision-probe` | 前景 `world_state` が薄く、強い `drive_state` がある | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`vision.capture` request |
+| `thin-drive-person-vision-hold` | 前景 `world_state` が薄く、人物側の画面観測が必要な強い `drive_state` がある | `selected_candidate_family=autonomous`、`decision.kind=noop`、capability request なし |
 | `schedule-grounded-speech` | 近い予定の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
 | `social-grounded-speech` | 対人文脈の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
-| `body-grounded-speech` | 身体状態の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
-| `external-fresh-speech` | 外部サービスの新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=thin`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
-| `device-fresh-speech` | 端末状態の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=thin`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
-| `environment-fresh-speech` | 作業環境の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=mixed`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
-| `location-fresh-speech` | 場所状態の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=mixed`、`selected_candidate_family=autonomous`、`decision.kind=speech` |
+| `body-grounded-context` | 身体状態の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech/noop` |
+| `external-fresh-context` | 外部サービスの新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=thin`、`selected_candidate_family=autonomous`、`decision.kind=speech/noop` |
+| `device-fresh-context` | 端末状態の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=thin`、`selected_candidate_family=autonomous`、`decision.kind=speech/noop` |
+| `environment-fresh-context` | 作業環境の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=mixed`、`selected_candidate_family=autonomous`、`decision.kind=speech/noop` |
+| `location-fresh-context` | 場所状態の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=mixed`、`selected_candidate_family=autonomous`、`decision.kind=speech/noop` |
 | `ongoing-waiting-noop` | `ongoing_action.status=waiting_result` がある | `selected_candidate_family=ongoing_action`、`blocking_reason_summary` に waiting_result を残し、`decision.kind=noop` |
+
+安定した身体・外部サービス・端末・環境・場所の状態は、それだけで発話を必須にしない。これらの probe は状態が判断文脈へ渡ることを確認し、発話か見送りかは LLM が現在の意味から選ぶ。
 
 定期思考（`background_thinking`）制御 matrix は次の 4 件に固定する。
 
 | case | 入力条件 | 期待する構造 |
 | --- | --- | --- |
 | `background-no-context-skip` | interval 経過後の定期思考で `drive_state / world_state / ongoing_action` が空 | 定期思考 cycle を作り、`initiative_context` なしの `decision.kind=noop` と `memory_trace=skipped` を残す |
-| `background-recent-duplicate-noop` | interval 経過後の定期思考で視覚観測の `change_state` が `same_as_recent_speech` である | `suppression_level=high`、`decision.kind=noop`、`memory_trace=skipped` |
+| `background-weak-foreground-noop` | interval 経過後の定期思考で弱い視覚前景だけがある | 自律入口を見送り、`initiative_context` なしの `decision.kind=noop` と `memory_trace=skipped` を残す |
 | `background-grounded-speech` | interval 経過後の定期思考で予定 `world_state` と整合する構造値が強い `drive_state` がある | `background_thinking_scheduler_active=true`、`foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`memory_trace=succeeded` |
 | `background-interval-not-due` | `interval_started_at` 相当の直後に長い interval を設定する | `background_thinking_scheduler_active=true` を観測し、新しい定期思考 cycle を作らない |
 

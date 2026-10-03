@@ -149,6 +149,9 @@ class ServiceInputVisualMixin:
             ),
             "observation_summary": self._build_visual_observation_observation_summary(observation_summary),
             "current_input_summary": input_text.strip(),
+            "observed_persons": self._observed_persons_from_structured_source(
+                [observation_summary, client_context.get("visual_observation_signals")]
+            ),
         }
         if isinstance(visual_observation_change_context, dict) and visual_observation_change_context:
             payload["change_context"] = visual_observation_change_context

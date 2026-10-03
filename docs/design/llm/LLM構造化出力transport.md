@@ -60,6 +60,8 @@ server は role validator の前にその文字列を object へ戻す。
 文字列が JSON object として読めない場合は、その生成の契約違反として repair する。
 意味検証と後段が受け取る値は object である。
 
+decision の `supporting_factor_refs` は意味検証前にID集合として正規化し、primary と同じIDと同一IDの重複を除いて元の順序を保つ。未知IDや抑制対象との衝突は validator で失敗させる。
+
 `pattern`、`if` / `then`、ルートの巨大な `anyOf`、`$ref` は使わない。
 
 ## OpenRouter
@@ -79,9 +81,11 @@ OpenRouter 以外では `response_format` だけを渡し、`provider` は付け
 
 - model または endpoint が `json_schema` を受けない
 - schema 自体が provider に拒否される
+- provider の終了理由が `error / length / content_filter` を示す。LiteLLM が `error` を `stop` に正規化しても `provider_specific_fields.native_finish_reason` から生成失敗を検出する
 - 2 回目の出力も parse または validator を満たさない
 
 provider が schema または非対応で拒否した初回は repair しない。
+生成途中の `finish_reason=error` だけは transport が同一 model、同一入力、同一設定で1回再送し、再送の理由をログへ残す。2回目も失敗した場合は明示失敗とする。schema 拒否、出力上限、content filter は再送しない。この再送は JSON 契約の repair とは別で、schema や model の切り替えは行わない。
 JSON として壊れている場合と、JSON は通るが validator が落ちる場合は、同じ `response_format` のまま repair prompt で 1 回だけ再生成する。
 repair 回数と failure 範囲は [LLM補助契約共通.md](LLM補助契約共通.md) と各 role 文書を正とする。
 

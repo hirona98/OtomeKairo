@@ -37,6 +37,8 @@ raw response body、MCP の `content / structured_content / arguments`、client 
 
 ## source pack shape
 
+`user_message` の本文が非空の場合、`world_state_source_selection` に人格文脈と原入力を渡す。出力は `reported_states` の配列で、各要素は `state_type` と原入力の連続した引用 `evidence_text` を持つ。型は `environment / location / device / external_service / social_context`、型ごとに1件までである。コードは引用の出所を検証し、採用型の `state_sources.evidence_summary` に渡す。意味判断は LLM が担う。質問だけなら配列は空とする。視覚、自己の身体と予定は対応する型別 context から作る。採用の意味判断は [world_state の更新責務](../runtime/world_state.md#更新責務) を正とする。
+
 source pack 例:
 
 ```json
@@ -97,7 +99,7 @@ source pack 例:
 ```
 
 source pack では、標準の `client_context` と state-type 別の structured context を分ける。
-`state_sources` は LLM が選択できる候補集合の正本であり、各 structured context からコードが 1 件ずつ生成する。
+`state_sources` は LLM が選択できる候補集合の正本であり、各 structured context または上記の人物発話枠からコードが型別に 1 件ずつ生成する。
 `candidate_ref` は request-local な `state_source:<state_type>` とし、`state_type / scope_type / scope_key` はコードが確定する。
 LLM は `state_sources` に存在しない候補を生成しない。
 視覚前景は `vision.capture` result の視覚説明を根拠に `visual_context` へ載せ、`vision_source_id` で観測 source を識別する。

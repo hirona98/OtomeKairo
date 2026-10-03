@@ -997,6 +997,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                 _ = kwargs
                 return SimpleNamespace(
                     comparison_scope="self_activity",
+                    capability_decision_view=[],
                     workspace_context={"workspace_candidates": [{
                         "factor_ref": "periodic_thought_topic:elyth",
                         "kind": "periodic_thought_topic",

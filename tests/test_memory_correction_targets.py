@@ -95,6 +95,25 @@ class MemoryCorrectionTargetTests(unittest.TestCase):
             self.assertEqual(targets[0]["memory_unit"]["memory_unit_id"], memory_unit_id)
             self.assertEqual(targets[0]["source_cycle_ids"], [old_cycle_id])
 
+            # 訂正後は recalled 経由でも直近履歴経由でも古い create を再提示しない。
+            revision.update({"revision_id": "revision:corrected", "operation": "correct", "corrects_revision_id": "revision:old"})
+            with sqlite3.connect(store.memory_db_path) as conn:
+                conn.execute(
+                    """INSERT INTO revisions
+                    (revision_id, memory_set_id, memory_unit_id, occurred_at, operation,
+                     related_memory_unit_ids_json, reason, evidence_event_ids_json, payload_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    ("revision:corrected", memory_set_id, memory_unit_id,
+                     "2026-09-28T09:07:00+09:00", "correct", "[]", "訂正済み。", "[]",
+                     json.dumps(revision, ensure_ascii=False)),
+                )
+            params["cycle_limit"] = 10
+            for recalled in ([], [memory_unit_id]):
+                with self.subTest(recalled=recalled):
+                    self.assertEqual(store.list_recent_memory_revision_targets_for_correction(
+                        **params, recalled_memory_unit_ids=recalled,
+                    ), [])
+
 
 if __name__ == "__main__":
     unittest.main()

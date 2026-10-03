@@ -22,6 +22,8 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             service.llm.generate_speech.return_value = {"speech_text": "そろそろ作業に戻りましょう。"}
             objective = "読書を終えて作業に戻るよう声をかける。"
             step_context = SimpleNamespace(
+                capability_decision_view=[], affect_context={"mood_state": {"current_vad": {"v": 0.4, "a": 0.1, "d": 0.2}}},
+                self_state_context={"agency_confidence": []}, drive_state_summary=[],
                 run={"objective_summary": objective},
                 current_input=CurrentInput(
                     sender_kind="system", sender_ref="self", source_kind="autonomous_run",
@@ -41,6 +43,9 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
 
             decision = service._build_speech_context.call_args.kwargs["decision"]
             self.assertEqual(decision["run_objective_summary"], objective)
+            context_args = service._build_speech_context.call_args.kwargs
+            self.assertEqual(context_args["affect_context"], step_context.affect_context)
+            self.assertEqual(context_args["self_state_context"], step_context.self_state_context)
 
     def _use_mock_model(self, service: OtomeKairoService, state: dict) -> dict:
         preset_id = state["selected_model_preset_id"]
