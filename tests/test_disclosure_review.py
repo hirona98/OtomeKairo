@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 from otomekairo.interaction import InteractionContext, ParticipantContext
 from otomekairo.llm.contexts import CurrentInput, PersonaContext
@@ -29,6 +31,47 @@ class DisclosureService(ServiceInputDecisionComparisonMixin, ServiceInputPipelin
 
 
 class DisclosureReviewTests(unittest.TestCase):
+    def test_review_receives_original_person_report_outside_recent_conversation(self) -> None:
+        llm = ReviewLLM({"outcome": "allow", "speech_text": "共有を許可された好みです。", "reason_code": "owner_permission"})
+        service = DisclosureService(llm)
+        original = {
+            "event_id": "event:source", "role": "person", "speaker_ref": "person:other",
+            "participant_refs": ["person:other"], "interaction_ref": "interaction:other",
+            "created_at": "2026-10-03T09:00:00+09:00",
+            "text": "普段は無糖の麦茶が好きです。この好みは今の相手へ共有して構いません。",
+        }
+        service.store = SimpleNamespace(load_events_for_evidence=Mock(return_value=[original]))
+        result = service._apply_disclosure_review(
+            memory_set_id="memory_set:test", model_config={}, persona_context=self._persona_context(),
+            current_input=self._current_input("person:current"),
+            recent_turns=[{"role": "assistant", "text": "私が共有を許可したという推測。"}],
+            recall_pack={"person_model": [{
+                "memory_unit_id": "memory:other", "source_participant_refs": ["person:other"],
+                "evidence_event_ids": ["event:source"], "summary_text": "麦茶が好き。",
+            }]},
+            speech_payload={"speech_text": "共有を許可された好みです。"}, decision={"kind": "speech"},
+        )
+        self.assertEqual(result["disclosure_review"]["outcome"], "allow")
+        service.store.load_events_for_evidence.assert_called_once_with(
+            memory_set_id="memory_set:test", event_ids=["event:source"], limit=1,
+        )
+        self.assertEqual(llm.calls[0]["review_context"]["person_utterances"], [original])
+
+    def test_missing_selected_source_event_fails_before_review(self) -> None:
+        llm = ReviewLLM({})
+        service = DisclosureService(llm)
+        service.store = SimpleNamespace(load_events_for_evidence=Mock(return_value=[]))
+        with self.assertRaisesRegex(ValueError, "出所 event"):
+            service._apply_disclosure_review(
+                memory_set_id="memory_set:test", model_config={}, persona_context=self._persona_context(),
+                current_input=self._current_input("person:current"),
+                recall_pack={"person_model": [{
+                    "memory_unit_id": "memory:other", "source_participant_refs": ["person:other"],
+                    "evidence_event_ids": ["event:missing"],
+                }]}, speech_payload={"speech_text": "候補。"}, decision={"kind": "speech"},
+            )
+        self.assertEqual(llm.calls, [])
+
     def test_decision_only_conversation_is_reviewed_without_recalled_memory(self) -> None:
         llm = ReviewLLM({
             "outcome": "rewrite", "speech_text": "雨が上がりました。",
@@ -50,6 +93,7 @@ class DisclosureReviewTests(unittest.TestCase):
         ):
             with self.subTest(sender_kind=current_input.sender_kind):
                 result = service._apply_disclosure_review(
+                    memory_set_id="memory_set:test",
                     model_config={}, persona_context=self._persona_context(), current_input=current_input,
                     recall_pack={}, recent_interactions=groups,
                     speech_payload={"speech_text": "判断理由を経由して他の会話に触れた候補。"},
@@ -70,6 +114,7 @@ class DisclosureReviewTests(unittest.TestCase):
         service = DisclosureService(FailingReview({}))
         with self.assertRaisesRegex(RuntimeError, "review unavailable"):
             service._apply_disclosure_review(
+                memory_set_id="memory_set:test",
                 model_config={}, persona_context=self._persona_context(),
                 current_input=self._current_input("person:current"), recall_pack={},
                 recent_interactions=[{"interaction_ref": "interaction:other", "turns": [{
@@ -90,6 +135,7 @@ class DisclosureReviewTests(unittest.TestCase):
         decision = {"kind": "speech"}
 
         result = service._apply_disclosure_review(
+            memory_set_id="memory_set:test",
             model_config={"model": "test"},
             persona_context=self._persona_context(),
             current_input=self._current_input("person:current"),
@@ -132,6 +178,7 @@ class DisclosureReviewTests(unittest.TestCase):
         speech_payload = {"speech_text": "そのまま返します。"}
 
         result = service._apply_disclosure_review(
+            memory_set_id="memory_set:test",
             model_config={},
             persona_context=self._persona_context(),
             current_input=self._current_input("person:current"),
@@ -166,6 +213,7 @@ class DisclosureReviewTests(unittest.TestCase):
         decision = {"kind": "speech"}
 
         result = service._apply_disclosure_review(
+            memory_set_id="memory_set:test",
             model_config={},
             persona_context=self._persona_context(),
             current_input=self._current_input("person:current"),
@@ -214,6 +262,7 @@ class DisclosureReviewTests(unittest.TestCase):
         }
 
         result = service._apply_disclosure_review(
+            memory_set_id="memory_set:test",
             model_config={},
             persona_context=self._persona_context(),
             current_input=self._current_input("person:current"),

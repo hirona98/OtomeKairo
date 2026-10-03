@@ -9,6 +9,10 @@ from otomekairo.interaction import InteractionContext
 PERSONA_PROMPT_EXCERPT_LIMIT = 240
 
 
+def person_utterances_from_turns(turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [turn for turn in turns if turn.get("role") == "person"]
+
+
 PERSONA_CONTEXT_USE_POLICY = (
     "人格全体を、常に考え方、判断、振る舞い、話し方の基底として使う。"
     "本人の発言・投稿・返信は、人格本文の話し方、一人称、語尾、距離感に従う。"
@@ -295,6 +299,7 @@ class DecisionContext:
     agent_skill_context: dict[str, Any] | None = None
     comparison_scope: str = "full"
     recent_interactions: list[dict[str, Any]] | None = None
+    configured_activity_topics: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -365,3 +370,5 @@ class SpeechContext:
     people_context: list[dict[str, str]] | None = None
     agent_skill_context: dict[str, Any] | None = None
     capability_decision_view: list[dict[str, Any]] | None = None
+    configured_activity_topics: list[dict[str, Any]] | None = None
+    autonomous_run_summaries: list[dict[str, Any]] | None = None

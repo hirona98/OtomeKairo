@@ -291,7 +291,11 @@ class EvidenceResolver:
             evidence_pack = self._grounded_pack(
                 answer_contract=answer_contract,
                 evidence_items=items,
-                speech_guidance="根拠として渡された evidence_items だけを使い、根拠が弱い部分は弱いと明示する。",
+                speech_guidance=(
+                    "正確な原文・日時・出典は evidence_items の範囲で述べる。"
+                    "現在または最後に把握した状態は、本人発話、ActivityContext、観測、有効な継続理解もそれぞれの根拠として使い、"
+                    "報告・観測・推定と、その時点・確認不足を分けて答える。"
+                ),
             )
             return self._resolution(
                 input_text=input_text,

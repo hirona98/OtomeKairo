@@ -13,6 +13,7 @@ from otomekairo.llm.contexts import (
     InitiativeContext,
     PersonaContext,
     SpeechContext,
+    person_utterances_from_turns,
 )
 from otomekairo.llm.contracts import (
     LLMContractError,
@@ -408,7 +409,7 @@ class LLMClient:
         turns = [*context.recent_turns]
         for interaction in context.recent_interactions or []:
             turns.extend(interaction["turns"])
-        person_utterances = [turn for turn in turns if turn.get("role") == "user"]
+        person_utterances = person_utterances_from_turns(turns)
         for attempt in range(2):
             review = self._generate_structured_payload(
                 model_config=model_config,

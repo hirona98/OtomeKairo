@@ -10,6 +10,7 @@ from otomekairo.llm.contexts import (
     InitiativeContext,
     PersonaContext,
     SpeechContext,
+    person_utterances_from_turns,
 )
 from otomekairo.llm.contracts import (
     ANSWER_BOUNDARY_VALUES,
@@ -103,6 +104,45 @@ def _expression_address_instruction() -> str:
     )
 
 
+def _autonomous_run_evidence_instruction() -> str:
+    return (
+        "autonomous_run_summaries は現在の非終端 run の実行状態です。予定の有無と取消の完了は、会話での了解や過去の返答ではなく、この現在状態に照らして説明します。"
+        "active / waiting_timer / waiting_result / paused の run は終了していません。paused_by_user_interaction は会話中の一時停止であり、返答後に再開する予定です。"
+        "取消は特定 run の取消操作、または会話 API の autonomous_run_action.kind=cancel_all で行われます。本文で取消を望んだだけの場合は、現在残る予定と必要な取消操作を率直に伝えます。\n"
+    )
+
+
+def _activity_topic_evidence_instruction() -> str:
+    return (
+        "configured_activity_topics は、現在有効な動作設定に書かれた活動の範囲です。自己の関心や実績そのものではなく、活動候補として設定されている内容を説明する根拠です。"
+        "RecallPack.active_topics は過去の会話や未解決事項から想起した話題です。設定された活動、想起した話題、今回の判断で気にかけることを、それぞれの出所に沿って説明します。"
+        "外部の場所やサービスへの実際の関与は、その場所で行った取得・投稿・返信などの実行結果や記録に照らして述べます。会話で草案に返答した経験は、その相手との会話上の経験として扱います。"
+        "今できることは現在の capability_decision_view に照らして説明し、設定された活動に使える手段が示されていない場合は、現在その手段を利用できないことと、確認できる実績の範囲を伝えます。\n"
+    )
+
+
+def _activity_evidence_time_instruction() -> str:
+    return (
+        "ActivityContext は最後の根拠から保持している短期活動推定です。"
+        "actor_ref はその活動の人物参照です。複数の人物が話題に入る場合も対応する人物の活動として扱います。"
+        "age_label はその根拠からの経過、started_age_label と duration_label は推定上の活動区間を表します。保存中であることと、回答時点でも継続が確認できたことを分けます。"
+        "今も続いていると確認する根拠は、現在の本人報告または本人と同定された新しい観測です。"
+        "以前の報告だけが根拠なら、最後に聞いた活動として述べ、現在の継続は未確認と説明します。\n"
+        "最後に把握した活動を尋ねられたときは、その人物の ActivityContext の label、target、age_label、reason_summary を保持済み情報の根拠にします。現在の会話の recent_turns に以前の報告がなくても、この保持済み情報と今の確認不足を分けて答えます。\n"
+    )
+
+
+def _memory_evidence_time_instruction() -> str:
+    return (
+        "現在の人物の好みや継続理解は、最新の本人発話と person_model などの有効な記憶を、status、valid_from、valid_to、last_confirmed_at に照らして判断します。"
+        "episodic_evidence は formed_at 時点で交わされた報告や判断の記録です。その後の訂正や変化は有効な継続理解に反映されるため、過去の報告と現在の理解を区別して述べます。"
+        "summary は根拠から再構成した理解、memory_link_summary と memory_link_context は関係の補助情報です。"
+        "関連先の related_status または source_status / target_status が revoked / superseded なら、その内容は取り消された、または後の理解に置き換わった記録として扱います。"
+        "具体的な confirmed の継続理解と古い episode や推論要約が異なるときは、本人と対象、有効期間、訂正の経緯を照合し、現在の理解と当時の報告を分けて答えます。\n"
+        "人物が当時述べた経験や心情は、その本人報告を根拠にします。過去の assistant の回答やその要約に『不明』『聞いていない』とある場合も、本人の報告と照合します。今の想起で確認できないことは未確認として伝え、経験や報告がなかったこととは区別します。\n"
+    )
+
+
 def _semantic_layer_boundary_instruction(
     role_layer: str,
     *,
@@ -179,6 +219,9 @@ def build_decision_messages(
         },
     ]
     messages.extend(_build_agent_skill_messages(context.agent_skill_context))
+    messages.append({"role": "user", "content": _format_named_json_prompt_payload(
+        "CONFIGURED_ACTIVITY_TOPICS", context.configured_activity_topics or [],
+    )})
     messages.extend([
         {
             "role": "user",
@@ -259,6 +302,9 @@ def build_speech_messages(
     ]
     messages.extend(_build_agent_skill_messages(context.agent_skill_context))
     messages.append({"role": "user", "content": _format_named_json_prompt_payload(
+        "CONFIGURED_ACTIVITY_TOPICS", context.configured_activity_topics or [],
+    )})
+    messages.append({"role": "user", "content": _format_named_json_prompt_payload(
         "CAPABILITY_DECISION_VIEW", context.capability_decision_view,
     )})
     messages.extend([
@@ -285,6 +331,7 @@ def build_speech_messages(
                 recall_hint=context.recall_hint,
                 recall_pack=context.recall_pack,
                 decision=context.decision,
+                autonomous_run_summaries=context.autonomous_run_summaries,
             ),
         },
         {
@@ -407,7 +454,9 @@ def build_disclosure_review_messages(*, review_context: dict[str, Any]) -> list[
                 "内部処理 role `disclosure_review` として判定します。\n"
                 "候補発話が、応答対象とは別の人物に由来する記憶や、判断で参照した会話を不自然に開示しないか判断します。\n"
                 "応答対象本人が述べた情報、一般化された知識、会話上必要で秘密性のない情報は許可します。\n"
+                "person_utterances と other_person_sources に、情報の本人が応答対象への共有を明示的に許可した発話がある場合は、その人物・情報・時点の範囲で開示を許可します。許可の意味判断は本人の発話と出所に照らして行います。\n"
                 "他者の私的情報、他者との会話内容、出所を隠した横流しになる内容は、意味を保って安全に書き換えます。\n"
+                "rewrite では開示が不適切な節だけを一般化するか削り、応答対象本人についての回答と、候補の根拠に沿う事実関係は保ちます。\n"
                 "安全な書き換えが成立しない場合は withhold を選びます。周囲への独り言も同じ基準で確認します。\n"
                 "persona_context の人格全体に基づき、この role の問いと出力契約に従って処理してください。開示可否と候補集合を人格で変えません。\n"
                 "JSONオブジェクト1個だけを返します。キーは outcome, speech_text, reason_code の3個です。\n"
@@ -599,11 +648,13 @@ def build_speech_grounding_review_messages(
     review_context = {
         "persona_context": review_persona_context,
         "current_input": context.current_input.to_prompt_payload(),
-        "person_utterances": [turn for turn in context.recent_turns if turn.get("role") == "user"],
-        "recall_pack": _compact_recall_pack(context.recall_pack),
+        "person_utterances": person_utterances_from_turns(context.recent_turns),
+        "recall_pack": _compact_recall_pack(context.recall_pack, activity_context=context.activity_context),
         "decision": context.decision,
         "ongoing_action_summary": context.ongoing_action_summary,
         "capability_decision_view": context.capability_decision_view,
+        "configured_activity_topics": context.configured_activity_topics or [],
+        "autonomous_run_summaries": context.autonomous_run_summaries or [],
         "foreground_world_state": context.foreground_world_state,
         "visual_observation_context": context.visual_observation_context,
         "activity_context": context.activity_context,
@@ -625,7 +676,11 @@ def build_speech_grounding_review_messages(
             "カメラに映る人物は、構造化された observed_person_refs または本人による同定の根拠がある場合だけ会話の話者自身として述べます。未同定なら『映っている人物』として描写し、話者から聞いた場所と映像の場所も区別します。"
             "場所の固有名は、その観測に付いた source_label または観測本文の明示を使います。本人が書斎にいるという発話だけでは、未同定のカメラ映像を「書斎」とは呼べません。画像の部屋と本人の場所の対応が不明なら、対応は分からないと説明します。同じ場所や対象という対応が確認できた場合だけ、一致や変化を比較します。"
             "利用可能な能力は capability_decision_view の根拠で確認します。観測未実行や現在利用不可と、恒久的に能力を持たないことを区別します。人物から聞いた内容、実際に観測した内容、まだ分からない内容を発話でも区別します。観測がない場合は、今は見えていないことを自然に答えます。foreground_world_state.source_kind=user_input は人物から聞いた報告です。実際に見たという説明には視覚観測の根拠を使い、報告と活動推定はそれぞれ聞いた内容と推定として述べます。"
-            "persona_context は人格と口調の根拠です。人格上の自己像やPC上に存在するという設定から、画面を見る能力や外界の事実を補いません。"
+            + _activity_evidence_time_instruction()
+            + _memory_evidence_time_instruction()
+            + _activity_topic_evidence_instruction()
+            + _autonomous_run_evidence_instruction()
+            + "persona_context は人格と口調の根拠です。人格上の自己像やPC上に存在するという設定から、画面を見る能力や外界の事実を補いません。"
             "decision.reason_summary と persona_context は応答方針や口調の材料であり、過去の実績や予定日時を補完する証拠ではありません。"
             "候補発話が、単発の行動を習慣と断定する、過去の失敗回数や達成率を作る、週末を明日の朝に変えるなど、"
             "本人の事実・回数・時期を広げていないか確認します。"
@@ -1482,7 +1537,10 @@ def _decision_rules_section(comparison_scope: str) -> str:
 
 def _decision_recall_evidence_rules() -> str:
     return (
-        "RecallPack.evidence_pack.status=grounded のとき、正確な原文・日時・出典に関する判断は evidence_items の範囲で行ってください。\n"
+        _memory_evidence_time_instruction()
+        + _activity_topic_evidence_instruction()
+        + _autonomous_run_evidence_instruction()
+        + "RecallPack.evidence_pack.status=grounded のとき、正確な原文・日時・出典に関する判断は evidence_items の範囲で行ってください。\n"
         "人物から現在状態や知覚を直接尋ねられた場合は、分かっていることと未観測のことを説明する speech で応答します。観測不足や利用可能な binding がないことは、外界の断定を控えて現在の観測状況を伝える材料です。人物発話の向きでは recent_turns はその会話の本体です。正確な原文・日時・出典だけ evidence_items を正本にしてください。\n"
         "向きが人物発話ではないとき、recent_turns と過去の assistant 発話、要約記憶は会話の文脈や表現調整に使います。\n"
         "evidence_items に raw event が含まれるときは、その text と recorded_date を利用可能な根拠として扱ってください。\n"
@@ -1583,7 +1641,8 @@ def _decision_full_rules_section() -> str:
         + _decision_context_view_rules()
         + "非ユーザー起点では、initiative_context と観測、向き、能力を同じ盤面で比べ、関わる、保留する、見送る、能力を使うのどれが自然かを選びます。\n"
         + _decision_capability_run_rules(include_person_start=True)
-        + "ActivityContext は短期活動推定です。actor=person は人物、actor=self は現在の個です。"
+        + _activity_evidence_time_instruction()
+        + "actor=person は人物、actor=self は現在の個です。"
         "reason_summary では current_activity と整合する活動状態を書き、前の活動は「直前まで」として扱います。\n"
         "空文字だけの入力は noop を選びます。"
     )
@@ -1626,7 +1685,8 @@ def _decision_outward_speech_rules_section() -> str:
         "WorkspaceContext は観測、活動、抑制、直近文脈の前景です。\n"
         + _decision_foreground_selection_rules(comparison_scope="outward_speech")
         + _decision_context_view_rules()
-        + "ActivityContext は短期活動推定です。actor=person は人物、actor=self は現在の個です。"
+        + _activity_evidence_time_instruction()
+        + "actor=person は人物、actor=self は現在の個です。"
         "reason_summary では current_activity と整合する活動状態を書き、前の活動は「直前まで」として扱います。\n"
         "空文字だけの入力は noop を選びます。"
     )
@@ -2060,7 +2120,11 @@ def _build_speech_system_prompt() -> str:
             + _current_individual_side_instruction()
             + "source_owner=user_environment の視覚観測、foreground_world_state、ActivityContext.actor=person は人物側の環境または活動です。現在の個の一人称とは切り分け、対応する person_ref の人物側の見え方として表現してください。\n"
             "source_owner=self の camera 視覚観測は、現在の個の視覚根拠として表現できます。\n"
-            "persona_context の人格全体に基づき、この role の問いと出力契約に従って処理してください。decision と internal_context の根拠外の事実を足してはいけません。",
+            + _activity_evidence_time_instruction()
+            + _memory_evidence_time_instruction()
+            + _activity_topic_evidence_instruction()
+            + _autonomous_run_evidence_instruction()
+            + "persona_context の人格全体に基づき、この role の問いと出力契約に従って処理してください。decision と internal_context の根拠外の事実を足してはいけません。",
         ),
         ("人物参照", _person_reference_instruction() + _expression_address_instruction()),
         (
@@ -2128,6 +2192,7 @@ def _build_speech_context_prompt(
     recall_hint: dict,
     recall_pack: dict[str, Any],
     decision: dict,
+    autonomous_run_summaries: list[dict[str, Any]] | None = None,
 ) -> str:
     speech_workspace_context = _build_speech_workspace_context(
         workspace_context=workspace_context,
@@ -2157,6 +2222,7 @@ def _build_speech_context_prompt(
         "recall_hint": recall_hint,
         "decision": decision,
     }
+    payload["internal_context"]["autonomous_run_summaries"] = autonomous_run_summaries or []
     return _format_named_json_prompt_payload("INTERNAL_CONTEXT", payload)
 
 
@@ -2237,6 +2303,7 @@ def _build_memory_interpretation_system_prompt() -> str:
         + "\n"
         "一時的な支援姿勢をどうしても commitment 候補にする場合は qualifiers_hint.source=assistant_response、commitment_actor=self、scope_duration=session、commitment_focus=support_posture を入れてください。\n"
         "明示訂正で以前の理解を置き換えるなら、置換後の候補メモを返し qualifiers_hint.negates_previous=true を付けてください。\n"
+        "本人が普段選ぶ対象や継続的な方針を以前のものから新しいものへ変えた場合は、現在有効な候補を返し qualifiers_hint.replace_prior=true とします。これは当時の説明を誤りとして取り消す訂正とは別で、correction_status=no_correction と両立します。現在の選択を再確認する場合も、以前の選択に代わることが本人発話で明確なら replace_prior=true を付けます。独立した好みを追加して並存させる場合は allow_parallel=true として区別します。\n"
         "弱い単発推測や event に留めるべき断片は candidate_memory_units に入れず、結果として noop になってよいです。\n"
         "memory_type は fact, preference, relation, commitment, interpretation, summary のいずれかです。\n"
         "candidate_memory_units は DB 行候補ではなく、意味ヒントだけを持つ記憶候補メモです。\n"
@@ -2678,7 +2745,7 @@ def _build_speech_internal_context_payload(
             initiative_context=initiative_context,
             visual_observation_context=visual_observation_context,
         ),
-        "recall_pack": _compact_recall_pack(recall_pack),
+        "recall_pack": _compact_recall_pack(recall_pack, activity_context=activity_context),
     }
     if drive_state_summary:
         payload["drive_state_summary"] = drive_state_summary
@@ -2901,7 +2968,7 @@ def _build_internal_context_payload(
     payload: dict[str, Any] = {
         "time_context": time_context,
         "affect_context": affect_context,
-        "recall_pack": _compact_recall_pack(recall_pack),
+        "recall_pack": _compact_recall_pack(recall_pack, activity_context=activity_context),
         "current_autonomous_run_count": len(autonomous_run_summaries or []),
     }
     if drive_state_summary:
@@ -2989,7 +3056,9 @@ def _compact_default_mode_context(default_mode_context: dict[str, Any]) -> dict[
     return compact
 
 
-def _compact_recall_pack(recall_pack: dict[str, Any]) -> dict[str, Any]:
+def _compact_recall_pack(
+    recall_pack: dict[str, Any], *, activity_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     compact = {
         "self_model": [_compact_memory_context_item(item) for item in recall_pack.get("self_model", [])],
         "person_model": [_compact_memory_context_item(item) for item in recall_pack.get("person_model", [])],
@@ -3012,7 +3081,19 @@ def _compact_recall_pack(recall_pack: dict[str, Any]) -> dict[str, Any]:
     if isinstance(recall_pack.get("answer_contract"), dict):
         compact["answer_contract"] = recall_pack["answer_contract"]
     if isinstance(recall_pack.get("evidence_pack"), dict):
-        compact["evidence_pack"] = recall_pack["evidence_pack"]
+        compact["evidence_pack"] = dict(recall_pack["evidence_pack"])
+        if compact.get("answer_contract", {}).get("contract") == "provenance" and activity_context:
+            current_activity = activity_context.get("current_activity")
+            if isinstance(current_activity, dict):
+                compact["evidence_pack"]["evidence_items"] = [{
+                    "type": "activity_context",
+                    "text": current_activity.get("reason_summary"),
+                    "payload": {
+                        "source_kind": "activity_state",
+                        "evidence_kind": "inference",
+                        **current_activity,
+                    },
+                }, *compact["evidence_pack"].get("evidence_items", [])]
     return compact
 
 
@@ -3023,6 +3104,9 @@ def _compact_memory_context_item(item: dict[str, Any]) -> dict[str, Any]:
         "scope_key": item["scope_key"],
         "summary_text": item["summary_text"],
     }
+    for key in ("status", "formed_at", "last_confirmed_at", "valid_from", "valid_to"):
+        if item.get(key) is not None:
+            payload[key] = item[key]
     if item.get("commitment_state") is not None:
         payload["commitment_state"] = item["commitment_state"]
     if item.get("valid_to") is not None:
@@ -3058,6 +3142,8 @@ def _compact_episode_context_item(item: dict[str, Any]) -> dict[str, Any]:
         "summary_text": item["summary_text"],
         "open_loops": item.get("open_loops", []),
     }
+    if item.get("formed_at") is not None:
+        payload["formed_at"] = item["formed_at"]
     if item.get("outcome_text") is not None:
         payload["outcome_text"] = item["outcome_text"]
     if item.get("retrieval_lane") is not None:
@@ -3124,6 +3210,8 @@ def _compact_memory_link_context(value: Any) -> dict[str, Any]:
             {
                 "label": item.get("label"),
                 "selected_endpoint": item.get("selected_endpoint"),
+                "source_status": item.get("source_status"),
+                "target_status": item.get("target_status"),
                 "summary_text": item.get("summary_text"),
             }
         )

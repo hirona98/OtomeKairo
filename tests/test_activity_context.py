@@ -82,6 +82,7 @@ class ActivityContextTests(unittest.TestCase):
             {
                 "label": "離席中",
                 "actor": "person",
+                "actor_ref": "person:test",
                 "target": "workspace",
                 "transition": "continue",
                 "confidence": 0.86,
@@ -95,6 +96,7 @@ class ActivityContextTests(unittest.TestCase):
 
         assert context is not None
         current_activity = context["current_activity"]
+        self.assertEqual(current_activity["actor_ref"], "person:test")
         self.assertEqual(current_activity["transition"], "continue")
         self.assertEqual(current_activity["started_age_label"], "19時間前")
         self.assertEqual(current_activity["duration_label"], "約19時間")

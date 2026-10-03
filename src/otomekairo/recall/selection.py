@@ -292,6 +292,9 @@ class RecallSelectionMixin:
             payload["scope_type"] = item["scope_type"]
             payload["scope_key"] = item["scope_key"]
             payload["status"] = item["status"]
+            for key in ("formed_at", "last_confirmed_at", "valid_from", "valid_to"):
+                if item.get(key) is not None:
+                    payload[key] = item[key]
             if item.get("commitment_state") is not None:
                 payload["commitment_state"] = item["commitment_state"]
             if isinstance(item.get("memory_link_summary"), dict):
@@ -302,6 +305,7 @@ class RecallSelectionMixin:
         if item["source_kind"] == "episode":
             payload["primary_scope_type"] = item["primary_scope_type"]
             payload["primary_scope_key"] = item["primary_scope_key"]
+            payload["formed_at"] = item["formed_at"]
             payload["open_loops"] = item.get("open_loops", [])
             if item.get("outcome_text") is not None:
                 payload["outcome_text"] = item["outcome_text"]

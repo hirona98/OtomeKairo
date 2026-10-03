@@ -10,6 +10,7 @@ from otomekairo.llm.contexts import (
     PersonaContext,
     SpeechContext,
     build_persona_context_summary,
+    person_utterances_from_turns,
 )
 from otomekairo.interaction import InteractionContext
 from otomekairo.service.agent_skills import (
@@ -291,6 +292,7 @@ class ServiceInputPipelineMixin:
 
         # decision生成
         decision = self._run_pipeline_decision(
+            configured_activity_topics=self._configured_activity_topic_context(state=state),
             recent_interactions=recent_interactions,
             input_text=input_text,
             current_input=current_input,
@@ -339,6 +341,7 @@ class ServiceInputPipelineMixin:
             prior_attempts: list[dict[str, Any]] | None = None,
         ) -> dict[str, Any]:
             return self._run_pipeline_output(
+                autonomous_run_summaries=pipeline_contexts["autonomous_run_summaries"],
                 capability_decision_view=pipeline_contexts["capability_decision_view"],
                 recent_interactions=recent_interactions,
                 state=state,
@@ -384,6 +387,7 @@ class ServiceInputPipelineMixin:
         except PreSendCheckWithheldError as first_withhold:
             first_attempt = deepcopy(first_withhold.audit_summary)
             decision = self._run_pipeline_decision(
+                configured_activity_topics=self._configured_activity_topic_context(state=state),
                 recent_interactions=recent_interactions,
                 input_text=input_text,
                 current_input=current_input,
@@ -2298,6 +2302,7 @@ class ServiceInputPipelineMixin:
         self_activity_recall_pack: dict[str, Any] | None = None,
         self_activity_agent_skill_context: dict[str, Any] | None = None,
         recent_interactions: list[dict[str, Any]] | None = None,
+        configured_activity_topics: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         # decision生成
         if self._should_compare_self_activity_separately(
@@ -2342,6 +2347,7 @@ class ServiceInputPipelineMixin:
                 pre_send_check_feedback=pre_send_check_feedback,
             )
         decision_context = self._build_decision_context(
+            configured_activity_topics=configured_activity_topics,
             recent_interactions=recent_interactions,
             input_text=input_text,
             current_input=current_input,
@@ -2417,6 +2423,7 @@ class ServiceInputPipelineMixin:
         suppress_outward_speech: bool = False,
         suppress_outward_speech_reason: str | None = None,
         recent_interactions: list[dict[str, Any]] | None = None,
+        autonomous_run_summaries: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         self_decision = self._execution_self_decision(decision)
         outward_decision = self._execution_outward_decision(decision)
@@ -2519,6 +2526,8 @@ class ServiceInputPipelineMixin:
             debug_log("Pipeline", f"{cycle_label} speech skipped {reason_code}")
         elif outward_decision.get("kind") == "speech":
             speech_context = self._build_speech_context(
+                autonomous_run_summaries=autonomous_run_summaries,
+                configured_activity_topics=self._configured_activity_topic_context(state=state),
                 input_text=input_text,
                 capability_decision_view=capability_decision_view,
                 current_input=current_input,
@@ -2548,6 +2557,7 @@ class ServiceInputPipelineMixin:
                 context=speech_context,
             )
             speech_payload = self._apply_disclosure_review(
+                memory_set_id=state["selected_memory_set_id"],
                 recent_interactions=recent_interactions,
                 model_config=model_config,
                 persona_context=self._build_selected_persona_context(
@@ -2558,6 +2568,7 @@ class ServiceInputPipelineMixin:
                 recall_pack=recall_pack,
                 speech_payload=speech_payload,
                 decision=decision,
+                recent_turns=recent_turns,
             )
             if speech_payload is None:
                 debug_log("Pipeline", f"{cycle_label} speech withheld disclosure_review")
@@ -2584,6 +2595,7 @@ class ServiceInputPipelineMixin:
     def _apply_disclosure_review(
         self,
         *,
+        memory_set_id: str,
         model_config: dict[str, Any],
         persona_context: PersonaContext,
         current_input: CurrentInput,
@@ -2591,6 +2603,7 @@ class ServiceInputPipelineMixin:
         speech_payload: dict[str, Any],
         decision: dict[str, Any],
         recent_interactions: list[dict[str, Any]] | None = None,
+        recent_turns: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         sensitive_sources = self._disclosure_review_sources(
             recent_interactions=recent_interactions,
@@ -2599,11 +2612,29 @@ class ServiceInputPipelineMixin:
         )
         if not sensitive_sources:
             return speech_payload
+        evidence_ids = list(dict.fromkeys(
+            event_id
+            for source in sensitive_sources
+            for key in ("evidence_event_ids", "linked_event_ids")
+            for event_id in source["source_item"].get(key, [])
+        ))
+        source_turns: list[dict[str, Any]] = []
+        if evidence_ids:
+            events = self.store.load_events_for_evidence(
+                memory_set_id=memory_set_id, event_ids=evidence_ids, limit=len(evidence_ids),
+            )
+            if {event["event_id"] for event in events} != set(evidence_ids):
+                raise ValueError("開示審査の記憶出所 event を取得できません。")
+            source_turns = [{
+                key: event.get(key)
+                for key in ("event_id", "role", "text", "speaker_ref", "participant_refs", "interaction_ref", "created_at")
+            } for event in events]
         review = self.llm.generate_disclosure_review(
             model_config=model_config,
             review_context={
                 "persona_context": persona_context.to_prompt_payload(),
                 "current_input": current_input.to_prompt_payload(),
+                "person_utterances": person_utterances_from_turns([*(recent_turns or []), *source_turns]),
                 "candidate_speech": speech_payload["speech_text"],
                 "requires_response": current_input.sender_kind == "person",
                 "other_person_sources": [
@@ -2701,6 +2732,13 @@ class ServiceInputPipelineMixin:
                 )
         return sources
 
+    def _configured_activity_topic_context(self, *, state: dict[str, Any]) -> list[dict[str, Any]]:
+        return [
+            {"topic_id": topic["topic_id"], "topic_summary": topic["topic_summary"]}
+            for topic in state.get("periodic_thought_topics", [])
+            if topic["enabled"]
+        ]
+
     def _build_decision_context(
         self,
         *,
@@ -2732,8 +2770,10 @@ class ServiceInputPipelineMixin:
         pre_send_check_feedback: str | None = None,
         comparison_scope: str = "full",
         recent_interactions: list[dict[str, Any]] | None = None,
+        configured_activity_topics: list[dict[str, Any]] | None = None,
     ) -> DecisionContext:
         return DecisionContext(
+            configured_activity_topics=configured_activity_topics,
             recent_interactions=recent_interactions,
             input_text=input_text,
             current_input=current_input,
@@ -2789,8 +2829,12 @@ class ServiceInputPipelineMixin:
         agent_skill_context: dict[str, Any] | None,
         reference_context: dict[str, Any] | None = None,
         capability_decision_view: list[dict[str, Any]] | None = None,
+        configured_activity_topics: list[dict[str, Any]] | None = None,
+        autonomous_run_summaries: list[dict[str, Any]] | None = None,
     ) -> SpeechContext:
         return SpeechContext(
+            autonomous_run_summaries=autonomous_run_summaries,
+            configured_activity_topics=configured_activity_topics,
             input_text=input_text,
             capability_decision_view=capability_decision_view,
             current_input=current_input,

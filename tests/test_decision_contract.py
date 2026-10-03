@@ -827,7 +827,7 @@ class DecisionContractTests(unittest.TestCase):
     def test_outward_grounding_reconsiders_and_uses_only_person_utterances(self) -> None:
         context = replace(
             _decision_context([]), comparison_scope="outward_speech", trigger_kind="wake",
-            recent_turns=[{"role": "user", "text": "様子を教えて"}, {"role": "assistant", "text": "作業が見えます"}],
+            recent_turns=[{"role": "person", "text": "様子を教えて"}, {"role": "assistant", "text": "作業が見えます"}],
             recent_interactions=[{"interaction_ref": "interaction:other", "turns": [{"role": "assistant", "text": "返答しました"}]}],
             autonomous_run_summaries=[{"run_id": "run:completed", "status": "completed"}],
         )
@@ -843,7 +843,7 @@ class DecisionContractTests(unittest.TestCase):
             )
         self.assertEqual(result, corrected)
         review_input = json.loads(generate.call_args_list[0].kwargs["messages"][1]["content"])
-        self.assertEqual(review_input["person_utterances"], [{"role": "user", "text": "様子を教えて"}])
+        self.assertEqual(review_input["person_utterances"], [{"role": "person", "text": "様子を教えて"}])
         self.assertEqual(review_input["communication_history"], {"recent_turns": context.recent_turns, "recent_interactions": context.recent_interactions})
         self.assertEqual(review_input["autonomous_run_summaries"], context.autonomous_run_summaries)
         self.assertEqual(generate.call_count, 3)

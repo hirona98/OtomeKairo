@@ -231,6 +231,7 @@ run は必要に応じて `vision.capture`、`camera.ptz`、`wait_until`、`spee
 次の観測時刻、継続、完了、中断は `autonomous_step_generation` が目的、履歴、現在時刻、能力可否、直近 result から判断する。
 server は特定語句の文字列一致で監視間隔や終了時刻へ変換しない。
 特定 run は cancel API、会話からの全run停止は `autonomous_run_action.kind=cancel_all` で `cancelled` に遷移する。
+判断、表現、発話根拠審査は、現在の非終端 run を `autonomous_run_summaries` として参照する。人物発話による一時停止は取消ではなく、返答後の再開を伴う。会話中の了解や過去の返答だけで取消完了を説明せず、本文だけで取消を望んだ場合には、残っている予定と必要な取消操作を現在状態に沿って伝える。
 server は会話本文から停止意図を推定しない。
 
 ## ユーザー割り込み

@@ -255,6 +255,7 @@ class ServiceInputInitiativeContextMixin:
         for key, limit in (
             ("label", 120),
             ("actor", 32),
+            ("actor_ref", 128),
             ("target", 120),
             ("transition", 32),
             ("started_age_label", 40),

@@ -179,15 +179,20 @@ LLM は `status` を出力しない。
 `previous_activity` は直前活動だけを表し、現在進行中の活動として扱わない。
 判断文脈へ出す `activity_context` には `status` を含めない。
 判断文脈へ出す `activity_context.current_activity.actor` は speech の主体境界に使う。
+`current_activity / previous_activity` の `actor_ref` は、活動の人物との対応を保つため圧縮表現にも残す。
 `actor=person` の活動に触れる発話は、`actor_ref` の人物側の状況へのコメントとして表現する。
 判断文脈へ出す `activity_context.current_activity` には、活動推定 LLM が返した `transition` を含める。
 判断文脈へ出す `activity_context.current_activity / previous_activity` には、時刻そのものではなく `started_age_label / duration_label / ended_age_label` のような生活文脈向けラベルを含める。
 これにより、長く続いた直前活動が `直前` という終了時点だけへ圧縮されないようにする。
+`current_activity.age_label` は最後に活動を支えた根拠からの経過を表す。`started_age_label / duration_label` は推定上の活動区間であり、その間の継続を観測し続けた実績ではない。
+有効期限内の状態保持と、回答時点の継続確認は分ける。判断、発話生成、発話の根拠審査では、現在の本人報告または本人と同定された新しい観測で現在の継続を確認する。以前の報告だけが根拠なら、最後に聞いた活動として述べ、現在も続いているかは未確認として扱う。
+最後に把握した活動を尋ねられた場合は、その人物の `activity_context` を根拠にする。現在の相互作用の直近会話に元の報告がなくても、保持済みの活動と現在の継続の確認不足を分けて答える。
 
 ```json
 {
   "current_activity": {
     "actor": "person",
+    "actor_ref": "person:external-123",
     "label": "現在活動を短く表す自然文",
     "transition": "switch",
     "confidence": 0.7,
@@ -198,6 +203,7 @@ LLM は `status` を出力しない。
   },
   "previous_activity": {
     "actor": "person",
+    "actor_ref": "person:external-123",
     "label": "直前活動を短く表す自然文",
     "target": "直前活動の対象",
     "started_age_label": "6時間前",

@@ -188,6 +188,7 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
 - `association_score` や query 種別は、source pack に残すが、本命判断値としては育てない
 - `memory_link_summary` は label count と代表関係だけを持ち、永続 ID を含めない
 - `memory_link_summary` は `supports / contradicts / derived_from / about_same_scope / affects` の関係を選別補助として渡す
+- 有効状態、時点、関連先の扱いは [想起と判断.md](想起と判断.md#現在の理解と過去の報告) の圧縮表現の規則に従う
 - `conflicts` には compare key と variant の短い summary だけを入れ、memory unit の内部 ID は渡さない
 
 ## LLM 出力契約

@@ -459,6 +459,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         )
         episode_scope_filters = self._merged_scope_filters(
             person_filters
+            + relationship_defaults
             + relationship_filters
             + self_filters
             + topic_filters
@@ -1347,6 +1348,8 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
                         "direction": direction,
                         "summary_text": f"{label}/{direction}: {related_summary}",
                         "related_summary_text": related_summary,
+                        "related_memory_type": related_unit.get("memory_type"),
+                        "related_status": related_unit.get("status"),
                     }
                 )
 
@@ -1544,6 +1547,11 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "object_ref_or_value": record.get("object_ref_or_value"),
             "summary_text": record["summary_text"],
             "status": record["status"],
+            "formed_at": record.get("formed_at"),
+            "last_confirmed_at": record.get("last_confirmed_at"),
+            "valid_from": record.get("valid_from"),
+            "valid_to": record.get("valid_to"),
+            "qualifiers": record.get("qualifiers", {}),
             "commitment_state": record.get("commitment_state"),
             "confidence": record["confidence"],
             "salience": record["salience"],

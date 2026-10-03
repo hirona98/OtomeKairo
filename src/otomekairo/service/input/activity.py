@@ -436,7 +436,7 @@ class ServiceInputActivityMixin:
         current_time: str,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {}
-        for key in ("label", "target"):
+        for key in ("label", "target", "actor_ref"):
             value = activity_state.get(key)
             if isinstance(value, str) and value.strip():
                 payload[key] = value.strip()
@@ -488,6 +488,7 @@ class ServiceInputActivityMixin:
         for key in (
             "label",
             "actor",
+            "actor_ref",
             "target",
             "transition",
             "reason_summary",

@@ -99,6 +99,58 @@ class MemoryActionResolver:
             memory_set_id=memory_set_id,
             candidate=normalized_candidate,
         )
+        actions = self._resolve_candidate_memory_actions(
+            memory_set_id=memory_set_id,
+            finished_at=finished_at,
+            event_ids=event_ids,
+            cycle_ids=cycle_ids,
+            candidate=normalized_candidate,
+            embedding_definition=embedding_definition,
+            allow_summary=allow_summary,
+        )
+        if normalized_candidate["qualifiers"].get("replace_prior") is not True:
+            return actions
+
+        # LLM が同軸の置換を指定した場合、再確認経路でも旧理解を有効なまま残さない。
+        resolved_ids = {action["memory_unit_id"] for action in actions}
+        prior_actions: list[dict[str, Any]] = []
+        for action in actions:
+            target = action.get("memory_unit")
+            if not isinstance(target, dict) or target.get("status") not in ACTIVE_MEMORY_STATUSES:
+                continue
+            matches = self.store.find_memory_units_for_compare(
+                memory_set_id=memory_set_id,
+                memory_type=target["memory_type"], scope_type=target["scope_type"],
+                scope_key=target["scope_key"], subject_ref=target["subject_ref"],
+                predicate=target["predicate"],
+            )
+            for existing in matches:
+                if existing["status"] not in ACTIVE_MEMORY_STATUSES or existing["memory_unit_id"] in resolved_ids:
+                    continue
+                superseded = self.build_superseded_memory_unit(
+                    existing=existing, finished_at=finished_at, event_ids=event_ids, cycle_ids=cycle_ids,
+                )
+                prior_actions.append(self.build_memory_action(
+                    operation="supersede", memory_set_id=memory_set_id, finished_at=finished_at,
+                    memory_unit=superseded, related_memory_unit_ids=[target["memory_unit_id"]],
+                    before_snapshot=existing, after_snapshot=superseded,
+                    reason=normalized_candidate["reason"], event_ids=event_ids,
+                ))
+                resolved_ids.add(existing["memory_unit_id"])
+        return prior_actions + actions
+
+    def _resolve_candidate_memory_actions(
+        self,
+        *,
+        memory_set_id: str,
+        finished_at: str,
+        event_ids: list[str],
+        cycle_ids: list[str],
+        candidate: dict[str, Any],
+        embedding_definition: dict[str, Any] | None,
+        allow_summary: bool,
+    ) -> list[dict[str, Any]]:
+        normalized_candidate = candidate
         if self._should_noop_candidate(normalized_candidate, allow_summary=allow_summary):
             return []
 
@@ -158,9 +210,11 @@ class MemoryActionResolver:
                 )
             ]
 
-        # reinforce経路
+        # 再生成した要約は、同じ scope の正本を最新の本文へ更新する。
         if same_memory_match is not None:
-            updated_unit = self.build_reinforced_memory_unit(
+            is_summary = normalized_candidate["memory_type"] == "summary"
+            build_updated_unit = self.build_refined_memory_unit if is_summary else self.build_reinforced_memory_unit
+            updated_unit = build_updated_unit(
                 existing=same_memory_match,
                 candidate=normalized_candidate,
                 finished_at=finished_at,
@@ -169,7 +223,7 @@ class MemoryActionResolver:
             )
             return [
                 self.build_memory_action(
-                    operation="reinforce",
+                    operation="refine" if is_summary else "reinforce",
                     memory_set_id=memory_set_id,
                     finished_at=finished_at,
                     memory_unit=updated_unit,
