@@ -93,6 +93,7 @@ repair 回数と failure 範囲は [LLM補助契約共通.md](LLM補助契約共
 
 DEBUG には operation と schema `name` を残す。
 schema 全文、raw prompt 全文、LLM 生レスポンス全文は標準保存しない。
+生成応答の使用量と終了理由は [デバッグ可能性の LLM 生成使用量](../runtime/デバッグ可能性.md#llm-生成使用量) に従って記録する。
 
 ## モデルプリセットとの関係
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from typing import Any, Callable
 from urllib import error as urllib_error
 from urllib import request as urllib_request
@@ -69,6 +70,8 @@ def complete_text(
         request_kwargs["extra_body"] = extra_body
     max_output_tokens = _resolve_max_output_tokens(model_config)
     if max_output_tokens is not None:
+        # 出力予算には推論も含まれる。本文文字数や入力 context window の上限とは別。
+        # モデルの対応上限と使用量を確認して設定し、transport では自動補正しない。
         token_limit_parameter = (
             "max_completion_tokens" if _model_provider_name(model_config) in {"openai", "azure"} else "max_tokens"
         )
@@ -78,10 +81,18 @@ def complete_text(
         request_kwargs["web_search_options"] = web_search_options
 
     for attempt in range(2):
+        started_at = time.perf_counter()
         try:
             response = completion(**request_kwargs)
         except Exception as exc:  # noqa: BLE001
             raise LLMError(f"LiteLLM の呼び出しに失敗しました: {exc}") from exc
+        _log_completion_metrics(
+            response,
+            response_format=response_format,
+            max_output_tokens=max_output_tokens,
+            attempt=attempt + 1,
+            elapsed_ms=round((time.perf_counter() - started_at) * 1000),
+        )
         try:
             return extract_response_text(response)
         except LLMGenerationError:
@@ -89,6 +100,49 @@ def complete_text(
                 raise
             debug_log("LLM", "provider generation_failed attempt=1 retry=same_request", level="WARNING")
     raise AssertionError("Completion attempts exhausted without a result.")
+
+
+def _response_field(value: Any, key: str) -> Any:
+    return value.get(key) if isinstance(value, dict) else getattr(value, key, None)
+
+
+def _log_completion_metrics(
+    response: Any,
+    *,
+    response_format: dict[str, Any] | None,
+    max_output_tokens: int | None,
+    attempt: int,
+    elapsed_ms: int,
+) -> None:
+    # provider が返す数値だけを記録する。欠損は null とし、本文から推計しない。
+    # prompt、本文、接続設定、provider 固有の payload はログへ渡さない。
+    usage = _response_field(response, "usage")
+    details = _response_field(usage, "completion_tokens_details")
+    schema = response_format.get("json_schema") if response_format is not None else None
+    choices = _response_field(response, "choices")
+    choice = choices[0] if isinstance(choices, list) and choices else None
+    provider_fields = _response_field(choice, "provider_specific_fields")
+    finish_reason = _response_field(choice, "finish_reason")
+    native_finish_reason = _response_field(provider_fields, "native_finish_reason")
+    metrics = {
+        "schema_name": _response_field(schema, "name"),
+        "attempt": attempt,
+        "max_output_tokens": max_output_tokens,
+        "elapsed_ms": elapsed_ms,
+        "finish_reason": finish_reason,
+        "native_finish_reason": native_finish_reason,
+    }
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = _response_field(usage, key)
+        metrics[key] = value if type(value) is int and value >= 0 else None
+    reasoning_tokens = _response_field(details, "reasoning_tokens")
+    metrics["reasoning_tokens"] = reasoning_tokens if type(reasoning_tokens) is int and reasoning_tokens >= 0 else None
+    failed = finish_reason in {"length", "content_filter", "error"} or native_finish_reason == "error"
+    debug_log(
+        "LLM",
+        "completion_metrics " + json.dumps(metrics, ensure_ascii=False, separators=(",", ":")),
+        level="WARNING" if failed else "INFO",
+    )
 
 
 # embedding を model 差分込みで実行する。
@@ -261,10 +315,12 @@ def _resolve_api_key(model_config: dict) -> str | None:
 
 
 def _resolve_max_output_tokens(model_config: dict) -> int | None:
-    value = model_config.get("max_output_tokens")
-    if isinstance(value, int) and value >= 1:
-        return value
-    return None
+    if "max_output_tokens" not in model_config:
+        return None
+    value = model_config["max_output_tokens"]
+    if type(value) is not int or value < 1:
+        raise LLMError("max_output_tokens は正の整数である必要があります。")
+    return value
 
 
 def _resolve_timeout_seconds(model_config: dict, *, default: float) -> float:

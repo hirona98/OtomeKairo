@@ -787,16 +787,22 @@
                   <label for="model-reasoning-effort">推論の深さ:</label>
                   <div class="console-control-with-hint">
                     <input id="model-reasoning-effort" class="field-width-medium">
-                    <span class="field-hint">空欄のときは provider と model の既定動作を使う</span>
+                    <span class="field-hint">空欄はモデルの既定動作。強い推論はトークン消費と所要時間が増えるため、出力予算とタイムアウトも合わせて調整する</span>
                   </div>
                 </div>
                 <div class="setting-row">
                   <label for="model-max-output-tokens">最大出力トークン:</label>
-                  <input id="model-max-output-tokens" class="field-width-short" type="number" min="1">
+                  <div class="console-control-with-hint">
+                    <input id="model-max-output-tokens" class="field-width-short" type="number" min="1" aria-describedby="model-output-budget-hint">
+                    <span id="model-output-budget-hint" class="field-hint">推論モデルでは内部の推論も含む出力予算。初期値は32,000。モデルの最大出力上限以内で指定し、ログの消費量で調整する。入力の容量・文字数とは別で、上限に達して未完了の応答は失敗する</span>
+                  </div>
                 </div>
                 <div class="setting-row">
                   <label for="model-timeout-seconds">タイムアウト（秒）:</label>
-                  <input id="model-timeout-seconds" class="field-width-short" type="number" min="1" step="1">
+                  <div class="console-control-with-hint">
+                    <input id="model-timeout-seconds" class="field-width-short" type="number" min="1" step="1">
+                    <span class="field-hint">初期値は90秒。強い推論や長い生成では、ログの所要時間を見て調整する</span>
+                  </div>
                 </div>
                 <label class="checkbox-field model-web-search-field">Web検索を使用する
                   <input id="model-web-search-enabled" type="checkbox">
@@ -1140,16 +1146,22 @@
                   <label for="pre-send-check-reasoning-effort">推論の深さ:</label>
                   <div class="console-control-with-hint">
                     <input id="pre-send-check-reasoning-effort" class="field-width-medium">
-                    <span class="field-hint">空欄のときは provider と model の既定動作を使う</span>
+                    <span class="field-hint">空欄はモデルの既定動作。強い推論はトークン消費と所要時間が増えるため、出力予算とタイムアウトも合わせて調整する</span>
                   </div>
                 </div>
                 <div class="setting-row">
                   <label for="pre-send-check-max-output-tokens">最大出力トークン:</label>
-                  <input id="pre-send-check-max-output-tokens" class="field-width-short" type="number" min="1">
+                  <div class="console-control-with-hint">
+                    <input id="pre-send-check-max-output-tokens" class="field-width-short" type="number" min="1" aria-describedby="pre-send-check-output-budget-hint">
+                    <span id="pre-send-check-output-budget-hint" class="field-hint">推論モデルでは内部の推論も含む出力予算。初期値は32,000。モデルの最大出力上限以内で指定し、ログの消費量で調整する。入力の容量・文字数とは別で、上限に達して未完了の応答は失敗する</span>
+                  </div>
                 </div>
                 <div class="setting-row">
                   <label for="pre-send-check-timeout-seconds">タイムアウト（秒）:</label>
-                  <input id="pre-send-check-timeout-seconds" class="field-width-short" type="number" min="1" step="1">
+                  <div class="console-control-with-hint">
+                    <input id="pre-send-check-timeout-seconds" class="field-width-short" type="number" min="1" step="1">
+                    <span class="field-hint">初期値は90秒。強い推論や長い生成では、ログの所要時間を見て調整する</span>
+                  </div>
                 </div>
               </div>
             </fieldset>

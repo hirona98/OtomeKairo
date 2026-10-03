@@ -133,6 +133,7 @@ LLM の出力は JSON object 1 個に固定する。
 - 細かな OCR 全文、座標、UI 構造、資格情報、内部 URL、配送先 client、base64 本文を書かない
 - `confidence_hint` は `low / medium / high` のいずれかにする
 - `change_state / change_basis` の値と意味は [視覚機能.md](視覚機能.md) の「視覚変化」を正本とする
+- `summary_text` は 1200 文字以内、`change_reason_summary` は 240 文字以内とする。保存する視覚説明と短い変化理由の用途に応じた上限であり、モデルのトークン容量とは別に扱う。生成プロンプトにも同じ上限を伝え、超過は契約違反として扱う
 - `change_reason_summary` は変化判定の短い理由とし、改行と内部識別子を含めない
 
 ## パイプライン統合

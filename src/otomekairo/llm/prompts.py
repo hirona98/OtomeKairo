@@ -22,6 +22,9 @@ from otomekairo.llm.contracts import (
     DECISION_COMPARISON_SCOPE_KINDS,
     INITIATIVE_ENTRY_BASIS_VALUES,
     INITIATIVE_ENTRY_ENTER_BASIS_VALUES,
+    MAX_MEMORY_REFLECTION_SUMMARY_LENGTH,
+    MAX_VISUAL_OBSERVATION_SUMMARY_LENGTH,
+    MAX_VISUAL_OBSERVATION_CHANGE_REASON_LENGTH,
     RECALL_PACK_SECTION_NAMES,
     RECALL_FOCUS_VALUES,
     RECALL_HINT_REQUIRED_KEYS,
@@ -1090,7 +1093,7 @@ def build_memory_reflection_summary_repair_prompt(validation_error: str) -> str:
         "トップレベルキーは summaries だけです。\n"
         "summaries の各要素は scope_ref と summary_text だけを持ちます。\n"
         "scope_ref は source pack にある値だけを使ってください。\n"
-        "summary_text は簡潔に、140 文字以内、改行なしで返してください。\n"
+        f"summary_text は簡潔に、{MAX_MEMORY_REFLECTION_SUMMARY_LENGTH} 文字以内、改行なしで返してください。\n"
         "新しい事実の追加、内部識別子、Markdown、コードフェンス、説明文は禁止です。"
     )
 
@@ -2370,7 +2373,7 @@ def _build_memory_reflection_summary_system_prompt() -> str:
         "返すトップレベルキーは summaries だけです。\n"
         "summaries の各要素は scope_ref と summary_text だけを持ちます。\n"
         "scope_ref は source pack にある値だけを使い、scope をまたいで事実を混ぜないでください。\n"
-        "summary_text は簡潔に、140 文字以内、改行なしで返してください。\n"
+        f"summary_text は簡潔に、{MAX_MEMORY_REFLECTION_SUMMARY_LENGTH} 文字以内、改行なしで返してください。\n"
         "渡された evidence pack の外を推測で埋めないでください。\n"
         "単発出来事の説明ではなく、反復して見えている傾向として要約してください。\n"
         "summary_status_candidate=inferred のときは断定しすぎず、confirmed のときも過剰な人格断定は避けてください。\n"
@@ -2581,7 +2584,7 @@ def _build_visual_observation_system_prompt() -> str:
         + "\n"
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "返すトップレベルキーは summary_text, confidence_hint, change_state, change_basis, change_reason_summary の 5 つだけです。\n"
-        "summary_text は 2～5 文、改行なし、内部識別子なしにしてください。\n"
+        f"summary_text は {MAX_VISUAL_OBSERVATION_SUMMARY_LENGTH} 文字以内の 2～5 文、改行なし、内部識別子なしにしてください。\n"
         "source_pack.image_input_kind が conversation_attachment の場合は、対話入力に添付された画像として、後続の判断と発話に必要な見えている内容を詳細な説明文に変換してください。\n"
         "source_pack.image_input_kind が vision_capture_result の場合は、現在の視覚前景として、判断に効く対象、状態、配置、変化を詳細な説明文に変換してください。\n"
         "summary_text では、画像に見えている内容のうち判断に効く部分を具体的に書いてください。\n"
@@ -2595,7 +2598,7 @@ def _build_visual_observation_system_prompt() -> str:
         "現在の画像が previous_observation_context と意味上同じなら、change_state は stable、change_basis は semantic_stability にしてください。\n"
         "現在の画像が previous_observation_context と意味上変わったなら、change_state は changed、change_basis は semantic_change にしてください。\n"
         "source の種類や対象が変わった場合、change_state は changed、change_basis は source_identity_changed にしてください。\n"
-        "change_reason_summary は変化判定の根拠を短く書き、summary_text の繰り返しだけにしないでください。\n"
+        f"change_reason_summary は {MAX_VISUAL_OBSERVATION_CHANGE_REASON_LENGTH} 文字以内、改行なしで、summary_text を補う変化判定の根拠を短く書いてください。\n"
         "不確実な対象は断定せず、「らしき」「可能性がある」として書いてください。\n"
         "細かな OCR の全文、座標、UI 構造、資格情報、内部 URL、配送先 client、base64 本文を書いてはいけません。\n"
         "画像に自信が持てない場合は、控えめな summary_text と low confidence を返してください。\n"

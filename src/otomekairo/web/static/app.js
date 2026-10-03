@@ -3414,7 +3414,7 @@ function renderPreSendCheck() {
   element("pre-send-check-api-base").value = preset.api_base || "";
   element("pre-send-check-api-key").value = preset.api_key || "";
   element("pre-send-check-reasoning-effort").value = preset.reasoning_effort || "";
-  element("pre-send-check-max-output-tokens").value = preset.max_output_tokens || 4000;
+  element("pre-send-check-max-output-tokens").value = preset.max_output_tokens;
   element("pre-send-check-timeout-seconds").value = preset.timeout_seconds || 90;
   renderPreSendCheckMcpList();
 }
@@ -3456,7 +3456,7 @@ function syncPreSendCheck() {
   const preset = preSendCheckModelPreset();
   preset.model = textValue("pre-send-check-model");
   preset.api_key = textValue("pre-send-check-api-key");
-  preset.max_output_tokens = intValue("pre-send-check-max-output-tokens", 4000);
+  preset.max_output_tokens = boundedIntValue("pre-send-check-max-output-tokens", "最大出力トークン", 1);
   preset.timeout_seconds = boundedIntValue(
     "pre-send-check-timeout-seconds",
     "タイムアウト（秒）",
@@ -3625,7 +3625,7 @@ function renderModel() {
   element("model-api-base").value = preset.api_base || "";
   element("model-api-key").value = preset.api_key || "";
   element("model-reasoning-effort").value = preset.reasoning_effort || "";
-  element("model-max-output-tokens").value = preset.max_output_tokens || 4000;
+  element("model-max-output-tokens").value = preset.max_output_tokens;
   element("model-timeout-seconds").value = preset.timeout_seconds || 90;
   element("model-web-search-enabled").checked = preset.web_search_enabled === true;
 }
@@ -3641,7 +3641,7 @@ function syncModel() {
   preset.prompt_window.recent_turn_minutes = intValue("model-recent-turn-minutes", 30);
   preset.model = textValue("model-model");
   preset.api_key = textValue("model-api-key");
-  preset.max_output_tokens = intValue("model-max-output-tokens", 4000);
+  preset.max_output_tokens = boundedIntValue("model-max-output-tokens", "最大出力トークン", 1);
   preset.timeout_seconds = boundedIntValue("model-timeout-seconds", "タイムアウト（秒）", 1);
   preset.web_search_enabled = boolValue("model-web-search-enabled");
   const apiBase = textValue("model-api-base").trim();
@@ -4291,7 +4291,8 @@ function addModel() {
       // モデル名・キー等は空。数値はシステム定数（選択中プリセットはコピーしない）。
       model: "",
       api_key: "",
-      max_output_tokens: 4000,
+      // 推論を含む出力予算の初期値。モデルの対応上限と実測で調整する。
+      max_output_tokens: 32000,
       timeout_seconds: 90,
       web_search_enabled: false,
       prompt_window: {

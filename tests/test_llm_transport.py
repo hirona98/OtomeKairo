@@ -39,6 +39,72 @@ def _current_input() -> CurrentInput:
 
 
 class LLMTransportTests(unittest.TestCase):
+    def test_invalid_output_budget_fails_without_calling_provider(self) -> None:
+        for value in (0, -1, True, None, "32000", 32000.5):
+            with self.subTest(value=value):
+                completion = Mock()
+                with patch("otomekairo.llm.transport._load_litellm_completion", return_value=completion):
+                    with self.assertRaisesRegex(LLMError, "max_output_tokens"):
+                        complete_text(model_config={"model": "test", "max_output_tokens": value}, messages=[])
+                completion.assert_not_called()
+
+    def test_completion_metrics_include_usage_before_rejecting_incomplete_response(self) -> None:
+        for as_dict in (False, True):
+            with self.subTest(as_dict=as_dict):
+                response = {
+                    "choices": [{"message": {"content": "private-response"}, "finish_reason": "length"}],
+                    "usage": {
+                        "prompt_tokens": 100,
+                        "completion_tokens": 32000,
+                        "total_tokens": 32100,
+                        "completion_tokens_details": {"reasoning_tokens": 31990},
+                        "provider_secret": "private-usage",
+                    },
+                }
+                if not as_dict:
+                    response = SimpleNamespace(
+                        choices=[SimpleNamespace(**response["choices"][0])],
+                        usage=SimpleNamespace(**{
+                            **response["usage"],
+                            "completion_tokens_details": SimpleNamespace(reasoning_tokens=31990),
+                        }),
+                    )
+                completion = Mock(return_value=response)
+                with (
+                    patch("otomekairo.llm.transport._load_litellm_completion", return_value=completion),
+                    patch("otomekairo.llm.transport.time.perf_counter", side_effect=[1.0, 1.25]),
+                    patch("otomekairo.llm.transport.debug_log") as log,
+                ):
+                    with self.assertRaisesRegex(LLMError, "length"):
+                        complete_text(
+                            model_config={"model": "test", "max_output_tokens": 32000, "api_key": "private-key"},
+                            messages=[{"role": "user", "content": "private-prompt"}],
+                        )
+                completion.assert_called_once()
+                log.assert_called_once()
+                message = log.call_args.args[1]
+                metrics = json.loads(message.removeprefix("completion_metrics "))
+                self.assertEqual(metrics["completion_tokens"], 32000)
+                self.assertEqual(metrics["reasoning_tokens"], 31990)
+                self.assertEqual(metrics["prompt_tokens"], 100)
+                self.assertEqual(metrics["total_tokens"], 32100)
+                self.assertEqual(metrics["max_output_tokens"], 32000)
+                self.assertEqual(metrics["elapsed_ms"], 250)
+                self.assertEqual(metrics["finish_reason"], "length")
+                self.assertEqual(log.call_args.kwargs["level"], "WARNING")
+                self.assertNotIn("private-", message)
+
+    def test_completion_metrics_leave_missing_usage_unknown(self) -> None:
+        with (
+            patch("otomekairo.llm.transport._load_litellm_completion", return_value=Mock(return_value=_completion_response("ok"))),
+            patch("otomekairo.llm.transport.debug_log") as log,
+        ):
+            self.assertEqual(complete_text(model_config={"model": "test"}, messages=[]), "ok")
+        metrics = json.loads(log.call_args.args[1].removeprefix("completion_metrics "))
+        for key in ("prompt_tokens", "completion_tokens", "reasoning_tokens", "total_tokens"):
+            self.assertIsNone(metrics[key])
+        self.assertEqual(log.call_args.kwargs["level"], "INFO")
+
     def test_positive_factor_id_duplicates_are_canonicalized_without_altering_suppression(self) -> None:
         payload = {"foreground_selection": {
             "primary_factor_ref": "factor:primary",

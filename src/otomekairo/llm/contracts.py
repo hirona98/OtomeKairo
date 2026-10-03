@@ -170,8 +170,10 @@ SCOPE_TYPE_VALUES = {
 MAX_SECONDARY_RECALL_FOCUSES = 2
 MAX_RISK_FLAGS = 3
 MAX_HINT_SCOPE_VALUES = 4
+# 文字数は保存する要約の用途に応じた契約であり、モデルのトークン容量とは別。
 MAX_MEMORY_REFLECTION_SUMMARY_LENGTH = 140
 MAX_VISUAL_OBSERVATION_SUMMARY_LENGTH = 1200
+MAX_VISUAL_OBSERVATION_CHANGE_REASON_LENGTH = 240
 RECALL_PACK_SECTION_NAMES = (
     "self_model",
     "person_model",
@@ -1628,7 +1630,7 @@ def validate_visual_observation_contract(payload: dict[str, Any]) -> None:
         raise LLMError("VisualObservation change_reason_summary は空にできません。")
     if "\n" in normalized_change_reason or "\r" in normalized_change_reason:
         raise LLMError("VisualObservation change_reason_summary に改行を含めてはいけません。")
-    if len(normalized_change_reason) > 240:
+    if len(normalized_change_reason) > MAX_VISUAL_OBSERVATION_CHANGE_REASON_LENGTH:
         raise LLMError("VisualObservation change_reason_summary が最大長を超えています。")
     if INTERNAL_IDENTIFIER_PATTERN.search(normalized_change_reason) is not None:
         raise LLMError("VisualObservation change_reason_summary に内部識別子を含めてはいけません。")
