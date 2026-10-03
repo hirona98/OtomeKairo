@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from otomekairo.llm.client import LLMClient
 from otomekairo.llm.contexts import CurrentInput, PersonaContext, SpeechContext
@@ -89,6 +89,28 @@ class LLMTransportTests(unittest.TestCase):
                 "outcome": "allow", "speech_text": "書き換えた本文", "reason_summary": "根拠と一致。",
             })
 
+    def test_openai_and_azure_output_limit_uses_max_completion_tokens(self) -> None:
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {"name": "t", "strict": True, "schema": {"type": "object"}},
+        }
+        for model in ("openai/gpt-6-luna", "openai/gpt-4o", "azure/test-deployment"):
+            for output_format in (None, response_format):
+                with self.subTest(model=model, structured=output_format is not None):
+                    completion = Mock(return_value=_completion_response("{}"))
+                    with patch("otomekairo.llm.transport._load_litellm_completion", return_value=completion):
+                        result = complete_text(
+                            model_config={"model": model, "max_output_tokens": 8000},
+                            messages=[{"role": "user", "content": "x"}],
+                            response_format=output_format,
+                        )
+
+                    self.assertEqual(result, "{}")
+                    completion.assert_called_once()
+                    request = completion.call_args.kwargs
+                    self.assertEqual(request["max_completion_tokens"], 8000)
+                    self.assertNotIn("max_tokens", request)
+
     def test_openrouter_structured_call_requires_parameters_and_keeps_reasoning(self) -> None:
         captured: dict = {}
 
@@ -101,6 +123,7 @@ class LLMTransportTests(unittest.TestCase):
                 model_config={
                     "model": "openrouter/google/gemini-3.5-flash-lite",
                     "reasoning_effort": "low",
+                    "max_output_tokens": 4000,
                 },
                 messages=[{"role": "user", "content": "x"}],
                 response_format={
@@ -112,6 +135,8 @@ class LLMTransportTests(unittest.TestCase):
         self.assertEqual(captured["response_format"]["type"], "json_schema")
         self.assertEqual(captured["extra_body"]["reasoning"], {"effort": "low"})
         self.assertEqual(captured["extra_body"]["provider"], {"require_parameters": True})
+        self.assertEqual(captured["max_tokens"], 4000)
+        self.assertNotIn("max_completion_tokens", captured)
 
     def test_non_openrouter_structured_call_does_not_set_provider(self) -> None:
         captured: dict = {}
@@ -149,6 +174,7 @@ class LLMTransportTests(unittest.TestCase):
                 model_config={
                     "model": "openrouter/google/gemini-3.5-flash-lite",
                     "reasoning_effort": "low",
+                    "max_output_tokens": 4000,
                 },
                 messages=[{"role": "user", "content": "x"}],
             )
@@ -156,6 +182,8 @@ class LLMTransportTests(unittest.TestCase):
         self.assertNotIn("response_format", captured)
         self.assertEqual(captured["extra_body"]["reasoning"], {"effort": "low"})
         self.assertNotIn("provider", captured["extra_body"])
+        self.assertEqual(captured["max_tokens"], 4000)
+        self.assertNotIn("max_completion_tokens", captured)
 
     def test_litellm_error_is_not_retried_without_schema(self) -> None:
         calls: list[dict] = []

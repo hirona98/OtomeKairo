@@ -69,7 +69,10 @@ def complete_text(
         request_kwargs["extra_body"] = extra_body
     max_output_tokens = _resolve_max_output_tokens(model_config)
     if max_output_tokens is not None:
-        request_kwargs["max_tokens"] = max_output_tokens
+        token_limit_parameter = (
+            "max_completion_tokens" if _model_provider_name(model_config) in {"openai", "azure"} else "max_tokens"
+        )
+        request_kwargs[token_limit_parameter] = max_output_tokens
     web_search_options = _resolve_web_search_options(model_config)
     if web_search_options is not None:
         request_kwargs["web_search_options"] = web_search_options
