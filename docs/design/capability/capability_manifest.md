@@ -357,6 +357,7 @@ busy、権限不足、動的一時 unavailable は decision view の `available:
 `vision.capture` は `visual_context` の state type だけでは判断せず、`vision_source_id` が一致する新鮮な foreground `world_state` を `fresh_world_state_by_vision_source` に入れる。
 `wake / background_thinking` では、同じ cycle の `wake_observations` で成功した `vision.capture` も `fresh_world_state_by_vision_source` に入れる。
 この `wake_observations` は起床判断の前に取得済みの観測であり、直後の判断では再取得対象ではなく判断根拠として扱う。
+思考前観測由来の各要約には、元の `observation_id / request_id / source_kind` がある場合にその参照も保持する。記憶更新への引継ぎは [../memory/記憶更新と再整理.md](../memory/記憶更新と再整理.md) を参照する。
 `source_kind` は保存可否を決めないため、desktop と camera は同じ `fresh_world_state_by_vision_source` の対象にする。
 `capability_result` follow-up でも、同じ `vision_source_id` の current foreground `visual_context` を再利用対象にする。
 `fresh_world_state_by_vision_source` にある同じ `vision_source_id` の `vision.capture` request は、同じ現在状態の再取得として decision contract validation の repair 対象にする。
@@ -366,7 +367,7 @@ server は `camera.ptz` の decision view に、対象 camera source ごとの `
 `camera.ptz` の decision view には target client、host、credential、内部 URL、機器 API 名、角度を入れない。
 `camera.ptz` は `user_message / wake / background_thinking / capability_result` の全起点で available な場合に出す。
 `camera.ptz` result follow-up では、同じ `vision_source_id` の `vision.capture` request だけを許可された follow-up capability request として扱う。
-通常会話では `fresh_world_state_by_vision_source` を付けない。
+通常会話で同じ判断前の成功した視覚観測が無い場合は、保持中の世界状態だけから `fresh_world_state_by_vision_source` を付けない。同じ判断前に取得した観測がある場合はその観測を渡す。
 現在入力に対して capability を実行するか、既存文脈から発話するかは `decision_generation` が判断し、server はユーザー発話の意味から特定 capability の実行を強制しない。
 自律判断で現在情報の取得が必要な場合、利用可能な capability と現在の文脈を比較して実行を提案する。
 

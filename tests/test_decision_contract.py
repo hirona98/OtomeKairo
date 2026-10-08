@@ -144,7 +144,36 @@ def _capability_decision(capability_id: str, input_payload: dict) -> dict:
 
 
 class DecisionContractTests(unittest.TestCase):
+    def test_unknown_factor_repair_receives_actual_workspace_ids(self) -> None:
+        context = replace(_decision_context([]), comparison_scope="outward_speech", workspace_context={
+            "workspace_candidates": [{"factor_ref": "current_input:user_message"},
+                                     {"factor_ref": "memory:person_model:0"}],
+        })
+        valid = {
+            "kind": "speech", "reason_code": "reply", "reason_summary": "現在の好みを答える。",
+            "requires_confirmation": False, "pending_intent": None, "capability_request": None,
+            "autonomous_run": None, "foreground_selection": {
+                "primary_factor_ref": "current_input:user_message",
+                "supporting_factor_refs": ["memory:person_model:0"], "suppressed_factors": [],
+                "summary_text": "現在の人物理解を使う。",
+            }, "target_stances": build_decision_target_stances_for_kind(
+                "speech", required_targets=("outward_speech",), reason_summary="問いに答える。"),
+        }
+        invalid = json.loads(json.dumps(valid))
+        invalid["foreground_selection"]["supporting_factor_refs"] = ["memory:person_model:memory_unit:other"]
+        with patch("otomekairo.llm.client.complete_text", side_effect=[json.dumps(invalid), json.dumps(valid)]) as complete:
+            result = LLMClient().generate_decision(
+                model_config={"model": "real-model"}, persona_context=_persona_context(), context=context,
+            )
+        self.assertEqual(result["foreground_selection"]["supporting_factor_refs"], ["memory:person_model:0"])
+        self.assertEqual(complete.call_count, 2)
+        repair = complete.call_args_list[1].kwargs["messages"][-1]["content"]
+        self.assertIn('利用できる factor_ref 一覧=["current_input:user_message", "memory:person_model:0"]', repair)
+
     def setUp(self) -> None:
+        grounding_patch = patch.object(LLMClient, "_review_capability_input_grounding", return_value=None)
+        grounding_patch.start()
+        self.addCleanup(grounding_patch.stop)
         review_patch = patch.object(
             LLMClient, "generate_future_action_alignment_review",
             return_value={"outcome": "aligned", "reason_summary": "このテストの判断は現在の応答で完結する。"},
@@ -174,6 +203,60 @@ class DecisionContractTests(unittest.TestCase):
 
         self.assertEqual(result["kind"], "autonomous_run")
         self.assertEqual(generate.call_count, 2)
+
+    def test_future_action_review_receives_the_complete_capability_candidate(self) -> None:
+        candidate = _capability_decision("mcp.call_tool", {
+            "mcp_server_id": "elyth", "tool_name": "get_notifications", "arguments": {},
+        })
+        with patch.object(LLMClient, "_generate_structured_payload", return_value=candidate), patch.object(
+            LLMClient, "generate_future_action_alignment_review",
+            return_value={"outcome": "aligned", "reason_summary": "今の問いを満たす取得。"},
+        ) as review:
+            result = LLMClient().generate_decision(model_config={"model": "real-test"},
+                persona_context=_persona_context(), context=_decision_context(_mcp_capability_view()))
+        self.assertEqual(result, candidate)
+        self.assertEqual(review.call_args.kwargs["review_context"]["candidate_decision"], candidate)
+
+    def test_corrected_immediate_capability_is_reviewed_before_acceptance(self) -> None:
+        text = "今ここで一度投稿し、返却結果を確認して教えて。"
+        context = replace(_decision_context(_mcp_capability_view()), input_text=text,
+                          current_input=replace(_current_input(), text=text))
+        initial = {"kind": "speech", "reason_summary": "操作を受け取ったと返す。"}
+        corrected = _capability_decision("mcp.call_tool", {
+            "mcp_server_id": "elyth", "tool_name": "create_post",
+            "arguments": {"content": "検証用の公開文章。"},
+        })
+        with patch.object(LLMClient, "_generate_structured_payload", side_effect=[initial, corrected]), patch.object(
+            LLMClient, "generate_future_action_alignment_review", side_effect=[
+                {"outcome": "requires_autonomous_run", "reason_summary": "実行責務が残る。"},
+                {"outcome": "aligned", "reason_summary": "一度の実行と返却結果で完結する。"},
+            ],
+        ) as review:
+            result = LLMClient().generate_decision(model_config={"model": "real-test"},
+                                                   persona_context=_persona_context(), context=context)
+        self.assertEqual(result, corrected)
+        self.assertEqual(review.call_count, 2)
+        self.assertEqual(review.call_args_list[0].kwargs["review_context"]["candidate_decision"], initial)
+        self.assertEqual(review.call_args_list[1].kwargs["review_context"]["candidate_decision"], corrected)
+        for key in ("current_input", "recent_turns", "autonomous_run_summaries", "ongoing_action_summary"):
+            self.assertEqual(review.call_args_list[0].kwargs["review_context"][key],
+                             review.call_args_list[1].kwargs["review_context"][key])
+
+    def test_corrected_capability_with_remaining_future_obligation_fails(self) -> None:
+        text = "来週まで通知を定期的に確認して知らせて。"
+        context = replace(_decision_context(_mcp_capability_view()), input_text=text,
+                          current_input=replace(_current_input(), text=text))
+        candidate = _capability_decision("mcp.call_tool", {
+            "mcp_server_id": "elyth", "tool_name": "get_notifications", "arguments": {},
+        })
+        with patch.object(LLMClient, "_generate_structured_payload", return_value=candidate), patch.object(
+            LLMClient, "generate_future_action_alignment_review",
+            return_value={"outcome": "requires_autonomous_run", "reason_summary": "継続確認が未設定。"},
+        ) as review:
+            with self.assertRaises(LLMError):
+                LLMClient().generate_decision(model_config={"model": "real-test"},
+                                               persona_context=_persona_context(), context=context)
+        self.assertEqual(review.call_count, 2)
 
     def test_decision_contract_requires_foreground_selection(self) -> None:
         payload = {

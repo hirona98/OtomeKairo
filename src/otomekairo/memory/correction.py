@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
 from otomekairo.memory.actions import MemoryActionResolver
@@ -10,7 +11,7 @@ if TYPE_CHECKING:
     from otomekairo.store.file_store import FileStore
 
 
-# 訂正対象候補は直近だけを見る。
+# 直近の更新と、今回の入力に対して検索された記憶を訂正審査へ渡す。
 CORRECTION_CYCLE_LIMIT = 6
 CORRECTION_TARGET_LIMIT = 12
 
@@ -27,17 +28,29 @@ class MemoryCorrectionReconciler:
         memory_set_id: str,
         cycle_id: str,
         finished_at: str,
-        recalled_memory_unit_ids: list[str],
+        candidate_memory_unit_ids: list[str],
     ) -> dict[str, Any]:
-        # 直近候補
+        # 返答用の想起採否とは独立した候補
         targets = self.store.list_recent_memory_revision_targets_for_correction(
             memory_set_id=memory_set_id,
             before_finished_at=finished_at,
             exclude_cycle_id=cycle_id,
             cycle_limit=CORRECTION_CYCLE_LIMIT,
             limit=CORRECTION_TARGET_LIMIT,
-            recalled_memory_unit_ids=recalled_memory_unit_ids,
+            candidate_memory_unit_ids=candidate_memory_unit_ids,
         )
+        event_ids = list(dict.fromkeys(
+            event_id for target in targets for event_id in target["revision"].get("evidence_event_ids", [])
+        ))
+        evidence = self.store.load_events_for_evidence(
+            memory_set_id=memory_set_id, event_ids=event_ids, limit=len(event_ids),
+        ) if event_ids else []
+        evidence_by_id = {event["event_id"]: event for event in evidence}
+        if set(evidence_by_id) != set(event_ids):
+            raise ValueError("訂正候補の根拠イベントを取得できません。")
+        targets = [{**target, "source_evidence_events": [
+            evidence_by_id[event_id] for event_id in dict.fromkeys(target["revision"].get("evidence_event_ids", []))
+        ]} for target in targets]
         return {
             "targets": targets,
             "trace": self.queued_trace(targets=targets),
@@ -154,18 +167,17 @@ class MemoryCorrectionReconciler:
                 continue
             target = target_by_revision_id.get(revision_id)
             if target is None:
-                continue
+                raise ValueError("訂正選定のrevision_idが提示候補にありません。")
             target_actions = self._build_actions_for_target(
                 target=target,
                 selected_memory_unit_id=item.get("memory_unit_id"),
-                correction_kind=item.get("correction_kind"),
                 finished_at=finished_at,
                 event_ids=event_ids,
                 cycle_ids=cycle_ids,
                 reason=str(item.get("reason_summary") or "").strip(),
             )
             if not target_actions:
-                continue
+                raise ValueError("選定済みの訂正対象から補正actionを作れません。")
             actions.extend(target_actions)
             selected_targets.append(target)
             handled_revision_ids.add(revision_id)
@@ -182,7 +194,6 @@ class MemoryCorrectionReconciler:
         *,
         target: dict[str, Any],
         selected_memory_unit_id: Any,
-        correction_kind: Any,
         finished_at: str,
         event_ids: list[str],
         cycle_ids: list[str],
@@ -198,10 +209,7 @@ class MemoryCorrectionReconciler:
             return []
 
         # 種別
-        normalized_kind = str(correction_kind or "").strip()
         if operation == "create":
-            if normalized_kind != "revoke_created":
-                return []
             return self._build_revoke_created_actions(
                 target=target,
                 finished_at=finished_at,
@@ -211,11 +219,9 @@ class MemoryCorrectionReconciler:
             )
 
         if operation in {"reinforce", "refine", "revoke", "dormant"}:
-            if normalized_kind != "restore_previous":
-                return []
             action = self._build_restore_previous_action(
                 target=target,
-                correction_kind=normalized_kind,
+                correction_kind="restore_previous",
                 finished_at=finished_at,
                 event_ids=event_ids,
                 reason=reason,
@@ -223,8 +229,6 @@ class MemoryCorrectionReconciler:
             return [action] if action is not None else []
 
         if operation == "supersede":
-            if normalized_kind != "supersede_compensation":
-                return []
             return self._build_supersede_compensation_actions(
                 target=target,
                 finished_at=finished_at,
@@ -389,25 +393,27 @@ class MemoryCorrectionReconciler:
         # LLMに渡す候補は、対象選定に必要な最小情報に絞る。
         unit = target.get("memory_unit", {})
         revision = target.get("revision", {})
-        before_snapshot = revision.get("before_snapshot")
-        after_snapshot = revision.get("after_snapshot")
+        snapshot_keys = (
+            "memory_type", "scope_type", "scope_key", "subject_ref", "predicate",
+            "object_ref_or_value", "summary_text", "status", "commitment_state",
+            "qualifiers", "confidence", "salience", "formed_at", "last_confirmed_at",
+            "valid_from", "valid_to", "evidence_event_ids", "evidence_cycle_ids",
+        )
+
+        def compact_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any] | None:
+            if snapshot is None:
+                return None
+            return {key: deepcopy(snapshot[key]) for key in snapshot_keys if key in snapshot}
+
         return {
             "revision_id": revision.get("revision_id"),
             "memory_unit_id": unit.get("memory_unit_id"),
-            "memory_type": unit.get("memory_type"),
-            "scope_type": unit.get("scope_type"),
-            "scope_key": unit.get("scope_key"),
-            "subject_ref": unit.get("subject_ref"),
-            "predicate": unit.get("predicate"),
-            "object_ref_or_value": unit.get("object_ref_or_value"),
-            "summary_text": unit.get("summary_text"),
-            "status": unit.get("status"),
-            "confidence": unit.get("confidence"),
-            "salience": unit.get("salience"),
             "last_operation": target.get("operation"),
             "last_reason": revision.get("reason"),
-            "before_summary_text": before_snapshot.get("summary_text") if isinstance(before_snapshot, dict) else None,
-            "after_summary_text": after_snapshot.get("summary_text") if isinstance(after_snapshot, dict) else None,
+            "occurred_at": target.get("occurred_at"),
+            "before_snapshot": compact_snapshot(revision.get("before_snapshot")),
+            "after_snapshot": compact_snapshot(revision.get("after_snapshot")),
+            "current_memory_unit": compact_snapshot(unit),
             "related_memory_units": [
                 {
                     "memory_unit_id": related_unit.get("memory_unit_id"),
@@ -418,6 +424,11 @@ class MemoryCorrectionReconciler:
                 if isinstance(related_unit, dict)
             ],
             "source_cycle_ids": target.get("source_cycle_ids", []),
+            "source_evidence_events": [{key: deepcopy(event[key]) for key in (
+                "event_id", "cycle_id", "created_at", "kind", "role", "source_kind", "run_id",
+                "terminal_status", "interaction_ref", "speaker_ref", "participant_refs", "text",
+                "objective_summary", "history_summary", "observed_result_summaries",
+            ) if key in event} for event in target.get("source_evidence_events", [])],
         }
 
     def _trace(

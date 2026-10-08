@@ -2,19 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import threading
-from difflib import SequenceMatcher
 from typing import Any
 
 from otomekairo.memory.utils import local_now
+from otomekairo.llm.contexts import build_persona_context
 from otomekairo.service.common import debug_log, format_debug_log_text
 
 
 VISUAL_DAILY_CHECK_INTERVAL_SECONDS = 3600.0
 VISUAL_DAILY_RUN_DATE_LIMIT = 7
-VISUAL_DAILY_DUPLICATE_SIMILARITY = 0.86
 VISUAL_DAILY_PROMOTION_LOOKBACK_LIMIT = 14
 VISUAL_DAILY_PROMOTION_LIMIT_PER_DIGEST = 8
-VISUAL_DAILY_PROMOTION_SIMILARITY = 0.74
 
 
 class ServiceVisualDailyMixin:
@@ -96,6 +94,7 @@ class ServiceVisualDailyMixin:
         with self._runtime_state_lock:
             self._visual_daily_runtime_state["current_digest_id"] = digest_id
 
+        digest = None
         try:
             groups = self._visual_daily_groups(
                 memory_set_id=memory_set_id,
@@ -129,6 +128,19 @@ class ServiceVisualDailyMixin:
                 ),
             )
             return digest
+        except Exception:
+            if digest is None:
+                digest = self._build_visual_daily_digest(
+                    digest_id=digest_id, memory_set_id=memory_set_id, local_date=local_date,
+                    started_at=started_at, finished_at=self._now_iso(), records=records, groups=[])
+                digest["result_status"] = "failed"
+                digest["failure_reason"] = "visual_daily_grouping_failed"
+                self.store.upsert_daily_visual_digest(digest=digest, updated_records=[])
+            elif digest["memory_promotion"]["result_status"] == "not_started":
+                self._store_visual_daily_promotion_result(
+                    digest=digest, result_status="failed", promoted_memory_unit_ids=[],
+                    skipped_candidate_count=0, failure_reason="visual_daily_promotion_failed", relation_index_sync=None)
+            raise
         finally:
             with self._runtime_state_lock:
                 self._visual_daily_runtime_state["current_digest_id"] = None
@@ -140,23 +152,23 @@ class ServiceVisualDailyMixin:
         local_date: str,
         records: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        # 連続する近似観測だけを同じ group にする。
+        state = self.store.read_state()
+        persona = build_persona_context(state["personas"][state["selected_persona_id"]], role="visual_daily_grouping")
+        inputs = [{"visual_observation_id": r["visual_observation_id"],
+                   "source_key": self._visual_daily_source_key(r), "observed_at": r["observed_at"],
+                   "detailed_summary_text": r["detailed_summary_text"]} for r in records]
+        review = self.llm.generate_visual_daily_grouping(
+            model_config=state["model_presets"][state["selected_model_preset_id"]],
+            persona_context=persona, records=inputs)
+        by_id = {r["visual_observation_id"]: r for r in records}
         groups: list[dict[str, Any]] = []
-        current: dict[str, Any] | None = None
-        for record in records:
-            if current is None or not self._visual_daily_record_matches_group(record, current):
-                current = {
-                    "duplicate_group_id": self._visual_daily_group_id(
-                        memory_set_id=memory_set_id,
-                        local_date=local_date,
-                        index=len(groups) + 1,
-                    ),
-                    "source_key": self._visual_daily_source_key(record),
-                    "records": [],
-                    "representative_text": record["detailed_summary_text"],
-                }
-                groups.append(current)
-            current["records"].append(record)
+        for item in review["groups"]:
+            group_records = [by_id[ref] for ref in item["observation_ids"]]
+            groups.append({"duplicate_group_id": self._visual_daily_group_id(
+                memory_set_id=memory_set_id, local_date=local_date, index=len(groups) + 1),
+                "source_key": self._visual_daily_source_key(group_records[0]),
+                "records": group_records, "summary_text": item["summary_text"],
+                "reason_summary": item["reason_summary"]})
         return groups
 
     def _visual_daily_updated_records(
@@ -236,7 +248,8 @@ class ServiceVisualDailyMixin:
             "first_observed_at": first_record["observed_at"],
             "last_observed_at": last_record["observed_at"],
             "representative_visual_observation_id": first_record["visual_observation_id"],
-            "summary_text": first_record["detailed_summary_text"].strip(),
+            "summary_text": group["summary_text"],
+            "reason_summary": group["reason_summary"],
             "retention_status": "compressed" if len(group_records) >= 3 else "active",
         }
 
@@ -252,23 +265,14 @@ class ServiceVisualDailyMixin:
                     "duplicate_group_id": group["duplicate_group_id"],
                     "representative_visual_observation_id": group.get("representative_visual_observation_id"),
                     "summary_text": group["summary_text"],
+                    "source_key": group["source_key"],
+                    "topic_ref": self._visual_daily_topic_ref(group["duplicate_group_id"]),
                     "reason_code": "repeated_or_retained_visual_context",
                 }
             )
             if len(candidates) >= 6:
                 break
         return candidates
-
-    def _visual_daily_record_matches_group(self, record: dict[str, Any], group: dict[str, Any]) -> bool:
-        # source が違う場合は別 group にする。
-        if self._visual_daily_source_key(record) != group["source_key"]:
-            return False
-        similarity = SequenceMatcher(
-            None,
-            self._visual_daily_similarity_text(record["detailed_summary_text"]),
-            self._visual_daily_similarity_text(group["representative_text"]),
-        ).ratio()
-        return similarity >= VISUAL_DAILY_DUPLICATE_SIMILARITY
 
     def _visual_daily_compressible(self, record: dict[str, Any]) -> bool:
         # ユーザー関心が強い入力は圧縮対象にしない。
@@ -288,10 +292,6 @@ class ServiceVisualDailyMixin:
         if isinstance(source_label, str) and source_label.strip():
             return f"label:{source_label.strip()}"
         return f"kind:{record.get('source_kind', 'unknown')}"
-
-    def _visual_daily_similarity_text(self, value: str) -> str:
-        # 比較用に空白だけ潰す。
-        return " ".join(value.strip().split())
 
     def _visual_daily_digest_id(self, *, memory_set_id: str, local_date: str) -> str:
         # 安定ID
@@ -348,11 +348,20 @@ class ServiceVisualDailyMixin:
         finished_at = self._now_iso()
         actions: list[dict[str, Any]] = []
         skipped_count = 0
-        for candidate in candidates[:VISUAL_DAILY_PROMOTION_LIMIT_PER_DIGEST]:
-            if not self._visual_daily_candidate_has_repeated_support(digest=digest, candidate=candidate):
+        candidates = candidates[:VISUAL_DAILY_PROMOTION_LIMIT_PER_DIGEST]
+        try:
+            support = self._visual_daily_repeated_support(digest=digest, candidates=candidates, state=state)
+        except Exception:
+            self._store_visual_daily_promotion_result(
+                digest=digest, result_status="failed", promoted_memory_unit_ids=[],
+                skipped_candidate_count=0, failure_reason="visual_daily_support_failed", relation_index_sync=None)
+            raise
+        for index, candidate in enumerate(candidates):
+            if not support[index]:
                 skipped_count += 1
                 continue
             memory_candidate = self._visual_daily_memory_candidate(digest=digest, candidate=candidate)
+            memory_candidate["qualifiers_hint"]["support_group_refs"] = support[index]
             candidate_actions = self.memory.action_resolver.resolve_memory_actions(
                 memory_set_id=memory_set_id,
                 finished_at=finished_at,
@@ -438,31 +447,41 @@ class ServiceVisualDailyMixin:
             f"promotion done digest={digest['digest_id']} promoted={len(promoted_ids)} skipped={skipped_count}",
         )
 
-    def _visual_daily_candidate_has_repeated_support(self, *, digest: dict[str, Any], candidate: dict[str, Any]) -> bool:
-        # 2 日以上にまたがる類似 digest だけ昇格する。
+    def _visual_daily_repeated_support(self, *, digest: dict[str, Any], candidates: list[dict[str, Any]], state: dict[str, Any]) -> dict[int, list[str]]:
         previous_digests = self.store.list_daily_visual_digests(
             memory_set_id=digest["memory_set_id"],
             before_local_date=digest["local_date"],
             limit=VISUAL_DAILY_PROMOTION_LOOKBACK_LIMIT,
         )
-        candidate_text = self._visual_daily_similarity_text(str(candidate.get("summary_text", "")))
+        evidence = []
         for previous_digest in previous_digests:
+            if previous_digest["result_status"] != "succeeded":
+                continue
             for previous_candidate in previous_digest.get("memory_candidate_summaries", []):
-                if not isinstance(previous_candidate, dict):
-                    continue
-                similarity = SequenceMatcher(
-                    None,
-                    candidate_text,
-                    self._visual_daily_similarity_text(str(previous_candidate.get("summary_text", ""))),
-                ).ratio()
-                if similarity >= VISUAL_DAILY_PROMOTION_SIMILARITY:
-                    return True
-        return False
+                evidence.append({"evidence_ref": previous_candidate["duplicate_group_id"],
+                                 "digest_id": previous_digest["digest_id"], "local_date": previous_digest["local_date"],
+                                 "source_key": previous_candidate["source_key"], "summary_text": previous_candidate["summary_text"],
+                                 "topic_ref": previous_candidate["topic_ref"]})
+        if not evidence:
+            return {i: [] for i in range(len(candidates))}
+        context = {"local_date": digest["local_date"], "candidates": candidates, "evidence": evidence}
+        review = self.llm.generate_visual_daily_support(
+            model_config=state["model_presets"][state["selected_model_preset_id"]],
+            persona_context=build_persona_context(state["personas"][state["selected_persona_id"]], role="visual_daily_support"),
+            context=context)
+        digest["support_review"] = review
+        by_ref = {item["evidence_ref"]: item for item in evidence}
+        for decision in review["decisions"]:
+            if decision["support_refs"]:
+                anchor = min((by_ref[ref] for ref in decision["support_refs"]),
+                             key=lambda item: (item["local_date"], item["evidence_ref"]))
+                candidates[decision["candidate_index"]]["topic_ref"] = anchor["topic_ref"]
+        return {item["candidate_index"]: item["support_refs"] for item in review["decisions"]}
 
     def _visual_daily_memory_candidate(self, *, digest: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
         # 日次視覚整理由来の候補は弱い inferred 記憶に固定する。
         summary_text = str(candidate.get("summary_text", "")).strip()
-        topic_hint = self._visual_daily_topic_hint(summary_text)
+        topic_hint = candidate["topic_ref"]
         return {
             "memory_type": "interpretation",
             "scope": "topic",
@@ -481,9 +500,9 @@ class ServiceVisualDailyMixin:
             "evidence_text": f"{digest['local_date']} の視覚日次整理で反復または保持対象として整理された。",
         }
 
-    def _visual_daily_topic_hint(self, summary_text: str) -> str:
-        # 安定した topic hint
-        key = hashlib.sha256(summary_text.encode("utf-8")).hexdigest()[:12]
+    def _visual_daily_topic_ref(self, duplicate_group_id: str) -> str:
+        # 意味の同一性は support review で確定し、IDだけをコードで作る。
+        key = hashlib.sha256(duplicate_group_id.encode("utf-8")).hexdigest()[:24]
         return f"topic:visual_daily_{key}"
 
     def _cap_visual_daily_memory_action_scores(self, actions: list[dict[str, Any]]) -> list[dict[str, Any]]:

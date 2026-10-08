@@ -24,6 +24,66 @@ def source_text_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def memory_claim_context(record: dict[str, Any]) -> dict[str, Any]:
+    """判断に必要な主張の対象、時点、出所を内部記憶IDなしで保つ。"""
+    context = {
+        key: record[key]
+        for key in (
+            "memory_type", "scope_type", "scope_key", "subject_ref", "predicate",
+            "object_ref_or_value", "summary_text", "status", "formed_at",
+            "last_confirmed_at", "valid_from", "valid_to", "commitment_state",
+        )
+        if key in record
+    }
+    qualifiers = record.get("qualifiers")
+    if isinstance(qualifiers, dict):
+        retained = {
+            key: qualifiers[key]
+            for key in (
+                "source", "object_kind", "scope_duration", "summary_scope", "source_memory_types",
+                "commitment_actor", "commitment_focus", "negates_previous", "replace_prior",
+                "source_interaction_refs", "source_participant_refs",
+            )
+            if key in qualifiers
+        }
+        if retained:
+            context["qualifiers"] = retained
+    return context
+
+
+MEMORY_OBJECT_REF_PREFIXES = (
+    "person:", "place:", "tool:", "topic:", "food:", "state:", "work:",
+    "rhythm:", "preference:", "commitment_state:",
+)
+
+
+def normalized_memory_object_hint(hint: Any) -> str | None:
+    """LLM が明示した参照／値の型を検証し、値の本文を保持する。"""
+    if hint is None:
+        return None
+    if not isinstance(hint, dict) or set(hint) != {"kind", "value"}:
+        raise ValueError("object_hint は kind/value の object または null である必要があります。")
+    if not isinstance(hint["kind"], str) or hint["kind"] not in {"reference", "value"}:
+        raise ValueError("object_hint.kind は reference/value のいずれかである必要があります。")
+    value = hint["value"]
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("object_hint.value は非空文字列である必要があります。")
+    text = value.strip()
+    if hint["kind"] == "reference" and not any(
+        text.startswith(prefix) and text != prefix for prefix in MEMORY_OBJECT_REF_PREFIXES
+    ):
+        raise ValueError(f"object_hint.reference は {' / '.join(MEMORY_OBJECT_REF_PREFIXES)} の型付き参照で表してください。")
+    return text
+
+
+def memory_object_reference(record: dict[str, Any]) -> str | None:
+    """明示的に参照とされた目的語だけを人物・対象の索引へ渡す。"""
+    qualifiers = record.get("qualifiers")
+    if not isinstance(qualifiers, dict) or qualifiers.get("object_kind") != "reference":
+        return None
+    return normalized_memory_object_hint({"kind": "reference", "value": record.get("object_ref_or_value")})
+
+
 # 時間
 def local_now() -> datetime:
     # OtomeKairo が生活するローカルタイムゾーンの現在時刻を正本にする。
@@ -39,7 +99,7 @@ def parse_iso(value: str) -> datetime:
     # duration 計算用に UTC へ正規化する。
     parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
+        raise ValueError("timestamp requires a timezone offset.")
     return parsed.astimezone(UTC)
 
 
@@ -47,7 +107,7 @@ def local_datetime(value: str) -> datetime:
     # API/inspection/LLM 表示用にローカルタイムゾーンへそろえる。
     parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None:
-        return parsed.astimezone()
+        raise ValueError("timestamp requires a timezone offset.")
     return parsed.astimezone()
 
 
@@ -63,7 +123,7 @@ def llm_local_time_text(value: str) -> str:
     timezone_label = _local_timezone_label(local_time)
     return (
         f"現在時刻: {local_time.year}年{local_time.month}月{local_time.day}日 "
-        f"{weekdays[local_time.weekday()]} {local_time.hour}時{local_time.minute:02d}分\n"
+        f"{weekdays[local_time.weekday()]} {local_time.hour}時{local_time.minute:02d}分{local_time.second:02d}秒\n"
         f"生活タイムゾーン: {timezone_label}"
     )
 
@@ -90,6 +150,26 @@ def localize_timestamp_fields(value: Any) -> Any:
             continue
         localized[key] = localize_timestamp_fields(item)
     return localized
+
+
+def validate_timestamp_fields(value: Any) -> None:
+    # 機械用日時のキーは、表示変換より前に同じ規則で検証する。
+    if isinstance(value, list):
+        for item in value:
+            validate_timestamp_fields(item)
+        return
+    if not isinstance(value, dict):
+        return
+    for key, item in value.items():
+        if _is_timestamp_display_key(key) and item is not None:
+            message = f"timestamp field {key} requires an offset ISO timestamp or null."
+            if not isinstance(item, str) or not item.strip():
+                raise ValueError(message)
+            try:
+                parse_iso(item)
+            except ValueError as exc:
+                raise ValueError(message) from exc
+        validate_timestamp_fields(item)
 
 
 def _is_timestamp_display_key(key: Any) -> bool:
@@ -174,6 +254,7 @@ def display_scope_key(scope_key: str) -> str:
 
 
 NON_SEMANTIC_QUALIFIER_KEYS = {
+    "object_kind",
     "allow_parallel",
     "negates_previous",
     "replace_prior",

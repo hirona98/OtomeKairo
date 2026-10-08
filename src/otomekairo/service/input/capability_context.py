@@ -144,6 +144,9 @@ class ServiceInputCapabilityContextMixin:
             for source_key, target_key, limit in (
                 ("visual_summary_text", "summary_text", 120),
                 ("source_label", "source_label", 80),
+                ("observation_id", "observation_id", 96),
+                ("request_id", "request_id", 96),
+                ("source_kind", "source_kind", 80),
             ):
                 value = self._client_context_text(observation.get(source_key), limit=limit)
                 if value is not None:
@@ -289,6 +292,8 @@ class ServiceInputCapabilityContextMixin:
         source_request_summary = self._compact_capability_request_summary(capability_request_summary)
         if isinstance(source_request_summary, dict):
             payload["source_request_summary"] = source_request_summary
+        if capability_request_summary and capability_request_summary.get("source_visual_observations"):
+            payload["source_visual_observations"] = capability_request_summary["source_visual_observations"]
         followup_constraints = self._capability_result_followup_constraints(
             source_capability_id=source_capability_id,
             source_request_summary=source_request_summary,

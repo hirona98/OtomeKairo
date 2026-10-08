@@ -10,6 +10,7 @@ from otomekairo.llm.contexts import (
     PersonaContext,
     SpeechContext,
     build_persona_context_summary,
+    fresh_visual_observations_from_capability_view,
     person_utterances_from_turns,
 )
 from otomekairo.interaction import InteractionContext
@@ -343,6 +344,7 @@ class ServiceInputPipelineMixin:
                 recent_interactions=recent_interactions,
                 state=state,
                 cycle_id=cycle_id,
+                started_at=started_at,
                 input_text=input_text,
                 current_input=current_input,
                 recent_turns=recent_turns,
@@ -370,6 +372,7 @@ class ServiceInputPipelineMixin:
                     include_expression=True,
                 ),
                 decision=candidate_decision,
+                capability_result_context=pipeline_contexts["capability_result_context"],
                 assistant_message_target_client_id=pipeline_assistant_message_target_client_id,
                 cycle_label=cycle_label,
                 pre_send_check_attempt=review_attempt,
@@ -481,6 +484,11 @@ class ServiceInputPipelineMixin:
             "persona_id": state["selected_persona_id"],
             "persona_display_name": persona["display_name"],
             "current_input": current_input.to_prompt_payload(),
+            "person_utterances": person_utterances_from_turns([
+                *recent_turns,
+                *(turn for group in (recent_interactions or []) for turn in group["turns"]),
+            ]),
+            "configured_activity_topics": self._configured_activity_topic_context(state=state),
             "recent_interaction_summary": [
                 {
                     "interaction_ref": group["interaction_ref"],
@@ -1514,6 +1522,17 @@ class ServiceInputPipelineMixin:
             source_counts=source_counts,
             initiative_context=initiative_context,
         )
+        for observation in fresh_visual_observations_from_capability_view(capability_decision_view):
+            if observation.get("fresh_source") != "wake_observation":
+                continue
+            source_id = observation["vision_source_id"]
+            self._append_workspace_context_item(
+                candidates=candidates, used_refs=used_refs, source_counts=source_counts,
+                factor_ref=f"visual_observation:wake:{source_id}", kind="visual_observation",
+                source="fresh_visual_observations", item=observation, summary_keys=("summary_text",),
+                metadata_keys=("vision_source_id", "request_id", "observation_id", "fresh_source",
+                               "source_kind", "source_owner", "source_label", "age_label"),
+            )
         self._append_workspace_candidate(
             candidates=candidates,
             used_refs=used_refs,
@@ -1615,7 +1634,8 @@ class ServiceInputPipelineMixin:
                 source="foreground_world_state",
                 item=item,
                 summary_keys=("summary_text", "visual_summary_text", "reason_summary"),
-                metadata_keys=("state_type", "scope", "summary_source", "confidence_hint", "salience_hint", "ttl_hint"),
+                metadata_keys=("state_type", "scope", "source_kind", "source_ref", "source_owner", "age_label",
+                               "summary_source", "confidence_hint", "salience_hint", "ttl_hint"),
             )
         self._append_workspace_activity_candidates(
             candidates=candidates,
@@ -2391,6 +2411,7 @@ class ServiceInputPipelineMixin:
         *,
         state: dict[str, Any],
         cycle_id: str | None,
+        started_at: str,
         input_text: str,
         current_input: CurrentInput,
         recent_turns: list[dict[str, Any]],
@@ -2423,6 +2444,7 @@ class ServiceInputPipelineMixin:
         suppress_outward_speech_reason: str | None = None,
         recent_interactions: list[dict[str, Any]] | None = None,
         autonomous_run_summaries: list[dict[str, Any]] | None = None,
+        capability_result_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self_decision = self._execution_self_decision(decision)
         outward_decision = self._execution_outward_decision(decision)
@@ -2442,10 +2464,19 @@ class ServiceInputPipelineMixin:
         if agent_skill_activation is not None:
             source_current_input["agent_skill_activation"] = agent_skill_activation
         if self_decision.get("kind") == "capability_request":
+            source_visual_observations = deepcopy(
+                (capability_result_context or {}).get("source_visual_observations", [])
+            )
+            for observation in fresh_visual_observations_from_capability_view(capability_decision_view):
+                if observation.get("fresh_source") == "wake_observation":
+                    source_visual_observations.append({**observation, "observed_at": started_at})
+            if visual_observation_context is not None:
+                source_visual_observations.append({**visual_observation_context, "observed_at": started_at})
             dispatch_result = self._dispatch_decision_capability_request(
                 state=state,
                 current_time=self._now_iso(),
                 source_current_input=source_current_input,
+                source_visual_observations=source_visual_observations,
                 assistant_message_target_client_id=assistant_message_target_client_id,
                 decision=self_decision,
                 pre_send_check_attempt=pre_send_check_attempt,
@@ -2469,6 +2500,7 @@ class ServiceInputPipelineMixin:
                 state=state,
                 current_time=self._now_iso(),
                 decision=self_decision,
+                source_started_at=started_at,
                 source_current_input=source_current_input,
                 source_cycle_id=cycle_id,
                 assistant_message_target_client_id=assistant_message_target_client_id,
@@ -2525,6 +2557,7 @@ class ServiceInputPipelineMixin:
             debug_log("Pipeline", f"{cycle_label} speech skipped {reason_code}")
         elif outward_decision.get("kind") == "speech":
             speech_context = self._build_speech_context(
+                capability_result_context=capability_result_context,
                 autonomous_run_summaries=autonomous_run_summaries,
                 configured_activity_topics=self._configured_activity_topic_context(state=state),
                 input_text=input_text,
@@ -2635,6 +2668,8 @@ class ServiceInputPipelineMixin:
                 "current_input": current_input.to_prompt_payload(),
                 "person_utterances": person_utterances_from_turns([*(recent_turns or []), *source_turns]),
                 "candidate_speech": speech_payload["speech_text"],
+                "decision": self._execution_outward_decision(decision),
+                "recall_pack": recall_pack,
                 "requires_response": current_input.sender_kind == "person",
                 "other_person_sources": [
                     source["source_item"]
@@ -2830,8 +2865,10 @@ class ServiceInputPipelineMixin:
         capability_decision_view: list[dict[str, Any]] | None = None,
         configured_activity_topics: list[dict[str, Any]] | None = None,
         autonomous_run_summaries: list[dict[str, Any]] | None = None,
+        capability_result_context: dict[str, Any] | None = None,
     ) -> SpeechContext:
         return SpeechContext(
+            capability_result_context=capability_result_context,
             autonomous_run_summaries=autonomous_run_summaries,
             configured_activity_topics=configured_activity_topics,
             input_text=input_text,

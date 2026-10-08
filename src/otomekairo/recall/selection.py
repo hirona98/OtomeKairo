@@ -6,7 +6,7 @@ from typing import Any
 from otomekairo.llm.client import LLMContractError, LLMError
 from otomekairo.llm.contexts import PersonaContext
 from otomekairo.llm.contracts import RECALL_PACK_SECTION_NAMES
-from otomekairo.memory.utils import normalized_text_list
+from otomekairo.memory.utils import memory_claim_context, normalized_text_list
 from otomekairo.recall.association import ACTIVE_MEMORY_STATUSES
 
 
@@ -121,6 +121,7 @@ class RecallSelectionMixin:
         self,
         *,
         augmented_query_text: str,
+        current_person_ref: str | None,
         recall_hint: dict[str, Any],
         candidate_sections: dict[str, list[dict[str, Any]]],
         conflicts: list[dict[str, Any]],
@@ -143,6 +144,7 @@ class RecallSelectionMixin:
         try:
             source_pack = self._build_recall_pack_selection_source_pack(
                 augmented_query_text=augmented_query_text,
+                current_person_ref=current_person_ref,
                 recall_hint=recall_hint,
                 candidate_sections=candidate_sections,
                 conflicts=conflicts,
@@ -216,6 +218,7 @@ class RecallSelectionMixin:
         self,
         *,
         augmented_query_text: str,
+        current_person_ref: str | None,
         recall_hint: dict[str, Any],
         candidate_sections: dict[str, list[dict[str, Any]]],
         conflicts: list[dict[str, Any]],
@@ -253,6 +256,7 @@ class RecallSelectionMixin:
         return {
             "persona_context": persona_context.to_prompt_payload(),
             "augmented_query_text": augmented_query_text.strip(),
+            "current_person_ref": current_person_ref,
             "recall_hint": recall_hint,
             "constraints": {
                 "global_recall_limit": GLOBAL_RECALL_LIMIT,
@@ -288,15 +292,7 @@ class RecallSelectionMixin:
 
         # 記憶単位
         if item["source_kind"] == "memory_unit":
-            payload["memory_type"] = item["memory_type"]
-            payload["scope_type"] = item["scope_type"]
-            payload["scope_key"] = item["scope_key"]
-            payload["status"] = item["status"]
-            for key in ("formed_at", "last_confirmed_at", "valid_from", "valid_to"):
-                if item.get(key) is not None:
-                    payload[key] = item[key]
-            if item.get("commitment_state") is not None:
-                payload["commitment_state"] = item["commitment_state"]
+            payload.update(memory_claim_context(item))
             if isinstance(item.get("memory_link_summary"), dict):
                 payload["memory_link_summary"] = item["memory_link_summary"]
             return payload

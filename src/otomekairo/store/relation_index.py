@@ -6,7 +6,7 @@ import uuid
 from collections import Counter
 from typing import Any
 
-from otomekairo.memory.utils import clamp_score, now_iso, parse_iso
+from otomekairo.memory.utils import clamp_score, memory_object_reference, now_iso, parse_iso
 
 
 ACTIVE_MEMORY_STATUSES = {"confirmed", "inferred"}
@@ -295,7 +295,7 @@ class StoreRelationIndexMixin:
         elif unit.get("memory_type") == "relation":
             refs = [
                 str(unit.get("subject_ref") or "").strip(),
-                str(unit.get("object_ref_or_value") or "").strip(),
+                str(memory_object_reference(unit) or "").strip(),
             ]
         else:
             return None, None

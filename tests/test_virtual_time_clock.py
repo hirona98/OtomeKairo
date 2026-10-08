@@ -99,3 +99,33 @@ def test_every_forward_move_checks_registered_deadlines():
     runner.verify_timer_delivery.assert_called_once()
     runner.move(target + timedelta(hours=1), 'next-forward')
     assert runner.verify_timer_delivery.call_count == 1
+
+
+def test_long_timer_survives_more_than_two_hundred_later_runs():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    start = datetime.fromisoformat('2026-10-03T09:00:00+09:00')
+    due = start + timedelta(days=365)
+    waiting = {'run_id': 'autonomous_run:year', 'status': 'waiting_timer', 'next_run_at': due.isoformat()}
+    records = [{'run_id': f'autonomous_run:later-{i}', 'status': 'completed'} for i in range(250)] + [waiting]
+    def read_runs(*, memory_set_id, limit):
+        assert memory_set_id == 'memory:test'
+        return records if limit is None else records[:limit]
+    runner = module.ConversationVerification.__new__(module.ConversationVerification)
+    runner.clock = module.VirtualClock(start)
+    runner.memory_set = 'memory:test'
+    runner.service = SimpleNamespace(store=SimpleNamespace(list_autonomous_runs=read_runs))
+    runner.future_timers = [{'label': 'year', 'before': dict(waiting), 'due': due}]
+    def advance(instant, label):
+        runner.clock.advance_to(instant)
+        if instant == due:
+            waiting['status'] = 'completed'
+    runner._move_instant = advance
+    runner.wait = lambda predicate, label: predicate() or pytest.fail(label)
+    runner.drain = Mock()
+    runner.save = Mock()
+    runner.proofs = []
+    runner.verify_timer_delivery = Mock()
+    runner.move(due + timedelta(days=1), 'past-year')
+    assert runner.future_timers[0]['verified']
+    runner.verify_timer_delivery.assert_called_once()

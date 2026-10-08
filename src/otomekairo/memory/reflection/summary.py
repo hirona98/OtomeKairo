@@ -207,7 +207,14 @@ class MemoryReflectionSummaryMixin:
         for scope_type, scope_key in sorted(dirty_index):
             scope_episodes = episode_groups.get((scope_type, scope_key), [])
             scope_units = memory_groups.get((scope_type, scope_key), [])
-            if not self._should_build_reflective_summary(
+            existing_summaries = summary_groups.get((scope_type, scope_key), [])
+            correction_refresh = bool(existing_summaries) and any(
+                action["operation"] in {"correct", "revoke", "supersede"}
+                and action["memory_unit"].get("scope_type") == scope_type
+                and action["memory_unit"].get("scope_key") == scope_key
+                for action in memory_actions or []
+            )
+            if not correction_refresh and not self._should_build_reflective_summary(
                 scope_type=scope_type,
                 scope_episodes=scope_episodes,
                 scope_units=scope_units,
@@ -221,7 +228,7 @@ class MemoryReflectionSummaryMixin:
                     scope_key=scope_key,
                     scope_episodes=scope_episodes,
                     scope_units=scope_units,
-                    existing_summary_units=summary_groups.get((scope_type, scope_key), []),
+                    existing_summary_units=existing_summaries,
                     scope_support=scope_support_index.get((scope_type, scope_key)),
                 )
             except Exception as exc:  # noqa: BLE001
@@ -524,7 +531,7 @@ class MemoryReflectionSummaryMixin:
             "scope_key": scope_key,
             "subject_ref": self._summary_subject_ref(scope_type, scope_key),
             "predicate": "long_term_pattern",
-            "object_ref_or_value": f"{scope_type}:{scope_key}:summary",
+            "object_ref_or_value": None,
             "summary_text": summary_text.strip(),
             "status": summary_status,
             "commitment_state": None,
@@ -541,6 +548,7 @@ class MemoryReflectionSummaryMixin:
             "valid_from": None,
             "valid_to": None,
             "qualifiers": {
+                "object_kind": "none",
                 "summary_scope": scope_type,
                 "source_memory_types": memory_types,
                 "evidence_episode_count": evidence_counts["episodes"],
@@ -961,6 +969,10 @@ class MemoryReflectionSummaryMixin:
             "object_ref_or_value": unit.get("object_ref_or_value"),
             "summary_text": unit.get("summary_text"),
             "status": unit.get("status"),
+            "formed_time_label": self._reflective_time_label(unit.get("formed_at")),
+            "last_confirmed_time_label": self._reflective_time_label(unit.get("last_confirmed_at")),
+            "valid_from_time_label": self._reflective_time_label(unit.get("valid_from")),
+            "valid_to_time_label": self._reflective_time_label(unit.get("valid_to")),
             "confidence": clamp_score(unit.get("confidence")),
             "salience": clamp_score(unit.get("salience")),
         }

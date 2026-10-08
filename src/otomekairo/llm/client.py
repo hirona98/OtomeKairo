@@ -38,6 +38,8 @@ from otomekairo.llm.contracts import (
     validate_initiative_entry_check_contract,
 
     validate_memory_interpretation_contract,
+    known_person_refs_from_context,
+    validate_known_person_references,
     validate_memory_candidate_review_contract,
     validate_memory_retention_review_contract,
     validate_affect_review_contract,
@@ -56,6 +58,7 @@ from otomekairo.llm.schemas import (
     state_grounding_review_response_format,
     world_state_source_selection_response_format,
     decision_grounding_review_response_format,
+    capability_input_grounding_review_response_format,
     agent_skill_material_selection_response_format,
     agent_skill_selection_response_format,
     autonomous_completion_review_response_format,
@@ -80,6 +83,7 @@ from otomekairo.llm.schemas import (
     recall_pack_selection_response_format,
     response_format_schema_name,
     visual_observation_response_format,
+    visual_observation_review_response_format,
     world_state_response_format,
 )
 from otomekairo.llm.prompts import (
@@ -100,6 +104,7 @@ from otomekairo.llm.prompts import (
     build_autonomous_step_repair_prompt,
     build_decision_messages,
     build_decision_repair_prompt,
+    build_capability_input_grounding_review_messages,
     build_disclosure_review_messages,
     build_disclosure_review_repair_prompt,
     build_speech_grounding_review_messages,
@@ -439,7 +444,7 @@ class LLMClient:
                         "candidate_decision": candidate,
                     }, ensure_ascii=False)},
                 ],
-                validator=self._validate_decision_grounding_review,
+                validator=self._validate_grounding_review,
                 repair_prompt_builder=lambda error: "outcome=allow|reconsider と reason_summary を返してください。" + error,
                 response_format=decision_grounding_review_response_format(),
                 failure_message="外向き判断の根拠審査に失敗しました。",
@@ -464,12 +469,38 @@ class LLMClient:
             )
         raise AssertionError("Decision review attempts exhausted.")
 
-    def _validate_decision_grounding_review(self, payload: dict[str, Any]) -> None:
-        _validate_exact_keys(payload, {"outcome", "reason_summary"}, "DecisionGroundingReview")
+    def _validate_grounding_review(self, payload: dict[str, Any]) -> None:
+        _validate_exact_keys(payload, {"outcome", "reason_summary"}, "GroundingReview")
         if payload["outcome"] not in {"allow", "reconsider"}:
-            raise LLMError("DecisionGroundingReview.outcome が不正です。")
+            raise LLMError("GroundingReview.outcome が不正です。")
         if not isinstance(payload["reason_summary"], str) or not payload["reason_summary"].strip():
-            raise LLMError("DecisionGroundingReview.reason_summary が必要です。")
+            raise LLMError("GroundingReview.reason_summary が必要です。")
+
+    def _review_capability_input_grounding(
+        self, *, model_config: dict, persona_context: PersonaContext,
+        source_messages: list[dict[str, Any]], candidate_request: dict[str, Any] | None,
+    ) -> None:
+        if not isinstance(candidate_request, dict) or candidate_request.get("capability_id") != "mcp.call_tool":
+            return
+        try:
+            review = self._generate_structured_payload(
+                model_config=model_config,
+                messages=build_capability_input_grounding_review_messages(
+                    persona_context=persona_context,
+                    source_messages=[message for message in source_messages if message["role"] == "user"],
+                    candidate_request=candidate_request,
+                ),
+                validator=self._validate_grounding_review,
+                repair_prompt_builder=lambda error: "outcome=allow|reconsider と非空の reason_summary を返してください。" + error,
+                response_format=capability_input_grounding_review_response_format(),
+                failure_message="MCP 本文の根拠審査に失敗しました。",
+                operation="capability_input_grounding_review",
+            )
+        except Exception as exc:
+            # Reviewer failure is not a reason to regenerate an unchecked action.
+            raise RuntimeError("MCP 本文の根拠審査に失敗しました。") from exc
+        if review["outcome"] == "reconsider":
+            raise LLMError("MCP arguments の事実表現を同じ根拠の確かさへ対応させて判断し直してください。審査理由: " + review["reason_summary"])
 
     def _validate_input_interpretation_contract(self, payload: dict[str, Any]) -> None:
         _validate_exact_keys(payload, {"recall_hint", "answer_contract"}, "InputInterpretation")
@@ -507,13 +538,17 @@ class LLMClient:
                 context=context,
             )
 
+            def validate_candidate(candidate: dict[str, Any]) -> None:
+                self._validate_decision_contract_for_context(payload=candidate, context=context)
+                self._review_capability_input_grounding(
+                    model_config=model_config, persona_context=persona_context,
+                    source_messages=messages, candidate_request=candidate.get("capability_request"),
+                )
+
             payload = self._generate_structured_payload(
                 model_config=model_config,
                 messages=messages,
-                validator=lambda payload: self._validate_decision_contract_for_context(
-                    payload=payload,
-                    context=context,
-                ),
+                validator=validate_candidate,
                 repair_prompt_builder=lambda error: build_decision_repair_prompt(
                     error,
                     context.comparison_scope,
@@ -534,19 +569,17 @@ class LLMClient:
                         context=context, messages=messages, candidate=payload,
                     )
                 return payload
+            review_context = {
+                "persona_context": persona_context.to_prompt_payload(),
+                "current_input": context.current_input.to_prompt_payload(),
+                "recent_turns": context.recent_turns,
+                "autonomous_run_summaries": context.autonomous_run_summaries or [],
+                "ongoing_action_summary": context.ongoing_action_summary,
+                "candidate_decision": payload,
+            }
             review = self.generate_future_action_alignment_review(
                 model_config=model_config,
-                review_context={
-                    "persona_context": persona_context.to_prompt_payload(),
-                    "current_input": context.current_input.to_prompt_payload(),
-                    "recent_turns": context.recent_turns,
-                    "autonomous_run_summaries": context.autonomous_run_summaries or [],
-                    "ongoing_action_summary": context.ongoing_action_summary,
-                    "candidate_decision": {
-                        "kind": payload["kind"],
-                        "reason_summary": payload["reason_summary"],
-                    },
-                },
+                review_context=review_context,
             )
             if review["outcome"] == "aligned":
                 return payload
@@ -554,17 +587,16 @@ class LLMClient:
                 *messages,
                 {"role": "assistant", "content": json.dumps(payload, ensure_ascii=False)},
                 {"role": "user", "content": (
-                    "前の判断は、現在の人物発話が求める応答後のAI行動を実行できません。"
-                    "現在の run と ongoing action を確認し、新しい未来行動を始める autonomous_run として判断を作り直してください。"
+                    "前の判断は、現在の人物発話が求める行動の履行範囲に整合していません。"
+                    "現在の run と ongoing action、依頼の完了条件を確認して判断を作り直してください。"
+                    "複合・待機・継続の履行責務は autonomous_run に載せ、今回の単発操作と返却結果の報告で完結するなら、その実行を行う capability_request を選びます。"
                     f"審査理由: {review['reason_summary']}"
                 )},
             ]
             corrected = self._generate_structured_payload(
                 model_config=model_config,
                 messages=retry_messages,
-                validator=lambda item: self._validate_decision_contract_for_context(
-                    payload=item, context=context,
-                ),
+                validator=validate_candidate,
                 repair_prompt_builder=lambda error: build_decision_repair_prompt(
                     error, context.comparison_scope,
                 ),
@@ -573,7 +605,12 @@ class LLMClient:
                 operation="decision_future_action_retry",
             )
             if corrected["kind"] != "autonomous_run":
-                raise LLMError("未来行動の依頼に対し autonomous_run を開始する判断が得られませんでした。")
+                corrected_review = self.generate_future_action_alignment_review(
+                    model_config=model_config,
+                    review_context={**review_context, "candidate_decision": corrected},
+                )
+                if corrected_review["outcome"] != "aligned":
+                    raise LLMError("人物の行動依頼の履行範囲に整合する判断が得られませんでした。")
             return corrected
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc, level='ERROR')}", level="ERROR")
@@ -677,7 +714,8 @@ class LLMClient:
         if missing_refs:
             raise LLMError(
                 "Decision foreground_selection には WorkspaceContext.workspace_candidates[].factor_ref "
-                f"に含まれる参照だけを指定してください。不明な参照={','.join(missing_refs)}"
+                f"に含まれる参照だけを指定してください。不明な参照={','.join(missing_refs)}。"
+                f"利用できる factor_ref 一覧={json.dumps(sorted(candidate_refs), ensure_ascii=False)}"
             )
         if candidate_refs and primary_factor_ref is None:
             raise LLMError(
@@ -745,13 +783,18 @@ class LLMClient:
                 persona_context=persona_context,
                 context=context,
             )
+
+            def validate_candidate(candidate: dict[str, Any]) -> None:
+                self._validate_autonomous_step_contract_for_context(payload=candidate, context=context)
+                self._review_capability_input_grounding(
+                    model_config=model_config, persona_context=persona_context,
+                    source_messages=messages, candidate_request=candidate["action"].get("capability_request"),
+                )
+
             payload = self._generate_structured_payload(
                 model_config=model_config,
                 messages=messages,
-                validator=lambda value: self._validate_autonomous_step_contract_for_context(
-                    payload=value,
-                    context=context,
-                ),
+                validator=validate_candidate,
                 repair_prompt_builder=build_autonomous_step_repair_prompt,
                 failure_message="AutonomousStep の生成に失敗しました。解析可能な応答が得られませんでした。",
                 response_format=autonomous_step_response_format(),
@@ -1374,6 +1417,10 @@ class LLMClient:
             operation=operation,
         )
 
+    def generate_commitment_lifecycle_summaries(self, *, model_config: dict, context: dict[str, Any]) -> dict[str, Any]:
+        from otomekairo.llm.commitment import generate_summaries
+        return generate_summaries(self, model_config=model_config, context=context)
+
     def generate_memory_interpretation(
         self,
         *,
@@ -1414,10 +1461,13 @@ class LLMClient:
             current_time=current_time,
             correction_targets=correction_targets,
         )
+        def validate_interpretation(payload):
+            validate_memory_interpretation_contract(payload)
+            validate_known_person_references(payload, person_refs=known_person_refs_from_context(memory_context or {}))
         payload = self._generate_structured_payload(
             model_config=model_config,
             messages=messages,
-            validator=validate_memory_interpretation_contract,
+            validator=validate_interpretation,
             repair_prompt_builder=build_memory_interpretation_repair_prompt,
             failure_message="MemoryInterpretation の生成に失敗しました。解析可能な応答が得られませんでした。",
             response_format=memory_interpretation_response_format(),
@@ -1508,10 +1558,13 @@ class LLMClient:
             }
             validate_affect_review_contract(payload)
             return payload
+        def validate_review(payload):
+            validate_affect_review_contract(payload)
+            validate_known_person_references(payload, person_refs=known_person_refs_from_context(review_context))
         return self._generate_structured_payload(
             model_config=model_config,
             messages=build_affect_review_messages(review_context=review_context),
-            validator=validate_affect_review_contract,
+            validator=validate_review,
             repair_prompt_builder=build_affect_review_repair_prompt,
             failure_message="AffectReview の生成に失敗しました。",
             response_format=affect_review_response_format(),
@@ -1803,6 +1856,39 @@ class LLMClient:
         debug_log("LLM", f"{state_kind}_grounding_review decisions={self._debug_rejected_payload(review)}", level="DEBUG")
         return {candidate_key: [item for index, item in enumerate(candidates) if index in accepted]}
 
+    def generate_visual_daily_grouping(self, *, model_config: dict, persona_context: PersonaContext,
+                                       records: list[dict[str, Any]]) -> dict[str, Any]:
+        from otomekairo.llm.schemas import visual_daily_grouping_response_format
+        from otomekairo.llm.visual_daily import grouping_messages, validate_grouping
+        if self._is_mock_model_config(model_config):
+            # Mechanical mock: no semantic grouping is claimed.
+            return {"groups": [{"observation_ids": [r["visual_observation_id"]],
+                                "summary_text": r["detailed_summary_text"],
+                                "reason_summary": "機械的mockの独立記録。"} for r in records]}
+        context = {"persona_context": persona_context.to_prompt_payload(), "records": records}
+        return self._generate_structured_payload(
+            model_config=model_config, messages=grouping_messages(context),
+            validator=lambda payload: validate_grouping(payload, records),
+            repair_prompt_builder=lambda error: "全観測IDを順序通り一度ずつ参照するgroupsを返してください。\n" + error,
+            failure_message="視覚の日次整理に失敗しました。", wrap_validation_error=True,
+            response_format=visual_daily_grouping_response_format(), operation="visual_daily_grouping")
+
+    def generate_visual_daily_support(self, *, model_config: dict, persona_context: PersonaContext,
+                                     context: dict[str, Any]) -> dict[str, Any]:
+        from otomekairo.llm.schemas import visual_daily_support_response_format
+        from otomekairo.llm.visual_daily import support_messages, validate_support
+        if self._is_mock_model_config(model_config):
+            return {"decisions": [{"candidate_index": i, "support_refs": [],
+                                   "reason_summary": "機械的mockでは意味を評価しない。"}
+                                  for i in range(len(context["candidates"]))]}
+        context = {**context, "persona_context": persona_context.to_prompt_payload()}
+        return self._generate_structured_payload(
+            model_config=model_config, messages=support_messages(context),
+            validator=lambda payload: validate_support(payload, context),
+            repair_prompt_builder=lambda error: "全候補のcandidate_index、support_refs、reason_summaryをdecisionsに返してください。\n" + error,
+            failure_message="視覚の反復根拠審査に失敗しました。", wrap_validation_error=True,
+            response_format=visual_daily_support_response_format(), operation="visual_daily_support")
+
     def generate_visual_observation_summary(
         self,
         *,
@@ -1827,7 +1913,7 @@ class LLMClient:
             source_pack=source_pack,
             images=images,
         )
-        return self._generate_structured_payload(
+        candidate = self._generate_structured_payload(
             model_config=model_config,
             messages=messages,
             validator=validate_visual_observation_contract,
@@ -1836,6 +1922,19 @@ class LLMClient:
             response_format=visual_observation_response_format(),
             wrap_validation_error=True,
             operation=operation,
+        )
+        return self._generate_structured_payload(
+            model_config=model_config,
+            messages=build_visual_observation_messages(
+                persona_context=persona_context, source_pack=source_pack, images=images,
+                candidate_observation=candidate,
+            ),
+            validator=validate_visual_observation_contract,
+            repair_prompt_builder=build_visual_observation_repair_prompt,
+            failure_message="VisualObservation の画像照合に失敗しました。",
+            response_format=visual_observation_review_response_format(),
+            wrap_validation_error=True,
+            operation="visual_observation_review",
         )
 
     def generate_embeddings(

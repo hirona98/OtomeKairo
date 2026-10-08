@@ -46,7 +46,7 @@ class MemoryConsolidator:
         finished_at: str,
         input_text: str,
         recall_hint: dict[str, Any],
-        recalled_memory_unit_ids: list[str],
+        correction_candidate_memory_unit_ids: list[str],
         decision: dict[str, Any],
         speech_payload: dict[str, Any] | None,
         events: list[dict[str, Any]],
@@ -63,7 +63,7 @@ class MemoryConsolidator:
             memory_set_id=selected_memory_set_id,
             cycle_id=cycle_id,
             finished_at=finished_at,
-            recalled_memory_unit_ids=recalled_memory_unit_ids,
+            candidate_memory_unit_ids=correction_candidate_memory_unit_ids,
         )
 
         correction_targets = [
@@ -95,6 +95,8 @@ class MemoryConsolidator:
             selected_preset=selected_preset,
             selected_persona=selected_persona,
             input_text=input_text,
+            decision=decision,
+            speech_text=speech_payload["speech_text"] if speech_payload else None,
             recall_hint=recall_hint,
             interpretation_context=interpretation_context,
             interpretation=interpretation,
@@ -269,6 +271,8 @@ class MemoryConsolidator:
         selected_preset: dict[str, Any],
         selected_persona: dict[str, Any],
         input_text: str,
+        decision: dict[str, Any],
+        speech_text: str | None,
         recall_hint: dict[str, Any],
         interpretation_context: dict[str, Any],
         interpretation: dict[str, Any],
@@ -282,6 +286,8 @@ class MemoryConsolidator:
                     selected_persona, role="memory_candidate_review",
                 ).to_prompt_payload(),
                 "input_text": input_text,
+                "decision": decision,
+                "speech_text": speech_text,
                 "episode": interpretation["episode"],
                 "recall_hint": recall_hint,
                 "memory_context": interpretation_context,
@@ -382,6 +388,7 @@ class MemoryConsolidator:
                 "speech_text": speech_text,
                 "episode": interpretation["episode"],
                 "people_context": interpretation_context.get("people_context", []),
+                "person_utterances": interpretation_context.get("person_utterances", []),
                 "events": interpretation_context.get("events", []),
                 "candidate_episode_affects": candidates,
             },
@@ -430,6 +437,36 @@ class MemoryConsolidator:
             memory_set_id=memory_set_id,
             memory_unit_ids=linked_ids,
         )
+        units = [unit for unit in units if unit.get("memory_type") == "commitment"
+                 and unit.get("commitment_state") in ACTIVE_COMMITMENT_STATES]
+        if not units:
+            return self._autonomous_run_commitment_resolution_trace(
+                result_status="skipped", reason="no_active_linked_commitments",
+            )
+        unique_evidence_ids = list(dict.fromkeys(evidence_event_ids))
+        evidence = self.store.load_events_for_evidence(
+            memory_set_id=memory_set_id, event_ids=unique_evidence_ids, limit=len(unique_evidence_ids),
+        )
+        if {event["event_id"] for event in evidence} != set(unique_evidence_ids):
+            raise ValueError("約束の履行状態更新の根拠イベントを取得できません。")
+        summaries = self.llm.generate_commitment_lifecycle_summaries(
+            model_config=state["model_presets"][state["selected_model_preset_id"]],
+            context={
+                "persona_context": build_persona_context(state["personas"][state["selected_persona_id"]],
+                    role="commitment_lifecycle_summary").to_prompt_payload(),
+                "current_time": finished_at, "target_commitment_state": target_state,
+                "memory_units": [{key: deepcopy(unit.get(key)) for key in (
+                    "memory_unit_id", "summary_text", "commitment_state", "formed_at",
+                )} for unit in units],
+                "run": {key: deepcopy(run.get(key)) for key in (
+                    "run_id", "objective_summary", "history_summary", "observed_result_summaries",
+                )},
+                "source_evidence_events": [self._compact_event_for_memory_context(event) for event in evidence],
+            },
+        )
+        from otomekairo.llm.commitment import validate_summaries
+        validate_summaries(summaries, [unit["memory_unit_id"] for unit in units])
+        summaries_by_id = {item["memory_unit_id"]: item["summary_text"].strip() for item in summaries["summaries"]}
         actions: list[dict[str, Any]] = []
         updated_ids: list[str] = []
         for unit in units:
@@ -439,6 +476,7 @@ class MemoryConsolidator:
                 continue
             after = deepcopy(unit)
             after["commitment_state"] = target_state
+            after["summary_text"] = summaries_by_id[unit["memory_unit_id"]]
             after["last_confirmed_at"] = finished_at if target_state == "done" else after.get("last_confirmed_at")
             after["evidence_event_ids"] = merged_event_ids(after.get("evidence_event_ids", []), evidence_event_ids)
             qualifiers = dict(after.get("qualifiers", {}))
@@ -859,6 +897,12 @@ class MemoryConsolidator:
     def _compact_event_for_memory_context(self, event: dict[str, Any]) -> dict[str, Any]:
         payload: dict[str, Any] = {}
         for key in (
+            "event_id",
+            "cycle_id",
+            "created_at",
+            "source_kind",
+            "run_id",
+            "terminal_status",
             "kind",
             "role",
             "result_kind",

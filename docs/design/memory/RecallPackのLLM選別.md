@@ -89,6 +89,7 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
 ```json
 {
   "augmented_query_text": "この前の続きだけど、どう進める？",
+  "current_person_ref": "person:external-123",
   "recall_hint": {
     "primary_recall_focus": "commitment",
     "secondary_recall_focuses": ["episodic"],
@@ -177,19 +178,24 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
 
 `augmented_query_text` は検索・想起用の内部拡張クエリであり、ユーザー発話の原文ではない。
 会話判断・発話の `input_text` と同一視しない。
+`current_person_ref` は候補収集と同じ入力話者の参照を選別へ渡す。一人称で本人の好みや経験を尋ねる問いは、その人物の候補へ対応させる。同じ表示名の別人を参照で区別し、別人や第三者を尋ねる問いは問いと `recall_hint` の対象へ対応させる。話者のない入力では `null` とし、候補の表示名や最近の記憶から話者を補わない。
 
 入力の原則は次である。
 
 - `candidate_ref` と `conflict_ref` は request-local な参照であり、永続 ID をそのまま渡さない
 - 候補は section ごとに分けて渡す
 - section 名は canonical なものだけを使う
-- 各 candidate は `summary_text` と意味判断に効く最小の構造化項目に絞る
+- memory candidate は判断用と同じ主張投影を使い、要約、`subject_ref / predicate / object_ref_or_value`、状態・時点・有効期間と出所の qualifiers を保持する。主張の内容を要約だけへ縮めず、永続記憶 ID と根拠 event ID は渡さない
 - `retrieval_lane` は残し、`association` 候補が補助レーンであることは downstream にも保つ
 - `association_score` や query 種別は、source pack に残すが、本命判断値としては育てない
 - `memory_link_summary` は label count と代表関係だけを持ち、永続 ID を含めない
 - `memory_link_summary` は `supports / contradicts / derived_from / about_same_scope / affects` の関係を選別補助として渡す
 - 有効状態、時点、関連先の扱いは [想起と判断.md](想起と判断.md#現在の理解と過去の報告) の圧縮表現の規則に従う
 - `conflicts` には compare key と variant の短い summary だけを入れ、memory unit の内部 ID は渡さない
+
+エピソードの構造レーンは最終採用上限の4倍まで取得し、検索上限内で得た連想レーンと重複を除いて選別へ渡す。最終採用上限まで候補を先に削らない。最終的な `episodic_evidence` の採用上限は6件のままとする。経緯や変化の順序を尋ねる問いでは、最初の報告、訂正、中間の変化、最後の状態の根拠を組として選ぶ。後の報告に含まれる過去の値と、その変化を報告した出来事の時点を区別する。
+
+候補の採否は LLM が、現在の問いの照合に必要な主張の対象・内容・有効条件と、それを支える出来事を組にして判断する。曖昧さがある場合も、それを解消する根拠を残して無関係な候補を絞る。
 
 ## LLM 出力契約
 

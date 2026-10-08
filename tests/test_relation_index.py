@@ -368,7 +368,7 @@ class RelationIndexTests(unittest.TestCase):
             "valid_to": None,
             "evidence_event_ids": [],
             "evidence_cycle_ids": [],
-            "qualifiers": {},
+            "qualifiers": {"object_kind": "reference" if object_ref is not None else "none"},
         }
 
 

@@ -117,6 +117,18 @@ class EvaluationRegressionTests(unittest.TestCase):
             "source_cycle_id": "cycle:test-reminder",
             "origin_interaction_ref": "interaction:test-master",
             "participant_refs": ["person:master"],
+            "source_current_input": {
+                "sender_kind": "person",
+                "sender_ref": "person:master",
+                "source_kind": "user_message",
+                "response_target_refs": ["person:master"],
+                "interaction_context": {
+                    "interaction_ref": "interaction:test-master",
+                    "speaker_ref": "person:master",
+                    "participants": [{"person_ref": "person:master", "display_name": "マスター"}],
+                },
+                "text": "あとで作業へ戻る時間を知らせて。",
+            },
         }
         self.service._persist_autonomous_run_speech_event(
             state=self.state,

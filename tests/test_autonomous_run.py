@@ -1,8 +1,11 @@
 import tempfile
 import unittest
+from contextlib import closing
+import json
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from otomekairo.llm.contexts import CurrentInput
 from otomekairo.llm.contracts import LLMError
@@ -13,6 +16,78 @@ from otomekairo.service.capability import PreSendCheckWithheldError
 
 
 class AutonomousRunRecoveryTests(unittest.TestCase):
+    def test_scheduled_step_and_delivery_share_saved_origin(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
+            service._build_agent_skill_context = Mock(return_value=None)
+            context = service._build_autonomous_step_context(
+                state=state, run=run, current_time="2026-06-20T11:03:00+09:00",
+                source_current_input=None, last_result_context=None, step_trigger="timer",
+            )
+            self.assertEqual(context.current_input.sender_kind, "system")
+            self.assertEqual(context.current_input.source_kind, "autonomous_run")
+            self.assertEqual(context.current_input.response_target_refs, ("person:test",))
+            self.assertEqual(context.current_input.interaction_context.interaction_ref, "interaction:test")
+            self.assertEqual(context.current_input.interaction_context.participants[0].display_name, "テスト人物")
+            service._emit_assistant_message_with_audio = Mock(return_value=(True, None))
+            service._emit_autonomous_run_assistant_message_event(
+                state=state, run=run, speech_payload={"speech_text": "時間の確認です。"},
+            )
+            wire = service._emit_assistant_message_with_audio.call_args.kwargs["event_data"]
+            self.assertEqual(tuple(wire["recipient_person_refs"]), context.current_input.response_target_refs)
+            self.assertEqual(wire["interaction_ref"], context.current_input.interaction_context.interaction_ref)
+
+    def test_run_speech_rejects_inconsistent_saved_delivery_route(self) -> None:
+        for change in (
+            {"origin_interaction_ref": "interaction:other"},
+            {"participant_refs": ["person:other"]},
+            {"participant_refs": []},
+            {"source_current_input": {}},
+            {"source_current_input": None},
+            {"origin_interaction_ref": None},
+        ):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temp_dir:
+                service = OtomeKairoService(Path(temp_dir))
+                state = service.store.read_state()
+                run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
+                run.update(change)
+                service._emit_assistant_message_with_audio = Mock()
+                with self.assertRaises(ValueError):
+                    service._emit_autonomous_run_assistant_message_event(
+                        state=state, run=run, speech_payload={"speech_text": "時間の確認です。"},
+                    )
+                service._emit_assistant_message_with_audio.assert_not_called()
+
+    def test_self_run_has_no_person_delivery(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            service._emit_assistant_message_with_audio = Mock()
+            run = {"source_current_input": {"sender_kind": "system", "source_kind": "wake"},
+                   "origin_interaction_ref": None, "participant_refs": []}
+            self.assertIsNone(service._autonomous_run_speech_interaction(run))
+            service._emit_autonomous_run_assistant_message_event(
+                state={}, run=run, speech_payload={"speech_text": "少し落ち着きました。"},
+            )
+            service._emit_assistant_message_with_audio.assert_not_called()
+
+    def test_current_run_context_keeps_active_work_and_recent_terminal_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            for index in range(7):
+                run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"], status="cancelled")
+                run.update(run_id=f"autonomous_run:cancelled-{index}",
+                           created_at=f"2026-10-04T09:00:0{index}+09:00", updated_at=f"2026-10-04T09:00:0{index}+09:00")
+                service.store.upsert_autonomous_run(autonomous_run=run)
+            active = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"], status="waiting_timer")
+            active["run_id"] = "autonomous_run:long-wait"
+            service.store.upsert_autonomous_run(autonomous_run=active)
+            summaries = service._list_autonomous_run_prompt_summaries(state=state, current_time="2026-10-04T10:00:00+09:00")
+            self.assertEqual({r["run_id"] for r in summaries}, {active["run_id"], *[f"autonomous_run:cancelled-{i}" for i in range(2, 7)]})
+            self.assertEqual(len([r for r in summaries if r["status"] == "cancelled"]), 5)
+
     def test_completion_context_keeps_the_current_requests_origin_and_time(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))
@@ -30,6 +105,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             self.assertEqual(review["run_id"], run["run_id"])
             self.assertEqual(review["source_cycle_id"], run["source_cycle_id"])
             self.assertEqual(review["created_at"], run["created_at"])
+            self.assertEqual(review["source_started_at"], run["source_started_at"])
             self.assertEqual(review["next_run_at"], run["next_run_at"])
             self.assertEqual(review["source_current_input"], run["source_current_input"])
             self.assertEqual(review["history_summary"], "")
@@ -48,7 +124,8 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             step_context = SimpleNamespace(
                 capability_decision_view=[], affect_context={"mood_state": {"current_vad": {"v": 0.4, "a": 0.1, "d": 0.2}}},
                 self_state_context={"agency_confidence": []}, drive_state_summary=[],
-                run={"objective_summary": objective},
+                run={"objective_summary": objective, "observed_result_summaries": [
+                    {"tool_name": "create_reply", "summary_text": "返信成功。" * 100}]},
                 current_input=CurrentInput(
                     sender_kind="system", sender_ref="self", source_kind="autonomous_run",
                     response_target_refs=("person:master",), interaction_context=None,
@@ -62,14 +139,20 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             service._generate_autonomous_run_speech(
                 state={}, selected_preset={"model": "mock-test"},
                 step_context=step_context,
-                step={"action": {"speech": {"reason_summary": "1分が経過した。"}}},
+                step={"action": {"speech": {"reason_summary": "1分が経過した。"}},
+                      "transition": {"kind": "complete", "next_run_at": None},
+                      "run_update": {"current_step_summary": "声をかけて終了する。", "history_summary": "1分経過した。"}},
             )
 
             decision = service._build_speech_context.call_args.kwargs["decision"]
             self.assertEqual(decision["run_objective_summary"], objective)
+            self.assertEqual(decision["autonomous_step"], {
+                "transition": {"kind": "complete", "next_run_at": None},
+                "run_update": {"current_step_summary": "声をかけて終了する。", "history_summary": "1分経過した。"}})
             context_args = service._build_speech_context.call_args.kwargs
             self.assertEqual(context_args["affect_context"], step_context.affect_context)
             self.assertEqual(context_args["self_state_context"], step_context.self_state_context)
+            self.assertEqual(context_args["autonomous_run_summaries"], [step_context.run])
 
     def _use_mock_model(self, service: OtomeKairoService, state: dict) -> dict:
         preset_id = state["selected_model_preset_id"]
@@ -143,18 +226,23 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
 
     def test_start_review_blocks_creation_and_replacement_before_side_effects(self) -> None:
         for mode in ("create_new", "replace_existing"):
-            for response in ({"outcome": "reject_start"}, {"outcome": "invalid"}, LLMError("failed")):
+            for response in (
+                {"outcome": "reject_start", "reason_summary": "既存実行の待機を続ける目的です。"},
+                {"outcome": "invalid"}, LLMError("failed"),
+            ):
                 with self.subTest(mode=mode, response=response), tempfile.TemporaryDirectory() as temp_dir:
                     service = OtomeKairoService(Path(temp_dir))
                     state = service.store.read_state()
                     run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
                     service.store.upsert_autonomous_run(autonomous_run=run)
+                    service.store.append_events = Mock(wraps=service.store.append_events)
                     review = Mock(side_effect=response) if isinstance(response, Exception) else Mock(return_value=response)
                     service.llm = SimpleNamespace(generate_autonomous_start_review=review)
                     service._execute_autonomous_run_step = Mock()
                     with self.assertRaises(LLMError):
                         service._start_autonomous_run_from_decision(
                             state=state, current_time=run["created_at"],
+                            source_started_at=run["source_started_at"],
                             decision={"kind": "autonomous_run", "reason_summary": "既存の待機を維持する。",
                                 "autonomous_run": {"objective_summary": "交流機会を確認する。",
                                     "initial_step_summary": "待つ。", "coordination": {
@@ -168,6 +256,45 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                     self.assertEqual(len(service.store.list_autonomous_runs(memory_set_id=run["memory_set_id"])), 1)
                     service._execute_autonomous_run_step.assert_not_called()
                     self.assertEqual(review.call_args.kwargs["review_context"]["existing_runs"][0]["run_id"], run["run_id"])
+                    context = review.call_args.kwargs["review_context"]
+                    self.assertEqual(context["time_context"], service._build_time_context(current_time=run["created_at"]))
+                    event = service.store.append_events.call_args.kwargs["events"][0]
+                    self.assertEqual(event["kind"], "autonomous_start_review")
+                    audit = event["start_review"]
+                    self.assertEqual(audit["candidate_summary"], context["decision"])
+                    self.assertEqual(audit["time_context"], context["time_context"])
+                    rejected = isinstance(response, dict) and response["outcome"] == "reject_start"
+                    self.assertEqual(audit["reason_summary"], response["reason_summary"] if rejected else None)
+                    self.assertEqual(audit["result_status"], "completed" if rejected else "failed")
+
+    def test_start_review_preserves_decision_clock_across_generation_delay(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            decision_clock = service._build_time_context(current_time="2027-10-04T09:00:47+09:00")
+            review_time = "2027-10-04T09:02:17+09:00"
+            review = Mock(return_value={"outcome": "allow_start", "reason_summary": "依頼時点から5分後の一回通知です。"})
+            service.llm = SimpleNamespace(generate_autonomous_start_review=review)
+            service.store.append_events = Mock(wraps=service.store.append_events)
+            service._review_autonomous_start_candidate(
+                state=state, current_time=review_time, time_context=decision_clock,
+                source_cycle_id="cycle:delayed-review",
+                source_current_input={"sender_kind": "person", "source_kind": "user_message",
+                    "text": "今から5分後に一度知らせて。", "response_target_refs": ["person:master"]},
+                decision={"kind": "autonomous_run", "reason_summary": "時刻まで待って知らせる依頼です。",
+                    "autonomous_run": {"objective_summary": "2027年10月4日9時5分47秒に一度知らせて終了する。",
+                        "initial_step_summary": "指定時刻まで待機する。",
+                        "coordination": {"mode": "create_new", "target_run_ids": [], "reason_summary": "独立した依頼です。"}}},
+            )
+            context = review.call_args.kwargs["review_context"]
+            self.assertEqual(context["time_context"], decision_clock)
+            self.assertNotEqual(context["time_context"], service._build_time_context(current_time=review_time))
+            event = service.store.append_events.call_args.kwargs["events"][0]
+            self.assertEqual(event["created_at"], review_time)
+            self.assertEqual(event["start_review"]["time_context"], decision_clock)
+            self.assertEqual(event["start_review"]["reason_summary"], review.return_value["reason_summary"])
+            context["time_context"]["current_time_text"] = "changed"
+            self.assertEqual(event["start_review"]["time_context"], decision_clock)
 
     def test_allowed_start_review_creates_run_and_includes_all_existing_runs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -181,6 +308,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             service._execute_autonomous_run_step = Mock(return_value={"status": "active"})
             result = service._start_autonomous_run_from_decision(
                 state=state, current_time=run["created_at"],
+                source_started_at="2026-06-20T10:59:00+09:00",
                 decision={"kind": "autonomous_run", "autonomous_run": {
                     "objective_summary": "指定時刻に声をかけて完了する。", "initial_step_summary": "時刻を確認する。",
                     "coordination": {"mode": "create_new", "target_run_ids": [], "reason_summary": "独立した依頼。"}}},
@@ -188,8 +316,32 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 assistant_message_target_client_id=None,
             )
             self.assertEqual(len(review.call_args.kwargs["review_context"]["existing_runs"]), 21)
+            self.assertEqual(
+                review.call_args.kwargs["review_context"]["time_context"],
+                service._build_time_context(current_time="2026-06-20T10:59:00+09:00"),
+            )
             self.assertEqual(result["autonomous_run"]["status"], "active")
+            saved = service.store.get_autonomous_run(run_id=result["autonomous_run"]["run_id"])
+            self.assertEqual(saved["source_started_at"], "2026-06-20T10:59:00+09:00")
+            self.assertEqual(saved["created_at"], run["created_at"])
+            summary = service._autonomous_run_prompt_summary(saved)
+            self.assertEqual(summary["source_started_at"], saved["source_started_at"])
+            self.assertEqual(service._autonomous_completion_review_run_context(summary)["source_started_at"], saved["source_started_at"])
             service._execute_autonomous_run_step.assert_called_once()
+
+    def test_step_requires_the_saved_time_origin_before_model_calls(self) -> None:
+        for value in (None, "", "invalid", "2026-10-04T09:00:47"):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as temp_dir:
+                service = OtomeKairoService(Path(temp_dir))
+                service.llm = Mock()
+                run = self._commitment_run_record(memory_set_id="memory_set:default")
+                run["source_started_at"] = value
+                with self.assertRaises(ValueError):
+                    service._build_autonomous_step_context(
+                        state={}, run=run, current_time="2026-10-04T09:02:17+09:00",
+                        source_current_input=run["source_current_input"], last_result_context=None,
+                    )
+                service.llm.generate_autonomous_step.assert_not_called()
 
     def test_saved_source_factors_are_not_forwarded_to_run_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -236,6 +388,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                     }] if select_new_topic else [])}
                     result = service._start_autonomous_run_from_decision(
                         state=state, current_time=now,
+                        source_started_at=now,
                         decision={"kind": "autonomous_run", "foreground_selection": {
                             "primary_factor_ref": "periodic_thought_topic:new" if select_new_topic else None,
                             "supporting_factor_refs": [],
@@ -441,7 +594,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 service._build_autonomous_step_context.call_args.kwargs[
                     "completion_review_feedback"
                 ],
-                AUTONOMOUS_COMPLETION_REVIEW_RETRY_FEEDBACK,
+                AUTONOMOUS_COMPLETION_REVIEW_RETRY_FEEDBACK + "\n審査理由: 外界への投稿作用がまだ実行されていない。",
             )
             service._emit_autonomous_run_assistant_message_event.assert_not_called()
             service._persist_autonomous_run_speech_event.assert_not_called()
@@ -541,6 +694,11 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 review_context["candidate"]["speech_text"],
                 "投稿が完了しました。",
             )
+            with closing(sqlite3.connect(service.store.memory_db_path)) as conn:
+                audits = [json.loads(row[0])["completion_review"] for row in conn.execute(
+                    "SELECT payload_json FROM events WHERE kind = 'autonomous_completion_review'")]
+            self.assertEqual(audits[-1]["reason_summary"], "投稿作成の成功結果と完了報告が一致する。")
+            self.assertEqual(audits[-1]["candidate"], review_context["candidate"])
 
     def test_second_completion_rejection_cancels_without_speech_delivery(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -652,6 +810,11 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             }
             service.store.upsert_autonomous_run(autonomous_run=run)
             service.memory.vector_indexer.sync = lambda **_: None
+            summary_patch = patch.object(type(service.memory.llm), "generate_commitment_lifecycle_summaries", return_value={"summaries": [{
+                "memory_unit_id": commitment["memory_unit_id"], "summary_text": "依頼された声かけを完了した。",
+            }]})
+            summary_patch.start()
+            self.addCleanup(summary_patch.stop)
 
             service._link_autonomous_run_source_commitments(
                 state=state,
@@ -672,6 +835,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             )[0]
             updated_run = service.store.get_autonomous_run(run_id=run["run_id"])
             self.assertEqual(updated_commitment["commitment_state"], "done")
+            self.assertEqual(updated_commitment["summary_text"], "依頼された声かけを完了した。")
             self.assertEqual(updated_run["commitment_resolution"]["result_status"], "updated")
 
     def test_completed_autonomous_run_marks_linked_commitment_done(self) -> None:
@@ -1180,6 +1344,8 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             state = service.store.read_state()
             run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
             run["origin_kind"] = "background_thinking"
+            run["origin_interaction_ref"] = None
+            run["participant_refs"] = []
             run["source_current_input"] = {
                 "sender_kind": "system",
                 "sender_ref": None,
@@ -1414,6 +1580,9 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             "updated_at": "2026-06-20T11:00:00+09:00",
             "completed_at": "2026-06-20T11:03:00+09:00" if status in {"completed", "cancelled"} else None,
             "source_cycle_id": "cycle:source",
+            "origin_interaction_ref": "interaction:test",
+            "participant_refs": ["person:test"],
+            "source_started_at": "2026-06-20T11:00:00+09:00",
             "source_current_input": {
                 "sender_kind": "person",
                 "sender_ref": "person:test",

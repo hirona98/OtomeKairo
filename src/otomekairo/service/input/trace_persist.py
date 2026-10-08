@@ -48,7 +48,7 @@ class ServiceInputTracePersistMixin:
             followup_capability_request_summary = None
         result_kind = self._external_result_kind(
             speech_payload=speech_payload,
-            capability_request_summary=capability_request_summary,
+            capability_request_summary=followup_capability_request_summary,
         )
         finished_at = self._now_iso()
         pending_intent_summary = self._apply_pending_intent_candidate(
@@ -60,6 +60,7 @@ class ServiceInputTracePersistMixin:
 
         # 永続化
         events = self._persist_cycle_success(
+            configured_activity_topics=pipeline.get("configured_activity_topics"),
             recent_interaction_summary=pipeline.get("recent_interaction_summary"),
             cycle_id=cycle_id,
             started_at=started_at,
@@ -174,7 +175,7 @@ class ServiceInputTracePersistMixin:
                 "persona_id": pipeline["persona_id"],
                 "persona_display_name": pipeline["persona_display_name"],
             } if speech_payload else None,
-            "capability_request": capability_request_summary if isinstance(capability_request_summary, dict) else None,
+            "capability_request": followup_capability_request_summary,
             "autonomous_run": pipeline.get("autonomous_run_summary")
             if isinstance(pipeline.get("autonomous_run_summary"), dict)
             else None,
@@ -227,6 +228,7 @@ class ServiceInputTracePersistMixin:
         ongoing_action_transition_summary: dict[str, Any] | None = None,
         system_notice: dict[str, Any] | None = None,
         recent_interaction_summary: list[dict[str, Any]] | None = None,
+        configured_activity_topics: list[dict[str, str]] | None = None,
     ) -> list[dict[str, Any]]:
         memory_set_id = state["selected_memory_set_id"]
         events = self._build_cycle_events(
@@ -293,6 +295,7 @@ class ServiceInputTracePersistMixin:
             foreground_world_state=foreground_world_state,
             recall_trace=self._build_success_recall_trace(recall_hint, recall_pack),
             decision_trace=self._build_success_decision_trace(
+                configured_activity_topics=configured_activity_topics,
                 recent_interaction_summary=recent_interaction_summary,
                 state=state,
                 input_text=input_text,

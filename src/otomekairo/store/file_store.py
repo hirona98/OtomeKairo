@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,7 @@ class SQLiteMemoryStore(
         # パス群
         self.root_dir = root_dir
         self.memory_db_path = root_dir / MEMORY_DB_FILE_NAME
+        self._memory_db_lock = threading.Lock()
 
         # 初期化
         self.root_dir.mkdir(parents=True, exist_ok=True)
@@ -132,14 +134,14 @@ class SQLiteMemoryStore(
         exclude_cycle_id: str,
         cycle_limit: int,
         limit: int,
-        recalled_memory_unit_ids: list[str],
+        candidate_memory_unit_ids: list[str],
     ) -> list[dict[str, Any]]:
         # 入力検証
         if cycle_limit <= 0 or limit <= 0:
             return []
         recalled_ids = list(dict.fromkeys(
-            value for value in recalled_memory_unit_ids if isinstance(value, str) and value
-        ))[:limit]
+            value for value in candidate_memory_unit_ids if isinstance(value, str) and value
+        ))
 
         # トランザクション
         with self._memory_db() as conn:

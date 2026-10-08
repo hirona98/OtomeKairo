@@ -16,7 +16,6 @@ from otomekairo.llm.contracts import (
     DISCLOSURE_REVIEW_OUTCOMES,
     INITIATIVE_ENTRY_BASIS_VALUES,
     LLMError,
-    MEMORY_CORRECTION_KIND_VALUES,
     MEMORY_CORRECTION_STATUS_VALUES,
     MEMORY_TYPE_VALUES,
     PRE_SEND_CHECK_OUTCOMES,
@@ -444,7 +443,10 @@ def memory_interpretation_response_format() -> dict[str, Any]:
                                 ),
                             },
                             "predicate_hint": {"type": "string"},
-                            "object_hint": nullable({"type": "string"}),
+                            "object_hint": nullable(closed_object({
+                                "kind": string_enum({"reference", "value"}),
+                                "value": {"type": "string"},
+                            })),
                             "qualifiers_hint": json_object_text(
                                 description="補助情報の JSON object を表す文字列。空の object は {}。"
                             ),
@@ -467,7 +469,6 @@ def memory_interpretation_response_format() -> dict[str, Any]:
                         {
                             "revision_id": {"type": "string"},
                             "memory_unit_id": {"type": "string"},
-                            "correction_kind": string_enum(MEMORY_CORRECTION_KIND_VALUES),
                             "reason_summary": {"type": "string"},
                         }
                     ),
@@ -575,6 +576,13 @@ def initiative_entry_check_response_format() -> dict[str, Any]:
 
 def decision_grounding_review_response_format() -> dict[str, Any]:
     return structured_response_format("decision_grounding_review", closed_object({
+        "outcome": string_enum({"allow", "reconsider"}),
+        "reason_summary": {"type": "string"},
+    }))
+
+
+def capability_input_grounding_review_response_format() -> dict[str, Any]:
+    return structured_response_format("capability_input_grounding_review", closed_object({
         "outcome": string_enum({"allow", "reconsider"}),
         "reason_summary": {"type": "string"},
     }))
@@ -695,8 +703,37 @@ def all_response_formats() -> dict[str, dict[str, Any]]:
         "world_state": world_state_response_format(),
         "activity_state": activity_state_response_format(),
         "visual_observation": visual_observation_response_format(),
+        "visual_observation_review": visual_observation_review_response_format(),
+        "visual_daily_grouping": visual_daily_grouping_response_format(),
+        "visual_daily_support": visual_daily_support_response_format(),
     }
     return formats
+
+
+def visual_observation_review_response_format() -> dict[str, Any]:
+    payload = visual_observation_response_format()
+    payload["json_schema"]["name"] = "visual_observation_review"
+    return payload
+
+
+def visual_daily_grouping_response_format() -> dict[str, Any]:
+    return structured_response_format("visual_daily_grouping", closed_object({
+        "groups": {"type": "array", "items": closed_object({
+            "observation_ids": string_array(min_items=1),
+            "summary_text": {"type": "string"},
+            "reason_summary": {"type": "string"},
+        })},
+    }))
+
+
+def visual_daily_support_response_format() -> dict[str, Any]:
+    return structured_response_format("visual_daily_support", closed_object({
+        "decisions": {"type": "array", "items": closed_object({
+            "candidate_index": {"type": "integer"},
+            "support_refs": string_array(),
+            "reason_summary": {"type": "string"},
+        })},
+    }))
 
 
 def closed_object(properties: dict[str, Any], *, description: str | None = None) -> dict[str, Any]:

@@ -5,6 +5,7 @@ import threading
 import uuid
 from typing import Any
 
+from otomekairo.llm.contexts import fresh_visual_observations_from_capability_view
 from otomekairo.service.common import debug_log, format_debug_log_text
 
 
@@ -307,7 +308,10 @@ class ServiceMemoryMixin:
                 finished_at=finished_at,
                 input_text=input_text,
                 recall_hint=pipeline["recall_hint"],
-                recalled_memory_unit_ids=pipeline["recall_pack"]["selected_memory_ids"],
+                correction_candidate_memory_unit_ids=list(dict.fromkeys([
+                    *pipeline["recall_pack"]["selected_memory_ids"],
+                    *pipeline["recall_pack"]["retrieved_memory_ids"],
+                ])),
                 decision=pipeline["decision"],
                 speech_payload=pipeline["speech_payload"],
                 events=events,
@@ -320,6 +324,11 @@ class ServiceMemoryMixin:
                     foreground_world_state=pipeline.get("foreground_world_state"),
                     visual_observation_context=pipeline.get("visual_observation_context"),
                     capability_decision_view=pipeline.get("capability_decision_view"),
+                    person_utterances=pipeline.get("person_utterances"),
+                    configured_activity_topics=pipeline.get("configured_activity_topics"),
+                    recall_pack=pipeline["recall_pack"],
+                    activity_context=pipeline.get("activity_context"),
+                    autonomous_run_summary=pipeline.get("autonomous_run_summary"),
                     pending_intent_summary=pending_intent_summary,
                     pending_intent_selection=pending_intent_selection,
                     observation_summary=observation_summary,
@@ -425,9 +434,14 @@ class ServiceMemoryMixin:
         capability_request_summary: dict[str, Any] | None,
         followup_capability_request_summary: dict[str, Any] | None,
         ongoing_action_transition_summary: dict[str, Any] | None,
+        autonomous_run_summary: dict[str, Any] | None,
         foreground_world_state: list[dict[str, Any]] | None = None,
         visual_observation_context: dict[str, Any] | None = None,
         capability_decision_view: list[dict[str, Any]] | None = None,
+        person_utterances: list[dict[str, Any]] | None = None,
+        recall_pack: dict[str, Any] | None = None,
+        activity_context: dict[str, Any] | None = None,
+        configured_activity_topics: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "trigger_kind": trigger_kind,
@@ -441,6 +455,13 @@ class ServiceMemoryMixin:
         payload["foreground_world_state"] = foreground_world_state
         payload["visual_observation_context"] = visual_observation_context
         payload["capability_decision_view"] = capability_decision_view
+        payload["fresh_visual_observations"] = fresh_visual_observations_from_capability_view(capability_decision_view)
+        payload["person_utterances"] = person_utterances or []
+        payload["recall_pack"] = recall_pack
+        payload["activity_context"] = activity_context
+        payload["configured_activity_topics"] = configured_activity_topics
+        if isinstance(autonomous_run_summary, dict):
+            payload["autonomous_run_summary"] = autonomous_run_summary
         if isinstance(pending_intent_summary, dict):
             payload["pending_intent_summary"] = pending_intent_summary
         compact_pending_selection = self._compact_pending_intent_selection_summary(pending_intent_selection)

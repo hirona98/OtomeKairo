@@ -5,7 +5,11 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from otomekairo.defaults import build_default_state
+from otomekairo.llm.client import LLMClient
+from otomekairo.recall.builder import RecallBuilder
 from otomekairo.store.file_store import FileStore
 
 
@@ -84,16 +88,41 @@ class MemoryCorrectionTargetTests(unittest.TestCase):
             }
             self.assertEqual(
                 store.list_recent_memory_revision_targets_for_correction(
-                    **params, recalled_memory_unit_ids=[],
+                    **params, candidate_memory_unit_ids=[],
                 ),
                 [],
             )
             targets = store.list_recent_memory_revision_targets_for_correction(
-                **params, recalled_memory_unit_ids=[memory_unit_id],
+                **params, candidate_memory_unit_ids=[memory_unit_id],
             )
             self.assertEqual(len(targets), 1)
             self.assertEqual(targets[0]["memory_unit"]["memory_unit_id"], memory_unit_id)
             self.assertEqual(targets[0]["source_cycle_ids"], [old_cycle_id])
+
+            # 返答用の採用がゼロでも、検索された旧記憶は訂正審査へ渡せる。
+            state = build_default_state()
+            state["selected_memory_set_id"] = memory_set_id
+            state["model_presets"][state["selected_model_preset_id"]]["model"] = "mock"
+            embedding = state["memory_sets"][memory_set_id]["embedding"]
+            embedding["model"] = "mock"
+            llm = LLMClient()
+            with patch.object(LLMClient, "generate_recall_pack_selection", return_value={
+                "section_selection": [], "conflict_summaries": [],
+            }):
+                recall = RecallBuilder(store=store, llm=llm).build_recall_pack(
+                    state=state, augmented_query_text="飲み物の好みを訂正する。",
+                    recall_hint={
+                        "primary_recall_focus": "preference", "secondary_recall_focuses": [],
+                        "focus_scopes": [], "mentioned_entities": [], "mentioned_topics": [],
+                    }, current_person_ref="person:master",
+                    current_time=params["before_finished_at"],
+                )
+            self.assertEqual(recall["selected_memory_ids"], [])
+            self.assertIn(memory_unit_id, recall["retrieved_memory_ids"])
+            targets = store.list_recent_memory_revision_targets_for_correction(
+                **params, candidate_memory_unit_ids=recall["retrieved_memory_ids"],
+            )
+            self.assertEqual([target["revision"]["revision_id"] for target in targets], ["revision:old"])
 
             # 訂正後は recalled 経由でも直近履歴経由でも古い create を再提示しない。
             revision.update({"revision_id": "revision:corrected", "operation": "correct", "corrects_revision_id": "revision:old"})
@@ -111,7 +140,7 @@ class MemoryCorrectionTargetTests(unittest.TestCase):
             for recalled in ([], [memory_unit_id]):
                 with self.subTest(recalled=recalled):
                     self.assertEqual(store.list_recent_memory_revision_targets_for_correction(
-                        **params, recalled_memory_unit_ids=recalled,
+                        **params, candidate_memory_unit_ids=recalled,
                     ), [])
 
 

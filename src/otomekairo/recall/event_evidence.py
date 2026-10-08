@@ -16,6 +16,9 @@ EVENT_EVIDENCE_FOCUSES = {
 }
 EVENT_EVIDENCE_SOURCE_SUMMARY_LIMIT = 6
 PRECISE_EVENT_EVIDENCE_LIMIT = 8
+EVENT_EVIDENCE_PROVENANCE_KEYS = (
+    "role", "speaker_ref", "participant_refs", "interaction_ref", "created_at",
+)
 PRECISE_EVENT_EVIDENCE_FOCUS_HISTORY = {
     "commitment",
     "relationship",
@@ -236,6 +239,7 @@ class RecallEventEvidenceMixin:
                             event_id=item["event_id"],
                             kind=item["kind"],
                             payload=slot_payload,
+                            source_item=item["source_item"],
                         )
                     )
                 except Exception as exc:  # noqa: BLE001
@@ -694,6 +698,7 @@ class RecallEventEvidenceMixin:
         kind = self._event_evidence_kind(record)
         return {
             "kind": kind,
+            **{key: record[key] for key in EVENT_EVIDENCE_PROVENANCE_KEYS if key in record},
             "role": self._optional_text(record.get("role")),
             "created_at": self._optional_text(record.get("created_at")),
             "text": self._optional_text(record.get("text")),
@@ -723,6 +728,7 @@ class RecallEventEvidenceMixin:
         event_id: str,
         kind: str,
         payload: dict[str, Any],
+        source_item: dict[str, Any],
     ) -> dict[str, Any]:
         # 基底
         item = {
@@ -739,6 +745,7 @@ class RecallEventEvidenceMixin:
 
         if len(item) <= 2:
             raise ValueError("EventEvidence payload did not contain any present slots.")
+        item.update({key: source_item[key] for key in EVENT_EVIDENCE_PROVENANCE_KEYS if key in source_item})
         return item
 
     def _event_evidence_kind(self, record: dict[str, Any]) -> str:

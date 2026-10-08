@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from datetime import datetime
 
 from otomekairo.llm.contracts import LLMError, validate_world_state_contract
@@ -32,6 +34,45 @@ class _WorldStateService(ServiceInputWorldStateMixin):
 
 
 class UserInputWorldSourceTests(unittest.TestCase):
+    def test_locations_from_different_people_coexist_and_update_independently(self) -> None:
+        from otomekairo.store.file_store import FileStore
+        service = _WorldStateService()
+        now = '2026-10-04T09:00:00+09:00'
+        with TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            for person, location in [('person:a', '家'), ('person:b', '職場'), ('person:b', '駅')]:
+                text = f'今は{location}にいる。'
+                pack = WorldStateSourcePack(
+                    trigger_kind='user_message', current_input_summary=text,
+                    source_kind='user_input', source_ref=f'cycle:{person}:{location}', time_context=now,
+                    client_context=WorldStateClientContext(source='test'), current_person_ref=person,
+                )
+                pack.state_sources = tuple(service._build_world_state_source_candidates(
+                    source_pack=pack, reported_states=[{'state_type': 'location', 'evidence_text': text}]))
+                records = service._normalize_world_state_candidates(
+                    memory_set_id='memory:test', observed_at=now, source_kind='user_input',
+                    source_ref=pack.source_ref, source_pack=pack,
+                    payload={'state_candidates': [{'candidate_ref': 'state_source:location',
+                             'summary_text': text, 'confidence_hint': 'high', 'salience_hint': 'medium',
+                             'ttl_hint': 'short'}]},
+                )
+                store.refresh_world_states(memory_set_id='memory:test', current_time=now,
+                                           world_states=records, max_active=12)
+            actual = store.list_world_states(memory_set_id='memory:test', current_time=now, limit=20)
+            self.assertEqual({(r['scope_type'], r['scope_key'], r['summary_text']) for r in actual},
+                             {('entity', 'person:a', '今は家にいる。'), ('entity', 'person:b', '今は駅にいる。')})
+
+    def test_report_without_person_reference_fails_explicitly(self) -> None:
+        service = _WorldStateService()
+        pack = WorldStateSourcePack(
+            trigger_kind='user_message', current_input_summary='今は家にいる。',
+            source_kind='user_input', source_ref='cycle:test', time_context='現在',
+            client_context=WorldStateClientContext(source='test'),
+        )
+        with self.assertRaisesRegex(ValueError, 'person_ref'):
+            service._build_world_state_source_candidates(
+                source_pack=pack, reported_states=[{'state_type': 'location', 'evidence_text': '今は家にいる。'}])
+
     def test_text_is_available_for_llm_state_judgment_without_visual_evidence(self) -> None:
         service = _WorldStateService()
         pack = WorldStateSourcePack(

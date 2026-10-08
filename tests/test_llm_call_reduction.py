@@ -341,7 +341,6 @@ class LlmCallReductionTests(unittest.TestCase):
                 "correction": {
                     "correction_group_id": "correction:1",
                     "corrects_revision_id": "revision:old",
-                    "correction_kind": "revoke_created",
                 },
             }
             reconciler = MemoryCorrectionReconciler(store=store, action_resolver=resolver)
@@ -364,7 +363,6 @@ class LlmCallReductionTests(unittest.TestCase):
                             {
                                 "revision_id": "revision:old",
                                 "memory_unit_id": "memory_unit:created",
-                                "correction_kind": "revoke_created",
                                 "reason_summary": "さっきの理解は誤りだった。",
                             }
                         ],

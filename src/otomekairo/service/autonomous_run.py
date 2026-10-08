@@ -9,7 +9,7 @@ from typing import Any
 from otomekairo.llm.client import LLMError
 from otomekairo.llm.contexts import AutonomousStepContext, CurrentInput
 from otomekairo.llm.contracts import build_decision_target_stances_for_kind
-from otomekairo.interaction import normalize_interaction_context
+from otomekairo.interaction import InteractionContext, normalize_interaction_context
 from otomekairo.service.capability import (
     CapabilityDispatchError,
     PreSendCheckFailureError,
@@ -40,10 +40,8 @@ AUTONOMOUS_PRE_SEND_CHECK_FAILURE_NOTICE = (
     "外部送信内容の安全確認を完了できなかったため、送信しませんでした。"
 )
 AUTONOMOUS_COMPLETION_REVIEW_RETRY_FEEDBACK = (
-    "前の complete 候補では、目的達成を裏付ける実績と発話の時間関係が一致しなかった。"
-    "run を継続し、目的を実績として満たす capability_request または wait_until、"
-    "実行不能を確定する cancel のいずれかを選ぶ。"
-    "speech を選ぶ場合は、実行済み結果または継続中の状態を表す。"
+    "完了審査の理由を、今回の目的、観測済み結果、候補発話と照合して次の判断を組み直す。"
+    "残る作用や待機が必要ならその作業を進め、目的が実績で満たされていれば、その実績に合う報告で完了する。"
 )
 
 
@@ -580,30 +578,34 @@ class ServiceAutonomousRunMixin:
     def _review_autonomous_start_candidate(
         self, *, state: dict[str, Any], decision: dict[str, Any],
         source_current_input: dict[str, Any], source_cycle_id: str | None,
-        current_time: str,
+        current_time: str, time_context: dict[str, Any],
     ) -> None:
         existing = self.store.list_autonomous_runs(
             memory_set_id=state["selected_memory_set_id"],
             statuses=sorted(AUTONOMOUS_RUN_ACTIVE_STATUSES), limit=None,
         )
+        review_context = {
+            "time_context": deepcopy(time_context),
+            "current_input": {key: deepcopy(source_current_input.get(key)) for key in (
+                "sender_kind", "source_kind", "text", "response_target_refs"
+            )},
+            "decision": {key: deepcopy(decision.get(key)) for key in (
+                "kind", "reason_summary", "autonomous_run"
+            )},
+            "existing_runs": [self._autonomous_run_prompt_summary(run) for run in existing],
+        }
         outcome = None
+        reason_summary = None
         try:
             review = self.llm.generate_autonomous_start_review(
                 model_config=state["model_presets"][state["selected_model_preset_id"]],
-                review_context={
-                    "current_input": {key: deepcopy(source_current_input.get(key)) for key in (
-                        "sender_kind", "source_kind", "text", "response_target_refs"
-                    )},
-                    "decision": {key: deepcopy(decision.get(key)) for key in (
-                        "kind", "reason_summary", "autonomous_run"
-                    )},
-                    "existing_runs": [self._autonomous_run_prompt_summary(run) for run in existing],
-                },
+                review_context=review_context,
             )
             outcome = review.get("outcome")
             if outcome not in {"allow_start", "reject_start"}:
                 outcome = None
                 raise LLMError("AutonomousStartReview.outcome が不正です。")
+            reason_summary = review["reason_summary"]
         finally:
             self.store.append_events(events=[{
                 "event_id": f"event:{uuid.uuid4().hex}",
@@ -614,6 +616,9 @@ class ServiceAutonomousRunMixin:
                 "start_review": {
                     "outcome": outcome,
                     "result_status": "failed" if outcome is None else "completed",
+                    "reason_summary": reason_summary,
+                    "time_context": deepcopy(review_context["time_context"]),
+                    "candidate_summary": deepcopy(review_context["decision"]),
                     "coordination_mode": decision["autonomous_run"]["coordination"]["mode"],
                     "target_run_ids": decision["autonomous_run"]["coordination"]["target_run_ids"],
                     "existing_run_ids": [run["run_id"] for run in existing],
@@ -628,6 +633,7 @@ class ServiceAutonomousRunMixin:
         state: dict[str, Any],
         current_time: str,
         decision: dict[str, Any],
+        source_started_at: str,
         source_current_input: dict[str, Any],
         source_cycle_id: str | None,
         assistant_message_target_client_id: str | None,
@@ -649,6 +655,7 @@ class ServiceAutonomousRunMixin:
         self._review_autonomous_start_candidate(
             state=state, decision=decision, source_current_input=source_current_input,
             source_cycle_id=source_cycle_id, current_time=current_time,
+            time_context=self._build_time_context(current_time=source_started_at),
         )
         # LLM 検証中に変化しうる置換対象を、副作用の前に再検証する。
         coordination = self._decision_autonomous_run_coordination(state=state, run_payload=run_payload)
@@ -670,6 +677,7 @@ class ServiceAutonomousRunMixin:
             "consecutive_step_count": 0,
             "cooldown_until": None,
             "created_at": current_time,
+            "source_started_at": source_started_at,
             "updated_at": current_time,
             "completed_at": None,
             "source_current_input": deepcopy(source_current_input),
@@ -1270,7 +1278,7 @@ class ServiceAutonomousRunMixin:
             if action_kind == "capability_request" or transition_kind != "complete":
                 return step_context, step, speech_payload
 
-            outcome = self._review_autonomous_completion_candidate(
+            review = self._review_autonomous_completion_candidate(
                 run=run,
                 selected_preset=selected_preset,
                 step_context=step_context,
@@ -1278,10 +1286,12 @@ class ServiceAutonomousRunMixin:
                 speech_payload=speech_payload,
                 review_attempt=review_attempt,
             )
-            if outcome == "allow_complete":
+            if review["outcome"] == "allow_complete":
                 return step_context, step, speech_payload
             if review_attempt == 1:
-                completion_review_feedback = AUTONOMOUS_COMPLETION_REVIEW_RETRY_FEEDBACK
+                completion_review_feedback = (
+                    AUTONOMOUS_COMPLETION_REVIEW_RETRY_FEEDBACK + "\n審査理由: " + review["reason_summary"]
+                )
                 continue
             raise LLMError(
                 "AutonomousCompletionReview が2回続けて run の継続を要求したため、"
@@ -1299,8 +1309,13 @@ class ServiceAutonomousRunMixin:
         step: dict[str, Any],
         speech_payload: dict[str, Any] | None,
         review_attempt: int,
-    ) -> str:
+    ) -> dict[str, Any]:
         current_time = self._now_iso()
+        candidate = {
+            "action_kind": step["action"]["kind"],
+            "run_update": deepcopy(step["run_update"]),
+            "speech_text": speech_payload.get("speech_text") if isinstance(speech_payload, dict) else None,
+        }
         try:
             review = self.llm.generate_autonomous_completion_review(
                 model_config=selected_preset,
@@ -1309,15 +1324,7 @@ class ServiceAutonomousRunMixin:
                     "run": self._autonomous_completion_review_run_context(
                         step_context.run
                     ),
-                    "candidate": {
-                        "action_kind": step["action"]["kind"],
-                        "run_update": deepcopy(step["run_update"]),
-                        "speech_text": (
-                            speech_payload.get("speech_text")
-                            if isinstance(speech_payload, dict)
-                            else None
-                        ),
-                    },
+                    "candidate": candidate,
                 },
             )
         except LLMError:
@@ -1359,6 +1366,8 @@ class ServiceAutonomousRunMixin:
                 "outcome": outcome,
                 "reason_code": reason_code,
                 "review_attempt": review_attempt,
+                "reason_summary": review["reason_summary"],
+                "candidate": candidate,
             },
         )
         debug_log(
@@ -1369,7 +1378,7 @@ class ServiceAutonomousRunMixin:
             ),
             level="DEBUG",
         )
-        return outcome
+        return review
 
     def _autonomous_completion_review_run_context(
         self,
@@ -1379,6 +1388,7 @@ class ServiceAutonomousRunMixin:
             "run_id": run_summary.get("run_id"),
             "status": run_summary.get("status"),
             "created_at": run_summary.get("created_at"),
+            "source_started_at": run_summary.get("source_started_at"),
             "next_run_at": run_summary.get("next_run_at"),
             "source_cycle_id": run_summary.get("source_cycle_id"),
             "source_current_input": deepcopy(run_summary.get("source_current_input")),
@@ -1449,6 +1459,10 @@ class ServiceAutonomousRunMixin:
         pre_send_check_feedback: str | None = None,
         completion_review_feedback: str | None = None,
     ) -> AutonomousStepContext:
+        source_started_at = run.get("source_started_at")
+        if not isinstance(source_started_at, str) or not source_started_at.strip():
+            raise ValueError("Autonomous run source_started_at is missing.")
+        self._parse_iso(source_started_at)
         current_input_payload = source_current_input if isinstance(source_current_input, dict) else None
         if current_input_payload is None:
             current_input_payload = {
@@ -1458,22 +1472,8 @@ class ServiceAutonomousRunMixin:
                 "response_target_refs": [],
                 "text": f"autonomous_run step: {run.get('objective_summary')}",
             }
-        raw_interaction_context = current_input_payload.get("interaction_context")
-        interaction_context = normalize_interaction_context(
-            raw_interaction_context,
-            required=False,
-            require_speaker=False,
-        )
-        raw_response_target_refs = current_input_payload.get("response_target_refs")
-        response_target_refs = (
-            tuple(
-                value.strip()
-                for value in raw_response_target_refs
-                if isinstance(value, str) and value.strip()
-            )
-            if isinstance(raw_response_target_refs, list)
-            else ()
-        )
+        interaction_context = self._autonomous_run_speech_interaction(run)
+        response_target_refs = interaction_context.participant_refs if interaction_context is not None else ()
         current_input = CurrentInput(
             sender_kind=str(current_input_payload.get("sender_kind") or "system"),
             sender_ref=(
@@ -1579,6 +1579,30 @@ class ServiceAutonomousRunMixin:
             current_time=current_time,
         )
 
+    def _autonomous_run_speech_interaction(
+        self,
+        run: dict[str, Any],
+    ) -> InteractionContext | None:
+        source = run.get("source_current_input")
+        if not isinstance(source, dict):
+            raise ValueError("Autonomous run source_current_input is missing.")
+        interaction = normalize_interaction_context(
+            source.get("interaction_context"), required=False, require_speaker=False,
+        )
+        interaction_ref = run.get("origin_interaction_ref")
+        participants = run.get("participant_refs")
+        if interaction_ref is None:
+            if participants not in (None, []) or interaction is not None:
+                raise ValueError("Autonomous run speech has participants without an interaction.")
+            return None
+        if (
+            interaction is None
+            or interaction.interaction_ref != interaction_ref
+            or list(interaction.participant_refs) != participants
+        ):
+            raise ValueError("Autonomous run speech origin and delivery route do not match.")
+        return interaction
+
     def _generate_autonomous_run_speech(
         self,
         *,
@@ -1599,6 +1623,8 @@ class ServiceAutonomousRunMixin:
             "reason_code": str(speech_action.get("reason_code") or "autonomous_run_speech").strip(),
             "reason_summary": reason_summary,
             "run_objective_summary": step_context.run["objective_summary"],
+            "autonomous_step": {"run_update": deepcopy(step["run_update"]),
+                                "transition": deepcopy(step["transition"])},
             "requires_confirmation": False,
             "pending_intent": None,
             "capability_request": None,
@@ -1637,6 +1663,7 @@ class ServiceAutonomousRunMixin:
             recall_pack=self._empty_recall_pack(),
             decision=decision,
             agent_skill_context=step_context.agent_skill_context,
+            autonomous_run_summaries=[step_context.run],
         )
         return self.llm.generate_speech(
             model_config=selected_preset,
@@ -2548,20 +2575,9 @@ class ServiceAutonomousRunMixin:
         step: dict[str, Any],
         transition: dict[str, Any],
     ) -> dict[str, Any]:
-        interaction_ref = run.get("origin_interaction_ref")
-        participant_refs = run.get("participant_refs")
-        if interaction_ref is None:
-            if participant_refs not in (None, []):
-                raise ValueError("Autonomous run speech has participants without an interaction.")
-            participant_refs = []
-        elif (
-            not isinstance(interaction_ref, str)
-            or not interaction_ref.strip()
-            or not isinstance(participant_refs, list)
-            or not participant_refs
-            or any(not isinstance(ref, str) or not ref.strip() for ref in participant_refs)
-        ):
-            raise ValueError("Autonomous run speech has an invalid interaction context.")
+        interaction = self._autonomous_run_speech_interaction(run)
+        interaction_ref = interaction.interaction_ref if interaction is not None else None
+        participant_refs = list(interaction.participant_refs) if interaction is not None else []
         persona_id = state["selected_persona_id"]
         event = {
             "event_id": f"event:{uuid.uuid4().hex}",
@@ -3033,15 +3049,11 @@ class ServiceAutonomousRunMixin:
         run: dict[str, Any],
         speech_payload: dict[str, Any],
     ) -> None:
-        interaction_ref = run.get("origin_interaction_ref")
-        participant_refs = run.get("participant_refs")
-        if (
-            not isinstance(interaction_ref, str)
-            or not interaction_ref
-            or not isinstance(participant_refs, list)
-            or not participant_refs
-        ):
+        interaction = self._autonomous_run_speech_interaction(run)
+        if interaction is None:
             return
+        interaction_ref = interaction.interaction_ref
+        participant_refs = list(interaction.participant_refs)
         persona_id = state["selected_persona_id"]
         persona = state["personas"][persona_id]
         sent, _ = self._emit_assistant_message_with_audio(
@@ -3081,6 +3093,11 @@ class ServiceAutonomousRunMixin:
             statuses=sorted(AUTONOMOUS_RUN_ACTIVE_STATUSES),
             limit=20,
         )
+        runs.extend(self.store.list_autonomous_runs(
+            memory_set_id=state["selected_memory_set_id"],
+            statuses=sorted(AUTONOMOUS_RUN_TERMINAL_STATUSES),
+            limit=5,
+        ))
         return [self._autonomous_run_prompt_summary(run) for run in runs]
 
     def _autonomous_run_prompt_summary(self, run: dict[str, Any]) -> dict[str, Any]:
@@ -3100,6 +3117,7 @@ class ServiceAutonomousRunMixin:
             "created_at": run.get("created_at"),
             "updated_at": run.get("updated_at"),
             "source_cycle_id": run.get("source_cycle_id"),
+            "source_started_at": run.get("source_started_at"),
             "source_current_input": {
                 key: deepcopy(run["source_current_input"][key])
                 for key in (

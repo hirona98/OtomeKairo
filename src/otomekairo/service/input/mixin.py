@@ -258,6 +258,7 @@ class ServiceInputMixin(
             "recall_pack_selection": self._empty_recall_pack_selection_trace(),
             "conflicts": [],
             "selected_memory_ids": [],
+            "retrieved_memory_ids": [],
             "selected_episode_ids": [],
             "association_selected_memory_ids": [],
             "association_selected_episode_ids": [],

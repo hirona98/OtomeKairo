@@ -47,6 +47,8 @@ OtomeKairo では、`reflective consolidation` 全体を LLM 任せにはしな�
 
 ## 基本構成
 
+内省の集約要約は、`subject_ref` で対象を示し、`predicate=long_term_pattern` と `summary_text` で継続理解を表す。独立した目的語を持たないため `object_ref_or_value=null` とする。scope の整理キーを目的語の参照として生成しない。一般の候補メモの目的語・値は [記憶更新と再整理.md](記憶更新と再整理.md) の契約に従う。
+
 `reflective consolidation` の summary 生成は、次の 4 段に分ける。
 
 1. ロジックで、今回文面を作り直す dirty scope を決める
@@ -56,6 +58,10 @@ OtomeKairo では、`reflective consolidation` 全体を LLM 任せにはしな�
 
 ここで重要なのは、LLM の出力をそのまま state 遷移へ使わないことである。
 未変更の active memory scope を毎回再生成しない。
+
+同じ scope の既存要約に対して `correct / revoke / supersede` が入った場合は、新規要約を作る根拠件数の下限とは分けて、訂正後の根拠から既存要約を再生成する。更新の前提が変わった既存要約を、直近の根拠が少ないという理由で以前の主張のまま残さない。訂正後の現在理解と過去の経緯は、要約生成の LLM が根拠へ照合する。
+
+要約生成は `memory_units` の状態、有効期間、確認時刻を現在の理解に対応させ、`episodes` をその時期の経験として扱う。`existing_summary_text` は更新前の生成済み要約であり、現在の記憶と新しい経験へ照合して組み直す。以前の正しい理解から後の理解へ変わった経緯は時間的変化として表し、過去の経験と現在の記憶を同時点の主張として並べない。当時から誤りだった説明の訂正とは区別する。
 
 ## 論理 role
 
@@ -159,6 +165,10 @@ LLM に渡す入力は raw `events` ではなく、dirty scope ごとの圧縮�
           "object_ref_or_value": "topic:health",
           "summary_text": "また体調の話の続きをしたい流れがある。",
           "status": "inferred",
+          "formed_time_label": "2026年4月12日 10時30分",
+          "last_confirmed_time_label": "2026年4月12日 10時30分",
+          "valid_from_time_label": null,
+          "valid_to_time_label": null,
           "confidence": 0.72,
           "salience": 0.61
         }
@@ -175,6 +185,7 @@ LLM に渡す入力は raw `events` ではなく、dirty scope ごとの圧縮�
 - 各 item は全文ではなく、`summary_text` と構造化項目の要点だけに絞る
 - `event_id` や `cycle_id` は LLM へ渡さない
 - `formed_at` のような正本 timestamp は、生活文脈向けに整形した `formed_time_label` として渡す
+- 記憶 item は `formed_time_label / last_confirmed_time_label / valid_from_time_label / valid_to_time_label` を持つ。不明な時刻は `null` とし、有効期間を形成時刻から補わない
 - `existing_summary_text` は安定化のために渡す
 - `relationship / self` では、selected persona から作る `persona_context` の短い summary を補助入力として渡す
 - `self` では `mood_state`、`relationship / entity` では対応する `affect_state` を補助入力として渡す

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import unittest
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 from otomekairo.interaction import InteractionContext, ParticipantContext
 from otomekairo.llm.contexts import CurrentInput, PersonaContext
+from otomekairo.llm.prompts import build_disclosure_review_messages, localize_timestamp_fields
 from otomekairo.service.input.decision_comparison import ServiceInputDecisionComparisonMixin
 from otomekairo.service.input.pipeline import ServiceInputPipelineMixin
 
@@ -41,6 +43,7 @@ class DisclosureReviewTests(unittest.TestCase):
             "text": "普段は無糖の麦茶が好きです。この好みは今の相手へ共有して構いません。",
         }
         service.store = SimpleNamespace(load_events_for_evidence=Mock(return_value=[original]))
+        decision = {"kind": "speech", "reason_summary": "本人が許可した範囲だけ答える。"}
         result = service._apply_disclosure_review(
             memory_set_id="memory_set:test", model_config={}, persona_context=self._persona_context(),
             current_input=self._current_input("person:current"),
@@ -49,13 +52,43 @@ class DisclosureReviewTests(unittest.TestCase):
                 "memory_unit_id": "memory:other", "source_participant_refs": ["person:other"],
                 "evidence_event_ids": ["event:source"], "summary_text": "麦茶が好き。",
             }]},
-            speech_payload={"speech_text": "共有を許可された好みです。"}, decision={"kind": "speech"},
+            speech_payload={"speech_text": "共有を許可された好みです。"}, decision=decision,
         )
         self.assertEqual(result["disclosure_review"]["outcome"], "allow")
         service.store.load_events_for_evidence.assert_called_once_with(
             memory_set_id="memory_set:test", event_ids=["event:source"], limit=1,
         )
         self.assertEqual(llm.calls[0]["review_context"]["person_utterances"], [original])
+        self.assertEqual(llm.calls[0]["review_context"]["decision"], decision)
+        self.assertEqual(llm.calls[0]["review_context"]["recall_pack"]["person_model"][0]["memory_unit_id"], "memory:other")
+
+    def test_disclosure_model_input_preserves_selected_claims_and_source_reports(self) -> None:
+        current = {
+            "memory_unit_id": "memory:current", "memory_type": "commitment",
+            "scope_type": "topic", "scope_key": "topic:test", "summary_text": "架空の共有条件。",
+            "subject_ref": "person:owner", "predicate": "sharing_boundary",
+            "object_ref_or_value": "person:recipient", "status": "confirmed", "valid_to": None,
+            "formed_at": "2026-10-04T09:00:06+09:00",
+            "qualifiers": {"source_participant_refs": ["person:owner"]},
+        }
+        reports = [{"role": "person", "text": "架空の確認報告。" * 500,
+                    "speaker_ref": "person:owner", "participant_refs": ["person:owner"],
+                    "interaction_ref": "interaction:owner", "created_at": "2026-10-04T09:00:06+09:00"}]
+        recall = {"active_commitments": [current], "memory_link_context": {"source_reports": reports},
+                  "answer_contract": {"contract": "summary", "reason_codes": ["audit:before_retrieval"]}}
+        messages = build_disclosure_review_messages(review_context={
+            "current_input": {"response_target_refs": ["person:recipient"]}, "recall_pack": recall,
+        })
+        content = messages[1]["content"]
+        payload, _ = json.JSONDecoder().raw_decode(content[content.index("{"):])
+        projected = payload["recall_pack"]
+        self.assertEqual(payload["current_input"]["response_target_refs"], ["person:recipient"])
+        self.assertEqual(projected["active_commitments"][0]["qualifiers"], current["qualifiers"])
+        self.assertEqual(projected["active_commitments"][0]["formed_at"], localize_timestamp_fields(current)["formed_at"])
+        self.assertEqual(projected["memory_link_context"]["source_reports"], localize_timestamp_fields(reports))
+        self.assertNotIn("memory_unit_id", projected["active_commitments"][0])
+        self.assertNotIn("reason_codes", projected["answer_contract"])
+        self.assertEqual(recall["answer_contract"]["reason_codes"], ["audit:before_retrieval"])
 
     def test_missing_selected_source_event_fails_before_review(self) -> None:
         llm = ReviewLLM({})

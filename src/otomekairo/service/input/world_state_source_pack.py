@@ -938,9 +938,16 @@ class ServiceInputWorldStateSourcePackMixin:
             # 対人状態は current_person_ref が示す人物との関係へ結び付ける。
             if state_type == "social_context":
                 if source_pack.current_person_ref is None:
+                    if state_type in report_evidence:
+                        raise ValueError("人物報告の世界状態には発話者のperson_refが必要です。")
                     continue
                 scope_type = "relationship"
                 scope_key = f"self|{source_pack.current_person_ref}"
+            elif state_type in report_evidence:
+                if not source_pack.current_person_ref:
+                    raise ValueError("人物報告の世界状態には発話者のperson_refが必要です。")
+                scope_type = "entity"
+                scope_key = source_pack.current_person_ref
             else:
                 scope_type, scope_key = WORLD_STATE_SCOPE_BY_TYPE[state_type]
             candidates.append(

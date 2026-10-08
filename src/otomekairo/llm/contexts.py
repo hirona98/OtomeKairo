@@ -13,6 +13,11 @@ def person_utterances_from_turns(turns: list[dict[str, Any]]) -> list[dict[str, 
     return [turn for turn in turns if turn.get("role") == "person"]
 
 
+def fresh_visual_observations_from_capability_view(view: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    return [observation for capability in view or [] if capability.get("id") == "vision.capture"
+            for observation in capability.get("fresh_world_state_by_vision_source", [])]
+
+
 PERSONA_CONTEXT_USE_POLICY = (
     "人格全体を、常に考え方、判断、振る舞い、話し方の基底として使う。"
     "本人の発言・投稿・返信は、人格本文の話し方、一人称、語尾、距離感に従う。"
@@ -30,12 +35,16 @@ PERSONA_CONTEXT_ROLES = frozenset({
     "event_evidence_generation",
     "memory_interpretation",
     "memory_candidate_review",
+    "commitment_lifecycle_summary",
     "affect_review",
     "future_action_alignment_review",
     "memory_reflection_summary",
     "world_state",
     "activity_state",
     "visual_observation",
+    "visual_observation_review",
+    "visual_daily_grouping",
+    "visual_daily_support",
     "drive_state",
 })
 
@@ -372,3 +381,4 @@ class SpeechContext:
     capability_decision_view: list[dict[str, Any]] | None = None
     configured_activity_topics: list[dict[str, Any]] | None = None
     autonomous_run_summaries: list[dict[str, Any]] | None = None
+    capability_result_context: dict[str, Any] | None = None

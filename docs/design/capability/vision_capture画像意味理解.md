@@ -19,6 +19,8 @@ raw image、base64、OCR 全文、UI 座標、資格情報、内部 URL、配送
 一方で、LLM が画像から生成した `visual_summary_text` は、視覚経験の詳細説明として保存する。
 短い要約は検索、一覧、重複判定、日次整理の派生値であり、詳細説明を置き換えない。
 
+通常の能力要求では、判断に用いた視覚観測の詳細説明、source、観測時刻を内部の要求記録 `source_visual_observations` に保持する。非同期の結果処理では `capability_result_context.source_visual_observations` として判断、発話生成、発話根拠審査へ渡し、さらに能力要求を続ける場合も引き継ぐ。これは要求時点の根拠であり、結果到着時点の新たな観測や現在状態へ読み替えない。外部toolへの引数や配送payloadへは追加しない。
+
 ## 視覚記録
 
 画像意味理解の正本レコードは `visual_observation_record` とする。
@@ -142,7 +144,7 @@ LLM の出力は JSON object 1 個に固定する。
 
 1. 画像入力を受ける
 2. raw image を保存せず、LLM へ multimodal input として渡す
-3. LLM が詳細な `summary_text` と構造化した視覚変化判定を返す
+3. LLM が詳細な `summary_text` と構造化した視覚変化判定を生成し、同じモデルの独立した画像照合呼出しで元画像と未確定の説明を比較して最終結果を返す
 4. `observation_summary.image_interpreted=true`、`image_input_kind`、`visual_observation_id`、`visual_summary_text` を付ける
 5. `visual_summary_text` を `visual_observation_record.detailed_summary_text` として保存する
 6. `scene_entities / activity_labels / environment_labels` と検索用 index を派生する
@@ -152,6 +154,9 @@ LLM の出力は JSON object 1 個に固定する。
 10. 重要、反復、継続、会話結合を満たす場合は記憶候補にする
 
 この段階の出力は `visual_observation_record` と派生データに集約する。
+画像照合は `visual_observation_review` の論理 role とし、通常会話の添付画像と `vision.capture` の両方で保存・後段の判断より先に行う。生成と同じ出力契約を使い、物体の名称と形・構造・配置、人物の同定、不確かな属性、変化判定を元画像に照合する。保存する詳細説明は審査後のものとする。画像照合に失敗した場合は入力サイクルを明示的に失敗させる。
+詳細説明は直接見える形・色・配置・動きと、種類・内容・量などの解釈を区別する。複数の解釈が残る属性は、見える外見と判別できない点を分けて記述する。レコード全体の `confidence_hint` が高くても、各属性の不確かさは消さない。
+物体の同定は今回の画像にある形と構造を根拠にする。用途や内部の状態が確認できない場合は、形・色・内部に見えるものを記述し、用途を確定させる名称より観測できる説明を選ぶ。過去の観測要約は変化の比較に使い、今回の物体名や属性を同定する根拠にはしない。
 短期状態、episode、記憶候補は `visual_observation_record` と派生データを経由して作る。
 
 ## world_state との関係
@@ -190,7 +195,7 @@ LLM の出力は JSON object 1 個に固定する。
 連続する類似視覚記録には `duplicate_group_id` を付ける。
 詳細説明は残し、低変化 group の中間記録だけ `retention_status=compressed` にする。
 日ごとの整理結果は `daily_visual_digest` として保存する。
-`daily_visual_digest.memory_candidate_summaries` は記憶候補であり、background worker が 2 日以上の類似候補だけを制限付きで `memory_unit` へ昇格する。
+日次整理と `daily_visual_digest.memory_candidate_summaries` の昇格の意味境界は [../memory/記憶更新と再整理.md](../memory/記憶更新と再整理.md) を正とする。
 
 保持対象は次である。
 
@@ -241,7 +246,7 @@ LLM の出力は JSON object 1 個に固定する。
 ## しきい値調整
 
 視覚整理のしきい値は固定仕様ではなく、実ログを根拠に調整する運用値である。
-運用値として、duplicate 判定類似度、1 回の worker 実行で扱う未整理日数、RecallPack 投入上限、`daily_visual_digest` からの昇格上限を調整する。
+運用値として、1 回の worker 実行で扱う未整理日数、RecallPack 投入上限、`daily_visual_digest` からの昇格上限を調整する。
 
 調整では次を観測する。
 

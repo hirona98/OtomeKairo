@@ -6,7 +6,7 @@ import sqlite3
 import unicodedata
 from typing import Any
 
-from otomekairo.memory.utils import clamp_score
+from otomekairo.memory.utils import clamp_score, memory_object_reference
 
 
 NAMED_ENTITY_PREFIXES = ("person:", "place:", "tool:")
@@ -557,7 +557,7 @@ class StoreEntityRegistryMixin:
         values.extend(
             [
                 memory_unit.get("subject_ref"),
-                memory_unit.get("object_ref_or_value"),
+                memory_object_reference(memory_unit),
                 memory_unit.get("qualifiers"),
             ]
         )

@@ -557,7 +557,7 @@ class ServiceInputTraceCompactMixin:
         if not isinstance(summary, dict):
             return None
         payload: dict[str, Any] = {}
-        for key in ("request_id", "capability_id", "status", "timeout_ms"):
+        for key in ("request_id", "capability_id", "autonomous_run_id", "status", "timeout_ms"):
             value = summary.get(key)
             if value is None:
                 continue

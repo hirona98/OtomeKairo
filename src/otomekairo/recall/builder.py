@@ -4,7 +4,7 @@ from typing import Any
 
 from otomekairo.llm.client import LLMClient
 from otomekairo.llm.contexts import build_persona_context
-from otomekairo.memory.utils import normalized_text_list, now_iso
+from otomekairo.memory.utils import memory_claim_context, normalized_text_list, now_iso
 from otomekairo.recall.association import (
     ACTIVE_COMMITMENT_STATES,
     ACTIVE_MEMORY_STATUSES,
@@ -24,6 +24,7 @@ MEMORY_LINK_RECALL_LABEL_PRIORITY = [
 ]
 MEMORY_LINK_RECALL_HINT_LIMIT = 8
 MEMORY_LINK_RECALL_TRACE_LIMIT = 16
+MEMORY_LINK_SOURCE_EVENT_LIMIT = 16
 VISUAL_OBSERVATION_RECALL_LIMIT = 8
 VISUAL_DAILY_DIGEST_RECALL_LIMIT = 4
 RELATION_INDEX_RECALL_LIMIT = 24
@@ -135,7 +136,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
                 scope_filters=scope_context["episode_scope_filters"],
                 primary_recall_focus=primary_recall_focus,
             ),
-            limit=SECTION_LIMITS["episodic_evidence"],
+            limit=SECTION_LIMITS["episodic_evidence"] * 4,
         )
         self._collect_raw_candidate_ids(raw_candidate_ids, episodic_evidence)
 
@@ -200,7 +201,8 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         )
         episodic_evidence = self._limit_episode_section(
             raw_items=episodic_evidence + association_sections["episodic_evidence"],
-            limit=SECTION_LIMITS["episodic_evidence"],
+            # Retrieval bounds each lane; adoption limits apply after LLM selection.
+            limit=len(episodic_evidence) + len(association_sections["episodic_evidence"]),
         )
 
         # 競合元
@@ -238,6 +240,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         selected_model_preset = state["model_presets"][state["selected_model_preset_id"]]
         selection_result = self._select_recall_pack_sections(
             augmented_query_text=augmented_query_text,
+            current_person_ref=current_person_ref,
             recall_hint=recall_hint,
             candidate_sections=candidate_sections,
             conflicts=conflicts,
@@ -273,6 +276,11 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             memory_links=memory_links,
         )
         memory_link_context = self._build_memory_link_context(
+            memory_links=memory_links,
+            selected_memory_ids=selected_memory_ids,
+        )
+        memory_link_context["source_reports"] = self._build_memory_link_source_reports(
+            memory_set_id=memory_set_id,
             memory_links=memory_links,
             selected_memory_ids=selected_memory_ids,
         )
@@ -317,6 +325,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "visual_daily_digests": visual_daily_digests,
             "event_evidence_generation": event_evidence_result["event_evidence_generation"],
             "selected_memory_ids": selected_memory_ids,
+            "retrieved_memory_ids": self._collect_selected_ids(candidate_sections, key="memory_unit_id"),
             "selected_episode_ids": selected_episode_ids,
             "association_selected_memory_ids": association_selected_memory_ids,
             "association_selected_episode_ids": association_selected_episode_ids,
@@ -1057,6 +1066,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "recall_pack_selection": self._empty_recall_pack_selection(),
             "conflicts": [],
             "selected_memory_ids": [],
+            "retrieved_memory_ids": [],
             "selected_episode_ids": [],
             "association_selected_memory_ids": [],
             "association_selected_episode_ids": [],
@@ -1276,8 +1286,41 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "link_count": 0,
             "label_counts": {},
             "representative_links": [],
+            "source_reports": [],
             "result_status": "empty",
         }
+
+    def _build_memory_link_source_reports(
+        self,
+        *,
+        memory_set_id: str,
+        memory_links: list[dict[str, Any]],
+        selected_memory_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        # 読み込み済みの直接の更新元だけを確かめ、リンクの先は再探索しない。
+        selected = set(selected_memory_ids)
+        event_ids: list[str] = []
+        for link in memory_links:
+            if link.get("label") != "derived_from" or link.get("source_memory_unit_id") not in selected:
+                continue
+            prior = link.get("target_memory_unit")
+            if not isinstance(prior, dict) or prior.get("status") not in {"superseded", "revoked"}:
+                continue
+            for event_id in prior.get("evidence_event_ids", []):
+                if event_id not in event_ids:
+                    event_ids.append(event_id)
+        requested = event_ids[:MEMORY_LINK_SOURCE_EVENT_LIMIT]
+        if not requested:
+            return []
+        records = self.store.load_events_for_evidence(
+            memory_set_id=memory_set_id, event_ids=requested, limit=MEMORY_LINK_SOURCE_EVENT_LIMIT,
+        )
+        if {record["event_id"] for record in records} != set(requested):
+            raise ValueError("選定記憶の更新元の根拠 event を取得できません。")
+        return [{
+            key: record.get(key)
+            for key in ("role", "text", "speaker_ref", "participant_refs", "interaction_ref", "created_at")
+        } for record in records if record.get("role") == "person"]
 
     def _attach_memory_link_summaries_to_sections(
         self,
@@ -1350,6 +1393,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
                         "related_summary_text": related_summary,
                         "related_memory_type": related_unit.get("memory_type"),
                         "related_status": related_unit.get("status"),
+                        "related_claim": memory_claim_context(related_unit),
                     }
                 )
 
@@ -1462,6 +1506,8 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "target_memory_unit_id": target_memory_unit_id,
             "source_status": source_unit.get("status") if isinstance(source_unit, dict) else None,
             "target_status": target_unit.get("status") if isinstance(target_unit, dict) else None,
+            "source_claim": memory_claim_context(source_unit) if isinstance(source_unit, dict) else None,
+            "target_claim": memory_claim_context(target_unit) if isinstance(target_unit, dict) else None,
             "source_summary_text": source_summary,
             "target_summary_text": target_summary,
             "summary_text": f"{label}: {source_summary or '?'} -> {target_summary or '?'}",

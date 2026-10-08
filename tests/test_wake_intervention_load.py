@@ -1313,6 +1313,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         service._run_pipeline_output(
             state={"selected_memory_set_id": "memory:test"},
             cycle_id="cycle:test",
+            started_at="2026-06-20T11:00:00+09:00",
             input_text=current_input.text,
             current_input=current_input,
             recent_turns=[],

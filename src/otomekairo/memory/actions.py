@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any
 
 from otomekairo.memory.utils import (
     NON_SEMANTIC_QUALIFIER_KEYS,
+    memory_object_reference,
+    normalized_memory_object_hint,
     build_memory_unit_semantic_text,
     source_text_hash,
     clamp_score,
@@ -609,7 +611,10 @@ class MemoryActionResolver:
         canonicalized = {
             **candidate,
             "subject_ref": self._canonicalized_ref_value(candidate.get("subject_ref"), mapping),
-            "object_ref_or_value": self._canonicalized_ref_value(candidate.get("object_ref_or_value"), mapping),
+            "object_ref_or_value": (
+                self._canonicalized_ref_value(memory_object_reference(candidate), mapping)
+                if memory_object_reference(candidate) is not None else candidate.get("object_ref_or_value")
+            ),
             "qualifiers": self._canonicalized_ref_value(candidate.get("qualifiers", {}), mapping),
         }
         canonicalized["scope_key"] = self._canonicalized_scope_key(
@@ -673,7 +678,7 @@ class MemoryActionResolver:
         values = [
             candidate.get("scope_key"),
             candidate.get("subject_ref"),
-            candidate.get("object_ref_or_value"),
+            memory_object_reference(candidate),
             candidate.get("qualifiers", {}),
         ]
         for value in values:
@@ -715,6 +720,7 @@ class MemoryActionResolver:
         subject_ref = self._normalize_ref_hint(candidate["subject_hint"], scope_type=scope_type)
         object_ref_or_value = self._normalize_object_hint(candidate["object_hint"])
         qualifiers = dict(candidate.get("qualifiers_hint", {}))
+        qualifiers["object_kind"] = candidate["object_hint"]["kind"] if candidate["object_hint"] is not None else "none"
         confidence_hint = str(candidate.get("confidence_hint", "low")).strip()
         confidence = CONFIDENCE_HINT_SCORES.get(confidence_hint, CONFIDENCE_HINT_SCORES["low"])
         salience = self._candidate_memo_salience(memory_type=memory_type, confidence_hint=confidence_hint)
@@ -839,16 +845,7 @@ class MemoryActionResolver:
         return self._slug_hint(text)
 
     def _normalize_object_hint(self, value: Any) -> str | None:
-        if value is None:
-            return None
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError("object_hint は非空文字列または null である必要があります。")
-        text = value.strip()
-        if text.startswith("entity:"):
-            raise ValueError("entity:<key> は memory ref として使えません。person:/place:/tool: を使ってください。")
-        if self._looks_like_ref(text):
-            return text
-        return self._slug_hint(text)
+        return normalized_memory_object_hint(value)
 
     def _normalize_predicate_hint(self, value: Any) -> str:
         return self._slug_hint(str(value).strip())

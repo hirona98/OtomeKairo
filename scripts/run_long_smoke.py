@@ -256,6 +256,7 @@ class SimpleWebSocketClient:
         client_id: str,
         caps: list[dict[str, str]],
         vision_sources: list[dict[str, Any]] | None = None,
+        mcp_servers: list[dict[str, Any]] | None = None,
     ) -> None:
         raw_socket = socket.create_connection((self.host, self.port), timeout=10.0)
         websocket = self.ssl_context.wrap_socket(raw_socket, server_hostname=self.host)
@@ -291,6 +292,8 @@ class SimpleWebSocketClient:
         }
         if vision_sources is not None:
             hello_payload["vision_sources"] = vision_sources
+        if mcp_servers is not None:
+            hello_payload["mcp_servers"] = mcp_servers
         self.send_json(hello_payload)
         self._reader_thread = threading.Thread(target=self._reader_loop, name="long-smoke-event-reader", daemon=True)
         self._reader_thread.start()
@@ -311,10 +314,12 @@ class SimpleWebSocketClient:
             websocket.shutdown(socket.SHUT_RDWR)
         except OSError:
             pass
-        websocket.close()
-        self._socket = None
         if self._reader_thread is not None and self._reader_thread.is_alive():
             self._reader_thread.join(timeout=2.0)
+            if self._reader_thread.is_alive():
+                raise SmokeError("event stream reader did not stop before closing its socket.")
+        websocket.close()
+        self._socket = None
 
     def _read_http_response(self) -> tuple[int, dict[str, str]]:
         websocket = self._require_socket()

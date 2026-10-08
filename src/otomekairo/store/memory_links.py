@@ -5,6 +5,7 @@ import sqlite3
 import uuid
 from typing import Any
 
+from otomekairo.memory.utils import memory_claim_context
 from otomekairo.service.common import debug_log, format_debug_log_text
 
 
@@ -186,12 +187,9 @@ class StoreMemoryLinksMixin:
 
         # 結果
         return {
+            **memory_claim_context(payload),
             "memory_unit_id": payload.get("memory_unit_id"),
-            "memory_type": payload.get("memory_type"),
-            "scope_type": payload.get("scope_type"),
-            "scope_key": payload.get("scope_key"),
-            "summary_text": payload.get("summary_text"),
-            "status": payload.get("status"),
+            "evidence_event_ids": payload.get("evidence_event_ids", []),
             "confidence": payload.get("confidence"),
             "salience": payload.get("salience"),
         }

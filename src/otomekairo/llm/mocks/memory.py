@@ -304,7 +304,10 @@ class LLMMockMemoryMixin:
             "scope": candidate["scope_type"],
             "subject_hint": subject_hint,
             "predicate_hint": candidate["predicate"],
-            "object_hint": candidate.get("object_ref_or_value"),
+            "object_hint": ({
+                "kind": "reference" if candidate["memory_type"] == "relation" else "value",
+                "value": candidate["object_ref_or_value"],
+            } if candidate.get("object_ref_or_value") is not None else None),
             "qualifiers_hint": qualifiers,
             "summary_text": candidate["summary_text"],
             "evidence_text": candidate["reason"],

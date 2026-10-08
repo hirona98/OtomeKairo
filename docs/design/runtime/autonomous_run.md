@@ -29,6 +29,7 @@
 | `cooldown_until` | 20連続 step 後の強制休止中だけ入る再開可能時刻 |
 | `created_at / updated_at / completed_at` | lifecycle 時刻 |
 | `source_cycle_id` | run を開始した入力サイクル |
+| `source_started_at` | 目的の候補を判断した入力サイクルの時刻。相対時刻の固定した起点 |
 | `source_commitment_memory_unit_ids` | run の根拠になった commitment memory |
 | `periodic_thought_topic_ids` | 着手した活動の `topic_id`。非終端のあいだ、同じ活動を定期思考の候補に出さない。手段の選択には使わない |
 | `commitment_resolution` | terminal 時の commitment 更新結果 |
@@ -67,6 +68,7 @@ terminal 時の発話と terminal 監査イベントは `events` に残し、com
 ```
 
 run の次の一手は `autonomous_step_generation` が決める。
+step の `current_input` は今回の起動元を表し、timer や結果到着での `sender_kind` と本文は内部入力のまま保持する。その `interaction_context` と `response_target_refs` は run に保存した起点の相互作用と参加者へ対応させ、発話生成・発話記録・実配送と同じ宛先にする。起点入力の相互作用と保存した配送先が一致しない場合は明示的に失敗する。人物の相互作用を持たない run は応答先を持たない。過去の依頼本文を新しい人物発話として扱わず、起点と現在の実行機会は区別する。
 人物依頼でも定期思考でも、個が `autonomous_run` または `capability_request` を選んでよい。server は due な定期思考トピックや MCP 定義から作業を作らない。
 会話 follow-up で同じ MCP tool を再実行できないときの残作業の開始は [判断と行動.md](判断と行動.md) を正とする。
 `comparison_scope=self_activity` から始まる run の `source_current_input` は、自身の活動用に隔離した current input とする。周期の観測要約入り current input は使わない。
@@ -93,7 +95,7 @@ server は既存 run との意味的な近さを文字列一致で判定しな�
 
 分離した自身の活動判断から始まる run は、保存前に [判断と行動.md](判断と行動.md) の目的条件の整合審査も通る。この審査は判断直後、外向き比較前に行い、ここで定める開始前意味検証とは問いを分ける。
 
-server は run の保存・置換・初回stepより前に `autonomous_start_review` を行う。検証には開始起点の current input（sender_kind / source_kind / text / response_target_refs）、候補decision（kind / reason_summary / autonomous_run）、同じ記憶集合の全非terminal run要約を渡す。独立した検証として人格本文は渡さない。
+server は run の保存・置換・初回stepより前に `autonomous_start_review` を行う。検証には候補を判断したサイクルの生活時刻 `time_context`、開始起点の current input（sender_kind / source_kind / text / response_target_refs）、候補decision（kind / reason_summary / autonomous_run）、同じ記憶集合の全非terminal run要約を渡す。日時と相対時間はこの生活時刻を基準に照合し、依頼に実行時刻がある場合は候補と依頼の整合も開始条件とする。判断の生成待ち時間で相対時刻の起点を変えないよう、判断へ渡した `time_context` をそのまま開始審査へ引き継ぐ。時刻の表現は [時刻モデル.md](時刻モデル.md#llm-へ渡す時刻) を参照する。独立した検証として人格本文は渡さない。
 
 `allow_start` は独立した追加目的、または対象runの中核目的の変更が必要で、操作と理由が一致している場合を表す。既存runの維持・結果待ち・タイマー待機の継続だけなら `reject_start` とする。定期思考トピックから始める作業の範囲・完了条件、継続観測の必要性・終了または再評価条件も検証する。
 
@@ -153,14 +155,14 @@ server は capability request 以外の complete 候補について、状態遷�
 
 review には次だけを渡す。
 
-- 現在時刻の `TimeContext` と、run の ID、状態、開始時刻、次の実行機会、起点 cycle ID、起点入力
+- 現在時刻の `TimeContext` と、run の ID、状態、保存時刻、判断起点時刻 `source_started_at`、次の実行機会、起点 cycle ID、起点入力
 - run の目的、現在段階、履歴、観測済み capability result 要約
 - complete 候補の `action.kind / run_update`
 - `action.kind=speech` の場合だけ生成済み候補本文
 
 review の結果は `allow_complete / continue_run` のいずれかである。
 
-相対時刻を含む目的は固定した run の開始時刻と起点入力から解釈し、現在時刻と照合する。
+相対時刻を含む目的は固定した判断起点 `source_started_at` と起点入力から解釈し、現在時刻と照合する。server は開始候補を判断した入力サイクルの時刻を run に保存する。`created_at` は run の保存時刻であり、判断生成・保存・再開にかかった時間で相対時刻の起点を変えない。この起点は step、完了審査、発話生成と根拠審査に共通して渡す。step は起点時刻を必須とし、取得できない場合は明示的に失敗する。
 `next_run_at` は次の実行機会であり、開始直後の即時実行は待機を登録する機会となる。
 目的達成は当該 run の履歴・観測実績と候補行為から評価する。同じ内容を持つ過去の依頼の完了は、その過去の run の実績として扱う。
 step 判断にも同じ起点情報を渡し、直近会話の実績と今回の run の実績を区別する。
@@ -225,6 +227,8 @@ server は orphan を timeout と同じ再評価可能状態へ戻し、未完�
 
 間隔が開いた活動から開始する run は、今回の関与を単位とする。活動の設定は run のあとにも残る。`objective_summary` に今回達成する範囲と完了条件を明示する。状況を見るなら、今回の情報を確認し、応じるか・表現するかを判断して、必要な応対をこの run の中で終える。応じない判断で完了してよい。見えている応対を、次の定期思考まで残さない。活動の設定が続いていても、今回の関与が済めば run を閉じる。
 
+観測してから関与を選ぶ場合は、今回確認する情報の範囲と取得の区切り、取得結果から選ぶ行動の範囲と回数、行動しない場合も含む終了条件を目的に示す。交流相手や投稿内容は、その範囲内で取得した情報から決められる。この探索の範囲と区切りが明確なら、開始前に相手や本文が未確定であることだけでは開始条件の不足としない。生成と開始前意味検証でこの条件を共有し、取得後の行動は得た根拠、その時点の能力と共有条件へ照合する。
+
 会話から開始する run は、依頼を受けたことを外へ返すのが自然なとき、最初の step で短く返してから作業へ進む。伝える目的があるときは、実績を報告する発話で完了する。step の判断と発話には、通常会話と同じ正本から読み出した AffectContext、DriveStateSummary、外界・実行結果から派生した SelfStateContext を渡す。感情を固定の中立値で置き換えない。元の依頼に自己状態と観測の両方が含まれる場合、今回の発話で両方を説明する。この発話は、開始時に残した `origin_interaction_ref` と参加者があるとき、その場へ届く。
 人物へ届けた run の発話イベントにも同じ会話場と参加者を保存し、会話履歴から再取得できるようにする。
 
@@ -237,7 +241,7 @@ run は必要に応じて `vision.capture`、`camera.ptz`、`wait_until`、`spee
 次の観測時刻、継続、完了、中断は `autonomous_step_generation` が目的、履歴、現在時刻、能力可否、直近 result から判断する。
 server は特定語句の文字列一致で監視間隔や終了時刻へ変換しない。
 特定 run は cancel API、会話からの全run停止は `autonomous_run_action.kind=cancel_all` で `cancelled` に遷移する。
-判断、表現、発話根拠審査は、現在の非終端 run を `autonomous_run_summaries` として参照する。人物発話による一時停止は取消ではなく、返答後の再開を伴う。会話中の了解や過去の返答だけで取消完了を説明せず、本文だけで取消を望んだ場合には、残っている予定と必要な取消操作を現在状態に沿って伝える。
+判断、表現、発話根拠審査は、現在の非終端 run を最大20件、直近の完了・取消を最大5件、`autonomous_run_summaries` として参照する。作業IDと起点、保存済み状態を照合し、終端済みの作業は完了・取消の実績として扱う。人物発話による一時停止は取消ではなく、返答後の再開を伴う。会話中の了解や過去の返答だけで取消完了を説明せず、本文だけで取消を望んだ場合には、残っている予定と必要な取消操作を現在状態に沿って伝える。
 server は会話本文から停止意図を推定しない。
 
 ## ユーザー割り込み

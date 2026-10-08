@@ -52,6 +52,7 @@ class MemoryCandidateReviewTests(unittest.TestCase):
         candidate = {"memory_type": "relationship", "summary_text": "対等な相談相手として信頼している。", "evidence_text": "信頼している。", "qualifiers_hint": {}}
         interpretation = {"episode": {"summary_text": "会話した。", "outcome_text": None, "open_loops": []}, "candidate_memory_units": [candidate], "correction_status": "no_correction", "selected_targets": []}
         selected, trace = consolidator._review_memory_candidates(
+            decision={}, speech_text=None,
             selected_preset={}, selected_persona={}, input_text="窓を開けたというのは誤りだった。レイカを信頼している。",
             recall_hint={}, interpretation_context={}, interpretation=interpretation,
             correction_targets=[{"revision_id": "revision:drink", "summary_text": "麦茶を好む。"}],
@@ -76,6 +77,7 @@ class MemoryCandidateReviewTests(unittest.TestCase):
         ]
 
         selected, trace = consolidator._review_memory_candidates(
+            decision={}, speech_text=None,
             selected_preset={"model": "mock-test"},
             selected_persona={},
             input_text="今日は段取りを誤った。普段はほうじ茶を飲む。",
@@ -101,6 +103,7 @@ class MemoryCandidateReviewTests(unittest.TestCase):
         ]}
         with self.assertRaisesRegex(ValueError, "during correction selection"):
             consolidator._review_memory_candidates(
+                decision={}, speech_text=None,
                 selected_preset={"model": "mock-test"},
                 selected_persona={},
                 input_text="訂正します。",
@@ -133,8 +136,9 @@ class MemoryCandidateReviewTests(unittest.TestCase):
             {"memory_type": "fact", "summary_text": "窓は閉まっている。", "evidence_text": "今は閉まっている。", "qualifiers_hint": {}},
             {"memory_type": "preference", "summary_text": "普段はほうじ茶が好き。", "evidence_text": "本当はほうじ茶が好き。", "qualifiers_hint": {}},
         ]
-        interpretation = {"episode": episode, "candidate_memory_units": candidates, "correction_status": "selected", "selected_targets": [{"revision_id": "revision:drink", "memory_unit_id": "memory_unit:drink", "correction_kind": "revoke_created"}]}
+        interpretation = {"episode": episode, "candidate_memory_units": candidates, "correction_status": "selected", "selected_targets": [{"revision_id": "revision:drink", "memory_unit_id": "memory_unit:drink"}]}
         selected, trace = consolidator._review_memory_candidates(
+            decision={}, speech_text=None,
             selected_preset={}, selected_persona={}, input_text="窓は閉まっている。好きな飲み物は麦茶というのは間違いで、本当はほうじ茶だ。",
             recall_hint={}, interpretation_context={}, interpretation=interpretation,
             correction_targets=[{"revision_id": "revision:drink", "summary_text": "麦茶が好き。"}],
@@ -168,6 +172,7 @@ class MemoryCandidateReviewTests(unittest.TestCase):
             "selected_targets": [{"revision_id": "revision:1", "memory_unit_id": "memory_unit:1"}],
         }
         selected, trace = consolidator._review_memory_candidates(
+            decision={}, speech_text=None,
             selected_preset={"model": "mock-test"}, selected_persona={},
             input_text="メモは片づいたので、今はお茶を飲んで休んでいます。",
             recall_hint={}, interpretation_context={}, interpretation=interpretation,
@@ -195,6 +200,7 @@ class MemoryCandidateReviewTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(ValueError, "did not review selected correction"):
             consolidator._review_memory_candidates(
+                decision={}, speech_text=None,
                 selected_preset={}, selected_persona={}, input_text="訂正します。",
                 recall_hint={}, interpretation_context={}, interpretation={
                     "episode": {"summary_text": "訂正の発話。", "outcome_text": None, "open_loops": []},
@@ -226,6 +232,7 @@ class MemoryCandidateReviewTests(unittest.TestCase):
             "correction_status": "no_correction", "selected_targets": [],
         }
         selected, trace = consolidator._review_memory_candidates(
+            decision={}, speech_text=None,
             selected_preset={}, selected_persona={}, input_text="さっきの説明は間違いだった。",
             recall_hint={}, interpretation_context={}, interpretation=interpretation,
             correction_targets=[{"revision_id": "revision:1", "summary_text": "訂正前の飲み物の理解。"}],
@@ -261,6 +268,7 @@ class MemoryCandidateReviewTests(unittest.TestCase):
             "decisions": [{"index": 0, "retention_basis": "current_episode", "reason_summary": "一度だけの飲用。"}],
         }
         selected, trace = consolidator._review_memory_candidates(
+            decision={}, speech_text=None,
             selected_preset={}, selected_persona={}, input_text="昨日初めて飲んだだけ。",
             recall_hint={}, interpretation_context={}, interpretation={
                 "episode": {"summary_text": "訂正。", "outcome_text": None, "open_loops": []},
@@ -271,7 +279,7 @@ class MemoryCandidateReviewTests(unittest.TestCase):
                 "correction_status": "selected",
                 "selected_targets": [{
                     "revision_id": "revision:1", "memory_unit_id": "memory_unit:1",
-                    "correction_kind": "revoke_created", "reason_summary": "誤作成。",
+                    "reason_summary": "誤作成。",
                 }],
             },
             correction_targets=[{"revision_id": "revision:1", "summary_text": "毎晩飲む。"}],
@@ -303,6 +311,7 @@ class MemoryCandidateReviewTests(unittest.TestCase):
         }
 
         selected, trace = consolidator._review_memory_candidates(
+            decision={}, speech_text=None,
             selected_preset={"model": "mock-test"},
             selected_persona={},
             input_text="今夜は窓を開けて換気しようかな。",

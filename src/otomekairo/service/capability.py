@@ -127,6 +127,7 @@ class ServiceCapabilityMixin:
         decision: dict[str, Any],
         pre_send_check_attempt: int = 1,
         pre_send_check_prior_attempts: list[dict[str, Any]] | None = None,
+        source_visual_observations: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         request_payload = decision.get("capability_request")
         if not isinstance(request_payload, dict):
@@ -147,6 +148,7 @@ class ServiceCapabilityMixin:
             wait_for_response=False,
             component="Capability",
             source_current_input=source_current_input,
+            source_visual_observations=source_visual_observations,
             assistant_message_target_client_id=assistant_message_target_client_id,
             pre_send_check_attempt=pre_send_check_attempt,
             pre_send_check_prior_attempts=pre_send_check_prior_attempts,
@@ -172,6 +174,7 @@ class ServiceCapabilityMixin:
         pre_send_check_attempt: int = 1,
         pre_send_check_prior_attempts: list[dict[str, Any]] | None = None,
         skip_pre_send_check: bool = False,
+        source_visual_observations: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         # manifest と input schema を先に確定する。
         manifests = capability_manifests()
@@ -265,6 +268,7 @@ class ServiceCapabilityMixin:
             assistant_message_target_client_id=assistant_message_target_client_id,
             autonomous_run_id=autonomous_run_id,
             pre_send_check=pre_send_check,
+            source_visual_observations=source_visual_observations,
         )
         pending = {
             "event": threading.Event(),
@@ -1123,6 +1127,7 @@ class ServiceCapabilityMixin:
         assistant_message_target_client_id: str | None = None,
         autonomous_run_id: str | None = None,
         pre_send_check: dict[str, Any] | None = None,
+        source_visual_observations: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         request_id = f"{capability_id.replace('.', '_')}_request:{uuid.uuid4().hex}"
         expires_at = self._capability_ongoing_action_expires_at(current_time=current_time, timeout_ms=timeout_ms)
@@ -1147,6 +1152,8 @@ class ServiceCapabilityMixin:
         }
         if isinstance(pre_send_check, dict):
             record["pre_send_check"] = deepcopy(pre_send_check)
+        if source_visual_observations:
+            record["source_visual_observations"] = deepcopy(source_visual_observations)
         if isinstance(source_current_input, dict):
             record["source_current_input"] = deepcopy(source_current_input)
             sender_ref = source_current_input.get("sender_ref")
@@ -1265,6 +1272,8 @@ class ServiceCapabilityMixin:
         source_current_input = request_record.get("source_current_input")
         if isinstance(source_current_input, dict):
             summary["source_current_input"] = deepcopy(source_current_input)
+        if request_record.get("source_visual_observations"):
+            summary["source_visual_observations"] = deepcopy(request_record["source_visual_observations"])
         for key in ("requested_by_person_ref", "origin_interaction_ref", "participant_refs"):
             value = request_record.get(key)
             if value is not None:

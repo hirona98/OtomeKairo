@@ -13,6 +13,7 @@ OtomeKairo では、`event_evidence` 全体を LLM 任せにはしない。
 - section 優先順と `event_id` 選定はロジックで行う
 - `events` の読み込み件数上限はロジックで守る
 - `event_id`、`kind`、最終的な並び順はコード側で固定する
+- 元 event の `role / speaker_ref / participant_refs / interaction_ref / created_at` はコード側で保持する
 - `anchor / topic / decision_or_result / tone_or_note` の自然文生成だけを LLM へ任せる
 
 要するに、`どの event を証拠候補にするか` はコードが決め、`どう短く意味づけるか` だけを LLM に任せる。
@@ -125,6 +126,7 @@ LLM に渡すのは raw `events` 全文ではなく、共通の想起文脈と�
 - `decision` event では `reason_summary` と `result_kind` を優先して渡す
 - `speech` / `observation` event では `text` を主材料にし、不要なメタデータは増やさない
 - `event_id`、`cycle_id`、`memory_set_id` は LLM へ渡さない
+- `speaker_ref / participant_refs / interaction_ref` は元 event に記録された出所として渡す。人物参照のない event から人物を補わない
 
 ## LLM 出力契約
 
@@ -163,6 +165,7 @@ LLM client の validator は envelope（`evidence` 配列）だけを検証す�
 各項目の検証、重複 ref、未知 ref の扱いは呼び出し側が行う。
 
 最終的な `RecallPack.event_evidence` では、`null` slot は落とし、コード側で次の shape に戻す。
+元 event の `role / speaker_ref / participant_refs / interaction_ref / created_at` も保持し、判断・表現・根拠審査・共有審査への圧縮投影で落とさない。自然文 slot だけを LLM が生成し、出所は同じ `event_ref` に対応する source pack から付ける。相対的な人物表現の意味境界は [想起と判断.md](想起と判断.md#共有許可と受け手の照合) を参照する。
 
 ```json
 {

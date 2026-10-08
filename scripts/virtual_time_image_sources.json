@@ -1,0 +1,42 @@
+[
+  {
+    "fixture_id": "desk",
+    "path": "desk.jpg",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Coffee_cup_next_to_laptop_on_wooden_table_in_cozy_indoor_workspace_during_daytime.jpg",
+    "author": "<a href=\"//commons.wikimedia.org/wiki/User:Shixart1985\" title=\"User:Shixart1985\">Shixart1985</a>",
+    "license": "CC BY 2.0",
+    "license_url": "https://creativecommons.org/licenses/by/2.0",
+    "sha256": "d90750159ad87e67a25af70082cc344032fe6d4bb573304baff772912a9e81dd",
+    "visible_facts": "木の机にノートPCと、茶色い液体の入った透明な取っ手付きカップがある。人物は写っていない。"
+  },
+  {
+    "fixture_id": "working",
+    "path": "working.jpg",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Working_at_a_desk_with_a_laptop_coffee_cup_and_a_plant_on_a_white_surface.jpg",
+    "author": "<a href=\"//commons.wikimedia.org/wiki/User:Shixart1985\" title=\"User:Shixart1985\">Shixart1985</a>",
+    "license": "CC BY 2.0",
+    "license_url": "https://creativecommons.org/licenses/by/2.0",
+    "sha256": "82e3df0aa404d62147f9703daad40369b65abe3a369be2d35caff42fb48dd547",
+    "visible_facts": "明るい天板にノートPC、白いカップ、小さな鉢植えがある。天板は照明や影により白・薄い灰色・薄いベージュに見える。カップ内部に飲み物があるかは確認できず、人物は写っていない。"
+  },
+  {
+    "fixture_id": "person",
+    "path": "person.jpg",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Woman_works_on_laptop_while_holding_cup_of_coffee_in_cozy_home_office.jpg",
+    "author": "<a href=\"//commons.wikimedia.org/wiki/User:Shixart1985\" title=\"User:Shixart1985\">Shixart1985</a>",
+    "license": "CC BY 2.0",
+    "license_url": "https://creativecommons.org/licenses/by/2.0",
+    "sha256": "0672e33dc48b1e6e74fdf8e339504aa3585734bfed3005488827d68bdd7391fa",
+    "visible_facts": "長髪の人物が室内の机に座り、片手にカップを持ち、もう一方をノートPC付近に置いている。机に開いたノートと赤い花の花瓶、背後に黒い椅子がある。人物の同一性は不明。"
+  },
+  {
+    "fixture_id": "park",
+    "path": "park.jpg",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Rainy_and_Sunny_Day_at_the_Park_(6615785299).jpg",
+    "author": "<a rel=\"nofollow\" class=\"external text\" href=\"https://www.flickr.com/people/21442511@N08\">Daniel Ramirez</a> from Honolulu, USA",
+    "license": "CC BY 2.0",
+    "license_url": "https://creativecommons.org/licenses/by/2.0",
+    "sha256": "a244165d61feb183aa69df08db60cfb470889407509e0050ec6caaddd6fa9a5d",
+    "visible_facts": "海辺の草地が広がり、奥に水面と水平線が見える。手前中央には、高い横長の天板と低いベンチ状の横長の座面を備えたピクニックテーブルのような構造物がある。ヤシのような背の高い木と広い枝葉を持つ木、舗装路、街灯がある。人物は確認できない。画像だけから現在の天候や撮影日時は確定できない。"
+  }
+]

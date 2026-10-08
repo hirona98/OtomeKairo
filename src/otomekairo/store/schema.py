@@ -51,12 +51,15 @@ class StoreSchemaMixin:
     @contextmanager
     def _memory_db(self) -> sqlite3.Connection:
         # 接続ライフサイクル
-        conn = self._open_memory_db()
-        try:
-            with conn:
-                yield conn
-        finally:
-            conn.close()
+        with self._memory_db_lock:
+            conn = self._open_memory_db()
+            try:
+                with conn:
+                    # 読み取り後の更新も同じ取引にし、他の更新からの昇格競合を防ぐ。
+                    conn.execute("BEGIN IMMEDIATE")
+                    yield conn
+            finally:
+                conn.close()
 
     def _apply_current_schema(self, conn: sqlite3.Connection) -> None:
         # 現行 schema 全体

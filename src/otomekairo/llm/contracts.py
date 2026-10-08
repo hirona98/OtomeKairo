@@ -5,6 +5,7 @@ import math
 import re
 from typing import Any
 
+from otomekairo.memory.utils import normalized_memory_object_hint, validate_timestamp_fields
 from otomekairo.world_state.models import WorldStateSourcePack
 
 
@@ -1314,15 +1315,19 @@ def validate_memory_interpretation_contract(
         if not isinstance(candidate["predicate_hint"], str) or not candidate["predicate_hint"].strip():
             raise LLMError("MemoryInterpretation candidate_memory_unit.predicate_hint が不正です。")
         object_hint = candidate["object_hint"]
-        if object_hint is not None and (not isinstance(object_hint, str) or not object_hint.strip()):
-            raise LLMError("MemoryInterpretation candidate_memory_unit.object_hint が不正です。")
-        if candidate["subject_hint"].strip().startswith("entity:") or (
-            isinstance(object_hint, str) and object_hint.strip().startswith("entity:")
-        ):
-            raise LLMError(
-                "MemoryInterpretation candidate_memory_unit では entity:<key> を使えません。"
-                " person:/place:/tool: の型付き参照を使ってください。"
-            )
+        try:
+            normalized_memory_object_hint(object_hint)
+        except ValueError as exc:
+            raise LLMError(f"MemoryInterpretation candidate_memory_unit.object_hint: {exc}") from exc
+        for reference_field in ("subject_hint",):
+            reference = candidate[reference_field]
+            if isinstance(reference, str) and reference.strip().startswith("entity:"):
+                raise LLMError(
+                    f"MemoryInterpretation candidate_memory_unit.{reference_field} は"
+                    " person:/place:/tool: の型付き参照または意味を持つ値で表してください。"
+                    " entity:<key> は対象の参照ではなく整理用の scope 表現です。"
+                    " object_hint に独立した目的語や値がない場合は JSON null を返してください。"
+                )
         if candidate["scope"] == "entity" and not _has_named_ref_prefix(candidate["subject_hint"].strip()):
             raise LLMError(
                 "MemoryInterpretation candidate_memory_unit.scope が entity のとき、"
@@ -1336,6 +1341,10 @@ def validate_memory_interpretation_contract(
             )
         if not isinstance(candidate["qualifiers_hint"], dict):
             raise LLMError("MemoryInterpretation candidate_memory_unit.qualifiers_hint はオブジェクトである必要があります。")
+        try:
+            validate_timestamp_fields(candidate["qualifiers_hint"])
+        except ValueError as exc:
+            raise LLMError(f"MemoryInterpretation candidate_memory_unit.qualifiers_hint: {exc}") from exc
         if not isinstance(candidate["summary_text"], str) or not candidate["summary_text"].strip():
             raise LLMError("MemoryInterpretation candidate_memory_unit.summary_text が不正です。")
         if not isinstance(candidate["evidence_text"], str) or not candidate["evidence_text"].strip():
@@ -1345,6 +1354,46 @@ def validate_memory_interpretation_contract(
 
     # episode affect検証
     _validate_episode_affects(payload["episode_affects"], label="MemoryInterpretation")
+
+
+def known_person_refs_from_context(context: dict[str, Any]) -> set[str]:
+    sources = []
+    if isinstance(context.get("current_input"), dict):
+        sources.append(context["current_input"])
+    for key in ("people_context", "person_utterances", "events"):
+        sources.extend(context.get(key, []))
+    refs = set()
+    for source in sources:
+        for key in ("person_ref", "speaker_ref", "sender_ref"):
+            value = source.get(key)
+            if isinstance(value, str) and value.startswith("person:"):
+                refs.add(value)
+    return refs
+
+
+def validate_known_person_references(payload: dict[str, Any], *, person_refs: set[str]) -> None:
+    reference_fields = {"subject_hint", "object_reference", "primary_scope_key", "target_scope_key",
+                        "scope_key", "participant_refs", "participant_person_refs", "target_person_ref"}
+    def visit(value: Any, field: str | None = None) -> None:
+        if field == "object_hint":
+            try:
+                normalized_memory_object_hint(value)
+            except ValueError as exc:
+                raise LLMError(str(exc)) from exc
+            if value is not None and value["kind"] == "reference":
+                visit(value["value"], "object_reference")
+            return
+        if isinstance(value, dict):
+            for key, child in value.items():
+                visit(child, key)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child, field)
+        elif isinstance(value, str) and field in reference_fields:
+            reference = value.strip().removeprefix("self|")
+            if reference.startswith("person:") and reference not in person_refs:
+                raise LLMError(f"人物参照 {reference!r} は入力のperson_refにありません。提示された参照だけを使ってください: {sorted(person_refs)!r}")
+    visit(payload)
 
 
 def _validate_episode_affects(episode_affects: Any, *, label: str) -> None:
@@ -1463,7 +1512,7 @@ def _validate_memory_correction_selection(payload: dict[str, Any], *, label: str
 
     seen_revision_ids: set[str] = set()
     for item in selected_targets:
-        required_keys = {"revision_id", "memory_unit_id", "correction_kind", "reason_summary"}
+        required_keys = {"revision_id", "memory_unit_id", "reason_summary"}
         _validate_exact_keys(item, required_keys, f"{label} selected_target")
         revision_id = item["revision_id"]
         if not isinstance(revision_id, str) or not revision_id.startswith("revision:"):
@@ -1475,8 +1524,6 @@ def _validate_memory_correction_selection(payload: dict[str, Any], *, label: str
         memory_unit_id = item["memory_unit_id"]
         if not isinstance(memory_unit_id, str) or not memory_unit_id.startswith("memory_unit:"):
             raise LLMError(f"{label} selected_target.memory_unit_id が不正です。")
-        if item["correction_kind"] not in MEMORY_CORRECTION_KIND_VALUES:
-            raise LLMError(f"{label} selected_target.correction_kind が不正です。")
         reason_summary = item["reason_summary"]
         if not isinstance(reason_summary, str) or not reason_summary.strip():
             raise LLMError(f"{label} selected_target.reason_summary が不正です。")
