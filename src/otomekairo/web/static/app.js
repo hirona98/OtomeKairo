@@ -688,9 +688,8 @@ function buildDashboardHeadline({ runtime, detail, current }) {
 }
 
 function renderDashboardHeader() {
-  const { snapshot, runtime, detail, current } = dashboardSnapshotParts();
+  const { runtime, detail, current } = dashboardSnapshotParts();
   element("dashboard-headline").textContent = buildDashboardHeadline({ runtime, detail, current });
-  element("dashboard-generated-at").textContent = `更新 ${formatDateTime(snapshot.generated_at)}`;
 }
 
 function renderDashboardActive() {
@@ -1107,7 +1106,6 @@ async function refreshDashboard({ silent = false } = {}) {
     return;
   }
   state.dashboardRefreshing = true;
-  element("refresh-dashboard").disabled = true;
   try {
     const [currentState, cycles, memorySnapshot] = await Promise.all([
       apiRequest("/ui/api/inspection/current-state"),
@@ -1133,13 +1131,11 @@ async function refreshDashboard({ silent = false } = {}) {
       showNotice("いまを更新しました。");
     }
   } catch (error) {
-    element("dashboard-generated-at").textContent = "更新失敗";
     if (!silent) {
       showNotice(error.message, true);
     }
   } finally {
     state.dashboardRefreshing = false;
-    element("refresh-dashboard").disabled = false;
   }
 }
 
@@ -4627,8 +4623,6 @@ function bindEvents() {
       setConfirmMenuOpen(false);
     }
   });
-  element("refresh-dashboard").addEventListener("click", () => refreshDashboard({ silent: false }));
-  element("close-dashboard").addEventListener("click", () => setDashboardVisible(false));
   element("dashboard-active").addEventListener("click", (event) => {
     const button = event.target instanceof Element
       ? event.target.closest("[data-run-action]")

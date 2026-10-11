@@ -39,17 +39,6 @@
 
     <main class="workspace-layout" id="workspace-layout">
       <aside class="dashboard-panel" id="dashboard-panel" aria-label="いま">
-        <div class="dashboard-header">
-          <div>
-            <div class="dashboard-title">いま</div>
-            <div id="dashboard-generated-at" class="dashboard-updated">未取得</div>
-          </div>
-          <div class="dashboard-header-actions">
-            <button type="button" class="plain-button" id="refresh-dashboard">更新</button>
-            <button type="button" class="plain-button" id="close-dashboard" title="閉じる">閉じる</button>
-          </div>
-        </div>
-
         <p class="dashboard-role-note">
           現在の個の要約。直近判断は要約だけ。詳細は「判断」へ。
         </p>
@@ -82,7 +71,7 @@
             <div class="dashboard-list cycle-timeline" id="dashboard-cycles"></div>
           </details>
 
-          <details class="dashboard-section dashboard-section-wide">
+          <details class="dashboard-section dashboard-section-wide" open>
             <summary>接続と能力・健全性</summary>
             <div class="dashboard-list dashboard-list-dense" id="dashboard-health"></div>
           </details>
