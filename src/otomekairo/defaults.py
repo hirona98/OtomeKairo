@@ -23,6 +23,7 @@ DEFAULT_GENERATION_MAX_OUTPUT_TOKENS = 32000
 DEFAULT_GENERATION_TIMEOUT_SECONDS = 90
 DEFAULT_EMBEDDING_DIMENSION = 3072
 DEFAULT_GEMINI_GENERATION_MODEL = "openrouter/google/gemini-3.1-flash-lite"
+DEFAULT_PRE_SEND_CHECK_MODEL = "openrouter/openai/gpt-6-luna"
 DEFAULT_GEMINI_EMBEDDING_MODEL = "openrouter/google/gemini-embedding-001"
 DEFAULT_PERSONA_DISPLAY_NAME = "初音ミク"
 DEFAULT_CONVERSATION_DISPLAY_NAME_ID = "conversation_display_name:default"
@@ -376,7 +377,7 @@ def build_default_pre_send_check_model_preset() -> dict:
             "recent_turn_limit": DEFAULT_PROMPT_WINDOW_RECENT_TURN_LIMIT,
             "recent_turn_minutes": DEFAULT_PROMPT_WINDOW_RECENT_TURN_MINUTES,
         },
-        "model": DEFAULT_GEMINI_GENERATION_MODEL,
+        "model": DEFAULT_PRE_SEND_CHECK_MODEL,
         "api_key": "",
         "max_output_tokens": DEFAULT_GENERATION_MAX_OUTPUT_TOKENS,
         "timeout_seconds": DEFAULT_GENERATION_TIMEOUT_SECONDS,

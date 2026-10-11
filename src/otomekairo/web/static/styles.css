@@ -1406,9 +1406,14 @@ input[type="checkbox"]:disabled {
 .settings-separator {
   width: 100%;
   height: 0;
-  margin: 0;
+  margin-block: 4px;
+  margin-inline: 0;
   border: 0;
   border-top: 1px solid var(--line);
+}
+
+.tab-page > .selector-row + .settings-separator {
+  margin-top: 12px;
 }
 
 /* 枠外の名前行を、下のグループ内の入力と左端を揃える。 */
@@ -1417,7 +1422,8 @@ input[type="checkbox"]:disabled {
 }
 
 .settings-group {
-  margin: 0;
+  margin-block: 4px;
+  margin-inline: 0;
   padding: var(--settings-group-padding);
   border: var(--settings-group-border-width) solid var(--line);
   border-radius: 8px;

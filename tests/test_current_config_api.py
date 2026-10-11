@@ -62,6 +62,10 @@ class CurrentConfigApiTests(unittest.TestCase):
             "model_preset:pre_send_check",
             state["model_presets"],
         )
+        self.assertEqual(
+            state["model_presets"]["model_preset:pre_send_check"]["model"],
+            "openrouter/openai/gpt-6-luna",
+        )
         self.assertNotEqual(
             state["pre_send_check_model_preset_id"],
             state["selected_model_preset_id"],

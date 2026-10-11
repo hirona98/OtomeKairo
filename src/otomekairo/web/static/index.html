@@ -1116,6 +1116,18 @@
 
           <section class="tab-page" data-page="pre-send-check">
             <fieldset class="settings-group">
+              <legend>チェック対象のMCP Server</legend>
+              <div class="settings-list">
+                <p class="field-hint">呼び出し前に個人情報やセンシティブな内容が含まれていないかLLMでチェックします。</p>
+                <div class="setting-row setting-row-top">
+                  <label>対象 MCP:</label>
+                  <div class="console-control-with-hint">
+                    <div id="pre-send-check-mcp-list" class="pre-send-check-mcp-list"></div>
+                  </div>
+                </div>
+              </div>
+            </fieldset>
+            <fieldset class="settings-group">
               <legend>チェック用モデル</legend>
               <div class="settings-list">
                 <div class="setting-row">
@@ -1160,18 +1172,6 @@
                   <div class="console-control-with-hint">
                     <input id="pre-send-check-timeout-seconds" class="field-width-short" type="number" min="1" step="1">
                     <span class="field-hint">初期値は90秒。強い推論や長い生成では、ログの所要時間を見て調整する</span>
-                  </div>
-                </div>
-              </div>
-            </fieldset>
-            <fieldset class="settings-group">
-              <legend>MCP server ごとのチェック対象</legend>
-              <div class="settings-list">
-                <p class="field-hint">呼び出し前に個人情報やセンシティブな内容が含まれていないかLLMでチェックします。</p>
-                <div class="setting-row setting-row-top">
-                  <label>対象 MCP:</label>
-                  <div class="console-control-with-hint">
-                    <div id="pre-send-check-mcp-list" class="pre-send-check-mcp-list"></div>
                   </div>
                 </div>
               </div>
