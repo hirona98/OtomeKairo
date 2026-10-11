@@ -277,6 +277,8 @@ binary message は RIFF/WAVE の PCM 16-bit または IEEE float 32-bit とし�
 音声合成に失敗した場合、server は `status=failed / media_type=null / byte_count=0` の JSON messageだけを送り、`error_code` を `tts_request_failed / tts_response_invalid / tts_response_too_large` のいずれかにする。
 client は `status=succeeded` の `assistant_audio` を受信した場合だけ、直後の binary messageを対応する音声として扱う。
 server は音声合成を timeout 60 秒、FIFO 1 worker、queue 上限32件、WAV上限32 MiBで実行し、再試行とengine fallbackを実行しない。
+WebSocket送信は送信lockの待機から完了まで5秒を期限とする。音声metadataとWAVの連続送信にも同じ合計期限を適用する。
+期限超過または送信失敗時は、その接続を閉じて後続の購読者への配送を続ける。受信idleの期限は設けない。
 VOICEVOX では `voicevox_config.endpoint_url`（優先）と `secondary_endpoint_url`（サブ、空可）を持つ。
 server は両 endpoint の HTTP 応答を 10 秒間隔で監視し、健全な1つを選んで合成する。両方健全なら常に優先を使う。
 1 delivery 内で合成失敗した endpoint を即 unhealthy にし、**同一 delivery ではもう一方へ掛け直さない**。次の delivery または次のプローブ結果で接続先が切り替わる。
