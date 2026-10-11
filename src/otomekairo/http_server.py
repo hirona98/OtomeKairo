@@ -8,6 +8,7 @@ from importlib import resources
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
+from time import monotonic
 
 from otomekairo.event_stream import ServerWebSocket, WebSocketProtocolError, build_websocket_accept
 from otomekairo.service.app import OtomeKairoService, ServiceError
@@ -82,6 +83,8 @@ SUPPRESSED_HTTP_LOG_PATH_PREFIX_AND_SUFFIX = (
     ("/api/config/connectors/", "/runtime-config"),
 )
 WEB_STATIC_PACKAGE = "otomekairo.web.static"
+HTTP_RECEIVE_TIMEOUT_SECONDS = 30.0
+MAX_HTTP_JSON_BODY_BYTES = 64 * 1024 * 1024
 WEB_STATIC_FILES = {
     "/ui/": ("index.html", "text/html; charset=utf-8", "no-store"),
     "/ui/index.html": ("index.html", "text/html; charset=utf-8", "no-store"),
@@ -155,6 +158,8 @@ class OtomeKairoHttpServer(ThreadingHTTPServer):
 class OtomeKairoHandler(BaseHTTPRequestHandler):
     server: OtomeKairoHttpServer
     protocol_version = "HTTP/1.1"
+    # リクエスト行、ヘッダー、keep-alive待機にidle期限を設ける。
+    timeout = HTTP_RECEIVE_TIMEOUT_SECONDS
 
     # メソッド群
     def do_GET(self) -> None:  # noqa: N802
@@ -807,7 +812,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             raise ServiceError(404, "route_not_found", "The requested route does not exist.")
         except ClientDisconnectedError as exc:
             self._debug_log_client_disconnect(exc.__cause__ or exc)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             self._write_error_safely(
                 HTTPStatus.BAD_REQUEST,
                 "invalid_json",
@@ -815,6 +820,9 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             )
         except ServiceError as exc:
             self._write_error_safely(exc.status_code, exc.error_code, exc.message)
+        except TimeoutError:
+            self.close_connection = True
+            self._write_error_safely(HTTPStatus.REQUEST_TIMEOUT, "request_timeout", "Request body reception timed out.")
         except Exception as exc:  # noqa: BLE001
             if self._is_client_disconnect(exc):
                 self._debug_log_client_disconnect(exc)
@@ -847,6 +855,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
         # 接続
+        self.connection.settimeout(None)
         websocket = ServerWebSocket(self.connection)
         session_id = self.server.service.register_event_stream_connection(websocket)
         try:
@@ -901,6 +910,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.flush()
 
+        self.connection.settimeout(None)
         websocket = ServerWebSocket(self.connection)
         session_id = self.server.service.register_audio_stream_connection(
             websocket,
@@ -960,6 +970,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
         # 接続
+        self.connection.settimeout(None)
         websocket = ServerWebSocket(self.connection)
         session_id = self.server.service.register_log_stream_connection(websocket)
         try:
@@ -976,8 +987,40 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
 
     # リクエスト補助
     def _read_json_body(self) -> dict:
-        length = int(self.headers.get("Content-Length", "0"))
-        raw_body = self.rfile.read(length) if length > 0 else b"{}"
+        # HTTP本文の境界を確定してから読み、拒否後は同じ接続を再利用しない。
+        if self.headers.get("Transfer-Encoding") is not None:
+            self.close_connection = True
+            raise ServiceError(400, "unsupported_transfer_encoding", "Content-Length is required instead of Transfer-Encoding.")
+        lengths = self.headers.get_all("Content-Length", [])
+        raw_length = lengths[0] if len(lengths) == 1 else "0"
+        if len(lengths) > 1 or not raw_length.isascii() or not raw_length.isdecimal():
+            self.close_connection = True
+            raise ServiceError(400, "invalid_content_length", "Content-Length must be a single non-negative integer.")
+        if len(raw_length.lstrip("0")) > len(str(MAX_HTTP_JSON_BODY_BYTES)):
+            self.close_connection = True
+            raise ServiceError(413, "request_too_large", "The JSON request body exceeds 64 MiB.")
+        length = int(raw_length.lstrip("0") or "0")
+        if length > MAX_HTTP_JSON_BODY_BYTES:
+            self.close_connection = True
+            raise ServiceError(413, "request_too_large", "The JSON request body exceeds 64 MiB.")
+
+        body = bytearray()
+        previous_timeout = self.connection.gettimeout()
+        deadline = monotonic() + HTTP_RECEIVE_TIMEOUT_SECONDS
+        try:
+            while len(body) < length:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("Request body reception timed out.")
+                self.connection.settimeout(remaining)
+                chunk = self.rfile.read1(min(65536, length - len(body)))
+                if not chunk:
+                    self.close_connection = True
+                    raise ServiceError(400, "incomplete_request_body", "The request body ended before Content-Length.")
+                body.extend(chunk)
+        finally:
+            self.connection.settimeout(previous_timeout)
+        raw_body = bytes(body) if length > 0 else b"{}"
         payload = json.loads(raw_body.decode("utf-8"))
         if not isinstance(payload, dict):
             raise ServiceError(400, "invalid_json_shape", "The request body must be a JSON object.")

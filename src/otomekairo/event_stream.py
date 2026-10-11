@@ -7,11 +7,14 @@ import socket
 import struct
 import threading
 import uuid
+from contextlib import contextmanager
+from time import monotonic
 from typing import Any
 
 
 # 定数
 WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+WEBSOCKET_SEND_TIMEOUT_SECONDS = 5.0
 
 
 # エラー
@@ -43,6 +46,7 @@ class ServerWebSocket:
         # 項目
         self._connection = connection
         self._send_lock = threading.Lock()
+        self._close_lock = threading.Lock()
         self._closed = False
 
     def receive_json(self) -> dict[str, Any] | None:
@@ -99,9 +103,7 @@ class ServerWebSocket:
     ) -> None:
         # 音声metadataと直後のbinary messageを他の送信から分離する。
         text = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        with self._send_lock:
-            if self._closed:
-                return
+        with self._sending():
             self._send_frame_unlocked(opcode=0x1, payload=text)
             self._send_frame_unlocked(opcode=0x2, payload=binary)
 
@@ -110,19 +112,22 @@ class ServerWebSocket:
         self._send_frame(opcode=0x1, payload=text.encode("utf-8"))
 
     def close(self) -> None:
-        # 冪等化
-        with self._send_lock:
+        # close frameも通常送信と同じ期限内に送る。
+        if self._closed:
+            return
+        try:
+            self._send_frame(opcode=0x8, payload=b"")
+        except OSError:
+            pass
+        finally:
+            self.abort()
+
+    def abort(self) -> None:
+        # 送信lockを待たずにsocketを閉じ、停止中のsend/recvを解除する。
+        with self._close_lock:
             if self._closed:
                 return
             self._closed = True
-
-            # フレーム
-            try:
-                self._send_frame_unlocked(opcode=0x8, payload=b"")
-            except OSError:
-                pass
-
-            # ソケット
             try:
                 self._connection.shutdown(socket.SHUT_RDWR)
             except OSError:
@@ -158,11 +163,32 @@ class ServerWebSocket:
         return opcode, unmasked
 
     def _send_frame(self, *, opcode: int, payload: bytes) -> None:
-        # ロック下送信
-        with self._send_lock:
-            if self._closed:
-                return
+        with self._sending():
             self._send_frame_unlocked(opcode=opcode, payload=payload)
+
+    @contextmanager
+    def _sending(self):
+        # 受信のidle期限は変えず、lock待機と送信全体だけに期限を設ける。
+        deadline = monotonic() + WEBSOCKET_SEND_TIMEOUT_SECONDS
+        if not self._send_lock.acquire(timeout=WEBSOCKET_SEND_TIMEOUT_SECONDS):
+            self.abort()
+            raise TimeoutError("WebSocket send lock timed out.")
+        timer = threading.Timer(max(0.0, deadline - monotonic()), self.abort)
+        timer.daemon = True
+        try:
+            if self._closed:
+                raise OSError("WebSocket connection is closed.")
+            timer.start()
+            try:
+                yield
+                if self._closed:
+                    raise TimeoutError("WebSocket send timed out.")
+            except OSError:
+                self.abort()
+                raise
+        finally:
+            timer.cancel()
+            self._send_lock.release()
 
     def _send_frame_unlocked(self, *, opcode: int, payload: bytes) -> None:
         # ヘッダー
