@@ -283,9 +283,34 @@ async function loadConversationConfig() {
       config.settings_snapshot.selected_conversation_display_name_id,
     );
     state.conversationDisplayName = selectedDisplayName?.display_name || "";
+    renderConversationPersonChoices();
   } catch (error) {
     showNotice(error.message, true);
   }
+}
+
+function renderConversationPersonChoices() {
+  const list = element("conversation-person-names");
+  list.replaceChildren();
+  for (const definition of state.conversationDisplayNames || []) {
+    const name = definition?.display_name;
+    if (typeof name !== "string" || !name) {
+      continue;
+    }
+    const option = document.createElement("option");
+    option.value = name;
+    list.appendChild(option);
+  }
+  const input = element("conversation-person-name");
+  if (input.dataset.touched === "true" || input.value) {
+    return;
+  }
+  const stored = localStorage.getItem("otomekairo.conversation_display_name");
+  input.value = stored || state.conversationDisplayName || "";
+}
+
+function conversationPersonName() {
+  return element("conversation-person-name").value.trim();
 }
 
 async function loadAvatarSpeech() {
@@ -2170,10 +2195,10 @@ async function sendMessage(event) {
   }
   const images = state.attachment ? [state.attachment.data] : [];
   const personRef = state.conversationPersonRef;
-  const displayName = state.conversationDisplayName;
+  const displayName = conversationPersonName();
   const interactionRef = state.conversationInteractionRef;
   if (!displayName) {
-    showNotice("設定画面の「会話入力」で呼ばれ方を設定してください。", true);
+    showNotice("対話人物の名前を入力してください。", true);
     return;
   }
   if (!state.eventSocket || state.eventSocket.readyState !== WebSocket.OPEN) {
@@ -2963,6 +2988,7 @@ async function refreshConversationDisplayNames(preferredSelectedId = undefined) 
     state.editor?.current?.selected_conversation_display_name_id,
   );
   state.conversationDisplayName = selectedDisplayName?.display_name || "";
+  renderConversationPersonChoices();
   if (state.editor) {
     renderCurrent();
   }
@@ -4611,6 +4637,17 @@ function bindEvents() {
       return;
     }
     controlAutonomousRun(button.dataset.runAction, button.dataset.runId, button);
+  });
+  element("conversation-person-name").addEventListener("input", () => {
+    const input = element("conversation-person-name");
+    input.dataset.touched = "true";
+    localStorage.setItem("otomekairo.conversation_display_name", input.value);
+  });
+  element("conversation-person-name").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      element("message-input").focus();
+    }
   });
   element("composer").addEventListener("submit", sendMessage);
   element("message-input").addEventListener("keydown", (event) => {

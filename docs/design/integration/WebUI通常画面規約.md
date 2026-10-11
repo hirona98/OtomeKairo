@@ -85,6 +85,17 @@ badge、`.status.processing` / `.status.error` は上記を共有する。
 | `.icon-button` | topbar / 設定ヘッダのアイコン操作 |
 | dashboard 内 button | 高密度用に高さと font を micro 寄せてよい |
 
+## チャット入力の対話人物
+
+意味は [../configuration/設定モデル.md](../configuration/設定モデル.md) の呼ばれ方を正とする。
+
+- composer に「対話人物」の入力を置く
+- 候補は保存済み `conversation_display_name` の `display_name` とする
+- 候補以外の文字列も、その送信の `display_name` として使う
+- 未入力では送信しない
+- 入力した名前はブラウザに残す。設定の `selected_conversation_display_name_id` は変えない
+- CocoroConsole の直接入力は、設定で選んだ1件の定義を使う
+
 ## チャット吹き出し
 
 - person: 右寄せ・アクセント塗り
