@@ -3715,19 +3715,25 @@ function renderCapabilities() {
 }
 
 function setCollectionEditorEnabled(selectId, fieldsetSelector, deleteAction, hasItems) {
-  // 0 件のときは選択・入力・削除を無効化し、追加だけ残す。
-  // fieldsetSelector は .tab-page 内の CSS selector。data-collection-editor を優先して
-  // 読込状態など編集対象外 fieldset を残せる。
+  // 0 件のときは選択・枠外の名前・編集欄・削除を無効化し、追加だけ残す。
+  // data-collection-editor は編集 fieldset と枠外の名前行に付ける。
+  // 読込状態など編集対象外の fieldset には付けない。
   const select = element(selectId);
   select.disabled = !hasItems;
   const page = select.closest(".tab-page");
   if (page) {
-    const marked = page.querySelectorAll("fieldset[data-collection-editor]");
-    const fieldsets = marked.length > 0
+    const marked = page.querySelectorAll("[data-collection-editor]");
+    const regions = marked.length > 0
       ? marked
       : page.querySelectorAll(fieldsetSelector);
-    fieldsets.forEach((fieldset) => {
-      fieldset.disabled = !hasItems;
+    regions.forEach((region) => {
+      if (region instanceof HTMLFieldSetElement) {
+        region.disabled = !hasItems;
+        return;
+      }
+      region.querySelectorAll("input, select, textarea, button").forEach((control) => {
+        control.disabled = !hasItems;
+      });
     });
   }
   const deleteButton = page?.querySelector(`[data-action="${deleteAction}"]`);

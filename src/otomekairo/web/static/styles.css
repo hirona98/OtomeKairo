@@ -52,6 +52,7 @@
   --heading-size: var(--font-heading);
   --title-size: var(--font-heading);
   --setting-label-width: 170px;
+  --setting-column-gap: 10px;
   /* 入力幅トークン。field-width-* クラスで付与する。 */
   --field-width-peek: 4.5em;
   --field-width-short: 96px;
@@ -777,7 +778,7 @@ a.dashboard-item:hover {
 }
 
 .audio-meters-settings {
-  margin: var(--space-2) 0 var(--space-2) var(--setting-label-width, 170px);
+  margin: var(--space-2) 0 var(--space-2) calc(var(--setting-label-width) + var(--setting-column-gap));
   padding: var(--space-3);
   border: 1px solid var(--info-border);
   border-radius: 6px;
@@ -1067,6 +1068,8 @@ a.dashboard-item:hover {
 }
 
 .settings-body {
+  --settings-group-padding: 10px;
+  --settings-group-border-width: 1px;
   min-height: 0;
   overflow: auto;
   padding: 18px 20px 24px;
@@ -1095,7 +1098,7 @@ a.dashboard-item:hover {
   display: grid;
   grid-template-columns: var(--setting-label-width) minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
+  gap: var(--setting-column-gap);
 }
 
 .setting-row>label {
@@ -1226,12 +1229,13 @@ a.dashboard-item:hover {
   display: grid;
   grid-template-columns: var(--setting-label-width) minmax(0, 1fr) 70px;
   align-items: center;
-  gap: 10px;
+  gap: var(--setting-column-gap);
   color: var(--muted);
   font-size: var(--label-size);
 }
 
 .range-field input {
+  margin: 0;
   min-height: auto;
   padding: 0;
 }
@@ -1386,10 +1390,23 @@ input[type="checkbox"]:disabled {
   flex: 1 1 240px;
 }
 
+.settings-separator {
+  width: 100%;
+  height: 0;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+/* 枠外の名前行を、下のグループ内の入力と左端を揃える。 */
+.tab-page > .setting-row {
+  margin-inline: calc(var(--settings-group-padding) + var(--settings-group-border-width));
+}
+
 .settings-group {
   margin: 0;
-  padding: 10px;
-  border: 1px solid var(--line);
+  padding: var(--settings-group-padding);
+  border: var(--settings-group-border-width) solid var(--line);
   border-radius: 8px;
 }
 
@@ -1414,7 +1431,7 @@ input[type="checkbox"]:disabled {
   min-width: 0;
 }
 
-.conversation-display-name-manage input {
+.conversation-display-name-manage select {
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -1425,7 +1442,7 @@ input[type="checkbox"]:disabled {
 }
 
 .field-hint-indent {
-  margin-left: var(--setting-label-width);
+  margin-left: calc(var(--setting-label-width) + var(--setting-column-gap));
 }
 
 .capability-columns {

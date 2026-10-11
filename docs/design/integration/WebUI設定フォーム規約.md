@@ -18,9 +18,13 @@ API wire、認可、設定の意味境界は [../api/README.md](../api/README.md
 
 ## コンポーネント階層
 
+リストボックスで項目を選び、その項目の名前を編集する画面は次の順にする。名前はプリセット名、表示名、名前のいずれかである。
+
 ```
 .tab-page
-  ├── .selector-row          # プリセット選択がある場合のみ（枠外の操作バー）
+  ├── .selector-row           # select + 追加 / 複製 / 削除
+  ├── hr.settings-separator
+  ├── .setting-row            # 選択中項目の名前。fieldset では囲まない
   └── fieldset.settings-group
         ├── legend
         └── .settings-list
@@ -29,9 +33,12 @@ API wire、認可、設定の意味境界は [../api/README.md](../api/README.md
               └── details.advanced-settings
 ```
 
-- 意味のある節は、1ページ1節でも必ず `fieldset.settings-group` と `legend` で囲む
-- プリセット選択行（select + 追加 / 複製 / 削除）は枠外に置く
-- プリセット名などの「基本」項目は枠外に出さず、`settings-group` 内に置く
+- リストボックスの直下に `hr.settings-separator` を置き、その次に選択中項目の名前を `.setting-row` で置く
+- その名前は `fieldset` で囲まない
+- 枠外の名前行は、直下のグループ内の入力と左端を揃える。左右はグループの枠線と内側余白と同じだけ内側に置く
+- 名前以外の節は、1ページ1節でも `fieldset.settings-group` と `legend` で囲む
+- リストボックスを持たない画面は、各節を `fieldset.settings-group` で囲む
+- Watcher は選択項目の名前入力を持たないので、リストボックスの次に設定グループを置く
 
 ## 項目名と入力の配置
 
@@ -41,6 +48,8 @@ API wire、認可、設定の意味境界は [../api/README.md](../api/README.md
 | --- | --- |
 | 通常フィールド | `.setting-row`。左に `label`（for 付き）、右に input / select / 複合コントロール |
 | 複数行・ヒント付き | `.setting-row.setting-row-top` + 右列に `.console-control-with-hint` |
+| 入力列の下に置く単独の説明 | `.field-hint.field-hint-indent`。左端はラベル幅に列間の空きを足した入力列の位置 |
+| VAD・識別の観測枠 | `.audio-meters.audio-meters-settings`。左端は入力列に揃える |
 | boolean | `.checkbox-field`（`.settings-list` 直下。左ラベル列には載せない） |
 | 単位付き数値 | 右列に `.inline-suffix-control` |
 | 詳細・一覧の折りたたみ | `details.advanced-settings` |
@@ -94,7 +103,7 @@ APIキー入力は `type="password"` で伏せず、通常のテキスト入力 
 | エンジン切替でパネルごと入れ替える場合 | 非選択側を `hidden` | TTS エンジンパネル |
 | 親チェックに依存する子項目 | 親が off のとき子を `disabled`（値は state に保持し、触れなくする） | 送信前チェック用モデルの詳細項目 |
 
-- コレクション 0 件時は選択・編集 fieldset・削除を disabled にし、追加だけ残す。編集対象 fieldset には `data-collection-editor` を付ける
+- コレクション 0 件時は選択、枠外の名前行、編集 fieldset、削除を disabled にし、追加だけ残す。枠外の名前行と編集対象 fieldset には `data-collection-editor` を付ける
 - 読込状態など閲覧専用の枠は `data-collection-editor` を付けず、0 件時も操作可能にする
 - 接続クライアント ID などシステム固定値は input を `disabled` で表示する（カメラ・MCP と同じ）
 
