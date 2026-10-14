@@ -45,7 +45,7 @@ sequenceDiagram
     opt 思考前観測または添付画像がある
         C->>C: 観測と画像解釈（図7）
     end
-    C->>L: generate_input_interpretation
+    C->>L: generate_input_interpretation（人格や会話など）
     L-->>C: recall_hint と answer_contract
     C->>R: build_recall_pack
     R->>R: scope別の候補収集
@@ -103,6 +103,17 @@ sequenceDiagram
     C-)M: 後処理jobをキューへ登録
     C-->>U: サイクル結果
 ```
+
+`generate_input_interpretation()` は、記憶検索に先立って「何を思い出すか」「どんな根拠を探すか」を決める入口処理である。正常時は1回の LLM 呼び出しで、次の2つをまとめて返す。
+
+| 出力 | 役割と後続処理 |
+| --- | --- |
+| `recall_hint` | 想起する記憶の主題、人物・話題、時間軸、参照の曖昧さなどを整理し、後続の `build_recall_pack()` に渡す |
+| `answer_contract` | 原文、日時、出所など必要な根拠の種類と、検索対象の人物・会話の範囲を指定し、RecallPack 構築後の回答根拠の解決に使う |
+
+入力には、現在の入力本文と発信者・会話などの構造化情報、人格設定、直近会話、現在時刻を渡す。解釈済みの画像説明と活動状態がある場合は、内部補助文脈として渡す。入力の詳細と出力契約は [RecallHint](../memory/想起と判断.md#recallhint) と [AnswerContract](../memory/想起と判断.md#answercontract) を正とする。
+
+例えば「前に私が言ったことを原文で教えて」という入力では、本人の過去の会話を想起の対象とし、本人の発話原文を必要な根拠として指定する。この段階では検索方針を決め、長期記憶の検索や原文取得は後続処理が行う。行動選択と返答本文の生成は、後段の `generate_decision()` と `generate_speech()` が担当する。
 
 `generate_world_state()` と `generate_activity_state()` は、それぞれ候補と根拠判定を同じ生成で取得し、コード側で採用候補を選ぶ。具体的な根拠判定は [状態候補の根拠判定](状態候補根拠審査.md) を参照する。
 `generate_event_evidence()` は対象 event 群をまとめて呼び出し、返った各項目を想起側で検証する。
