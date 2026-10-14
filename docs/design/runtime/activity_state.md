@@ -93,7 +93,7 @@ LLM は複数 source の意味を見て、活動候補を返す。
 文字列比較は同一活動の統合、重複抑制、inspection の補助に限定する。
 `desktop / virtual` の vision source と `source_owner=user_environment` は人物側の環境観測として扱い、人物文脈が確定している場合だけ activity candidate の `actor=person` にする。
 `source_owner=self` の camera 観測は OtomeKairo の視覚根拠として扱い、観測対象の人物参照が確定している場合だけ `actor=person` の activity candidate に使う。
-コードは source pack の `observed_person_refs` と `activity_subject.actor_ref` の一致を検証する。未同定のカメラ人物についての `observation` 候補は会話話者の活動として採用せず、本人の `activity_report` は別に採用できる。
+コードは source pack の `observed_person_refs` と `activity_subject.actor_ref` の一致を検証する。未同定のカメラ人物についての `supported_observation` 候補は会話話者の活動として採用せず、本人の `supported_report` は別に採用できる。
 activity の `label / reason_summary` はユーザー側の観測事実から構成する。
 assistant の直近発話、約束、待機姿勢は activity とは別文脈として扱う。
 activity の `label` は具体的な内容名や対象名ではなく、判断と発話でそのまま使える短い活動モードにする。
@@ -115,6 +115,7 @@ activity の `label` は具体的な内容名や対象名ではなく、判断�
 ## LLM 出力契約
 
 LLM の出力は JSON object 1 個に固定する。
+活動候補とその一次根拠の判定を同じ応答で取得し、正常時は1回の生成で完了する。
 
 ```json
 {
@@ -123,11 +124,12 @@ LLM の出力は JSON object 1 個に固定する。
       "actor": "person",
       "label": "活動モードを短く表す自然文",
       "target": "活動対象を短く表す文字列",
+      "reason_summary": "活動主体、対象、時期と一次根拠の対応",
+      "evidence_kind": "supported_report",
       "confidence_hint": "high",
       "salience_hint": "high",
       "ttl_hint": "short",
-      "transition": "continue",
-      "reason_summary": "観測事実から活動モードを判断した根拠"
+      "transition": "continue"
     }
   ]
 }
@@ -138,9 +140,11 @@ LLM の出力は JSON object 1 個に固定する。
 - 必須トップレベルキーは `activity_candidates` だけにする
 - `activity_candidates` は最大 1 件の配列にする
 - 候補がない場合は空配列にする
-- 各候補は `actor / label / target / confidence_hint / salience_hint / ttl_hint / transition / reason_summary` だけを持つ
+- 各候補は `actor / label / target / reason_summary / evidence_kind / confidence_hint / salience_hint / ttl_hint / transition` だけを持つ
 - `actor` は `person` にする。主体が確定しない場合は候補を返さない
 - `label` は活動内容を自然文で短く表す
+- `reason_summary` は非空とし、活動主体、対象、時期と一次根拠の対応を説明する
+- `evidence_kind` の意味と採用規則は [状態候補の根拠判定](../llm/状態候補根拠審査.md) を正とする
 - `confidence_hint`、`salience_hint` は `low / medium / high` のいずれかにする
 - `ttl_hint` は `short / medium / long` のいずれかにする
 - `transition` は `start / continue / switch / end / none` のいずれかにする
@@ -148,7 +152,7 @@ LLM の出力は JSON object 1 個に固定する。
 
 ## 更新規則
 
-候補が非空の場合は、独立した `activity_state_grounding_review` に source pack と候補を渡す。人物についての根拠がある候補を採用し、現在の個の返答準備などを人物へ移した候補は除く。審査は [状態候補根拠審査](../llm/状態候補根拠審査.md) の共通契約を使う。審査に失敗した場合は更新を失敗させる。
+コードは全候補の契約を検証してから、同じ応答の根拠判定と上記の人物同定条件に従って採用候補を選ぶ。契約違反時の repair と失敗範囲は [LLM補助契約共通](../llm/LLM補助契約共通.md) に従う。`evidence_kind` は採用判定に使い、保存する activity row には含めない。
 
 コードは LLM 出力を受けて次を決める。
 

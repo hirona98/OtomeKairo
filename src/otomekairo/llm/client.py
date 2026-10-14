@@ -24,7 +24,6 @@ from otomekairo.llm.contracts import (
     normalize_recall_hint_payload,
     build_decision_target_stances_for_kind,
     validate_activity_state_contract,
-    validate_state_grounding_review_contract,
     validate_world_state_source_selection_contract,
     validate_answer_contract_contract,
     validate_autonomous_completion_review_contract,
@@ -56,7 +55,6 @@ from otomekairo.llm.mock import MockLLMClient
 from otomekairo.llm.parsing import parse_json_object
 from otomekairo.llm.schemas import (
     activity_state_response_format,
-    state_grounding_review_response_format,
     world_state_source_selection_response_format,
     decision_grounding_review_response_format,
     capability_input_grounding_review_response_format,
@@ -92,7 +90,6 @@ from otomekairo.llm.prompts import (
     build_agent_skill_selection_messages,
     build_agent_skill_selection_repair_prompt,
     build_activity_state_messages,
-    build_activity_state_grounding_review_messages,
     build_activity_state_repair_prompt,
     build_autonomous_completion_review_messages,
     build_autonomous_start_review_messages,
@@ -1802,56 +1799,33 @@ class LLMClient:
         if self._is_mock_model_config(model_config):
             payload = self.mock_client.generate_activity_state(model_config, source_pack)
             debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
-            return payload
+        else:
+            messages = build_activity_state_messages(
+                persona_context=persona_context,
+                source_pack=source_pack,
+            )
+            payload = self._generate_structured_payload(
+                model_config=model_config,
+                messages=messages,
+                validator=validate_activity_state_contract,
+                repair_prompt_builder=build_activity_state_repair_prompt,
+                failure_message="ActivityState の生成に失敗しました。解析可能な応答が得られませんでした。",
+                response_format=activity_state_response_format(),
+                wrap_validation_error=True,
+                operation=operation,
+            )
 
-        messages = build_activity_state_messages(
-            persona_context=persona_context,
-            source_pack=source_pack,
-        )
-        candidate = self._generate_structured_payload(
-            model_config=model_config,
-            messages=messages,
-            validator=validate_activity_state_contract,
-            repair_prompt_builder=build_activity_state_repair_prompt,
-            failure_message="ActivityState の生成に失敗しました。解析可能な応答が得られませんでした。",
-            response_format=activity_state_response_format(),
-            wrap_validation_error=True,
-            operation=operation,
-        )
-
-        return self._review_activity_state_candidates(
-            model_config=model_config, source_pack=source_pack, candidate=candidate,
-        )
-
-    def _review_activity_state_candidates(
-        self, *, model_config: dict, source_pack: dict[str, Any], candidate: dict[str, Any],
-    ) -> dict[str, Any]:
-        candidates = candidate["activity_candidates"]
+        candidates = payload["activity_candidates"]
         if not candidates:
-            return candidate
-        review = self._generate_structured_payload(
-            model_config=model_config,
-            messages=build_activity_state_grounding_review_messages(
-                source_pack=source_pack, candidate=candidate,
-            ),
-            validator=lambda payload: validate_state_grounding_review_contract(
-                payload, candidate_count=len(candidates),
-            ),
-            repair_prompt_builder=lambda error: (
-                "候補ごとに index, evidence_kind, reason_summary の decisions を返してください。\n" + error
-            ),
-            failure_message="活動候補の根拠審査に失敗しました。",
-            response_format=state_grounding_review_response_format(),
-            wrap_validation_error=True, operation="activity_state_grounding_review",
-        )
+            return payload
         supporting_kinds = set(SUPPORTED_STATE_GROUNDING_EVIDENCE_KINDS)
         if source_pack.get("source_owner") == "self":
             actor_ref = source_pack["activity_subject"]["actor_ref"]
             if actor_ref not in source_pack["observed_person_refs"]:
                 supporting_kinds.discard("supported_observation")
-        accepted = {item["index"] for item in review["decisions"] if item["evidence_kind"] in supporting_kinds}
-        debug_log("LLM", f"activity_state_grounding_review decisions={self._debug_rejected_payload(review)}", level="DEBUG")
-        return {"activity_candidates": [item for index, item in enumerate(candidates) if index in accepted]}
+        return {"activity_candidates": [
+            candidate for candidate in candidates if candidate["evidence_kind"] in supporting_kinds
+        ]}
 
     def generate_visual_daily_grouping(self, *, model_config: dict, persona_context: PersonaContext,
                                        records: list[dict[str, Any]]) -> dict[str, Any]:

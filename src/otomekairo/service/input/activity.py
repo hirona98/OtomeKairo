@@ -194,7 +194,7 @@ class ServiceInputActivityMixin:
             )
         ]
         # カメラの所有者と、そこに映る人物の同一性は別の境界。
-        # 未同定の人物の動作を本人報告と混ぜてから審査すると、報告由来と
+        # 未同定の人物の動作を本人報告と混ぜてから解釈すると、報告由来と
         # 誤認されるため、人物に結び付かない映像は活動推定の入力から分ける。
         if source_owner == "self" and payload["activity_subject"]["actor_ref"] not in payload["observed_person_refs"]:
             payload.pop("visual_observation_context", None)

@@ -663,25 +663,6 @@ def validate_world_state_source_selection_contract(payload: dict[str, Any], *, i
             raise LLMError("WorldStateSourceSelection.evidence_text は原入力の連続した引用である必要があります。")
 
 
-def validate_state_grounding_review_contract(payload: dict[str, Any], *, candidate_count: int) -> None:
-    _validate_exact_keys(payload, {"decisions"}, "StateGroundingReview")
-    decisions = payload["decisions"]
-    if not isinstance(decisions, list) or len(decisions) != candidate_count:
-        raise LLMError("StateGroundingReview は候補ごとに1件の decisions が必要です。")
-    seen: set[int] = set()
-    for item in decisions:
-        _validate_exact_keys(item, {"index", "evidence_kind", "reason_summary"}, "StateGroundingReview.decision")
-        index = item["index"]
-        if type(index) is not int or not 0 <= index < candidate_count or index in seen:
-            raise LLMError("StateGroundingReview.index が不正です。")
-        seen.add(index)
-        evidence_kind = item["evidence_kind"]
-        if evidence_kind not in STATE_GROUNDING_EVIDENCE_KINDS:
-            raise LLMError("StateGroundingReview.evidence_kind が不正です。")
-        if not isinstance(item["reason_summary"], str) or not item["reason_summary"].strip():
-            raise LLMError("StateGroundingReview.reason_summary が必要です。")
-
-
 def validate_activity_state_contract(payload: dict[str, Any]) -> None:
     # 形状
     _validate_exact_keys(payload, {"activity_candidates"}, "ActivityState")
@@ -704,9 +685,13 @@ def validate_activity_state_contract(payload: dict[str, Any]) -> None:
                 "ttl_hint",
                 "transition",
                 "reason_summary",
+                "evidence_kind",
             },
             "ActivityState.activity_candidate",
         )
+        evidence_kind = candidate["evidence_kind"]
+        if not isinstance(evidence_kind, str) or evidence_kind not in STATE_GROUNDING_EVIDENCE_KINDS:
+            raise LLMError("ActivityState.evidence_kind が不正です。")
         if candidate["confidence_hint"] not in WORLD_STATE_HINT_VALUES:
             raise LLMError("ActivityState.confidence_hint が不正です。")
         if candidate["salience_hint"] not in WORLD_STATE_HINT_VALUES:

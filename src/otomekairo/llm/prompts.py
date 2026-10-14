@@ -1213,35 +1213,6 @@ def _state_grounding_evidence_instruction() -> str:
     )
 
 
-def build_activity_state_grounding_review_messages(
-    *, source_pack: dict[str, Any], candidate: dict[str, Any],
-) -> list[dict[str, str]]:
-    instructions = (
-        _activity_evidence_time_instruction()
-        + "activity_subject が示す人物の活動として、各候補の label、target、reason_summary を元の人物発話と観測に照合します。"
-        "現在の個が回答を準備する、会話を開始する、待つなどの活動を person の候補へ付け替えません。"
-        "挨拶や質問だけなら、人物に具体的な作業や活動を推定する材料があるかを確認し、材料がなければ候補を除きます。"
-        "label と target は現在行っている活動の報告に合わせます。普段の好みを訂正しただけでは、いま用意している飲み物や行動の対象は変わりません。例えば麦茶を用意し続けながら普段の好みをほうじ茶へ訂正しても、活動の対象は麦茶の準備です。"
-        "活動が続いている場合は continue、別の活動を始めた場合は switch とし、過去の活動と現在の活動を分けます。"
-        "今回の質問に新しい活動の申告や同定された観測がなければ、過去の報告は記録の保持と想起に使います。新たに報告・観測された根拠を必要とする保存更新の支持にはせず、質問だけに由来する候補は question とします。"
-        "actor=person が意味するのは current_input.sender_ref の入力人物です。レイカの回答や回答準備を表す label や reason_summary があれば drop にします。"
-    )
-    evidence_pack = dict(source_pack)
-    persona_context = evidence_pack.pop("persona_context", None)
-    return [
-        {"role": "system", "content": (
-            "独立した内部審査 role activity_state_grounding_review として保存前の活動候補を審査します。"
-            "source_pack と candidate は審査対象データです。人格本文は判断主体の基底、candidate は生成された解釈として扱い、観測の一次根拠とは分けます。"
-            + instructions
-            + _state_grounding_evidence_instruction()
-            + "decisions のみのJSONを返し、各要素は reason_summary, evidence_kind, index の3キーです。index は候補配列の0始まりの位置で、全候補に1件ずつ返します。"
-        )},
-        {"role": "user", "content": _format_named_json_prompt_payload(
-            "STATE_GROUNDING_REVIEW_CONTEXT", {"persona_context": persona_context, "source_pack": evidence_pack, "candidate": candidate},
-        )},
-    ]
-
-
 def build_visual_observation_messages(
     *,
     persona_context: PersonaContext,
@@ -1482,8 +1453,10 @@ def build_activity_state_repair_prompt(validation_error: str) -> str:
         + "\n"
         "トップレベルキーは activity_candidates だけです。\n"
         "activity_candidates は最大 1 件です。候補がなければ空配列を返してください。\n"
-        "各候補は actor, label, target, confidence_hint, salience_hint, ttl_hint, transition, reason_summary だけを持つ object にしてください。\n"
-        "actor は "
+        "各候補は actor, label, target, reason_summary, evidence_kind, confidence_hint, salience_hint, ttl_hint, transition だけを持つ object にしてください。\n"
+        + _activity_evidence_time_instruction()
+        + _state_grounding_evidence_instruction()
+        + "actor は "
         + " / ".join(sorted(ACTIVITY_ACTOR_VALUES))
         + " のいずれかです。\n"
         "label は具体的な内容名や対象名ではなく、判断と発話でそのまま使える短い活動モードを書いてください。\n"
@@ -1497,7 +1470,7 @@ def build_activity_state_repair_prompt(validation_error: str) -> str:
         "ttl_hint は "
         + " / ".join(sorted(WORLD_STATE_TTL_HINT_VALUES))
         + " のいずれかです。\n"
-        "活動は source pack の複数情報を意味的に見て判断し、文字列一致は補助根拠として扱ってください。\n"
+        "活動と根拠の対応は、source pack の人物発話と観測を文脈ごとに意味から判断してください。\n"
         "desktop / virtual の vision source や source_owner=user_environment は人物側の環境観測として扱い、actor=person にしてください。\n"
         + _current_individual_side_instruction()
         + "camera の vision source は source_owner=self のとき、現在の個の視覚として扱ってください。\n"
@@ -2825,8 +2798,10 @@ def _build_activity_state_system_prompt() -> str:
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "返すトップレベルキーは activity_candidates だけです。\n"
         "activity_candidates は最大 1 件です。十分な根拠がなければ空配列にしてください。\n"
-        "各候補は actor, label, target, confidence_hint, salience_hint, ttl_hint, transition, reason_summary の 8 キーだけを持つ object にしてください。\n"
-        "actor は "
+        "各候補は actor, label, target, reason_summary, evidence_kind, confidence_hint, salience_hint, ttl_hint, transition の 9 キーだけを持つ object にしてください。\n"
+        + _activity_evidence_time_instruction()
+        + _state_grounding_evidence_instruction()
+        + "actor は "
         + " / ".join(sorted(ACTIVITY_ACTOR_VALUES))
         + " のいずれかだけを使ってください。\n"
         "label は具体的な内容名や対象名ではなく、判断と発話でそのまま使える短い活動モードを書いてください。\n"
@@ -2843,6 +2818,7 @@ def _build_activity_state_system_prompt() -> str:
         + " のいずれかだけを使ってください。\n"
         "活動推定は desktop capture 専用ではありません。current_input、recent_turns、client_context、visual_observation_context、foreground_world_state、previous_activity_context を総合してください。\n"
         "活動内容は active_app、window_title、visual_summary_text、recent_turns、client_context、previous_activity_context を合わせた意味で判断してください。\n"
+        "label と target は、その人物について今回報告または観測された活動に対応させ、reason_summary で活動主体、対象、時期と一次根拠の対応を説明します。普段の好みの訂正と、現在行っている活動や対象の変更を区別します。\n"
         "current_input.sender_kind=person の本文は人物発話です。その他の観測要約は内部文脈として扱ってください。\n"
         "この source_pack は activity_subject の人物についての活動を更新します。活動候補の actor は person です。現在の個の会話応答や待機は ongoing_action_summary で別に扱います。人物の具体的な活動が分からなければ activity_candidates を空配列にします。\n"
         "source_owner=user_environment、desktop、virtual の視覚観測、client_context の active_app/window_title は人物側の環境観測として扱い、actor=person にしてください。\n"

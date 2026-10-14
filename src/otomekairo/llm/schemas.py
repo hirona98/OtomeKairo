@@ -597,17 +597,6 @@ def world_state_source_selection_response_format() -> dict[str, Any]:
     }))
 
 
-def state_grounding_review_response_format() -> dict[str, Any]:
-    return structured_response_format(
-        "state_grounding_review",
-        closed_object({"decisions": {"type": "array", "maxItems": 4, "items": closed_object({
-            "reason_summary": {"type": "string"},
-            "evidence_kind": string_enum(STATE_GROUNDING_EVIDENCE_KINDS),
-            "index": {"type": "integer"},
-        })}}),
-    )
-
-
 def world_state_response_format() -> dict[str, Any]:
     return structured_response_format(
         "world_state",
@@ -649,11 +638,12 @@ def activity_state_response_format() -> dict[str, Any]:
                                 "type": "string",
                                 "description": "不明なときは空文字。null にはしない。",
                             },
+                            "reason_summary": {"type": "string"},
+                            "evidence_kind": string_enum(STATE_GROUNDING_EVIDENCE_KINDS),
                             "confidence_hint": string_enum(WORLD_STATE_HINT_VALUES),
                             "salience_hint": string_enum(WORLD_STATE_HINT_VALUES),
                             "ttl_hint": string_enum(WORLD_STATE_TTL_HINT_VALUES),
                             "transition": string_enum(ACTIVITY_TRANSITION_VALUES),
-                            "reason_summary": {"type": "string"},
                         }
                     ),
                 }
