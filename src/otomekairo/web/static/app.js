@@ -126,6 +126,9 @@ const OBSERVATION_STATUS_LABELS = {
 const DESKTOP_WAKE_OBSERVATION_ID = "observation:main_desktop";
 const DEFAULT_WAKE_INTERVAL_SECONDS = 300;
 const WEB_MICROPHONE_DEVICE_KEY = "otomekairo.web_microphone_device_id";
+const CONVERSATION_PERSON_NAME_KEY = "otomekairo.conversation_display_name";
+// プルダウン専用。conversation_display_name_id とは重ならない。
+const CONVERSATION_PERSON_FREE = "free";
 const MICROPHONE_SOURCE_LABELS = {
   local_microphone: "OtomeKairo",
   console_microphone: "CocoroConsole",
@@ -289,28 +292,120 @@ async function loadConversationConfig() {
   }
 }
 
-function renderConversationPersonChoices() {
-  const list = element("conversation-person-names");
-  list.replaceChildren();
-  for (const definition of state.conversationDisplayNames || []) {
-    const name = definition?.display_name;
-    if (typeof name !== "string" || !name) {
-      continue;
-    }
-    const option = document.createElement("option");
-    option.value = name;
-    list.appendChild(option);
-  }
-  const input = element("conversation-person-name");
-  if (input.dataset.touched === "true" || input.value) {
+function conversationPersonDefinitions() {
+  return (state.conversationDisplayNames || []).filter((definition) => (
+    typeof definition?.conversation_display_name_id === "string"
+    && definition.conversation_display_name_id
+    && definition.conversation_display_name_id !== CONVERSATION_PERSON_FREE
+    && typeof definition?.display_name === "string"
+    && definition.display_name
+  ));
+}
+
+function persistConversationPersonName(name) {
+  localStorage.setItem(CONVERSATION_PERSON_NAME_KEY, name);
+}
+
+function applyConversationPersonSelection(select, input) {
+  const free = select.value === CONVERSATION_PERSON_FREE;
+  input.hidden = !free;
+  if (select.dataset.touched !== "true") {
     return;
   }
-  const stored = localStorage.getItem("otomekairo.conversation_display_name");
-  input.value = stored || state.conversationDisplayName || "";
+  if (free) {
+    persistConversationPersonName(input.value);
+    return;
+  }
+  const definition = arrayById(
+    conversationPersonDefinitions(),
+    "conversation_display_name_id",
+    select.value,
+  );
+  if (definition) {
+    persistConversationPersonName(definition.display_name);
+  }
+}
+
+function renderConversationPersonChoices() {
+  const select = element("conversation-person-select");
+  const input = element("conversation-person-name");
+  const definitions = conversationPersonDefinitions();
+  const previousValue = select.value;
+  const touched = select.dataset.touched === "true";
+
+  select.replaceChildren();
+  for (const definition of definitions) {
+    const option = document.createElement("option");
+    option.value = definition.conversation_display_name_id;
+    option.textContent = definition.display_name;
+    select.append(option);
+  }
+  const freeOption = document.createElement("option");
+  freeOption.value = CONVERSATION_PERSON_FREE;
+  freeOption.textContent = "自由入力";
+  select.append(freeOption);
+
+  if (touched && previousValue) {
+    const selected = previousValue === CONVERSATION_PERSON_FREE
+      ? null
+      : arrayById(definitions, "conversation_display_name_id", previousValue);
+    if (previousValue === CONVERSATION_PERSON_FREE || selected) {
+      select.value = previousValue;
+      applyConversationPersonSelection(select, input);
+      return;
+    }
+    const storedName = localStorage.getItem(CONVERSATION_PERSON_NAME_KEY) || "";
+    const renamed = definitions.find((definition) => definition.display_name === storedName);
+    if (renamed) {
+      select.value = renamed.conversation_display_name_id;
+      applyConversationPersonSelection(select, input);
+      return;
+    }
+    select.value = CONVERSATION_PERSON_FREE;
+    input.value = storedName;
+    applyConversationPersonSelection(select, input);
+    return;
+  }
+
+  const stored = localStorage.getItem(CONVERSATION_PERSON_NAME_KEY);
+  const storedName = typeof stored === "string" ? stored : "";
+  const matched = storedName
+    ? definitions.find((definition) => definition.display_name === storedName)
+    : null;
+  if (matched) {
+    select.value = matched.conversation_display_name_id;
+    input.hidden = true;
+    return;
+  }
+  if (storedName) {
+    select.value = CONVERSATION_PERSON_FREE;
+    input.value = storedName;
+    input.hidden = false;
+    return;
+  }
+  const preferred = definitions.find((definition) => (
+    definition.display_name === state.conversationDisplayName
+  )) || definitions[0];
+  if (preferred) {
+    select.value = preferred.conversation_display_name_id;
+    input.hidden = true;
+    return;
+  }
+  select.value = CONVERSATION_PERSON_FREE;
+  input.hidden = false;
 }
 
 function conversationPersonName() {
-  return element("conversation-person-name").value.trim();
+  const select = element("conversation-person-select");
+  if (select.value === CONVERSATION_PERSON_FREE) {
+    return element("conversation-person-name").value.trim();
+  }
+  const definition = arrayById(
+    conversationPersonDefinitions(),
+    "conversation_display_name_id",
+    select.value,
+  );
+  return typeof definition?.display_name === "string" ? definition.display_name.trim() : "";
 }
 
 async function loadAvatarSpeech() {
@@ -2195,6 +2290,10 @@ async function sendMessage(event) {
   const interactionRef = state.conversationInteractionRef;
   if (!displayName) {
     showNotice("対話人物の名前を入力してください。", true);
+    const personName = element("conversation-person-name");
+    if (!personName.hidden) {
+      personName.focus();
+    }
     return;
   }
   if (!state.eventSocket || state.eventSocket.readyState !== WebSocket.OPEN) {
@@ -4632,10 +4731,19 @@ function bindEvents() {
     }
     controlAutonomousRun(button.dataset.runAction, button.dataset.runId, button);
   });
-  element("conversation-person-name").addEventListener("input", () => {
+  element("conversation-person-select").addEventListener("change", () => {
+    const select = element("conversation-person-select");
     const input = element("conversation-person-name");
-    input.dataset.touched = "true";
-    localStorage.setItem("otomekairo.conversation_display_name", input.value);
+    select.dataset.touched = "true";
+    applyConversationPersonSelection(select, input);
+    if (select.value === CONVERSATION_PERSON_FREE) {
+      input.focus();
+    }
+  });
+  element("conversation-person-name").addEventListener("input", () => {
+    const select = element("conversation-person-select");
+    select.dataset.touched = "true";
+    persistConversationPersonName(element("conversation-person-name").value);
   });
   element("conversation-person-name").addEventListener("keydown", (event) => {
     if (event.key === "Enter") {

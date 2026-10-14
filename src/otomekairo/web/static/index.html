@@ -136,9 +136,9 @@
             <button type="button" class="plain-button" id="remove-attachment">削除</button>
           </div>
           <div class="composer-person">
-            <label for="conversation-person-name">対話人物:</label>
-            <input id="conversation-person-name" list="conversation-person-names" enterkeyhint="next">
-            <datalist id="conversation-person-names"></datalist>
+            <label for="conversation-person-select">対話人物:</label>
+            <select id="conversation-person-select"></select>
+            <input id="conversation-person-name" enterkeyhint="next" hidden aria-label="人物名" placeholder="人物名">
           </div>
           <div class="composer-input-row">
             <textarea id="message-input" rows="3" placeholder="テキストと画像の入力が可能です"></textarea>
@@ -511,7 +511,7 @@
             <fieldset class="settings-group">
               <legend>対話人物の名前</legend>
               <div class="settings-list">
-                <p class="field-hint">対話した人物をこの名前で記憶します。チャット画面では自由入力も可能です。</p>
+                <p class="field-hint">対話した人物をこの名前で記憶します。チャット画面では一覧から選ぶか、自由入力できます。</p>
                 <div class="conversation-display-name-manage">
                   <select id="settings-conversation-display-name-select"></select>
                   <button type="button" id="add-conversation-display-name">追加</button>

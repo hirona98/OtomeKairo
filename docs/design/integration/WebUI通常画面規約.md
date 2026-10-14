@@ -96,11 +96,13 @@ badge、`.status.processing` / `.status.error` は上記を共有する。
 
 意味は [../configuration/設定モデル.md](../configuration/設定モデル.md) の呼ばれ方を正とする。
 
-- composer に「対話人物」の入力を置く
-- 候補は保存済み `conversation_display_name` の `display_name` とする
-- 候補以外の文字列も、その送信の `display_name` として使う
-- 未入力では送信しない
-- 入力した名前はブラウザに残す。設定の `selected_conversation_display_name_id` は変えない
+- composer に「対話人物」を置く
+- 左は選択専用のプルダウンとする。項目は保存済み `conversation_display_name` の `display_name` と「自由入力」
+- 「自由入力」を選んだときだけ、右に人物名の入力欄を出す
+- 送信する `display_name` は、選んだ定義の `display_name`、または自由入力の文字列
+- 自由入力が空のときは送信しない
+- 選んだ名前、または入力した名前はブラウザに残す。未操作のときは設定で選ばれている定義の `display_name` を表示する
+- 設定の `selected_conversation_display_name_id` は変えない
 - CocoroConsole の直接入力は、設定で選んだ1件の定義を使う
 
 ## チャット吹き出し

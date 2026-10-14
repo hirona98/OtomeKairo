@@ -818,8 +818,8 @@ a.dashboard-item:hover {
 }
 
 .composer-person {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
 }
@@ -828,6 +828,23 @@ a.dashboard-item:hover {
   color: var(--muted);
   font-size: var(--label-size);
   white-space: nowrap;
+}
+
+.composer-person select {
+  width: auto;
+  flex: 0 1 auto;
+  max-width: min(100%, var(--field-width-medium));
+}
+
+.composer-person input {
+  width: auto;
+  flex: 1 1 12em;
+  min-width: min(100%, 10em);
+  max-width: var(--field-width-medium);
+}
+
+.composer-person input[hidden] {
+  display: none;
 }
 
 #message-input {
