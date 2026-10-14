@@ -104,7 +104,7 @@ sequenceDiagram
     C-->>U: サイクル結果
 ```
 
-`generate_world_state()` と `generate_activity_state()` は候補生成の後、候補がある場合にそれぞれ `world_state_grounding_review`、`activity_state_grounding_review` の API 呼び出しを行う。審査結果を反映した候補をコード側で保存する。
+`generate_world_state()` は候補と根拠判定を同じ生成で取得し、コード側で採用候補を選ぶ。`generate_activity_state()` は候補がある場合に `activity_state_grounding_review` を追加で呼ぶ。具体的な根拠判定は [状態候補の根拠判定](状態候補根拠審査.md) を参照する。
 `generate_event_evidence()` は対象 event 群をまとめて呼び出し、返った各項目を想起側で検証する。
 
 実装: [入力サイクル](../../../src/otomekairo/service/input/cycle.py)、[共通パイプライン](../../../src/otomekairo/service/input/pipeline.py)、[想起構築](../../../src/otomekairo/recall/builder.py)、[Skill文脈](../../../src/otomekairo/service/agent_skills.py)、[結果の保存](../../../src/otomekairo/service/input/trace_persist.py)。
@@ -467,10 +467,9 @@ sequenceDiagram
         opt world_stateの生成対象がある
             C->>L: generate_world_state
             L->>G: world_state
-            opt 状態候補がある
-                L->>G: world_state_grounding_review
-            end
-            L-->>C: 審査済み状態候補
+            G-->>L: 状態候補と候補ごとの根拠判定
+            L->>L: 全候補の契約検証と根拠種別による採用候補の選別
+            L-->>C: 採用された状態候補
         end
         opt activity_stateの生成対象がある
             C->>L: generate_activity_state

@@ -619,6 +619,8 @@ def world_state_response_format() -> dict[str, Any]:
                     "items": closed_object(
                         {
                             "candidate_ref": {"type": "string"},
+                            "reason_summary": {"type": "string"},
+                            "evidence_kind": string_enum(STATE_GROUNDING_EVIDENCE_KINDS),
                             "summary_text": {"type": "string"},
                             "confidence_hint": string_enum(WORLD_STATE_HINT_VALUES),
                             "salience_hint": string_enum(WORLD_STATE_HINT_VALUES),

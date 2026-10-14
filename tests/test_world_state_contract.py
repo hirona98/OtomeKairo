@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from datetime import datetime
+from unittest.mock import patch
 
-from otomekairo.llm.contracts import LLMError, validate_world_state_contract
+from otomekairo.llm.client import LLMClient
+from otomekairo.llm.contexts import PersonaContext
+from otomekairo.llm.contracts import (
+    LLMError,
+    validate_world_state_contract,
+)
 from otomekairo.llm.mock import MockLLMClient
 from otomekairo.llm.prompts import _build_world_state_system_prompt, build_world_state_repair_prompt
+from otomekairo.llm.schemas import world_state_response_format
 from otomekairo.service.input.world_state import ServiceInputWorldStateMixin
 from otomekairo.world_state.models import (
     WorldStateClientContext,
@@ -190,6 +198,8 @@ class WorldStateContractTests(unittest.TestCase):
         pack = _source_pack()
         candidate = {
             "candidate_ref": "state_source:visual_context",
+            "reason_summary": "今回の視覚観測に支えられる。",
+            "evidence_kind": "supported_observation",
             "summary_text": "作業画面が前景にある。",
             "confidence_hint": "medium",
             "salience_hint": "high",
@@ -343,8 +353,110 @@ class WorldStateContractTests(unittest.TestCase):
         for candidate in payload["state_candidates"]:
             self.assertEqual(
                 set(candidate),
-                {"candidate_ref", "summary_text", "confidence_hint", "salience_hint", "ttl_hint"},
+                {"candidate_ref", "reason_summary", "evidence_kind", "summary_text", "confidence_hint", "salience_hint", "ttl_hint"},
             )
+
+    def test_generation_returns_only_supported_candidates_in_one_completion(self) -> None:
+        pack = _source_pack()
+        persona = PersonaContext("Test", "根拠を確かめて判断する。", None, "判断の基底。")
+        schema = world_state_response_format()["json_schema"]["schema"]
+        kinds = schema["properties"]["state_candidates"]["items"]["properties"]["evidence_kind"]["enum"]
+        acceptance = {
+            "supported_report": True, "supported_observation": True,
+            "question": False, "assistant_activity": False, "persona_setting": False,
+            "inference": False, "none": False,
+        }
+        self.assertEqual(set(kinds), set(acceptance))
+        for kind, accepted in acceptance.items():
+            with self.subTest(evidence_kind=kind):
+                candidate = {
+                    "candidate_ref": "state_source:visual_context",
+                    "reason_summary": "今回の資料と候補を照合した結果。",
+                    "evidence_kind": kind,
+                    "summary_text": "作業画面が前景にある。",
+                    "confidence_hint": "medium", "salience_hint": "high", "ttl_hint": "short",
+                }
+                with patch("otomekairo.llm.client.complete_text", return_value=json.dumps({"state_candidates": [candidate]})) as complete:
+                    result = LLMClient().generate_world_state(
+                        model_config={"model": "test"}, persona_context=persona, source_pack=pack,
+                    )
+                complete.assert_called_once()
+                self.assertEqual(complete.call_args.kwargs["response_format"], world_state_response_format())
+                expected = [candidate] if accepted else []
+                self.assertEqual(result, {"state_candidates": expected})
+
+    def test_supported_candidates_keep_order_scope_and_storage_contract(self) -> None:
+        from otomekairo.store.file_store import FileStore
+
+        pack = _source_pack()
+        persona = PersonaContext("Test", "根拠を確かめて判断する。", None, "判断の基底。")
+        candidates = [{
+            "candidate_ref": ref, "reason_summary": "元の資料と候補の照合結果。",
+            "evidence_kind": kind, "summary_text": summary,
+            "confidence_hint": "medium", "salience_hint": "medium", "ttl_hint": "short",
+        } for ref, kind, summary in (
+            ("state_source:location", "supported_report", "本人から現在地の報告がある。"),
+            ("state_source:environment", "question", "周囲の環境についての質問。"),
+            ("state_source:visual_context", "supported_observation", "作業画面が前景にある。"),
+        )]
+        with patch("otomekairo.llm.client.complete_text", return_value=json.dumps({"state_candidates": candidates})) as complete:
+            result = LLMClient().generate_world_state(
+                model_config={"model": "test"}, persona_context=persona, source_pack=pack,
+            )
+        complete.assert_called_once()
+        self.assertEqual(result["state_candidates"], [candidates[0], candidates[2]])
+        records = _WorldStateService()._normalize_world_state_candidates(
+            memory_set_id="memory:test", observed_at="2026-07-20T12:00:00+09:00",
+            source_kind="capability_result", source_ref=pack.source_ref, payload=result, source_pack=pack,
+        )
+        for record in records:
+            source = pack.source_candidate(record["candidate_ref"])
+            self.assertEqual((record["scope_type"], record["scope_key"]), (source.scope_type, source.scope_key))
+            self.assertNotIn("evidence_kind", record)
+            self.assertNotIn("reason_summary", record)
+        with TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            store.refresh_world_states(
+                memory_set_id="memory:test", current_time="2026-07-20T12:00:00+09:00",
+                world_states=records, max_active=12,
+            )
+            stored = store.list_world_states(memory_set_id="memory:test", current_time="2026-07-20T12:00:00+09:00", limit=20)
+        self.assertEqual({item["state_type"] for item in stored}, {"location", "visual_context"})
+
+    def test_invalid_grounding_fields_fail_after_repair(self) -> None:
+        pack = _source_pack()
+        persona = PersonaContext("Test", "根拠を確かめて判断する。", None, "判断の基底。")
+        candidate = {
+            "candidate_ref": "state_source:visual_context", "reason_summary": "根拠を照合した。",
+            "evidence_kind": "supported_observation", "summary_text": "作業画面が前景にある。",
+            "confidence_hint": "medium", "salience_hint": "high", "ttl_hint": "short",
+        }
+        invalid_candidates = [
+            {key: value for key, value in candidate.items() if key not in {"reason_summary", "evidence_kind"}},
+            {**candidate, "evidence_kind": "unknown"},
+            {**candidate, "evidence_kind": []},
+            {**candidate, "evidence_kind": "question", "reason_summary": ""},
+        ]
+        for invalid in invalid_candidates:
+            with self.subTest(candidate=invalid):
+                with patch("otomekairo.llm.client.complete_text", return_value=json.dumps({"state_candidates": [invalid]})) as complete:
+                    with self.assertRaises(LLMError):
+                        LLMClient().generate_world_state(
+                            model_config={"model": "test"}, persona_context=persona, source_pack=pack,
+                        )
+                self.assertEqual(complete.call_count, 2)
+
+    def test_empty_generation_and_json_repair_use_the_same_generation_path(self) -> None:
+        pack = _source_pack()
+        persona = PersonaContext("Test", "根拠を確かめて判断する。", None, "判断の基底。")
+        for responses in ([json.dumps({"state_candidates": []})], ["{invalid", json.dumps({"state_candidates": []})]):
+            with self.subTest(responses=responses):
+                with patch("otomekairo.llm.client.complete_text", side_effect=responses) as complete:
+                    result = LLMClient().generate_world_state(
+                        model_config={"model": "test"}, persona_context=persona, source_pack=pack,
+                    )
+                self.assertEqual(result, {"state_candidates": []})
+                self.assertEqual(complete.call_count, len(responses))
 
     def test_prompts_describe_candidate_ref_contract(self) -> None:
         prompts = (

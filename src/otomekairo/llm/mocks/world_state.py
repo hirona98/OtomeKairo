@@ -122,7 +122,15 @@ class LLMMockWorldStateMixin:
 
         # payload
         payload = {
-            "state_candidates": state_candidates[:4],
+            # mock の固定判定。実運用では同じ生成で LLM が根拠を判定する。
+            "state_candidates": [{
+                **candidate,
+                "reason_summary": "構造化済みの状態sourceを根拠にしたmock候補。",
+                "evidence_kind": (
+                    "supported_report" if source_pack.source_kind == "user_input"
+                    else "supported_observation"
+                ),
+            } for candidate in state_candidates[:4]],
         }
         validate_world_state_contract(payload, source_pack=source_pack)
         return payload

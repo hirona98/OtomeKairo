@@ -100,10 +100,10 @@ LLM が返した自由文をそのまま正本状態へ入れない。
 
 ## LLM 更新契約
 
-候補が非空の場合は、独立した `world_state_grounding_review` に source pack と候補を渡す。明示された本人報告または観測で支えられる候補を採用し、質問や人格本文から補った状態は除く。審査は [状態候補根拠審査](../llm/状態候補根拠審査.md) の共通契約を使う。審査に失敗した場合は更新を失敗させる。
+通常の成功経路では、`world_state` の 1 回の生成で状態候補と候補ごとの根拠判定を得る。コードは全候補の出力契約を検証した後、[状態候補の根拠判定](../llm/状態候補根拠審査.md) に従って採用候補を選ぶ。生成または契約検証が完了しない場合は更新を失敗させる。契約違反時の repair と provider 生成失敗時の再送は [LLM構造化出力transport](../llm/LLM構造化出力transport.md) を参照する。
 
 `world_state` 更新に使う LLM 契約は、観測や実行結果から短期世界状態候補を抽出するための補助契約である。
-専用モデル設定を増やさず、選択中の `model_preset` を使う。論理 role は `input_interpretation` とする。
+専用モデル設定を増やさず、選択中の `model_preset` を使う。論理 role は `world_state` とする。
 
 LLM に渡す source pack の wire shape は
 [world_state source pack](../capability/world_state_source_pack.md) を正本とする。
@@ -162,6 +162,8 @@ LLM の出力は JSON object 1 個に固定する。
   "state_candidates": [
     {
       "candidate_ref": "state_source:visual_context",
+      "reason_summary": "今回の視覚説明にチャットツールと前景チャンネルが示されている。",
+      "evidence_kind": "supported_observation",
       "summary_text": "チャットツールの general チャンネルが視覚前景にある。",
       "confidence_hint": "medium",
       "salience_hint": "medium",
@@ -175,7 +177,9 @@ LLM の出力は JSON object 1 個に固定する。
 
 - 必須トップレベルキーは `state_candidates` だけにする
 - `state_candidates` は配列にする
-- 各候補は `candidate_ref / summary_text / confidence_hint / salience_hint / ttl_hint` だけを持つ
+- 各候補は `candidate_ref / reason_summary / evidence_kind / summary_text / confidence_hint / salience_hint / ttl_hint` だけを持つ
+- `reason_summary` は候補の全内容と一次根拠の対応を説明する非空の短い自然文とする
+- `evidence_kind` の値と採用条件は [状態候補の根拠判定](../llm/状態候補根拠審査.md) を参照する
 - `candidate_ref` は source pack の `state_sources` に存在する値だけを使う
 - 同じ `candidate_ref` を重複して返さない
 - `state_sources` が空の場合は `state_candidates` を空配列にする
@@ -183,6 +187,8 @@ LLM の出力は JSON object 1 個に固定する。
 - `confidence_hint` と `salience_hint` は `low / medium / high` のいずれかにする
 - `ttl_hint` は `short / medium / long` のいずれかにする
 - raw payload、資格情報、内部 URL、配送先 client を出力しない
+
+採用候補の正規化では、`candidate_ref` からコード確定済みの状態種別と scope を解決する。`reason_summary / evidence_kind` は生成内の根拠判定に使い、永続 `world_state` の項目には追加しない。
 
 コードは LLM 出力を受けて次を決める。
 

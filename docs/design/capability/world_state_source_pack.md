@@ -127,7 +127,7 @@ LLM は結果要約が現在も成立する外部サービスの条件を表す�
 - `schedule_context.schedule_slots` があるときは deterministic な slot state を追加し、`schedule:self` と `schedule:<slot_key>` を併存させる
 - wake の selected pending-intent があるときだけ `schedule_context.pending_intent` を作り、`slot_key` を付ける
 - 対応 structured context が無い状態種別は `state_sources` に追加しない
-- LLM が返した `candidate_ref / summary_text / hint` を validator で検証する
+- LLM が返した候補と根拠判定を、[world_state の LLM 更新契約](../runtime/world_state.md#llm-更新契約) に従って検証・選別する
 - `candidate_ref` からコード確定済みの `state_type / scope_type / scope_key` を解決する
 - TTL は `summary_source` と state_type ごとの規則で決める
 - `external_service` の統合単位は `service` を使い、MCP は大文字小文字を保持した `mcp_server_id / tool_name` の組単位で別状態にする

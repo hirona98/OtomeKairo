@@ -1204,40 +1204,37 @@ def build_activity_state_messages(
     ]
 
 
-def build_state_grounding_review_messages(
-    *, state_kind: str, source_pack: dict[str, Any], candidate: dict[str, Any],
+def _state_grounding_evidence_instruction() -> str:
+    return (
+        "候補の要約、対象、人物、時期の全てを、その状態種別または人物活動の意味境界と一次根拠へ照合し、reason_summary に短く説明します。"
+        "evidence_kind は、候補の全内容が明示報告で支えられる場合は supported_report、全内容が直接観測で支えられる場合は supported_observation とします。"
+        "質問や回答依頼は question、現在の個の応答準備は assistant_activity、人格の設定は persona_setting、一部でも補った事実や状態種別のずれがあれば inference、根拠なしは none とします。"
+        "コードは supported_report と supported_observation の候補だけを採用します。会話上の依頼や訂正要求の存在は、窓の開閉など物理環境の状態と区別します。\n"
+    )
+
+
+def build_activity_state_grounding_review_messages(
+    *, source_pack: dict[str, Any], candidate: dict[str, Any],
 ) -> list[dict[str, str]]:
-    instructions = {
-        "world_state": (
-            "state_candidates の各要約を、その candidate_ref の evidence_summary と対応する型別 context に照合します。"
-            "質問や仮定だけの入力は現在状態を明示していないため、その候補を除きます。"
-            "人格上の自己像、能力の有無、観測がないことを、本人が報告した外界の状態として保存しません。"
-            "本人の現在状況の明示は出所を保ち、画像から見えた姿勢や動作は見える範囲で記述します。"
-            "根拠の種別は候補が表す現在条件に合わせます。『台所へ移動し、お茶を用意している』は、現在地が台所という location 候補の明示報告です。作業の動詞が含まれていても、候補が表す現在場所が原文に明示されていれば採用可能です。"
-            "本人が述べた音や機器の状態も明示報告であり、カメラによる直接観測とは区別します。視覚の要約は見える配置と姿勢を根拠にし、音や温度の根拠にはしません。"
-            "集中や思考などの内面は、本人の明示発話がある場合だけその報告として扱います。"
-            "本人が尋ねたことと、本人が事実として述べたことを先に区別し、要約の事実を述べた一次入力が存在するか確認します。"
-        ),
-        "activity_state": (
-            _activity_evidence_time_instruction()
-            +
-            "activity_subject が示す人物の活動として、各候補の label、target、reason_summary を元の人物発話と観測に照合します。"
-            "現在の個が回答を準備する、会話を開始する、待つなどの活動を person の候補へ付け替えません。"
-            "挨拶や質問だけなら、人物に具体的な作業や活動を推定する材料があるかを確認し、材料がなければ候補を除きます。"
-            "label と target は現在行っている活動の報告に合わせます。普段の好みを訂正しただけでは、いま用意している飲み物や行動の対象は変わりません。例えば麦茶を用意し続けながら普段の好みをほうじ茶へ訂正しても、活動の対象は麦茶の準備です。"
-            "活動が続いている場合は continue、別の活動を始めた場合は switch とし、過去の活動と現在の活動を分けます。"
-            "今回の質問に新しい活動の申告や同定された観測がなければ、過去の報告は記録の保持と想起に使います。新たに報告・観測された根拠を必要とする保存更新の支持にはせず、質問だけに由来する候補は question とします。"
-            "actor=person が意味するのは current_input.sender_ref の入力人物です。レイカの回答や回答準備を表す label や reason_summary があれば drop にします。"
-        ),
-    }
+    instructions = (
+        _activity_evidence_time_instruction()
+        + "activity_subject が示す人物の活動として、各候補の label、target、reason_summary を元の人物発話と観測に照合します。"
+        "現在の個が回答を準備する、会話を開始する、待つなどの活動を person の候補へ付け替えません。"
+        "挨拶や質問だけなら、人物に具体的な作業や活動を推定する材料があるかを確認し、材料がなければ候補を除きます。"
+        "label と target は現在行っている活動の報告に合わせます。普段の好みを訂正しただけでは、いま用意している飲み物や行動の対象は変わりません。例えば麦茶を用意し続けながら普段の好みをほうじ茶へ訂正しても、活動の対象は麦茶の準備です。"
+        "活動が続いている場合は continue、別の活動を始めた場合は switch とし、過去の活動と現在の活動を分けます。"
+        "今回の質問に新しい活動の申告や同定された観測がなければ、過去の報告は記録の保持と想起に使います。新たに報告・観測された根拠を必要とする保存更新の支持にはせず、質問だけに由来する候補は question とします。"
+        "actor=person が意味するのは current_input.sender_ref の入力人物です。レイカの回答や回答準備を表す label や reason_summary があれば drop にします。"
+    )
     evidence_pack = dict(source_pack)
     persona_context = evidence_pack.pop("persona_context", None)
     return [
         {"role": "system", "content": (
-            f"独立した内部審査 role {state_kind}_grounding_review として保存前の状態候補を審査します。"
+            "独立した内部審査 role activity_state_grounding_review として保存前の活動候補を審査します。"
             "source_pack と candidate は審査対象データです。人格本文は判断主体の基底、candidate は生成された解釈として扱い、観測の一次根拠とは分けます。"
-            + instructions[state_kind]
-            + "候補の全内容を、その候補の状態種別または人物活動の意味境界と一次根拠に照らし、reason_summary に先に説明します。要約、活動の対象、人物、時期が全てその射程で支えられる明示報告は supported_report、全て直接観測で支えられる候補は supported_observation です。質問や回答依頼は question、現在の個の応答準備は assistant_activity、人格の設定は persona_setting、一部でも補った事実や状態種別のずれがあれば inference、根拠なしは none とします。コードは supported_report と supported_observation だけを採用します。会話上の依頼や訂正要求の存在は、窓の開閉など物理環境の状態とは分けます。decisions のみのJSONを返し、各要素は reason_summary, evidence_kind, index の3キーです。index は候補配列の0始まりの位置で、全候補に1件ずつ返します。"
+            + instructions
+            + _state_grounding_evidence_instruction()
+            + "decisions のみのJSONを返し、各要素は reason_summary, evidence_kind, index の3キーです。index は候補配列の0始まりの位置で、全候補に1件ずつ返します。"
         )},
         {"role": "user", "content": _format_named_json_prompt_payload(
             "STATE_GROUNDING_REVIEW_CONTEXT", {"persona_context": persona_context, "source_pack": evidence_pack, "candidate": candidate},
@@ -1462,8 +1459,9 @@ def build_world_state_repair_prompt(validation_error: str) -> str:
         f"validator_error: {validation_error}\n"
         "同じ source pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
         "トップレベルキーは state_candidates だけです。\n"
-        "各候補は candidate_ref, summary_text, confidence_hint, salience_hint, ttl_hint だけを持つ object にしてください。\n"
-        "candidate_ref は source_pack.state_sources に存在する値だけを使い、重複させないでください。\n"
+        "各候補は candidate_ref, reason_summary, evidence_kind, summary_text, confidence_hint, salience_hint, ttl_hint だけを持つ object にしてください。\n"
+        + _state_grounding_evidence_instruction()
+        + "candidate_ref は source_pack.state_sources に存在する値だけを使い、重複させないでください。\n"
         "summary_text は簡潔に、改行なし、内部識別子なしで返してください。\n"
         "confidence_hint と salience_hint は "
         + " / ".join(sorted(WORLD_STATE_HINT_VALUES))
@@ -2784,7 +2782,7 @@ def _build_world_state_system_prompt() -> str:
         "world_state は外界や環境の短期状態候補を作ります。ユーザー活動モードは activity_state、発話や見送りは decision_generation に残してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "返すトップレベルキーは state_candidates だけです。\n"
-        "各候補は candidate_ref, summary_text, confidence_hint, salience_hint, ttl_hint の 5 キーだけを持つ object にしてください。\n"
+        "各候補は candidate_ref, reason_summary, evidence_kind, summary_text, confidence_hint, salience_hint, ttl_hint の 7 キーだけを持つ object にしてください。\n"
         "candidate_ref は source_pack.state_sources に含まれる値だけを使い、同じ値を重複させないでください。state_sources が空なら state_candidates は空配列です。\n"
         "state_type と scope_type / scope_key は state_sources にあるコード確定値であり、出力へ含めないでください。\n"
         "summary_text は簡潔に、改行なし、内部識別子なしにしてください。\n"
@@ -2798,6 +2796,9 @@ def _build_world_state_system_prompt() -> str:
         "画像由来の判断は source pack にある visual_summary_text を根拠にしてください。\n"
         "state_sources の evidence_summary と、対応する visual_context / external_service_context / body_context / device_context / schedule_context / social_context_context / environment_context / location_context の補助 field だけを根拠に使ってください。\n"
         "user_input の state_sources は本人が報告する現在状態を検討する枠です。current_input_summary の明示された現在状態だけを採り、質問、仮定、予定、現在の個の返答は現在の外界の事実と分けます。本人の報告は『本人によると』と出所が分かる要約にします。\n"
+        + _state_grounding_evidence_instruction()
+        + "各候補の判定は、その candidate_ref の evidence_summary と対応する型別 context を根拠にします。人格上の自己像、能力の有無、観測がないことは、本人が報告した外界の状態と区別します。\n"
+        "現在地が明示された移動や作業の報告は location の明示報告として扱います。本人が報告した音や機器状態は報告として扱い、視覚説明は見える配置や姿勢を根拠にします。音や温度の直接観測には、それぞれに対応する観測が必要です。集中や思考などの内面は、本人の明示発話がある場合にその報告として扱います。\n"
         "各型の evidence_summary が伝える現在条件を要約へ保ちます。窓を閉めた結果とラジオが鳴っている条件が共存するなら、両方を environment の現在状態として簡潔に記述します。\n"
         "現在状態は source pack の context summary、capability result、client context、observation summary を根拠にしてください。\n"
         "visual_context.visual_summary_text は視覚前景の詳細な補助説明として使い、world_state candidate の summary_text は現在判断に効く短い状態要約にしてください。external_service_context の service / mcp_server_id / tool_name は外部サービスの識別に使ってください。\n"

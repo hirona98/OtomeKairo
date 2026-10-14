@@ -23,6 +23,7 @@ class LLMGenerationError(LLMError):
 
 
 STATE_GROUNDING_EVIDENCE_KINDS = {"supported_report", "supported_observation", "question", "assistant_activity", "persona_setting", "inference", "none"}
+SUPPORTED_STATE_GROUNDING_EVIDENCE_KINDS = frozenset({"supported_report", "supported_observation"})
 
 
 # 設定
@@ -1602,7 +1603,7 @@ def validate_world_state_contract(
     for candidate in state_candidates:
         _validate_exact_keys(
             candidate,
-            {"candidate_ref", "summary_text", "confidence_hint", "salience_hint", "ttl_hint"},
+            {"candidate_ref", "reason_summary", "evidence_kind", "summary_text", "confidence_hint", "salience_hint", "ttl_hint"},
             "WorldState candidate",
         )
         candidate_ref = candidate["candidate_ref"]
@@ -1614,6 +1615,13 @@ def validate_world_state_contract(
         if normalized_candidate_ref in seen_candidate_refs:
             raise LLMError("WorldState state_candidates に同じ candidate_ref を重複して含めてはいけません。")
         seen_candidate_refs.add(normalized_candidate_ref)
+
+        evidence_kind = candidate["evidence_kind"]
+        if not isinstance(evidence_kind, str) or evidence_kind not in STATE_GROUNDING_EVIDENCE_KINDS:
+            raise LLMError("WorldState candidate.evidence_kind が不正です。")
+        reason_summary = candidate["reason_summary"]
+        if not isinstance(reason_summary, str) or not reason_summary.strip():
+            raise LLMError("WorldState candidate.reason_summary が必要です。")
 
         summary_text = candidate["summary_text"]
         if not isinstance(summary_text, str):
