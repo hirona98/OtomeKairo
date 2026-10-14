@@ -116,6 +116,7 @@ sequenceDiagram
 例えば「前に私が言ったことを原文で教えて」という入力では、本人の過去の会話を想起の対象とし、本人の発話原文を必要な根拠として指定する。この段階では検索方針を決め、長期記憶の検索や原文取得は後続処理が行う。行動選択と返答本文の生成は、後段の `generate_decision()` と `generate_speech()` が担当する。
 
 `generate_world_state()` と `generate_activity_state()` は、それぞれ候補と根拠判定を同じ生成で取得し、コード側で採用候補を選ぶ。具体的な根拠判定は [状態候補の根拠判定](状態候補根拠審査.md) を参照する。
+人物発話の報告抽出と `world_state` 生成の統合は、模擬データによるテストで精度に問題があったため見送った。
 `generate_event_evidence()` は対象 event 群をまとめて呼び出し、返った各項目を想起側で検証する。
 
 実装: [入力サイクル](../../../src/otomekairo/service/input/cycle.py)、[共通パイプライン](../../../src/otomekairo/service/input/pipeline.py)、[想起構築](../../../src/otomekairo/recall/builder.py)、[Skill文脈](../../../src/otomekairo/service/agent_skills.py)、[結果の保存](../../../src/otomekairo/service/input/trace_persist.py)。
