@@ -703,17 +703,10 @@ def all_response_formats() -> dict[str, dict[str, Any]]:
         "world_state": world_state_response_format(),
         "activity_state": activity_state_response_format(),
         "visual_observation": visual_observation_response_format(),
-        "visual_observation_review": visual_observation_review_response_format(),
         "visual_daily_grouping": visual_daily_grouping_response_format(),
         "visual_daily_support": visual_daily_support_response_format(),
     }
     return formats
-
-
-def visual_observation_review_response_format() -> dict[str, Any]:
-    payload = visual_observation_response_format()
-    payload["json_schema"]["name"] = "visual_observation_review"
-    return payload
 
 
 def visual_daily_grouping_response_format() -> dict[str, Any]:

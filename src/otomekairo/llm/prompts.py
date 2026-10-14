@@ -1250,18 +1250,13 @@ def build_visual_observation_messages(
     persona_context: PersonaContext,
     source_pack: dict[str, Any],
     images: list[str],
-    candidate_observation: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     enriched_pack = _with_persona_context(source_pack, persona_context)
     content = _build_visual_observation_user_prompt(source_pack=enriched_pack, images=images)
-    if candidate_observation is not None:
-        content.append({"type": "text", "text": _format_named_json_prompt_payload(
-            "CANDIDATE_OBSERVATION", candidate_observation,
-        )})
     return [
         {
             "role": "system",
-            "content": _build_visual_observation_system_prompt(review=candidate_observation is not None),
+            "content": _build_visual_observation_system_prompt(),
         },
         {
             "role": "user",
@@ -2862,12 +2857,9 @@ def _build_activity_state_system_prompt() -> str:
     )
 
 
-def _build_visual_observation_system_prompt(*, review: bool = False) -> str:
+def _build_visual_observation_system_prompt() -> str:
     return (
-        ("内部処理 role `visual_observation_review` として視覚説明を元画像へ照合します。\n"
-         "CANDIDATE_OBSERVATION は未確定の説明です。画像を直接確認し、物体の形・構造・内容・配置、人物の同定、属性ごとの不確かさを照合して、根拠に沿う最終説明を返します。名称と見える形が合わない場合は画像を優先して修正します。画像から確定できない属性は外見の説明へ戻します。要約や過去の観測が画像を上書きする根拠にはなりません。確かさと変化の判定も最終説明に揃えます。\n"
-         if review else "内部処理 role `visual_observation` として視覚入力を解釈します。\n")
-        +
+        "内部処理 role `visual_observation` として視覚入力を解釈します。\n"
         "画像と source pack を読み、JSON オブジェクト 1 個だけを返してください。\n"
         "persona_context の人格全体に基づき、この role の問いと出力契約に従って処理してください。見えていないものを足してはいけません。\n"
         + _person_reference_instruction()
@@ -2882,6 +2874,7 @@ def _build_visual_observation_system_prompt(*, review: bool = False) -> str:
         "summary_text では、画像に見えている内容のうち判断に効く部分を具体的に書いてください。\n"
         "画像の輪郭、色、境界、配置、動きとして直接確認できる特徴から説明を組み立てます。対象の種類、内容、量などに複数の解釈が残る場合は、見える外見と判別できない属性を分け、未確認の識別は不明とします。\n"
         "物体は今回の画像にある形と構造から同定します。用途や内部の状態まで確かめられない容器などは、見える形・色・中に見えるものを記述し、用途を確定させる名称より観測できる説明を選びます。\n"
+        "説明を確定する際に、物体の名称と見える形・構造・内容・配置、人物の同定、属性ごとの確かさを元画像へ照合します。名称や属性を画像で確かめられない場合は、直接確認できる外見と判別できない点を説明します。confidence_hint と視覚変化の判定は、この最終説明と同じ根拠に揃えます。\n"
         + _observation_certainty_instruction()
         + "\n"
         "source_pack.observed_persons が今回の画像で同定済みの人物です。空配列なら画像内の全員が未同定なので、人物は『映っている人物』と記述します。前回要約の人物名や人格本文の関係は同定結果ではありません。\n"

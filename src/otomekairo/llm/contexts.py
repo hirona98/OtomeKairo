@@ -42,7 +42,6 @@ PERSONA_CONTEXT_ROLES = frozenset({
     "world_state",
     "activity_state",
     "visual_observation",
-    "visual_observation_review",
     "visual_daily_grouping",
     "visual_daily_support",
     "drive_state",

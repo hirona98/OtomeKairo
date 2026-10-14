@@ -78,7 +78,7 @@ index が壊れた場合は `visual_observation_record.detailed_summary_text` �
 
 ## LLM 契約
 
-専用モデル設定を増やさず、選択中の `model_preset` を使う。論理 role は `input_interpretation` とする。
+専用モデル設定を増やさず、選択中の `model_preset` を使う。論理 role は `visual_observation` とする。
 
 LLM に渡す source pack は少なくとも次を持つ。
 
@@ -144,7 +144,7 @@ LLM の出力は JSON object 1 個に固定する。
 
 1. 画像入力を受ける
 2. raw image を保存せず、LLM へ multimodal input として渡す
-3. LLM が詳細な `summary_text` と構造化した視覚変化判定を生成し、同じモデルの独立した画像照合呼出しで元画像と未確定の説明を比較して最終結果を返す
+3. LLM が元画像に基づく詳細な `summary_text` と構造化した視覚変化判定を生成し、コードが出力契約を検証する
 4. `observation_summary.image_interpreted=true`、`image_input_kind`、`visual_observation_id`、`visual_summary_text` を付ける
 5. `visual_summary_text` を `visual_observation_record.detailed_summary_text` として保存する
 6. `scene_entities / activity_labels / environment_labels` と検索用 index を派生する
@@ -154,7 +154,7 @@ LLM の出力は JSON object 1 個に固定する。
 10. 重要、反復、継続、会話結合を満たす場合は記憶候補にする
 
 この段階の出力は `visual_observation_record` と派生データに集約する。
-画像照合は `visual_observation_review` の論理 role とし、通常会話の添付画像と `vision.capture` の両方で保存・後段の判断より先に行う。生成と同じ出力契約を使い、物体の名称と形・構造・配置、人物の同定、不確かな属性、変化判定を元画像に照合する。保存する詳細説明は審査後のものとする。画像照合に失敗した場合は入力サイクルを明示的に失敗させる。
+通常の成功経路では、`visual_observation` の 1 回の生成で詳細説明と視覚変化判定を得る。生成時に物体の名称と形・構造・配置、人物の同定、属性ごとの確かさを元画像へ照合し、確信度と変化判定を最終説明の根拠に揃える。コードの出力契約検証を通過した結果を保存し、後段の判断へ渡す。契約違反時の repair と provider 生成失敗時の再送は [LLM構造化出力transport](../llm/LLM構造化出力transport.md) に従い、生成または契約検証が完了しない場合は入力サイクルを明示的に失敗させる。
 詳細説明は直接見える形・色・配置・動きと、種類・内容・量などの解釈を区別する。複数の解釈が残る属性は、見える外見と判別できない点を分けて記述する。レコード全体の `confidence_hint` が高くても、各属性の不確かさは消さない。
 物体の同定は今回の画像にある形と構造を根拠にする。用途や内部の状態が確認できない場合は、形・色・内部に見えるものを記述し、用途を確定させる名称より観測できる説明を選ぶ。過去の観測要約は変化の比較に使い、今回の物体名や属性を同定する根拠にはしない。
 短期状態、episode、記憶候補は `visual_observation_record` と派生データを経由して作る。

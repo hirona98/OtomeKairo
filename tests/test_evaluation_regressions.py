@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -56,7 +57,7 @@ class EvaluationRegressionTests(unittest.TestCase):
             "change_basis": "no_previous_observation",
             "change_reason_summary": "前回の観測がない。",
         }
-        with patch.object(type(self.service.llm), "generate_visual_observation_summary", return_value=visual_result):
+        with patch("otomekairo.llm.client.complete_text", return_value=json.dumps(visual_result)) as complete:
             _, interpreted = self.service._interpret_visual_observation(
                 state=self.state,
                 started_at=NOW,
@@ -73,6 +74,7 @@ class EvaluationRegressionTests(unittest.TestCase):
                 input_text="カメラの結果を受信。",
                 images=["data:image/png;base64,YQ=="],
             )
+        complete.assert_called_once()
         wake_summary = self.service._wake_policy_observation_success_summary(
             observation={"observation_id": "wake_observation:camera", "capability_id": "vision.capture"},
             capability_response={"request_id": "request:test-camera"},

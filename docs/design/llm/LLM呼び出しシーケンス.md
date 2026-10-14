@@ -459,10 +459,9 @@ sequenceDiagram
 
     C->>L: generate_visual_observation_summary（画像と文脈）
     L->>G: visual_observation
-    G-->>L: 観測候補
-    L->>G: visual_observation_review（画像と候補を再照合）
-    G-->>L: 照合済み観測
-    L-->>C: 要約と詳細観測
+    G-->>L: 詳細説明・確信度・視覚変化判定
+    L->>L: 出力契約を検証
+    L-->>C: 契約検証済みの視覚観測
     C->>S: visual_observation_recordを保存
     alt 思考前観測の結果
         opt world_stateの生成対象がある

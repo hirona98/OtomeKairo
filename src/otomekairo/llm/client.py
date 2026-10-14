@@ -83,7 +83,6 @@ from otomekairo.llm.schemas import (
     recall_pack_selection_response_format,
     response_format_schema_name,
     visual_observation_response_format,
-    visual_observation_review_response_format,
     world_state_response_format,
 )
 from otomekairo.llm.prompts import (
@@ -1913,7 +1912,7 @@ class LLMClient:
             source_pack=source_pack,
             images=images,
         )
-        candidate = self._generate_structured_payload(
+        return self._generate_structured_payload(
             model_config=model_config,
             messages=messages,
             validator=validate_visual_observation_contract,
@@ -1922,19 +1921,6 @@ class LLMClient:
             response_format=visual_observation_response_format(),
             wrap_validation_error=True,
             operation=operation,
-        )
-        return self._generate_structured_payload(
-            model_config=model_config,
-            messages=build_visual_observation_messages(
-                persona_context=persona_context, source_pack=source_pack, images=images,
-                candidate_observation=candidate,
-            ),
-            validator=validate_visual_observation_contract,
-            repair_prompt_builder=build_visual_observation_repair_prompt,
-            failure_message="VisualObservation の画像照合に失敗しました。",
-            response_format=visual_observation_review_response_format(),
-            wrap_validation_error=True,
-            operation="visual_observation_review",
         )
 
     def generate_embeddings(
