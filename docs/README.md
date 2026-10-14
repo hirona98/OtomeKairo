@@ -8,6 +8,7 @@ OtomeKairo は、人格設定と記憶を基盤に、その時点で成立する
 
 用語の正規語は [用語表.md](用語表.md) を参照する。
 全体像は [design/foundation/アーキテクチャ.md](design/foundation/アーキテクチャ.md) から入る。
+主要な LLM 呼び出しの順序と条件分岐は [LLM呼び出しシーケンス](design/llm/LLM呼び出しシーケンス.md) を参照する。
 
 ## 構成
 
