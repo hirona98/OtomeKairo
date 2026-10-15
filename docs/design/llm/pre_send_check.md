@@ -7,7 +7,7 @@
 設定 wire は [../api/状態と設定.md](../api/状態と設定.md)、event wire は [../api/event_stream.md](../api/event_stream.md)、dispatch 順序は [../api/実行連携.md](../api/実行連携.md) を正とする。
 
 `pre_send_check` は、外部サービスへ送る最終 `arguments` に、現実人物の私的情報、資格情報、第三者との私的会話、精密な位置や予定、健康、金銭、法務、非公開観測などが含まれないかを意味判定する。
-対人発話の `disclosure_review` とは role、入力、出力契約を分ける。
+対人発話の共有可否は行動・本文生成で扱い、この外部MCP送信境界とは入力と出力契約を分ける。
 
 ## 適用境界
 

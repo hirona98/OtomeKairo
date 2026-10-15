@@ -830,7 +830,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
     def test_compose_separated_decisions_advances_both(self) -> None:
         service = DummyInputService()
         composed = service._compose_separated_decisions(
-            self_decision={
+            self_decision={"speech_text": None,
                 "kind": "autonomous_run",
                 "reason_code": "visit_place",
                 "reason_summary": "その関心に関わる。",
@@ -861,7 +861,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                     }
                 ],
             },
-            outward_decision={
+            outward_decision={"speech_text": "検証用の発話です。",
                 "kind": "speech",
                 "reason_code": "soft_aside",
                 "reason_summary": "短い独り言を残す。",
@@ -1314,21 +1314,8 @@ class WakeInterventionLoadTests(unittest.TestCase):
             state={"selected_memory_set_id": "memory:test"},
             cycle_id="cycle:test",
             started_at="2026-06-20T11:00:00+09:00",
-            input_text=current_input.text,
             current_input=current_input,
-            recent_turns=[],
-            time_context={},
-            affect_context={},
-            drive_state_summary=None,
-            foreground_world_state=None,
-            activity_context=None,
-            ongoing_action_summary=None,
-            initiative_context=None,
             agent_skill_context=None,
-            self_state_context=None,
-            people_context=[],
-            relationship_context=None,
-            prediction_error_context=None,
             workspace_context={
                 "workspace_candidates": [
                     {
@@ -1343,11 +1330,6 @@ class WakeInterventionLoadTests(unittest.TestCase):
                 ]
             },
             visual_observation_context=None,
-            reference_context=None,
-            recall_hint={},
-            recall_pack={},
-            model_config={},
-            persona_context=None,
             decision=decision,
             assistant_message_target_client_id=None,
             cycle_label="cycle:test",

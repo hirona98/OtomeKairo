@@ -327,6 +327,8 @@ class ServiceInputDecisionComparisonMixin:
             text="自己評価。いま短い見方として外へ出るかを見る。",
         )
         return self._build_decision_context(
+            disclosure_context=kwargs.get("disclosure_context"),
+            configured_activity_topics=kwargs.get("configured_activity_topics"),
             recent_interactions=kwargs.get("recent_interactions"),
             input_text=isolated_input.text,
             current_input=isolated_input,
@@ -739,7 +741,7 @@ class ServiceInputDecisionComparisonMixin:
             outward = dict(self._execution_outward_decision(decision))
             outward.update(
                 {
-                    "kind": "noop",
+                    "kind": "noop", "speech_text": None,
                     "reason_code": reason_code,
                     "reason_summary": reason_summary,
                     "requires_confirmation": False,
@@ -776,7 +778,7 @@ class ServiceInputDecisionComparisonMixin:
         combined_reason = f"{reason_summary} 元判断: {original_reason}" if original_reason else reason_summary
         decision.update(
             {
-                "kind": "noop",
+                "kind": "noop", "speech_text": None,
                 "reason_code": reason_code,
                 "reason_summary": combined_reason,
                 "requires_confirmation": False,
@@ -846,7 +848,7 @@ class ServiceInputDecisionComparisonMixin:
         reason_summary = "送信前チェックの結果、外部送信を行わず終了した。"
         outward_decision = self._execution_outward_decision(decision)
         self_hold = {
-            "kind": "noop",
+            "kind": "noop", "speech_text": None,
             "reason_code": "pre_send_check_withheld",
             "reason_summary": reason_summary,
             "requires_confirmation": False,
@@ -876,7 +878,7 @@ class ServiceInputDecisionComparisonMixin:
             updated = dict(decision)
             updated.update(
                 {
-                    "kind": "noop",
+                    "kind": "noop", "speech_text": None,
                     "reason_code": "pre_send_check_withheld",
                     "reason_summary": reason_summary,
                     "requires_confirmation": False,

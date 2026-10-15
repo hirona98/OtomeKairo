@@ -497,25 +497,6 @@ def validate_answer_contract_contract(payload: dict[str, Any]) -> None:
             raise LLMError("AnswerContract.query_terms に空または文字列以外の値が含まれています。")
 
 
-def validate_disclosure_review_contract(payload: dict[str, Any]) -> None:
-    # 他者由来記憶の開示可否と最終発話だけを返す。
-    _validate_exact_keys(
-        payload,
-        {"outcome", "speech_text", "reason_code"},
-        "DisclosureReview",
-    )
-    outcome = payload["outcome"]
-    if outcome not in DISCLOSURE_REVIEW_OUTCOMES:
-        raise LLMError("DisclosureReview.outcome が不正です。")
-    speech_text = payload["speech_text"]
-    if outcome == "withhold":
-        if speech_text is not None:
-            raise LLMError("DisclosureReview.outcome=withhold の speech_text は null です。")
-    elif not isinstance(speech_text, str) or not speech_text.strip():
-        raise LLMError("DisclosureReview の許可・書き換え結果には speech_text が必要です。")
-    reason_code = payload["reason_code"]
-    if not isinstance(reason_code, str) or not reason_code.strip():
-        raise LLMError("DisclosureReview.reason_code は空にできません。")
 
 
 def validate_pre_send_check_contract(payload: dict[str, Any]) -> None:
@@ -911,6 +892,7 @@ def validate_decision_contract(
         "reason_code",
         "reason_summary",
         "requires_confirmation",
+        "speech_text",
         "pending_intent",
         "capability_request",
         "autonomous_run",
@@ -933,6 +915,11 @@ def validate_decision_contract(
         raise LLMError("Decision reason_summary は空でない文字列である必要があります。")
     if not isinstance(payload["requires_confirmation"], bool):
         raise LLMError("Decision requires_confirmation は真偽値である必要があります。")
+    if payload["kind"] == "speech":
+        if not isinstance(payload["speech_text"], str) or not payload["speech_text"].strip():
+            raise LLMError("Decision kind=speech では空でない speech_text が必要です。")
+    elif payload["speech_text"] is not None:
+        raise LLMError("Decision kind=speech 以外では speech_text は null です。")
     if payload["kind"] == "pending_intent":
         pending_intent = payload["pending_intent"]
         required_pending_keys = {
@@ -1159,12 +1146,14 @@ def validate_autonomous_step_contract(payload: dict[str, Any]) -> None:
 
     if action["kind"] == "speech":
         speech = action["speech"]
-        if not isinstance(speech, dict) or set(speech.keys()) != {"reason_code", "reason_summary"}:
+        if not isinstance(speech, dict) or set(speech.keys()) != {"reason_code", "reason_summary", "speech_text"}:
             raise LLMError("AutonomousStep action.speech が不正です。")
         if not isinstance(speech["reason_code"], str) or not speech["reason_code"].strip():
             raise LLMError("AutonomousStep action.speech.reason_code は空でない文字列です。")
         if not isinstance(speech["reason_summary"], str) or not speech["reason_summary"].strip():
             raise LLMError("AutonomousStep action.speech.reason_summary は空でない文字列です。")
+        if not isinstance(speech["speech_text"], str) or not speech["speech_text"].strip():
+            raise LLMError("AutonomousStep action.speech.speech_text は空でない文字列です。")
     elif action["speech"] is not None:
         raise LLMError("AutonomousStep speech 以外の action では speech は null です。")
 

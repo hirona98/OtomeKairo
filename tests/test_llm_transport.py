@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from otomekairo.llm.client import LLMClient
-from otomekairo.llm.contexts import CurrentInput, PersonaContext, SpeechContext
+from otomekairo.llm.contexts import CurrentInput, PersonaContext
 from otomekairo.llm.contracts import LLMError
 from otomekairo.llm.transport import complete_text
 from otomekairo.llm.schemas import materialize_provider_open_maps
@@ -36,29 +36,6 @@ def _current_input() -> CurrentInput:
         response_target_refs=("person:test",),
         interaction_context=None,
         text="こんにちは",
-    )
-
-
-def _speech_context() -> SpeechContext:
-    return SpeechContext(
-        input_text="こんにちは",
-        current_input=_current_input(),
-        recent_turns=[],
-        time_context={},
-        affect_context={},
-        drive_state_summary=None,
-        foreground_world_state=None,
-        activity_context=None,
-        ongoing_action_summary=None,
-        initiative_context=None,
-        visual_observation_context=None,
-        self_state_context=None,
-        relationship_context=None,
-        prediction_error_context=None,
-        workspace_context=None,
-        recall_hint={},
-        recall_pack={},
-        decision={"kind": "speech"},
     )
 
 
@@ -374,40 +351,3 @@ class LLMTransportTests(unittest.TestCase):
         self.assertEqual(kwargs["response_format"]["type"], "json_schema")
         self.assertEqual(kwargs["response_format"]["json_schema"]["name"], "pre_send_check")
         self.assertTrue(kwargs["response_format"]["json_schema"]["strict"])
-
-    def test_speech_returns_generated_text_in_one_completion(self) -> None:
-        # 生成結果の受け渡しを確認し、自然文の精度は評価しない。
-        content = "  こんにちは。\n今の見方を伝えます。  "
-        with patch("otomekairo.llm.client.complete_text", return_value=content) as complete:
-            result = LLMClient().generate_speech(
-                model_config={"model": "provider/test"},
-                persona_context=_persona_context(), context=_speech_context(),
-            )
-        complete.assert_called_once()
-        self.assertNotIn("response_format", complete.call_args.kwargs)
-        self.assertEqual(result, {
-            "speech_text": content.strip(), "speech_style_notes": "model=provider/test",
-            "confidence_note": "litellm_model",
-        })
-
-    def test_speech_empty_output_fails_without_another_completion(self) -> None:
-        for content in ("", " \n "):
-            with self.subTest(content=content):
-                with patch("otomekairo.llm.client.complete_text", return_value=content) as complete:
-                    with self.assertRaisesRegex(LLMError, "生成結果が空"):
-                        LLMClient().generate_speech(
-                            model_config={"model": "provider/test"},
-                            persona_context=_persona_context(), context=_speech_context(),
-                        )
-                complete.assert_called_once()
-
-    def test_speech_provider_error_propagates_without_another_completion(self) -> None:
-        error = LLMError("provider failed")
-        with patch("otomekairo.llm.client.complete_text", side_effect=error) as complete:
-            with self.assertRaises(LLMError) as raised:
-                LLMClient().generate_speech(
-                    model_config={"model": "provider/test"},
-                    persona_context=_persona_context(), context=_speech_context(),
-                )
-        self.assertIs(raised.exception, error)
-        complete.assert_called_once()

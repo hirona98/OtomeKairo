@@ -47,7 +47,7 @@ LLM には時刻の生活文脈要約だけを渡す。
 - `pending_intent_candidates` の upsert / dedupe / expiry 管理
 - background thinking scheduler の interval 制御
 - capability result の follow-up
-- `decision_generation` / `expression_generation`
+- 行動と本文を生成する `decision_generation`
 - 記憶更新と `turn consolidation`
 
 ## 基本構成

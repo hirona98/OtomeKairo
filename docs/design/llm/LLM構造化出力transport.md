@@ -12,7 +12,6 @@ model_preset の項目意味は [../configuration/モデルプリセット詳細
 
 対象外は次である。
 
-- `expression_generation`（`generate_speech`）。自由文の発話本文を返す
 - embedding
 - `model` が `mock` で始まる開発用経路。LiteLLM を通さない
 

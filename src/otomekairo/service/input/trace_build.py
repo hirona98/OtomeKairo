@@ -880,10 +880,6 @@ class ServiceInputTraceBuildMixin:
             "internal_failure_summary": None,
             "duration_ms": self._duration_ms(started_at, finished_at),
         }
-        if isinstance(speech_payload, dict) and isinstance(speech_payload.get("disclosure_review"), dict):
-            trace["disclosure_review"] = speech_payload["disclosure_review"]
-        elif isinstance(decision.get("disclosure_review"), dict):
-            trace["disclosure_review"] = decision["disclosure_review"]
         if isinstance(capability_request_summary, dict):
             trace["capability_request_summary"] = capability_request_summary
         if isinstance(ongoing_action_transition_summary, dict):

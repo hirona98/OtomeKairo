@@ -19,7 +19,6 @@
 - `memory_candidate_review`
 - `affect_review`
 - `memory_reflection_summary`
-- `disclosure_review`
 - `pre_send_check`
 - `world_state` 候補抽出
 - `activity_state` 候補抽出
@@ -50,7 +49,7 @@ JSON payload は `<<<OTOMEKAIRO_SOURCE_PACK>>>` や `<<<OTOMEKAIRO_JSON_PAYLOAD>
 全補助 role の source pack には原則として `persona_context` を含める。
 `persona_context` は選択中 persona から作る runtime 文脈であり、適用方針は [../configuration/人格設定詳細.md](../configuration/人格設定詳細.md) を正とする。
 `persona_context` は候補集合、観測事実、ユーザー発話、根拠 ID、scope、memory_type、state_type を上書きする入力ではない。
-`expression_addon` は `expression_generation` にだけ渡し、補助 role の `persona_context` には入れない。
+`expression_addon` の適用範囲は [人格設定詳細](../configuration/人格設定詳細.md#expression_addon) を正とし、補助roleの判断材料にはしない。
 
 外部送信の安全境界である `pre_send_check` は例外とし、送信候補、送信先、tool metadata 以外の文脈を追加しない。
 この例外の入力と failure 境界は [pre_send_check.md](pre_send_check.md) を正とする。
@@ -58,7 +57,7 @@ JSON payload は `<<<OTOMEKAIRO_SOURCE_PACK>>>` や `<<<OTOMEKAIRO_JSON_PAYLOAD>
 人物同一性は各 role の入力に含まれる構造化済みの `person_ref` で扱う。
 `people_context` は、選択済みの構造化文脈に現れる人物だけを `person_ref / display_name` の組で持つ。
 LLM 補助 role は schema 値に API 由来の `person_ref` を使い、内部自然文で人物名が必要な場合は対応する `display_name` を使う。
-`expression_generation` が応答対象の人物を直接呼ぶ場合は、対応する `display_name` を敬称の追加、削除、言い換えなしで使う。
+生成する本文で応答対象の人物を直接呼ぶ場合は、対応する `display_name` を敬称の追加、削除、言い換えなしで使う。
 `response_target_refs` が空の発話本文は人物への直接呼称を持たない。
 
 次を守る。

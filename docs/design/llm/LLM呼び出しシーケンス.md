@@ -95,13 +95,14 @@ sequenceDiagram
             C->>C: 選択資料の読込と文脈への追加
         end
     end
-    C->>L: 行動を判断（generate_decision）［図 2］
-    L-->>C: 判断
+    opt 他人物由来の共有条件を確認する資料がある
+        C->>D: 選定済み出所eventの元発話を取得
+        D-->>C: 共有許可の元発話と出所
+    end
+    C->>L: 行動・共有範囲・最終本文を生成（generate_decision）［図 2］
+    L-->>C: 判断と、発話する場合の最終本文
     alt 発話を選ぶ
-        C->>L: 発話を生成（generate_speech）［図 2］
-        opt 他人物由来の開示審査対象がある
-            C->>L: 開示の可否を審査（generate_disclosure_review）［図 2］
-        end
+        C->>C: 判断に含まれる最終本文を配送
     else 能力実行を選ぶ（capability_request）
         C->>C: 能力の実行境界へ要求を渡す［図 3］
     else 自律作業を選ぶ（autonomous_run）
@@ -125,43 +126,41 @@ sequenceDiagram
 
 入力には、現在の入力本文と発信者・会話などの構造化情報、人格設定、直近会話、現在時刻を渡す。解釈済みの画像説明と活動状態がある場合は、内部補助文脈として渡す。入力の詳細と出力契約は [RecallHint](../memory/想起と判断.md#recallhint) と [AnswerContract](../memory/想起と判断.md#answercontract) を正とする。
 
-例えば「前に私が言ったことを原文で教えて」という入力では、本人の過去の会話を想起の対象とし、本人の発話原文を必要な根拠として指定する。この段階では検索方針を決め、長期記憶の検索や原文取得は後続処理が行う。行動選択と返答本文の生成は、後段の `generate_decision()` と `generate_speech()` が担当する。
+例えば「前に私が言ったことを原文で教えて」という入力では、本人の過去の会話を想起の対象とし、本人の発話原文を必要な根拠として指定する。この段階では検索方針を決め、長期記憶の検索や原文取得は後続処理が行う。行動選択と返答本文の生成は、後段の `generate_decision()` がまとめて担当する。
 
 実装: [入力サイクル](../../../src/otomekairo/service/input/cycle.py)、[共通パイプライン](../../../src/otomekairo/service/input/pipeline.py)、[想起構築](../../../src/otomekairo/recall/builder.py)、[Skill文脈](../../../src/otomekairo/service/agent_skills.py)、[結果の保存](../../../src/otomekairo/service/input/trace_persist.py)。
 契約: [想起と判断](../memory/想起と判断.md)、[RecallPackのLLM選別](../memory/RecallPackのLLM選別.md)、[event_evidenceの取得](../memory/event_evidenceの取得.md)、[状態候補根拠審査](状態候補根拠審査.md)、[AgentSkills統合](../integration/AgentSkills統合.md)。
 
 ## 図 2: 判断と発話の生成
 
-入口は `generate_decision()` と、発話を選んだ場合の `generate_speech()`。
-発話本文は、現在入力・観測・記憶・実行状態の根拠に沿って最初の生成で作る。ツールに渡す本文も行動の案と同じ生成で作り、外部送信直前の送信可否チェック［図 3］は別の段階で行う。
-必要な自律作業は、最初の行動の案に含める。
-外向きに話すか控えるかも、理由を根拠に合わせて最初の行動の案で決める。
+入口は `generate_decision()`。行動選択、今の相手へ伝えてよい範囲、最終本文を1回の生成で決める。
+必要な共有許可の元発話は、生成前にDBから取得する。人物発話・別の場の会話・観測・記憶・共有条件は出所を分けて渡す。
+通常の成功経路で、発話生成や開示確認のための後続LLM呼び出しは行わない。出力契約違反時の1回のrepairは共通の構造化生成の規則に従う。
+外部MCPへ送る要求の送信前チェック［図 3］は別の実行境界で行う。
 
 ```mermaid
 sequenceDiagram
     participant C as 判断パイプライン
+    participant D as DB
     participant L as LLMClient
     participant G as 通常生成API
 
-    C->>L: 何をするか考える（generate_decision）
-    L->>G: 行動と必要なツール入力の案を作る（decision_generation）
-    G-->>L: 行動の案
-    L-->>C: 採用する行動の案
-    opt 発話すると決まった
-        C->>L: 話す内容を作る（generate_speech）
-        L->>G: 根拠に沿って話す文章を作る（expression_generation）
-        G-->>L: 話す文章
-        L-->>C: 話す文章
-        opt 他の人の情報について、共有の確認が必要
-            C->>L: 今の相手に伝えてよいか確認（generate_disclosure_review）
-            L->>G: 伝える相手・内容・許可の条件を確認（disclosure_review）
-            G-->>L: 共有してよい範囲の判定
-            L-->>C: そのまま伝える・書き換える・伝えない、の判定
-        end
+    opt 共有条件の根拠となる元発話が必要
+        C->>D: 選定済み出所eventを取得
+        D-->>C: 元発話・人物・参加者・発生日時
+        Note over C,D: 必要な根拠を取得できなければ明示的に失敗
+    end
+    C->>L: 行動と、伝えてよい最終本文を考える（generate_decision）
+    L->>G: 行動・共有範囲・最終本文を生成（decision_generation）
+    G-->>L: 行動と、発話する場合の本文（speech_text）
+    L->>L: 出力契約・参照・能力の実行条件を検証
+    L-->>C: 採用する判断と最終本文
+    opt 発話を選んだ
+        C->>C: 判断に含まれる最終本文を配送
     end
 ```
 
-実装: [LLMClient](../../../src/otomekairo/llm/client.py) の `generate_decision()`、`generate_speech()` と、[パイプライン](../../../src/otomekairo/service/input/pipeline.py) の `_apply_disclosure_review()`。
+実装: [LLMClient](../../../src/otomekairo/llm/client.py) の `generate_decision()` と、[パイプライン](../../../src/otomekairo/service/input/pipeline.py) の `_build_disclosure_context()`、`_run_pipeline_output()`。
 契約: [判断と行動](../runtime/判断と行動.md)、[プロンプトの意味レイヤー](プロンプト文脈分離方針.md#意味レイヤー)、[外部本文の生成と根拠](外部本文の根拠照合.md)、[想起と判断の共有許可](../memory/想起と判断.md#共有許可と受け手の照合)。
 
 ## 図 3: 能力実行、送信前チェック、結果からの後続判断
@@ -318,13 +317,9 @@ sequenceDiagram
             A->>A: 自律作業・現在状態・Skillの文脈を構築
             Note over A,L: Skill一覧と追加資料があればSkill選択APIも呼ぶ
             A->>L: 自律作業の次の一手を判断（generate_autonomous_step）
-            L->>G: 次の一手と必要なツール入力の案を生成（autonomous_step_generation）
+            L->>G: 次の一手・必要な入力・最終発話本文を生成（autonomous_step_generation）
             G-->>L: 次の一手の候補
             L-->>A: 今回の行動（action）と作業の状態遷移（transition）
-            opt 発話を選んだ（speech）
-                A->>L: 発話を生成（generate_speech）
-                L->>G: 根拠に沿って発話を生成（expression_generation）［図 2］
-            end
             opt 能力実行以外で作業完了を候補にする（complete）
                 A->>L: 自律作業の完了を審査（generate_autonomous_completion_review）
                 L->>G: 自律作業の完了判定を生成（autonomous_completion_review）

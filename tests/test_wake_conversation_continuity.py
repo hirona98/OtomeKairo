@@ -111,7 +111,7 @@ class WakeConversationContinuityTests(unittest.TestCase):
         def choose_speech(**kwargs):
             result = generate_decision(**kwargs)
             if kwargs["context"].comparison_scope in {"full", "outward_speech"}:
-                result.update(kind="speech", reason_summary="周囲の変化に短く触れる。",
+                result.update(kind="speech", speech_text="周囲への短い見方です。", reason_summary="周囲の変化に短く触れる。",
                               pending_intent=None, capability_request=None, autonomous_run=None)
                 for stance in result["target_stances"]:
                     stance["stance"] = "advance" if stance["target"] == "outward_speech" else "hold"
@@ -126,18 +126,13 @@ class WakeConversationContinuityTests(unittest.TestCase):
                          side_effect=choose_speech) as decisions,
             patch.object(type(self.service.llm), "generate_input_interpretation",
                          wraps=self.service.llm.generate_input_interpretation) as interpretations,
-            patch.object(type(self.service.llm), "generate_speech",
-                         wraps=self.service.llm.generate_speech) as expressions,
-            patch.object(type(self.service.llm), "generate_disclosure_review", side_effect=lambda **kwargs: {
-                "outcome": "allow", "speech_text": kwargs["review_context"]["candidate_speech"],
-                "reason_code": "no_private_details",
-            }) as reviews,
         ):
             result = self.service._execute_wake_cycle(
                 state=self.state, client_context={}, trigger_kind="background_thinking",
             )
 
         self.assertEqual(result["result_kind"], "speech", result)
+        self.assertEqual(decisions.call_count, 2 if separated else 1)
         contexts = [call.kwargs["context"] for call in decisions.call_args_list]
         self.assertEqual(
             {c.comparison_scope for c in contexts},
@@ -160,14 +155,8 @@ class WakeConversationContinuityTests(unittest.TestCase):
         self.assertTrue(interpretations.called)
         for call in interpretations.call_args_list:
             self.assertEqual(call.kwargs["recent_turns"], [])
-        self.assertEqual(expressions.call_count, 1)
-        speech_context = expressions.call_args.kwargs["context"]
-        self.assertEqual(speech_context.recent_turns, [])
-        self.assertFalse(hasattr(speech_context, "recent_interactions"))
-        self.assertEqual(speech_context.initiative_context.recent_turn_summary, [])
-        self.assertEqual(reviews.call_count, 1)
         self.assertEqual(
-            [s["event_id"] for s in reviews.call_args.kwargs["review_context"]["other_person_sources"]],
+            [source["event_id"] for source in outward[0].disclosure_context["other_person_sources"]],
             ["event:invitation", "event:question"],
         )
         trace = self.service.store.get_cycle_trace(result["cycle_id"])

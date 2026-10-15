@@ -2,31 +2,29 @@ from __future__ import annotations
 
 from typing import Any
 
-from otomekairo.llm.contexts import InitiativeContext, SpeechContext
+from otomekairo.llm.contexts import InitiativeContext, DecisionContext
 from otomekairo.llm.contracts import INITIATIVE_ENTRY_ENTER_BASIS_VALUES
 
 
 class LLMMockSpeechMixin:
-    def generate_speech(
+    def _mock_speech_text(
         self,
         *,
         model_config: dict,
         persona_context: Any,
-        context: SpeechContext,
-    ) -> dict[str, Any]:
+        context: DecisionContext,
+        decision: dict[str, Any],
+    ) -> str:
         # model確認
         self._assert_mock_model(model_config)
         input_text = context.input_text
         recent_turns = context.recent_turns
-        time_context = context.time_context
         affect_context = context.affect_context
         initiative_context = context.initiative_context
         recall_hint = context.recall_hint
         recall_pack = context.recall_pack
-        decision = context.decision
 
         # コンテキスト
-        persona_prompt = str(getattr(persona_context, "persona_prompt_text", "") or "").strip()
         primary_recall_focus = recall_hint["primary_recall_focus"]
         secondary_recall_focuses = self._secondary_recall_focuses(recall_hint)
         text = input_text.strip()
@@ -83,14 +81,7 @@ class LLMMockSpeechMixin:
             recent_turns=recent_turns,
         )
 
-        # payload作成
-        return {
-            "speech_text": speech_text,
-            "speech_style_notes": (
-                f"persona_prompt_present={bool(persona_prompt)}; part_of_day={time_context.get('part_of_day', 'unknown')}"
-            ),
-            "confidence_note": "mock_model",
-        }
+        return speech_text
 
     def _mock_caution_prefix(
         self,

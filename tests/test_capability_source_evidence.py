@@ -1,13 +1,13 @@
 import json
+from dataclasses import replace
 from unittest.mock import Mock
 
-from otomekairo.llm.prompts import build_speech_messages
-from otomekairo.llm.contexts import SpeechContext
+from otomekairo.llm.prompts import build_decision_messages
 from otomekairo.memory.utils import localize_timestamp_fields
 from otomekairo.service.capability import ServiceCapabilityMixin
 from otomekairo.service.input.capability_context import ServiceInputCapabilityContextMixin
 from otomekairo.service.input.trace_compact import ServiceInputTraceCompactMixin
-from test_decision_contract import _current_input, _persona_context
+from test_decision_contract import _current_input, _persona_context, _decision_context
 
 
 class Service(ServiceCapabilityMixin, ServiceInputCapabilityContextMixin, ServiceInputTraceCompactMixin):
@@ -45,15 +45,15 @@ def test_speech_receives_the_complete_capability_evidence():
     result_context = {"source_visual_observations": [{
         "observed_at": "2026-10-04T09:00:00+09:00", "summary_text": "詳細な観測。" * 120,
     }]}
-    context = SpeechContext(
+    context = replace(_decision_context([]),
         input_text="結果を報告して。", current_input=_current_input(), recent_turns=[],
         time_context={}, affect_context={}, drive_state_summary=None, foreground_world_state=None,
         activity_context=None, ongoing_action_summary=None, initiative_context=None,
         visual_observation_context=None, self_state_context=None, relationship_context=None,
         prediction_error_context=None, workspace_context=None, recall_hint={}, recall_pack={},
-        decision={"kind": "speech"}, capability_result_context=result_context,
+        capability_result_context=result_context,
     )
-    messages = build_speech_messages(persona_context=_persona_context(), context=context)
+    messages = build_decision_messages(persona_context=_persona_context(), context=context)
     payloads = [json.loads(message["content"].split("\n")[1])
                 for message in messages if message["role"] == "user" and message["content"].startswith("<<<OTOMEKAIRO_INTERNAL_CONTEXT>>>")]
     assert payloads[0]["internal_context"]["capability_result_context"] == localize_timestamp_fields(result_context)

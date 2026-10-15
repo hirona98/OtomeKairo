@@ -1258,21 +1258,14 @@ class ServiceAutonomousRunMixin:
                 model_config=selected_preset,
                 persona_context=self._build_selected_persona_context(
                     state=state,
-                    role="autonomous_step_generation",
+                    role="autonomous_step_generation", include_expression=True,
                 ),
                 context=step_context,
             )
             action = step["action"]
             action_kind = str(action.get("kind") or "").strip()
             speech_payload = (
-                self._generate_autonomous_run_speech(
-                    state=state,
-                    selected_preset=selected_preset,
-                    step_context=step_context,
-                    step=step,
-                )
-                if action_kind == "speech"
-                else None
+                {"speech_text": action["speech"]["speech_text"]} if action_kind == "speech" else None
             )
             transition_kind = str(step.get("transition", {}).get("kind") or "").strip()
             if action_kind == "capability_request" or transition_kind != "complete":
@@ -1602,78 +1595,6 @@ class ServiceAutonomousRunMixin:
         ):
             raise ValueError("Autonomous run speech origin and delivery route do not match.")
         return interaction
-
-    def _generate_autonomous_run_speech(
-        self,
-        *,
-        state: dict[str, Any],
-        selected_preset: dict[str, Any],
-        step_context: AutonomousStepContext,
-        step: dict[str, Any],
-    ) -> dict[str, Any]:
-        speech_action = step["action"].get("speech")
-        if not isinstance(speech_action, dict):
-            speech_action = {}
-        reason_summary = self._autonomous_step_reason_summary(
-            step,
-            fallback="autonomous_run の一手として発話する。",
-        )
-        decision = {
-            "kind": "speech",
-            "reason_code": str(speech_action.get("reason_code") or "autonomous_run_speech").strip(),
-            "reason_summary": reason_summary,
-            "run_objective_summary": step_context.run["objective_summary"],
-            "autonomous_step": {"run_update": deepcopy(step["run_update"]),
-                                "transition": deepcopy(step["transition"])},
-            "requires_confirmation": False,
-            "pending_intent": None,
-            "capability_request": None,
-            "autonomous_run": None,
-            "foreground_selection": {
-                "primary_factor_ref": None,
-                "supporting_factor_refs": [],
-                "suppressed_factors": [],
-                "summary_text": "autonomous_step_generation が発話一手を選んだ。",
-            },
-            "target_stances": build_decision_target_stances_for_kind(
-                "speech",
-                required_targets=("outward_speech",),
-                reason_summary=reason_summary,
-            ),
-        }
-        speech_context = self._build_speech_context(
-            input_text=step_context.current_input.text,
-            capability_decision_view=step_context.capability_decision_view,
-            current_input=step_context.current_input,
-            recent_turns=step_context.recent_turns,
-            time_context=step_context.time_context,
-            affect_context=step_context.affect_context,
-            drive_state_summary=step_context.drive_state_summary,
-            foreground_world_state=step_context.foreground_world_state,
-            activity_context=step_context.activity_context,
-            ongoing_action_summary=step_context.ongoing_action_summary,
-            initiative_context=None,
-            visual_observation_context=None,
-            self_state_context=step_context.self_state_context,
-            people_context=step_context.people_context or [],
-            relationship_context=None,
-            prediction_error_context=None,
-            workspace_context=None,
-            recall_hint=self._empty_recall_hint(),
-            recall_pack=self._empty_recall_pack(),
-            decision=decision,
-            agent_skill_context=step_context.agent_skill_context,
-            autonomous_run_summaries=[step_context.run],
-        )
-        return self.llm.generate_speech(
-            model_config=selected_preset,
-            persona_context=self._build_selected_persona_context(
-                state=state,
-                role="expression_generation",
-                include_expression=True,
-            ),
-            context=speech_context,
-        )
 
     def _dispatch_autonomous_run_capability_request(
         self,

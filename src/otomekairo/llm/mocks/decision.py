@@ -124,6 +124,11 @@ class LLMMockDecisionMixin:
                 reason_summary=str(payload.get("reason_summary") or "mock decision"),
             ),
         )
+        payload["speech_text"] = (
+            self._mock_speech_text(model_config=model_config, persona_context=persona_context,
+                                   context=context, decision=payload)
+            if payload["kind"] == "speech" else None
+        )
         validate_decision_contract(
             payload,
             workspace_context=context.workspace_context if isinstance(context.workspace_context, dict) else None,
@@ -189,6 +194,7 @@ class LLMMockDecisionMixin:
                 "kind": "speech",
                 "capability_request": None,
                 "speech": {
+                    "speech_text": "目的に沿って最初の一手を進めるね。",
                     "reason_code": "autonomous_run:initial_speech",
                     "reason_summary": "複合行動の最初に短く伝える。",
                 },

@@ -50,7 +50,7 @@ OtomeKairo では、`RecallPack` 全体を LLM 任せにはしない。
 - section 名の集合
 - `event_evidence` の生成
 - `memory_links` をたどった候補外 `memory_unit` の追加
-- `decision_generation` と `expression_generation`
+- 行動と本文を生成する `decision_generation`
 - `MemoryActionResolver` や記憶更新の状態遷移
 
 ## 基本構成

@@ -160,6 +160,7 @@ def decision_response_format(*, comparison_scope: str = "full") -> dict[str, Any
                 "reason_code": {"type": "string"},
                 "reason_summary": {"type": "string"},
                 "requires_confirmation": {"type": "boolean"},
+                "speech_text": nullable({"type": "string"}),
                 "pending_intent": nullable(
                     closed_object(
                         {
@@ -242,6 +243,7 @@ def autonomous_step_response_format() -> dict[str, Any]:
                                 {
                                     "reason_code": {"type": "string"},
                                     "reason_summary": {"type": "string"},
+                                    "speech_text": {"type": "string"},
                                 }
                             )
                         ),
@@ -264,17 +266,6 @@ def autonomous_step_response_format() -> dict[str, Any]:
     )
 
 
-def disclosure_review_response_format() -> dict[str, Any]:
-    return structured_response_format(
-        "disclosure_review",
-        closed_object(
-            {
-                "outcome": string_enum(DISCLOSURE_REVIEW_OUTCOMES),
-                "speech_text": nullable({"type": "string"}),
-                "reason_code": {"type": "string"},
-            }
-        ),
-    )
 
 
 def pre_send_check_response_format() -> dict[str, Any]:
@@ -618,7 +609,6 @@ def all_response_formats() -> dict[str, dict[str, Any]]:
         "decision_self_activity": decision_response_format(comparison_scope="self_activity"),
         "decision_outward_speech": decision_response_format(comparison_scope="outward_speech"),
         "autonomous_step": autonomous_step_response_format(),
-        "disclosure_review": disclosure_review_response_format(),
         "pre_send_check": pre_send_check_response_format(),
         "autonomous_completion_review": autonomous_completion_review_response_format(),
         "autonomous_start_review": autonomous_start_review_response_format(),

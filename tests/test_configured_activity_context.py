@@ -1,15 +1,32 @@
 import json
 import unittest
+from dataclasses import replace
 
-from otomekairo.llm.contexts import CurrentInput, DecisionContext, PersonaContext, SpeechContext
+from otomekairo.llm.contexts import CurrentInput, DecisionContext, PersonaContext
 from otomekairo.llm.prompts import (
-    build_decision_messages, build_speech_messages,
+    build_decision_messages,
     build_memory_candidate_review_messages, build_memory_retention_review_messages,
 )
 from otomekairo.service.input.pipeline import ServiceInputPipelineMixin
+from test_decision_contract import _decision_context
 
 
 class ConfiguredActivityContextTests(unittest.TestCase):
+    def test_expression_addon_reaches_text_generation_and_is_excluded_from_self_activity(self) -> None:
+        persona = PersonaContext(display_name="Test", persona_prompt_text="テスト人格。",
+                                 expression_addon="発話の表記補助。", use_policy="判断の基底。")
+        for scope in ("full", "outward_speech", "self_activity"):
+            with self.subTest(scope=scope):
+                context = replace(_decision_context([]), comparison_scope=scope)
+                messages = build_decision_messages(persona_context=persona, context=context)
+                block = next(message["content"] for message in messages
+                             if message["content"].startswith("<<<OTOMEKAIRO_INTERNAL_CONTEXT>>>"))
+                payload = json.loads(block.splitlines()[1])["persona_context"]
+                if scope == "self_activity":
+                    self.assertNotIn("expression_addon", payload)
+                else:
+                    self.assertEqual(payload["expression_addon"], persona.expression_addon)
+
     def test_memory_roles_receive_setting_evidence_without_turning_it_into_recalled_memory(self) -> None:
         topics = [{"topic_id": "topic:activity", "topic_summary": "公開情報から学び、交流する。"}]
         context = {"persona_context": {}, "input_text": "今の関心と活動は？", "episode": {}, "decision": {}, "speech_text": None,
@@ -37,18 +54,18 @@ class ConfiguredActivityContextTests(unittest.TestCase):
             {"id": "mcp.call_tool", "available": True},
         ]:
             with self.subTest(capability=capability):
-                context = SpeechContext(
+                context = replace(_decision_context([]),
                     input_text=current.text, current_input=current, recent_turns=[], time_context={},
                     affect_context={}, drive_state_summary=None, foreground_world_state=[],
                     activity_context=None, ongoing_action_summary=None, initiative_context=None,
                     visual_observation_context=None, self_state_context=None, relationship_context=None,
                     prediction_error_context=None, workspace_context=None, recall_hint={}, recall_pack={},
-                    decision={"kind": "speech"}, capability_decision_view=[capability],
+                    capability_decision_view=[capability],
                 )
-                messages = build_speech_messages(context=context, persona_context=persona)
+                messages = build_decision_messages(context=context, persona_context=persona)
                 block = next(message["content"] for message in messages
-                             if message["content"].startswith("<<<OTOMEKAIRO_CAPABILITY_DECISION_VIEW>>>"))
-                self.assertEqual(json.loads(block.split("\n")[1]), [capability])
+                             if message["content"].startswith("<<<OTOMEKAIRO_INTERNAL_CONTEXT>>>"))
+                self.assertEqual(json.loads(block.split("\n")[1])["internal_context"]["capability_decision_view"], [capability])
 
     def test_expression_receives_complete_conversation_affect_and_relationship_evidence(self) -> None:
         current = CurrentInput(sender_kind="person", sender_ref="person:test", source_kind="user_message",
@@ -65,14 +82,14 @@ class ConfiguredActivityContextTests(unittest.TestCase):
                  {"role": "assistant", "event_id": "event:self-test", "speaker_ref": "self",
                   "text": "事実を正確に受け止めることを大切にします。" * 60,
                   "created_at": "2026-10-04T09:00:36+09:00"}]
-        context = SpeechContext(input_text=current.text, current_input=current, recent_turns=turns, time_context={},
+        context = replace(_decision_context([]), input_text=current.text, current_input=current, recent_turns=turns, time_context={},
             affect_context=affect, drive_state_summary=None, foreground_world_state=[], activity_context=None,
             ongoing_action_summary=None, initiative_context=None, visual_observation_context=None,
             self_state_context=None, relationship_context=relationship, prediction_error_context=None,
-            workspace_context=None, recall_hint={}, recall_pack={}, decision={"kind": "speech"})
+            workspace_context=None, recall_hint={}, recall_pack={})
         persona = PersonaContext(display_name="Test", persona_prompt_text="落ち着いて対等に関わる。",
                                  expression_addon=None, use_policy="判断の基底。")
-        expression = build_speech_messages(context=context, persona_context=persona)
+        expression = build_decision_messages(context=context, persona_context=persona)
         internal = next(m["content"] for m in expression
                         if m["content"].startswith("<<<OTOMEKAIRO_INTERNAL_CONTEXT>>>"))
         expression_payload = json.loads(internal.split("\n")[1])
@@ -108,12 +125,12 @@ class ConfiguredActivityContextTests(unittest.TestCase):
         pending_runs = [{"run_id": "run:test", "status": "paused",
                          "pause_reason": "paused_by_user_interaction",
                          "objective_summary": "後で一度報告する。"}]
-        speech = SpeechContext(**common, decision={"kind": "speech"}, capability_decision_view=[],
+        speech = replace(_decision_context([]), **common, capability_decision_view=[],
                                autonomous_run_summaries=pending_runs)
         persona = PersonaContext(display_name="Test", persona_prompt_text="テスト人格。",
                                  expression_addon=None, use_policy="判断の基底。")
         for role, messages in [("decision", build_decision_messages(persona_context=persona, context=decision)),
-                               ("speech", build_speech_messages(persona_context=persona, context=speech))]:
+                               ("speech", build_decision_messages(persona_context=persona, context=speech))]:
             with self.subTest(role=role):
                 block = next(m["content"] for m in messages
                              if m["content"].startswith("<<<OTOMEKAIRO_CONFIGURED_ACTIVITY_TOPICS>>>"))

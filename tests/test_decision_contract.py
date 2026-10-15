@@ -20,7 +20,6 @@ from otomekairo.llm.contracts import (
     validate_decision_contract,
 )
 from otomekairo.llm.prompts import (
-    _build_speech_system_prompt,
     build_autonomous_completion_review_messages,
     build_autonomous_activity_alignment_review_messages,
     build_autonomous_step_messages,
@@ -118,7 +117,7 @@ def _wire_response(payload: dict) -> str:
 
 
 def _capability_decision(capability_id: str, input_payload: dict) -> dict:
-    return {
+    return {"speech_text": None,
         "kind": "capability_request",
         "reason_code": "capability:test",
         "reason_summary": "必要な能力を実行する。",
@@ -149,7 +148,7 @@ class DecisionContractTests(unittest.TestCase):
             "workspace_candidates": [{"factor_ref": "current_input:user_message"},
                                      {"factor_ref": "memory:person_model:0"}],
         })
-        valid = {
+        valid = {"speech_text": "検証用の発話です。",
             "kind": "speech", "reason_code": "reply", "reason_summary": "現在の好みを答える。",
             "requires_confirmation": False, "pending_intent": None, "capability_request": None,
             "autonomous_run": None, "foreground_selection": {
@@ -182,6 +181,7 @@ class DecisionContractTests(unittest.TestCase):
                     "mcp_server_id": "elyth", "tool_name": "get_notifications", "arguments": {},
                 })
                 candidate["kind"] = kind
+                candidate["speech_text"] = "検証用の発話です。" if kind == "speech" else None
                 candidate["reason_summary"] = "今回の依頼に応じる。"
                 if kind != "capability_request":
                     candidate["capability_request"] = None
@@ -212,7 +212,7 @@ class DecisionContractTests(unittest.TestCase):
                 self.assertEqual(complete.call_args.kwargs["response_format"]["json_schema"]["name"], "decision")
 
     def test_decision_contract_requires_foreground_selection(self) -> None:
-        payload = {
+        payload = {"speech_text": "検証用の発話です。",
             "kind": "speech",
             "reason_code": "reply",
             "reason_summary": "ユーザー発話へ返す。",
@@ -226,7 +226,7 @@ class DecisionContractTests(unittest.TestCase):
             validate_decision_contract(payload)
 
     def test_decision_contract_accepts_foreground_selection(self) -> None:
-        payload = {
+        payload = {"speech_text": "検証用の発話です。",
             "kind": "speech",
             "reason_code": "reply",
             "reason_summary": "ユーザー発話へ返す。",
@@ -250,7 +250,7 @@ class DecisionContractTests(unittest.TestCase):
         validate_decision_contract(payload)
 
     def test_decision_accepts_affect_context_workspace_factor_ref(self) -> None:
-        payload = {
+        payload = {"speech_text": "検証用の発話です。",
             "kind": "speech",
             "reason_code": "evaluation_acknowledgment",
             "reason_summary": "評価に落ち着いて返す。",
@@ -301,7 +301,7 @@ class DecisionContractTests(unittest.TestCase):
         self.assertEqual(actual, payload)
 
     def test_decision_rejects_unknown_affect_context_factor_ref(self) -> None:
-        payload = {
+        payload = {"speech_text": "検証用の発話です。",
             "kind": "speech",
             "reason_code": "evaluation_acknowledgment",
             "reason_summary": "評価に落ち着いて返す。",
@@ -346,7 +346,7 @@ class DecisionContractTests(unittest.TestCase):
                 )
 
     def test_decision_contract_names_duplicate_foreground_factor_ref(self) -> None:
-        payload = {
+        payload = {"speech_text": None,
             "kind": "noop",
             "reason_code": "hold_speech",
             "reason_summary": "作業中なので問いかけない。",
@@ -385,7 +385,7 @@ class DecisionContractTests(unittest.TestCase):
             validate_decision_contract(payload)
 
     def test_decision_contract_accepts_autonomous_run(self) -> None:
-        payload = {
+        payload = {"speech_text": None,
             "kind": "autonomous_run",
             "reason_code": "autonomous_run:start",
             "reason_summary": "継続する確認を目的として持つ。",
@@ -421,7 +421,7 @@ class DecisionContractTests(unittest.TestCase):
             validate_decision_contract(payload)
 
     def test_decision_contract_requires_target_stances(self) -> None:
-        payload = {
+        payload = {"speech_text": "検証用の発話です。",
             "kind": "speech",
             "reason_code": "reply",
             "reason_summary": "ユーザー発話へ返す。",
@@ -450,7 +450,7 @@ class DecisionContractTests(unittest.TestCase):
                 }
             ]
         }
-        payload = {
+        payload = {"speech_text": None,
             "kind": "noop",
             "reason_code": "hold_speech",
             "reason_summary": "作業中なので問いかけない。",
@@ -482,7 +482,7 @@ class DecisionContractTests(unittest.TestCase):
         validate_decision_contract(payload, workspace_context=workspace)
 
     def test_speech_cannot_advance_self_activity(self) -> None:
-        payload = {
+        payload = {"speech_text": "検証用の発話です。",
             "kind": "speech",
             "reason_code": "reply",
             "reason_summary": "ユーザー発話へ返す。",
@@ -514,7 +514,7 @@ class DecisionContractTests(unittest.TestCase):
             validate_decision_contract(payload)
 
     def test_self_activity_scope_rejects_speech(self) -> None:
-        payload = {
+        payload = {"speech_text": "検証用の発話です。",
             "kind": "speech",
             "reason_code": "reply",
             "reason_summary": "話しかける。",
@@ -539,7 +539,7 @@ class DecisionContractTests(unittest.TestCase):
             validate_decision_contract(payload, comparison_scope="self_activity")
 
     def test_outward_scope_rejects_autonomous_run(self) -> None:
-        payload = {
+        payload = {"speech_text": None,
             "kind": "autonomous_run",
             "reason_code": "autonomous_run:start",
             "reason_summary": "その関心に関わる。",
@@ -811,7 +811,7 @@ class DecisionContractTests(unittest.TestCase):
         self.assertEqual(complete.call_count, 2)
 
     def test_decision_validation_failed_log_includes_rejected_payload(self) -> None:
-        invalid = {
+        invalid = {"speech_text": None,
             "kind": "noop",
             "reason_code": "hold_speech",
             "reason_summary": "作業中なので問いかけない。",
@@ -886,7 +886,7 @@ class DecisionContractTests(unittest.TestCase):
                             "summary_text": "直近のやり取りを比較する。",
                         }]},
                     )
-                    candidate = {
+                    candidate = {"speech_text": "検証用の発話です。" if kind == "speech" else None,
                         "kind": kind, "reason_code": "outward_comparison",
                         "reason_summary": "直近の会話と今伝える意味を比較した。",
                         "requires_confirmation": False, "capability_request": None, "autonomous_run": None,
@@ -1183,12 +1183,6 @@ class DecisionPromptScopeTests(unittest.TestCase):
                     ),
                     [],
                 )
-
-    def test_expression_prompt_keeps_autonomous_speech_as_situation_recognition(self) -> None:
-        system = _build_speech_system_prompt()
-        self.assertIn("観測事実に基づく状況認識", system)
-        self.assertIn("助言、依頼、支援提案、休息促し、身体注意、評価は本文へ足しません", system)
-        self.assertIn("具体的な固有名、表示対象名、作品名、ページ内容は主題化しません", system)
 
     def test_autonomous_step_prompt_treats_capability_input_as_external_expression(self) -> None:
         messages = build_autonomous_step_messages(

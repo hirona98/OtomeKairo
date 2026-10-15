@@ -113,46 +113,31 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             review["source_current_input"]["text"] = "changed"
             self.assertEqual(run["source_current_input"]["text"], "3分後に声をかけて")
 
-    def test_autonomous_speech_receives_run_objective(self) -> None:
+    def test_autonomous_step_returns_the_generated_speech_without_another_generation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))
-            service._build_speech_context = Mock(return_value=object())
+            context = SimpleNamespace(run={"objective_summary": "読書を終えて作業に戻るよう声をかける。"})
+            service._build_autonomous_step_context = Mock(return_value=context)
             service._build_selected_persona_context = Mock(return_value=object())
             service.llm = Mock()
-            service.llm.generate_speech.return_value = {"speech_text": "そろそろ作業に戻りましょう。"}
-            objective = "読書を終えて作業に戻るよう声をかける。"
-            step_context = SimpleNamespace(
-                capability_decision_view=[], affect_context={"mood_state": {"current_vad": {"v": 0.4, "a": 0.1, "d": 0.2}}},
-                self_state_context={"agency_confidence": []}, drive_state_summary=[],
-                run={"objective_summary": objective, "observed_result_summaries": [
-                    {"tool_name": "create_reply", "summary_text": "返信成功。" * 100}]},
-                current_input=CurrentInput(
-                    sender_kind="system", sender_ref="self", source_kind="autonomous_run",
-                    response_target_refs=("person:master",), interaction_context=None,
-                    text="タイマーが満了した。",
-                ),
-                recent_turns=[], time_context={}, foreground_world_state=None,
-                activity_context=None, ongoing_action_summary=None, people_context=[],
-                agent_skill_context=None,
+            step = {
+                "action": {"kind": "speech", "capability_request": None, "speech": {
+                    "reason_code": "scheduled", "reason_summary": "指定時刻が来た。",
+                    "speech_text": "そろそろ作業に戻りましょう。",
+                }},
+                "transition": {"kind": "wait_until", "next_run_at": "2026-06-20T11:04:00+09:00"},
+                "run_update": {"current_step_summary": "声をかけた。", "history_summary": "指定時刻に声をかけた。"},
+            }
+            service.llm.generate_autonomous_step.return_value = step
+            actual_context, actual_step, speech = service._generate_reviewed_autonomous_step_candidate(
+                state={}, run={}, selected_preset={"model": "provider/test"},
+                source_current_input=None, last_result_context=None,
             )
-
-            service._generate_autonomous_run_speech(
-                state={}, selected_preset={"model": "mock-test"},
-                step_context=step_context,
-                step={"action": {"speech": {"reason_summary": "1分が経過した。"}},
-                      "transition": {"kind": "complete", "next_run_at": None},
-                      "run_update": {"current_step_summary": "声をかけて終了する。", "history_summary": "1分経過した。"}},
-            )
-
-            decision = service._build_speech_context.call_args.kwargs["decision"]
-            self.assertEqual(decision["run_objective_summary"], objective)
-            self.assertEqual(decision["autonomous_step"], {
-                "transition": {"kind": "complete", "next_run_at": None},
-                "run_update": {"current_step_summary": "声をかけて終了する。", "history_summary": "1分経過した。"}})
-            context_args = service._build_speech_context.call_args.kwargs
-            self.assertEqual(context_args["affect_context"], step_context.affect_context)
-            self.assertEqual(context_args["self_state_context"], step_context.self_state_context)
-            self.assertEqual(context_args["autonomous_run_summaries"], [step_context.run])
+            self.assertIs(actual_context, context)
+            self.assertEqual(actual_step, step)
+            self.assertEqual(speech, {"speech_text": "そろそろ作業に戻りましょう。"})
+            service.llm.generate_autonomous_step.assert_called_once()
+            self.assertEqual(len(service.llm.method_calls), 1)
 
     def _use_mock_model(self, service: OtomeKairoService, state: dict) -> dict:
         preset_id = state["selected_model_preset_id"]
@@ -523,7 +508,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 "action": {
                     "kind": "speech",
                     "capability_request": None,
-                    "speech": {
+                    "speech": {"speech_text": "検証用の発話です。",
                         "reason_code": "announce_post",
                         "reason_summary": "これから投稿することを伝える。",
                     },
@@ -564,9 +549,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 generate_autonomous_step=generate_step,
                 generate_autonomous_completion_review=review,
             )
-            service._generate_autonomous_run_speech = Mock(
-                return_value={"speech_text": "さて、そろそろ私も何か投稿してみるとします。"}
-            )
+            future_speech_step["action"]["speech"]["speech_text"] = "さて、そろそろ私も何か投稿してみるとします。"
             service._dispatch_autonomous_run_capability_request = Mock(
                 return_value={
                     "request_id": "mcp_call_tool_request:create-post",
@@ -629,7 +612,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 "action": {
                     "kind": "speech",
                     "capability_request": None,
-                    "speech": {
+                    "speech": {"speech_text": "検証用の発話です。",
                         "reason_code": "post_completed",
                         "reason_summary": "投稿が完了したことを報告する。",
                     },
@@ -654,9 +637,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 generate_autonomous_step=Mock(return_value=complete_step),
                 generate_autonomous_completion_review=review,
             )
-            service._generate_autonomous_run_speech = Mock(
-                return_value={"speech_text": "投稿が完了しました。"}
-            )
+            complete_step["action"]["speech"]["speech_text"] = "投稿が完了しました。"
             service._emit_autonomous_run_assistant_message_event = Mock(
                 side_effect=lambda **_: call_order.append("delivery")
             )
@@ -717,7 +698,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 "action": {
                     "kind": "speech",
                     "capability_request": None,
-                    "speech": {
+                    "speech": {"speech_text": "検証用の発話です。",
                         "reason_code": "announce_post",
                         "reason_summary": "これから投稿することを伝える。",
                     },
@@ -737,12 +718,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                     }
                 ),
             )
-            service._generate_autonomous_run_speech = Mock(
-                side_effect=[
-                    {"speech_text": "投稿してみるとします。"},
-                    {"speech_text": "これから投稿へ移ります。"},
-                ]
-            )
+            incomplete_step["action"]["speech"]["speech_text"] = "投稿してみるとします。"
             service._emit_autonomous_run_assistant_message_event = Mock()
             service._persist_autonomous_run_speech_event = Mock()
             service._finalize_autonomous_run_commitments = Mock(
@@ -1076,7 +1052,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                     "action": {
                         "kind": "speech",
                         "capability_request": None,
-                        "speech": {
+                        "speech": {"speech_text": "検証用の発話です。",
                             "reason_code": "done",
                             "reason_summary": "対応した。",
                         },

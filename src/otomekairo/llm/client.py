@@ -12,7 +12,6 @@ from otomekairo.llm.contexts import (
     DecisionContext,
     InitiativeContext,
     PersonaContext,
-    SpeechContext,
 )
 from otomekairo.llm.contracts import (
     LLMContractError,
@@ -30,7 +29,6 @@ from otomekairo.llm.contracts import (
     validate_autonomous_activity_alignment_review_contract,
     validate_autonomous_step_contract,
     validate_decision_contract,
-    validate_disclosure_review_contract,
     validate_initiative_entry_check_contract,
 
     validate_memory_interpretation_contract,
@@ -59,7 +57,6 @@ from otomekairo.llm.schemas import (
     autonomous_activity_alignment_review_response_format,
     autonomous_step_response_format,
     decision_response_format,
-    disclosure_review_response_format,
     initiative_entry_check_response_format,
     input_interpretation_response_format,
     memory_interpretation_response_format,
@@ -92,8 +89,6 @@ from otomekairo.llm.prompts import (
     build_autonomous_step_repair_prompt,
     build_decision_messages,
     build_decision_repair_prompt,
-    build_disclosure_review_messages,
-    build_disclosure_review_repair_prompt,
     build_initiative_entry_check_messages,
     build_initiative_entry_check_repair_prompt,
     build_input_interpretation_messages,
@@ -114,7 +109,6 @@ from otomekairo.llm.prompts import (
     build_pending_intent_selection_repair_prompt,
     build_recall_pack_selection_messages,
     build_recall_pack_selection_repair_prompt,
-    build_speech_messages,
     build_visual_observation_messages,
     build_visual_observation_repair_prompt,
     build_world_state_messages,
@@ -1030,81 +1024,6 @@ class LLMClient:
             if isinstance(expected_source_id, str) and requested_source_id.strip() == expected_source_id.strip():
                 return True
         return False
-
-    def generate_speech(
-        self,
-        *,
-        model_config: dict,
-        persona_context: PersonaContext,
-        context: SpeechContext,
-    ) -> dict[str, Any]:
-        operation = "speech"
-        try:
-            # モック経路
-            if self._is_mock_model_config(model_config):
-                payload = self.mock_client.generate_speech(
-                    model_config=model_config,
-                    persona_context=persona_context,
-                    context=context,
-                )
-                debug_log("LLM", f"{operation} done mode=mock speech_chars={len(payload.get('speech_text', ''))}", level="DEBUG")
-                return payload
-
-            # プロンプト構築
-            messages = build_speech_messages(
-                persona_context=persona_context,
-                context=context,
-            )
-
-            # 補完
-            content = complete_text(model_config=model_config, messages=messages)
-            speech_text = content.strip()
-            if not speech_text:
-                raise LLMError("Speech の生成結果が空でした。")
-
-            # payload作成
-            payload = {
-                "speech_text": speech_text,
-                "speech_style_notes": f"model={model_config.get('model')}",
-                "confidence_note": "litellm_model",
-            }
-            debug_log(
-                "LLM",
-                (
-                    f"{operation} done model={self._debug_model(model_config)} "
-                    f"response_chars={len(content)} speech_chars={len(speech_text)}"
-                ),
-                level="DEBUG",
-            )
-            return payload
-        except Exception as exc:
-            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc, level='ERROR')}", level="ERROR")
-            raise
-
-    def generate_disclosure_review(
-        self,
-        *,
-        model_config: dict,
-        review_context: dict[str, Any],
-    ) -> dict[str, Any]:
-        operation = "disclosure_review"
-        if self._is_mock_model_config(model_config):
-            payload = {
-                "outcome": "allow",
-                "speech_text": review_context["candidate_speech"],
-                "reason_code": "mock_allow",
-            }
-            validate_disclosure_review_contract(payload)
-            return payload
-        return self._generate_structured_payload(
-            model_config=model_config,
-            messages=build_disclosure_review_messages(review_context=review_context),
-            validator=validate_disclosure_review_contract,
-            repair_prompt_builder=build_disclosure_review_repair_prompt,
-            failure_message="DisclosureReview の生成に失敗しました。",
-            response_format=disclosure_review_response_format(),
-            operation=operation,
-        )
 
     def generate_pre_send_check(
         self,
