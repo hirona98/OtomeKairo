@@ -1522,49 +1522,6 @@ def validate_memory_correction_reconciliation_contract(payload: dict[str, Any]) 
     _validate_memory_correction_selection(payload, label="MemoryCorrectionReconciliation")
 
 
-def validate_event_evidence_item_slots(payload: dict[str, Any], *, label: str = "EventEvidence") -> dict[str, str]:
-    present_slots: dict[str, str] = {}
-    for slot_name in ("anchor", "topic", "decision_or_result", "tone_or_note"):
-        value = payload.get(slot_name)
-        if value is None:
-            continue
-        if not isinstance(value, str):
-            raise LLMError(f"{label} {slot_name} は文字列または null である必要があります。")
-        normalized = value.strip()
-        if not normalized:
-            raise LLMError(f"{label} {slot_name} は指定する場合、空にできません。")
-        if "\n" in normalized or "\r" in normalized:
-            raise LLMError(f"{label} {slot_name} に改行を含めてはいけません。")
-        if INTERNAL_IDENTIFIER_PATTERN.search(normalized) is not None:
-            raise LLMError(f"{label} {slot_name} に内部識別子を含めてはいけません。")
-        present_slots[slot_name] = normalized
-    if not present_slots:
-        raise LLMError(f"{label} には少なくとも 1 つの null でない slot が必要です。")
-    return present_slots
-
-
-def validate_event_evidence_item(item: Any, *, label: str = "EventEvidence item") -> str:
-    if not isinstance(item, dict):
-        raise LLMError(f"{label} は object である必要があります。")
-    _validate_exact_keys(
-        item,
-        {"event_ref", "anchor", "topic", "decision_or_result", "tone_or_note"},
-        label,
-    )
-    event_ref = item["event_ref"]
-    if not isinstance(event_ref, str) or not event_ref.startswith("event:"):
-        raise LLMError(f"{label}.event_ref が不正です。")
-    validate_event_evidence_item_slots(item, label=label)
-    return event_ref
-
-
-def validate_event_evidence_contract(payload: dict[str, Any]) -> None:
-    # envelope だけを検証する。項目の契約は呼び出し側で閉じる。
-    _validate_exact_keys(payload, {"evidence"}, "EventEvidence")
-    if not isinstance(payload["evidence"], list):
-        raise LLMError("EventEvidence evidence は配列である必要があります。")
-
-
 def validate_world_state_contract(
     payload: dict[str, Any],
     *,

@@ -268,14 +268,9 @@ class LLMMockSpeechMixin:
         if item is None:
             return None
 
-        # スロット群
-        for key in ("decision_or_result", "topic", "anchor", "tone_or_note"):
-            value = item.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-
-        # 結果
-        return None
+        key = "reason_summary" if item["kind"] == "decision" else "text"
+        value = item.get(key)
+        return value if isinstance(value, str) else None
 
     def _should_mock_autonomous_initiative_speech(self, initiative_context: InitiativeContext | None) -> bool:
         if initiative_context is None:

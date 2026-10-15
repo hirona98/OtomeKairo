@@ -32,7 +32,6 @@ PERSONA_CONTEXT_ROLES = frozenset({
     "initiative_entry_check",
     "input_interpretation",
     "recall_pack_selection",
-    "event_evidence_generation",
     "memory_interpretation",
     "memory_candidate_review",
     "commitment_lifecycle_summary",

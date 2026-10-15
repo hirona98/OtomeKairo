@@ -83,12 +83,7 @@ sequenceDiagram
         R->>R: event_idを選定（標準・precise追加）
         R->>D: load_events_for_evidence（選定済みevent_id）
         D-->>R: event本文・判断理由・出所（events）
-        R->>R: 取得したeventからsource packを構築
-        opt source packを構築できたeventがある
-            R->>L: generate_event_evidence（選定済みevent群のsource pack）
-            L-->>R: 各eventの短い根拠表現
-            R->>R: 項目検証と出所の付与
-        end
+        R->>R: 項目の型を確認し、本文・判断理由と出所をRecallPackへ追加
     end
     R->>D: 視覚観測と日次要約を取得
     D-->>R: visual_observation_records・daily_visual_digests
@@ -146,10 +141,10 @@ sequenceDiagram
 `generate_world_state()` と `generate_activity_state()` は、それぞれ候補と根拠判定を同じ生成で取得し、コード側で採用候補を選ぶ。具体的な根拠判定は [状態候補の根拠判定](状態候補根拠審査.md) を参照する。
 人物発話の報告抽出と `world_state` 生成の統合は、模擬データによるテストで精度に問題があったため見送った。
 `generate_recall_pack_selection()` は DB から集めた記憶・エピソードの候補を受け取る。
-`generate_event_evidence()` の前に、想起側が `load_events_for_evidence()` で選定済み event を DB から読み、本文や判断理由を含む source pack を組み立てる。対象 event 群をまとめて LLM へ渡し、返った各項目を想起側で検証する。
+想起側は `load_events_for_evidence()` で選定済み event を DB から読み、本文・判断理由と出所を保持して `RecallPack.event_evidence` に載せる。この段階では LLM を呼ばず、後続の判断・表現・審査が同じ原文根拠を参照する。
 
 実装: [入力サイクル](../../../src/otomekairo/service/input/cycle.py)、[共通パイプライン](../../../src/otomekairo/service/input/pipeline.py)、[想起構築](../../../src/otomekairo/recall/builder.py)、[Skill文脈](../../../src/otomekairo/service/agent_skills.py)、[結果の保存](../../../src/otomekairo/service/input/trace_persist.py)。
-契約: [想起と判断](../memory/想起と判断.md)、[RecallPackのLLM選別](../memory/RecallPackのLLM選別.md)、[event_evidenceのLLM圧縮](../memory/event_evidenceのLLM圧縮.md)、[状態候補根拠審査](状態候補根拠審査.md)、[AgentSkills統合](../integration/AgentSkills統合.md)。
+契約: [想起と判断](../memory/想起と判断.md)、[RecallPackのLLM選別](../memory/RecallPackのLLM選別.md)、[event_evidenceの取得](../memory/event_evidenceの取得.md)、[状態候補根拠審査](状態候補根拠審査.md)、[AgentSkills統合](../integration/AgentSkills統合.md)。
 
 ## 図 2: 判断と発話の審査
 

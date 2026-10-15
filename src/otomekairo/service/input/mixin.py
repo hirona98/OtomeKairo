@@ -254,7 +254,7 @@ class ServiceInputMixin(
             "event_evidence": [],
             "visual_observations": [],
             "visual_daily_digests": [],
-            "event_evidence_generation": self._empty_event_evidence_generation_trace(),
+            "event_evidence_loading": self._empty_event_evidence_loading_trace(),
             "recall_pack_selection": self._empty_recall_pack_selection_trace(),
             "conflicts": [],
             "selected_memory_ids": [],
@@ -268,7 +268,7 @@ class ServiceInputMixin(
             "fact_resolution_trace": self._empty_fact_resolution_trace(),
         }
 
-    def _empty_event_evidence_generation_trace(self) -> dict[str, Any]:
+    def _empty_event_evidence_loading_trace(self) -> dict[str, Any]:
         return {
             "requested_event_count": 0,
             "loaded_event_count": 0,

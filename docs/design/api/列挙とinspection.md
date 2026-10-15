@@ -587,7 +587,7 @@ exact answer 系の cycle では、`recall_trace` に `answer_contract`、`evide
 | `input_trace` | [../runtime/デバッグ可能性.md](../runtime/デバッグ可能性.md)、[../runtime/自律initiative_loop.md](../runtime/自律initiative_loop.md)、[../llm/保留意図候補のLLM選別.md](../llm/保留意図候補のLLM選別.md) |
 | `world_state_trace` | [../runtime/world_state.md](../runtime/world_state.md) |
 | `activity_trace` | [../runtime/activity_state.md](../runtime/activity_state.md) |
-| `recall_trace` | [../memory/想起と判断.md](../memory/想起と判断.md)、[../memory/event_evidenceのLLM圧縮.md](../memory/event_evidenceのLLM圧縮.md)、[../memory/RecallPackのLLM選別.md](../memory/RecallPackのLLM選別.md) |
+| `recall_trace` | [../memory/想起と判断.md](../memory/想起と判断.md)、[../memory/event_evidenceの取得.md](../memory/event_evidenceの取得.md)、[../memory/RecallPackのLLM選別.md](../memory/RecallPackのLLM選別.md) |
 | `decision_trace` | [../runtime/判断と行動.md](../runtime/判断と行動.md)、[../runtime/自律initiative_loop.md](../runtime/自律initiative_loop.md) |
 | `result_trace` | [../runtime/判断と行動.md](../runtime/判断と行動.md)、[../capability/capability_manifest.md](../capability/capability_manifest.md) |
 | `memory_trace` | [../runtime/デバッグ可能性.md](../runtime/デバッグ可能性.md)、[../memory/記憶更新と再整理.md](../memory/記憶更新と再整理.md)、[../memory/内省要約のLLM生成.md](../memory/内省要約のLLM生成.md) |

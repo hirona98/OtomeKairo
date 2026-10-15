@@ -34,7 +34,6 @@ from otomekairo.llm.contracts import (
     validate_disclosure_review_contract,
     validate_speech_grounding_review_contract,
     validate_future_action_alignment_review_contract,
-    validate_event_evidence_contract,
     validate_initiative_entry_check_contract,
 
     validate_memory_interpretation_contract,
@@ -68,7 +67,6 @@ from otomekairo.llm.schemas import (
     disclosure_review_response_format,
     speech_grounding_review_response_format,
     future_action_alignment_review_response_format,
-    event_evidence_response_format,
     initiative_entry_check_response_format,
     input_interpretation_response_format,
     memory_interpretation_response_format,
@@ -108,8 +106,6 @@ from otomekairo.llm.prompts import (
     build_speech_grounding_review_repair_prompt,
     build_future_action_alignment_review_messages,
     build_future_action_alignment_review_repair_prompt,
-    build_event_evidence_messages,
-    build_event_evidence_repair_prompt,
     build_initiative_entry_check_messages,
     build_initiative_entry_check_repair_prompt,
     build_input_interpretation_messages,
@@ -1597,37 +1593,6 @@ class LLMClient:
             repair_prompt_builder=build_memory_reflection_summary_repair_prompt,
             failure_message="MemoryReflectionSummary の生成に失敗しました。解析可能な応答が得られませんでした。",
             response_format=memory_reflection_summary_response_format(),
-            operation=operation,
-        )
-
-    def generate_event_evidence(
-        self,
-        *,
-        model_config: dict,
-        persona_context: PersonaContext,
-        source_pack: dict[str, Any],
-    ) -> dict[str, Any]:
-        operation = "event_evidence"
-        source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
-        # モック経路
-        if self._is_mock_model_config(model_config):
-            payload = self.mock_client.generate_event_evidence(model_config, source_pack)
-            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
-            return payload
-
-        # プロンプト構築
-        messages = build_event_evidence_messages(
-            persona_context=persona_context,
-            source_pack=source_pack,
-        )
-        return self._generate_structured_payload(
-            model_config=model_config,
-            messages=messages,
-            validator=validate_event_evidence_contract,
-            repair_prompt_builder=build_event_evidence_repair_prompt,
-            failure_message="EventEvidence の生成に失敗しました。解析可能な応答が得られませんでした。",
-            response_format=event_evidence_response_format(),
-            wrap_validation_error=True,
             operation=operation,
         )
 

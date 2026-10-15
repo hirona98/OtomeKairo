@@ -837,11 +837,11 @@ class ServiceMemoryMixin:
         created_at: str,
         recall_pack: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        generation = recall_pack.get("event_evidence_generation", {})
-        failed_items = generation.get("failed_items", []) if isinstance(generation, dict) else []
+        loading = recall_pack.get("event_evidence_loading", {})
+        failed_items = loading.get("failed_items", []) if isinstance(loading, dict) else []
         precise_selected_event_ids = (
-            generation.get("precise_selected_event_ids", [])
-            if isinstance(generation, dict)
+            loading.get("precise_selected_event_ids", [])
+            if isinstance(loading, dict)
             else []
         )
         events: list[dict[str, Any]] = [
@@ -851,13 +851,13 @@ class ServiceMemoryMixin:
                 kind="event_evidence_precise_check",
                 created_at=created_at,
                 payload={
-                    "precise_evidence_used": bool(generation.get("precise_evidence_used", False)),
-                    "precise_reason_codes": generation.get("precise_reason_codes", []),
-                    "precise_reason_summary": generation.get("precise_reason_summary"),
+                    "precise_evidence_used": bool(loading.get("precise_evidence_used", False)),
+                    "precise_reason_codes": loading.get("precise_reason_codes", []),
+                    "precise_reason_summary": loading.get("precise_reason_summary"),
                     "selected_event_ids": recall_pack.get("selected_event_ids", []),
                     "precise_selected_event_ids": precise_selected_event_ids,
-                    "precise_requested_event_count": int(generation.get("precise_requested_event_count", 0)),
-                    "precise_loaded_event_count": int(generation.get("precise_loaded_event_count", 0)),
+                    "precise_requested_event_count": int(loading.get("precise_requested_event_count", 0)),
+                    "precise_loaded_event_count": int(loading.get("precise_loaded_event_count", 0)),
                 },
             )
         ]
@@ -868,7 +868,7 @@ class ServiceMemoryMixin:
                 self._build_memory_audit_event(
                     cycle_id=cycle_id,
                     memory_set_id=memory_set_id,
-                    kind="event_evidence_generation_failure",
+                    kind="event_evidence_load_failure",
                     created_at=created_at,
                     payload={
                         "source_event_id": failed_item.get("event_id"),

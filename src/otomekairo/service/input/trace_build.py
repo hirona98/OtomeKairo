@@ -273,7 +273,7 @@ class ServiceInputTraceBuildMixin:
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
     ) -> dict[str, Any]:
-        event_evidence_generation = recall_pack.get("event_evidence_generation", {})
+        event_evidence_loading = recall_pack.get("event_evidence_loading", {})
         recall_pack_selection = recall_pack.get("recall_pack_selection", {})
         return {
             "cycle_id": cycle_id,
@@ -292,20 +292,20 @@ class ServiceInputTraceBuildMixin:
             "memory_link_context": self._summarize_memory_link_context(
                 recall_pack.get("memory_link_context")
             ),
-            "event_evidence_generation": {
-                "requested_event_count": int(event_evidence_generation.get("requested_event_count", 0)),
-                "loaded_event_count": int(event_evidence_generation.get("loaded_event_count", 0)),
-                "succeeded_event_count": int(event_evidence_generation.get("succeeded_event_count", 0)),
-                "failed_count": len(event_evidence_generation.get("failed_items", [])),
-                "precise_evidence_used": bool(event_evidence_generation.get("precise_evidence_used", False)),
-                "precise_selected_event_ids": event_evidence_generation.get("precise_selected_event_ids", []),
+            "event_evidence_loading": {
+                "requested_event_count": int(event_evidence_loading.get("requested_event_count", 0)),
+                "loaded_event_count": int(event_evidence_loading.get("loaded_event_count", 0)),
+                "succeeded_event_count": int(event_evidence_loading.get("succeeded_event_count", 0)),
+                "failed_count": len(event_evidence_loading.get("failed_items", [])),
+                "precise_evidence_used": bool(event_evidence_loading.get("precise_evidence_used", False)),
+                "precise_selected_event_ids": event_evidence_loading.get("precise_selected_event_ids", []),
                 "precise_requested_event_count": int(
-                    event_evidence_generation.get("precise_requested_event_count", 0)
+                    event_evidence_loading.get("precise_requested_event_count", 0)
                 ),
                 "precise_loaded_event_count": int(
-                    event_evidence_generation.get("precise_loaded_event_count", 0)
+                    event_evidence_loading.get("precise_loaded_event_count", 0)
                 ),
-                "precise_reason_summary": event_evidence_generation.get("precise_reason_summary"),
+                "precise_reason_summary": event_evidence_loading.get("precise_reason_summary"),
             },
             "recall_pack_selection": {
                 "result_status": str(recall_pack_selection.get("result_status", "succeeded")),
@@ -522,9 +522,9 @@ class ServiceInputTraceBuildMixin:
             "selected_memory_unit_ids": recall_pack["selected_memory_ids"],
             "selected_episode_ids": recall_pack["selected_episode_ids"],
             "selected_event_ids": recall_pack["selected_event_ids"],
-            "event_evidence_generation": recall_pack.get(
-                "event_evidence_generation",
-                self._empty_event_evidence_generation_trace(),
+            "event_evidence_loading": recall_pack.get(
+                "event_evidence_loading",
+                self._empty_event_evidence_loading_trace(),
             ),
             "memory_link_context": self._summarize_memory_link_context(
                 recall_pack.get("memory_link_context")
@@ -579,7 +579,7 @@ class ServiceInputTraceBuildMixin:
             "selected_memory_unit_ids": [],
             "selected_episode_ids": [],
             "selected_event_ids": [],
-            "event_evidence_generation": self._empty_event_evidence_generation_trace(),
+            "event_evidence_loading": self._empty_event_evidence_loading_trace(),
             "memory_link_context": self._empty_memory_link_context_trace(),
             "entity_resolution": self._empty_entity_resolution_trace(),
             "relation_index": self._empty_relation_index_trace(),

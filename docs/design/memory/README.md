@@ -50,7 +50,7 @@ OtomeKairo では、人格設定と記憶を操作上は独立に扱う。
 | [記憶更新と再整理.md](記憶更新と再整理.md) | `turn consolidation` と `reflective consolidation` |
 | [記憶管理と削除.md](記憶管理と削除.md) | 個別記憶行に対する外部操作と管理操作を採用しない境界 |
 | [RecallPackのLLM選別.md](RecallPackのLLM選別.md) | RecallPack 選別の LLM 契約 |
-| [event_evidenceのLLM圧縮.md](event_evidenceのLLM圧縮.md) | event_evidence 圧縮の LLM 契約 |
+| [event_evidenceの取得.md](event_evidenceの取得.md) | event_evidence の取得・項目・失敗・観測の契約 |
 | [内省要約のLLM生成.md](内省要約のLLM生成.md) | 内省要約生成の LLM 契約 |
 
 ## 意図的に採らないもの

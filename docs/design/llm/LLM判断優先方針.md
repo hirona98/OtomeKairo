@@ -68,7 +68,6 @@ OtomeKairo では、LLM を使う意味判断を次の 2 種類に分ける。
 派生情報や補助表現を作る処理である。
 失敗した場合は、その部分だけを落とし、他の処理は継続する。
 
-- `event_evidence` の圧縮
 - `reflective consolidation` の `summary_text` 生成
 
 ## コードに残す対象

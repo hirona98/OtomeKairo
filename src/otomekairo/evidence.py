@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from otomekairo.memory.utils import localize_timestamp_fields, llm_local_time_text
+from otomekairo.recall.event_evidence import EVENT_EVIDENCE_MODEL_KEYS
 
 
 # 定数
@@ -558,11 +559,8 @@ class EvidenceResolver:
             }
         if section_name == "event_evidence":
             return {
-                "source_kind": item.get("source_kind"),
                 "event_id": item.get("event_id"),
-                "kind": item.get("kind"),
-                "recorded_date": item.get("recorded_date"),
-                "summary": item.get("summary"),
+                **{key: item[key] for key in EVENT_EVIDENCE_MODEL_KEYS if key in item},
             }
         if section_name == "conflicts":
             return {
@@ -697,6 +695,15 @@ class EvidenceResolver:
         }
 
     def _recall_evidence_item(self, item: dict[str, Any], *, item_type: str) -> dict[str, Any]:
+        if item_type == "event_evidence":
+            return {
+                "type": item_type,
+                "source_id": item["event_id"],
+                "text": item.get("text"),
+                "payload": localize_timestamp_fields({
+                    key: item[key] for key in EVENT_EVIDENCE_MODEL_KEYS if key in item
+                }),
+            }
         text = self._first_text(
             item.get("text"),
             item.get("summary"),

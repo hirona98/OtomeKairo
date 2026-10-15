@@ -1,65 +1,144 @@
+import sqlite3
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from otomekairo.evidence import EvidenceResolver
 from otomekairo.llm.prompts import _compact_recall_pack
 from otomekairo.recall.builder import RecallBuilder
 from otomekairo.store.memory_links import StoreMemoryLinksMixin
+from otomekairo.store.file_store import SQLiteMemoryStore
+from otomekairo.service.memory import ServiceMemoryMixin
 
 
 class RecallEvidenceStatusTests(unittest.TestCase):
-    def test_event_evidence_preserves_recorded_people_and_time_through_model_projection(self) -> None:
+    def _load_evidence(self, records, *, event_ids=None, store=None, risk_flags=None):
         builder = RecallBuilder.__new__(RecallBuilder)
+        by_id = {record["event_id"]: record for record in records}
+        builder.store = store if store is not None else SimpleNamespace(load_events_for_evidence=Mock(
+            side_effect=lambda **kwargs: [by_id[event_id] for event_id in kwargs["event_ids"] if event_id in by_id]
+        ))
+        builder.llm = Mock(spec=[])
+        result = builder._build_event_evidence(
+            memory_set_id="memory_set:test", primary_recall_focus="episodic",
+            recall_hint={"time_reference": "past", "risk_flags": risk_flags or []},
+            sections={"episodic_evidence": [{"source_kind": "episode", "linked_event_ids":
+                                           list(by_id) if event_ids is None else event_ids}]},
+        )
+        self.assertEqual(builder.llm.mock_calls, [])
+        return builder, result
+
+    def test_event_evidence_preserves_db_text_people_and_time_through_model_projection(self) -> None:
+        text = "  題名だけを共有してください。\n本人の確認前には本文を共有しません。" * 100 + "\n末尾  "
         records = [
             {"event_id": "event:owner", "kind": "conversation_input", "role": "person",
              "speaker_ref": "person:owner", "participant_refs": ["person:owner"],
              "interaction_ref": "interaction:owner", "created_at": "2026-10-04T09:00:06+09:00",
-             "text": "私とは別人の、以前に指定した方へ題名だけを共有してください。"},
+             "text": text},
             {"event_id": "event:recipient", "kind": "speech", "role": "assistant",
              "speaker_ref": None, "participant_refs": ["person:recipient"],
              "interaction_ref": "interaction:recipient", "created_at": "2026-10-04T09:00:07+09:00",
-             "text": "許可された題名です。"},
+             "text": "  許可された題名です。\n  "},
         ]
-        builder.store = SimpleNamespace(load_events_for_evidence=Mock(side_effect=[records, []]))
-        builder.llm = SimpleNamespace(generate_event_evidence=Mock(return_value={"evidence": [
-            {"event_ref": f"event:{index}", "anchor": "記録された場面", "topic": None,
-             "decision_or_result": "題名だけの共有", "tone_or_note": None}
-            for index in range(2)
-        ]}))
-        result = builder._build_event_evidence(
-            memory_set_id="memory_set:test", primary_recall_focus="fact",
-            recall_hint={"secondary_recall_focuses": [], "time_reference": "past", "risk_flags": []},
-            sections={"episodic_evidence": [{"source_kind": "episode", "summary_text": "共有の出来事。",
-                                            "linked_event_ids": [record["event_id"] for record in records]}]},
-            model_config={"model": "mock"},
-            persona_context=SimpleNamespace(to_prompt_payload=lambda: {}),
-        )
+        for record in records:
+            record.update(memory_set_id="memory_set:test", cycle_id="cycle:test")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SQLiteMemoryStore(Path(temp_dir))
+            store.append_events(events=records)
+            _, result = self._load_evidence(records, store=store)
         projected = _compact_recall_pack(result)["event_evidence"]
-        source_events = builder.llm.generate_event_evidence.call_args.kwargs["source_pack"]["events"]
         by_id = {record["event_id"]: record for record in records}
-        for source, evidence, compact in zip(source_events, result["event_evidence"], projected, strict=True):
+        for evidence, compact in zip(result["event_evidence"], projected, strict=True):
             record = by_id[evidence["event_id"]]
-            for key in ("role", "speaker_ref", "participant_refs", "interaction_ref", "created_at"):
-                self.assertEqual(source[key], record[key])
+            for key in ("text", "role", "speaker_ref", "participant_refs", "interaction_ref", "created_at"):
                 self.assertEqual(evidence[key], record[key])
-                if record[key] is not None:
-                    self.assertEqual(compact[key], record[key])
+                self.assertEqual(compact[key], record[key])
             self.assertNotIn("event_id", compact)
-        self.assertEqual(result["event_evidence_generation"]["failed_items"], [])
+            self.assertNotIn("cycle_id", compact)
+        self.assertEqual(result["event_evidence_loading"]["failed_items"], [])
+        resolver = EvidenceResolver(store=None)
+        items = resolver._resolve_recall_items(result)
+        trace = resolver._selected_recall_sections(result)["event_evidence"]
+        for evidence, item, traced in zip(result["event_evidence"], items, trace, strict=True):
+            self.assertEqual(item["text"], evidence["text"])
+            self.assertEqual(item["payload"]["text"], evidence["text"])
+            self.assertEqual(traced["text"], evidence["text"])
 
     def test_event_evidence_without_person_provenance_does_not_invent_a_person(self) -> None:
-        builder = RecallBuilder.__new__(RecallBuilder)
-        source = builder._event_evidence_source_event({"kind": "observation", "role": "system",
-                                                     "text": "外界の観測。"})
-        evidence = builder._event_evidence_item_from_payload(
-            event_id="event:self", kind="observation", source_item=source,
-            payload={"anchor": "外界の観測", "topic": None, "decision_or_result": None, "tone_or_note": None},
-        )
-        compact = _compact_recall_pack({"event_evidence": [evidence]})["event_evidence"][0]
-        for item in (source, evidence, compact):
+        _, result = self._load_evidence([
+            {"event_id": "event:self", "kind": "observation", "role": "system", "text": "外界の観測。"},
+        ])
+        evidence = result["event_evidence"][0]
+        compact = _compact_recall_pack(result)["event_evidence"][0]
+        for item in (evidence, compact):
             self.assertNotIn("speaker_ref", item)
             self.assertNotIn("participant_refs", item)
             self.assertNotIn("interaction_ref", item)
+
+    def test_decision_keeps_recorded_reason_and_pending_intent_without_inventing_text(self) -> None:
+        reason = "  条件を確認する。\n" * 100 + "本人の許可後に進める。  "
+        pending = {"intent_kind": "follow_up", "intent_summary": "  後で確認する。\n  ",
+                   "reason_summary": reason, "pending_intent_id": "pending_intent:internal"}
+        _, result = self._load_evidence([
+            {"event_id": "event:decision", "kind": "decision", "role": "system",
+             "reason_code": "confirm_permission", "reason_summary": reason,
+             "result_kind": "pending_intent", "external_result_kind": "noop", "pending_intent_summary": pending},
+        ])
+        evidence = _compact_recall_pack(result)["event_evidence"][0]
+        self.assertNotIn("text", evidence)
+        self.assertEqual(evidence["reason_summary"], reason)
+        self.assertEqual(evidence["result_kind"], "pending_intent")
+        self.assertEqual(evidence["external_result_kind"], "noop")
+        self.assertEqual(evidence["pending_intent_summary"], {key: pending[key] for key in
+                                                           ("intent_kind", "intent_summary", "reason_summary")})
+
+    def test_loading_keeps_successes_and_records_missing_or_invalid_events(self) -> None:
+        for records in ([], [
+            {"event_id": "event:valid", "kind": "speech", "text": "原文。"},
+            {"event_id": "event:invalid", "kind": "speech", "text": ["型が不正"]},
+        ]):
+            with self.subTest(all_missing=not records):
+                _, result = self._load_evidence(records, event_ids=["event:valid", "event:invalid", "event:missing"])
+                loading = result["event_evidence_loading"]
+                self.assertEqual(loading["requested_event_count"], 3)
+                self.assertEqual(loading["loaded_event_count"], len(records))
+                self.assertEqual(loading["succeeded_event_count"], int(bool(records)))
+                self.assertEqual(len(loading["failed_items"]), 2 if records else 3)
+                stages = {item["event_id"]: item["failure_stage"] for item in loading["failed_items"]}
+                self.assertEqual(stages["event:missing"], "load_event")
+                self.assertEqual(stages["event:invalid"], "validate_event" if records else "load_event")
+                service = ServiceMemoryMixin()
+                audits = service._build_event_evidence_audit_events(
+                    cycle_id="cycle:test", memory_set_id="memory_set:test",
+                    created_at="2026-10-04T09:00:00+09:00", recall_pack=result,
+                )
+                failures = [event for event in audits if event["kind"] == "event_evidence_load_failure"]
+                self.assertEqual({event["source_event_id"] for event in failures}, set(stages))
+                self.assertEqual(len(failures), len(loading["failed_items"]))
+
+    def test_standard_and_precise_loading_preserve_limits_order_and_deduplication(self) -> None:
+        ids = [f"event:{index}" for index in range(20)]
+        records = [{"event_id": event_id, "kind": "speech", "text": event_id} for event_id in ids]
+        builder, result = self._load_evidence(records, event_ids=[*ids, ids[0]], risk_flags=["ambiguous_reference"])
+        standard = [ids[1], ids[0], *ids[2:8]]
+        precise = ids[8:16]
+        self.assertEqual(result["selected_event_ids"], standard)
+        self.assertEqual(result["event_evidence_loading"]["precise_selected_event_ids"], precise)
+        self.assertEqual([item["event_id"] for item in result["event_evidence"]], standard + precise)
+        calls = builder.store.load_events_for_evidence.call_args_list
+        self.assertEqual([call.kwargs["event_ids"] for call in calls], [standard, precise])
+        self.assertEqual([call.kwargs["limit"] for call in calls], [8, 8])
+
+    def test_no_candidates_skip_loading_and_database_errors_propagate(self) -> None:
+        builder, result = self._load_evidence([], event_ids=[])
+        builder.store.load_events_for_evidence.assert_not_called()
+        self.assertEqual(result["event_evidence"], [])
+        self.assertEqual(result["event_evidence_loading"]["requested_event_count"], 0)
+        store = SimpleNamespace(load_events_for_evidence=Mock(side_effect=sqlite3.OperationalError("DB unavailable")))
+        with self.assertRaises(sqlite3.OperationalError):
+            self._load_evidence([], event_ids=["event:missing"], store=store)
 
     def test_update_source_reports_read_only_selected_direct_inactive_parent(self) -> None:
         builder = RecallBuilder.__new__(RecallBuilder)

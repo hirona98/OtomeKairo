@@ -35,6 +35,7 @@ from otomekairo.llm.contracts import (
     WORLD_STATE_TTL_HINT_VALUES,
 )
 from otomekairo.memory.utils import MEMORY_OBJECT_REF_PREFIXES, llm_local_time_text, localize_timestamp_fields, memory_claim_context
+from otomekairo.recall.event_evidence import EVENT_EVIDENCE_MODEL_KEYS
 from otomekairo.world_state.models import WorldStateSourcePack
 
 
@@ -1096,24 +1097,6 @@ def build_memory_reflection_summary_messages(
     ]
 
 
-def build_event_evidence_messages(
-    *,
-    persona_context: PersonaContext,
-    source_pack: dict[str, Any],
-) -> list[dict[str, str]]:
-    enriched_pack = _with_persona_context(source_pack, persona_context)
-    return [
-        {
-            "role": "system",
-            "content": _build_event_evidence_system_prompt(),
-        },
-        {
-            "role": "user",
-            "content": _build_event_evidence_user_prompt(enriched_pack),
-        },
-    ]
-
-
 def build_recall_pack_selection_messages(
     *,
     persona_context: PersonaContext,
@@ -1357,20 +1340,6 @@ def build_autonomous_step_repair_prompt(validation_error: str) -> str:
         "capability_request action では server が capability result 待ちへ遷移します。transition.kind と next_run_at は run 遷移には使われず、標準は kind=continue, next_run_at=null です。\n"
         "run_update のキーは current_step_summary, history_summary の 2 つだけです。\n"
         "秘密値、target_client_id、内部 URL、Markdown、コードフェンス、説明文は禁止です。"
-    )
-
-
-def build_event_evidence_repair_prompt(validation_error: str) -> str:
-    return (
-        "前回の出力は event_evidence_generation 契約を満たしていませんでした。\n"
-        f"validator_error: {validation_error}\n"
-        "同じ source pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
-        "トップレベルキーは evidence だけです。\n"
-        "evidence の各要素は event_ref, anchor, topic, decision_or_result, tone_or_note の 5 つだけを持ちます。\n"
-        "event_ref は source pack にある値だけを使ってください。\n"
-        "各 slot は string または null です。少なくとも 1 つは null ではなくしてください。\n"
-        "各 slot は present な場合は簡潔に、改行なしで返してください。\n"
-        "新しい事実の追加、内部識別子、Markdown、コードフェンス、説明文は禁止です。"
     )
 
 
@@ -2407,7 +2376,7 @@ def _build_speech_system_prompt() -> str:
             "向きが人物発話ではないとき、recent_turns と過去の assistant 発話、要約記憶は会話の文脈や表現調整に使います。\n"
             "evidence_items に raw event が含まれるときは、その text と recorded_date を利用可能な根拠として扱ってください。\n"
             "RecallPack.evidence_pack.status=missing のときは、ログが存在しないとは言わず、対象を特定できない、または根拠を開けなかったと述べてください。\n"
-            "RecallPack.event_evidence は短い証拠要約として扱い、必要なときだけ自然に参照してください。\n"
+            "RecallPack.event_evidence は選定済み event の本文・判断理由と出所です。話者・参加者・発生日時を保ち、過去の報告と現在有効な理解を照合して参照してください。\n"
             "RecallPack.conflicts は根拠の人物・範囲・時点と決定済み判断へ照合し、現在も未解決の競合について短く確認してください。後の本人報告で解消された履歴は現在の不確かさへ戻さないでください。\n"
             "断定確認が必要な場合は、短く確認質問に寄せてください。",
         ),
@@ -2631,27 +2600,6 @@ def _build_memory_reflection_summary_system_prompt() -> str:
         "mood_state や affect_state は、episodes と memory_units に整合する範囲だけで補助的に使ってください。\n"
         "open_loops は長期傾向に効くときだけ自然に触れてください。\n"
         "event_id や memory_unit_id のような内部識別子を書いてはいけません。"
-    )
-
-
-def _build_event_evidence_system_prompt() -> str:
-    return (
-        "内部処理 role `event_evidence_generation` として証拠要約を生成します。\n"
-        "選定済み event 群の source pack を読み、各 event_ref の短い証拠表現を JSON オブジェクト 1 個で返してください。\n"
-        "Markdown、コードフェンス、説明文は禁止です。\n"
-        "返すトップレベルキーは evidence だけです。\n"
-        "evidence の各要素は event_ref, anchor, topic, decision_or_result, tone_or_note の 5 つだけを持ちます。\n"
-        "event_ref は source pack にある値だけを使い、event をまたいで事実を混ぜないでください。\n"
-        "各 slot は string または null にしてください。少なくとも 1 つは null ではなくしてください。\n"
-        "各 slot は簡潔に、改行なしで返してください。\n"
-        "source pack に無い事実を補ってはいけません。\n"
-        "persona_context の人格全体に基づき、この role の問いと出力契約に従って処理してください。source pack 外の出来事、言い回し、判断を足してはいけません。\n"
-        + _person_reference_instruction()
-        + "\n"
-        "長い逐語引用、言い直し、相槌の再掲は避けてください。\n"
-        "decision_or_result は決定や結果があるときだけ書き、tone_or_note は補助に留めてください。\n"
-        "primary_recall_focus=commitment では決定や継続性を優先しやすくし、primary_recall_focus=episodic や time_reference=past では anchor と topic を残しやすくしてください。\n"
-        "event_id や cycle_id のような内部識別子を書いてはいけません。"
     )
 
 
@@ -2902,10 +2850,6 @@ def _build_memory_interpretation_user_prompt(
 
 
 def _build_memory_reflection_summary_user_prompt(source_pack: dict[str, Any]) -> str:
-    return _format_named_json_prompt_payload("SOURCE_PACK", source_pack)
-
-
-def _build_event_evidence_user_prompt(source_pack: dict[str, Any]) -> str:
     return _format_named_json_prompt_payload("SOURCE_PACK", source_pack)
 
 
@@ -3438,16 +3382,7 @@ def _compact_conflict_context_item(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _compact_event_evidence_item(item: dict[str, Any]) -> dict[str, Any]:
-    payload = {
-        "kind": item["kind"],
-    }
-    for key in ("role", "speaker_ref", "participant_refs", "interaction_ref", "created_at",
-                "anchor", "topic", "decision_or_result", "tone_or_note"):
-        value = item.get(key)
-        if value is None:
-            continue
-        payload[key] = value
-    return payload
+    return {key: item[key] for key in EVENT_EVIDENCE_MODEL_KEYS if key in item}
 
 
 def _compact_visual_observation_item(item: dict[str, Any]) -> dict[str, Any]:

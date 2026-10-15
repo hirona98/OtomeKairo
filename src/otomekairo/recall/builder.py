@@ -294,11 +294,6 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             primary_recall_focus=primary_recall_focus,
             recall_hint=recall_hint,
             sections=sections,
-            model_config=selected_model_preset,
-            persona_context=build_persona_context(
-                state["personas"][state["selected_persona_id"]],
-                role="event_evidence_generation",
-            ),
         )
         event_evidence = event_evidence_result["event_evidence"]
         selected_event_ids = event_evidence_result["selected_event_ids"]
@@ -323,7 +318,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "event_evidence": event_evidence,
             "visual_observations": visual_observations,
             "visual_daily_digests": visual_daily_digests,
-            "event_evidence_generation": event_evidence_result["event_evidence_generation"],
+            "event_evidence_loading": event_evidence_result["event_evidence_loading"],
             "selected_memory_ids": selected_memory_ids,
             "retrieved_memory_ids": self._collect_selected_ids(candidate_sections, key="memory_unit_id"),
             "selected_episode_ids": selected_episode_ids,
@@ -1051,7 +1046,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "event_evidence": [],
             "visual_observations": [],
             "visual_daily_digests": [],
-            "event_evidence_generation": {
+            "event_evidence_loading": {
                 "requested_event_count": 0,
                 "loaded_event_count": 0,
                 "succeeded_event_count": 0,

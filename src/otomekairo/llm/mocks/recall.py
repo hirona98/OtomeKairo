@@ -7,7 +7,6 @@ from otomekairo.llm.contracts import (
     RECALL_FOCUS_VALUES,
     RECALL_PACK_SECTION_NAMES,
     validate_answer_contract_contract,
-    validate_event_evidence_contract,
     validate_initiative_entry_check_contract,
     validate_pending_intent_selection_contract,
     validate_recall_hint_contract,
@@ -213,98 +212,6 @@ class LLMMockRecallMixin:
 
         # 結果
         return secondary_recall_focuses
-
-    def generate_event_evidence(
-        self,
-        model_config: dict,
-        source_pack: dict[str, Any],
-    ) -> dict[str, Any]:
-        # model確認
-        self._assert_mock_model(model_config)
-
-        events = source_pack.get("events")
-        if not isinstance(events, list) or not events:
-            events = [
-                {
-                    "event_ref": "event:0",
-                    **(
-                        source_pack.get("event", {})
-                        if isinstance(source_pack.get("event"), dict)
-                        else {}
-                    ),
-                    **(
-                        source_pack.get("selection_basis", {})
-                        if isinstance(source_pack.get("selection_basis"), dict)
-                        else {}
-                    ),
-                }
-            ]
-
-        primary_recall_focus = str(source_pack.get("primary_recall_focus") or "person")
-        time_reference = str(source_pack.get("time_reference") or "none")
-        evidence: list[dict[str, Any]] = []
-        for index, event in enumerate(events):
-            if not isinstance(event, dict):
-                continue
-            event_ref = event.get("event_ref")
-            if not isinstance(event_ref, str) or not event_ref.startswith("event:"):
-                event_ref = f"event:{index}"
-            retrieval_sections = event.get("retrieval_sections", [])
-            source_summaries = event.get("source_summaries", [])
-            kind = str(event.get("kind") or "event").strip() or "event"
-            event_text = self._mock_event_evidence_text(event.get("text"))
-            source_summary = self._mock_event_evidence_text(
-                source_summaries[0] if isinstance(source_summaries, list) and source_summaries else None
-            )
-            reason_summary = self._mock_event_evidence_text(event.get("reason_summary"))
-            result_kind = str(event.get("result_kind") or "").strip()
-            section_label = self._mock_event_evidence_section_label(
-                retrieval_sections[0] if isinstance(retrieval_sections, list) and retrieval_sections else None
-            )
-
-            anchor_prefix = "前回の" if primary_recall_focus == "episodic" or time_reference == "past" else "そのときの"
-            if kind == "decision":
-                anchor = f"{anchor_prefix}{section_label}の判断場面"
-            elif kind == "speech":
-                anchor = f"{anchor_prefix}{section_label}への返答場面"
-            elif kind == "conversation_input":
-                anchor = f"{anchor_prefix}{section_label}の会話場面"
-            else:
-                anchor = f"{anchor_prefix}{section_label}に関する場面"
-
-            topic = event_text or source_summary
-            decision_or_result = None
-            if kind == "decision":
-                if reason_summary is not None:
-                    decision_or_result = reason_summary
-                elif result_kind:
-                    decision_or_result = f"{result_kind} を選ぶ流れになった。"
-                else:
-                    decision_or_result = "その場で応答方針を決めた。"
-            elif kind == "speech" and event_text is not None:
-                decision_or_result = f"{event_text} と返した。"
-
-            tone_or_note = None
-            if primary_recall_focus in {"person", "state"}:
-                tone_or_note = "様子を確かめながら進める空気だった。"
-            elif kind == "decision" and result_kind == "pending_intent":
-                tone_or_note = "その場では返さず、後で触れる含みを残した。"
-            elif kind == "speech":
-                tone_or_note = "前の流れを受けて返していた。"
-
-            evidence.append(
-                {
-                    "event_ref": event_ref,
-                    "anchor": anchor,
-                    "topic": topic,
-                    "decision_or_result": decision_or_result,
-                    "tone_or_note": tone_or_note,
-                }
-            )
-
-        payload = {"evidence": evidence}
-        validate_event_evidence_contract(payload)
-        return payload
 
     def generate_recall_pack_selection(
         self,
@@ -616,7 +523,7 @@ class LLMMockRecallMixin:
         # variant summary 群
         compact_summaries: list[str] = []
         for value in conflict.get("variant_summaries", []):
-            compact_value = self._mock_event_evidence_text(value)
+            compact_value = self._mock_conflict_summary_text(value)
             if compact_value is None:
                 continue
             compact_summaries.append(compact_value.rstrip("。!?！？"))
@@ -756,22 +663,7 @@ class LLMMockRecallMixin:
         # 結果
         return features
 
-    def _mock_event_evidence_section_label(self, section_name: Any) -> str:
-        if section_name == "active_commitments":
-            return "約束の流れ"
-        if section_name == "episodic_evidence":
-            return "前の出来事"
-        if section_name == "relationship_model":
-            return "関係の流れ"
-        if section_name == "person_model":
-            return "人物の近況"
-        if section_name == "active_topics":
-            return "話題の流れ"
-        if section_name == "self_model":
-            return "自分側の応答"
-        return "やり取り"
-
-    def _mock_event_evidence_text(self, value: Any) -> str | None:
+    def _mock_conflict_summary_text(self, value: Any) -> str | None:
         if not isinstance(value, str):
             return None
         normalized = " ".join(value.split()).strip()

@@ -2,10 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from otomekairo.llm.contracts import LLMContractError, LLMError, validate_event_evidence_item
-from otomekairo.llm.contexts import PersonaContext
-
-
 # 定数
 EVENT_EVIDENCE_LIMIT = 8
 EVENT_EVIDENCE_FOCUSES = {
@@ -14,10 +10,13 @@ EVENT_EVIDENCE_FOCUSES = {
     "relationship",
     "episodic",
 }
-EVENT_EVIDENCE_SOURCE_SUMMARY_LIMIT = 6
 PRECISE_EVENT_EVIDENCE_LIMIT = 8
-EVENT_EVIDENCE_PROVENANCE_KEYS = (
-    "role", "speaker_ref", "participant_refs", "interaction_ref", "created_at",
+EVENT_EVIDENCE_TEXT_KEYS = (
+    "role", "speaker_ref", "interaction_ref", "created_at", "text",
+    "result_kind", "external_result_kind", "reason_code", "reason_summary",
+)
+EVENT_EVIDENCE_MODEL_KEYS = (
+    "kind", *EVENT_EVIDENCE_TEXT_KEYS, "participant_refs", "pending_intent_summary",
 )
 PRECISE_EVENT_EVIDENCE_FOCUS_HISTORY = {
     "commitment",
@@ -45,13 +44,8 @@ class RecallEventEvidenceMixin:
         primary_recall_focus: str,
         recall_hint: dict[str, Any],
         sections: dict[str, list[dict[str, Any]]],
-        model_config: dict[str, Any],
-        persona_context: PersonaContext,
     ) -> dict[str, Any]:
-        # 初期状態
         result = self._empty_event_evidence_result()
-
-        # 確認
         if not self._should_load_event_evidence(
             primary_recall_focus=primary_recall_focus,
             recall_hint=recall_hint,
@@ -59,7 +53,6 @@ class RecallEventEvidenceMixin:
         ):
             return result
 
-        # 選択済みID群
         selected_event_ids = self._select_event_evidence_ids(
             primary_recall_focus=primary_recall_focus,
             sections=sections,
@@ -71,21 +64,17 @@ class RecallEventEvidenceMixin:
             sections=sections,
             selected_event_ids=selected_event_ids,
         )
-        generation = result["event_evidence_generation"]
-        generation["precise_evidence_used"] = precise_plan["used"]
-        generation["precise_reason_codes"] = precise_plan["reason_codes"]
-        generation["precise_reason_summary"] = precise_plan["reason_summary"]
-        generation["precise_selected_event_ids"] = precise_plan["selected_event_ids"]
-        generation["precise_requested_event_count"] = len(precise_plan["selected_event_ids"])
-        requested_event_ids = [
-            *selected_event_ids,
-            *precise_plan["selected_event_ids"],
-        ]
-        generation["requested_event_count"] = len(requested_event_ids)
+        loading = result["event_evidence_loading"]
+        loading["precise_evidence_used"] = precise_plan["used"]
+        loading["precise_reason_codes"] = precise_plan["reason_codes"]
+        loading["precise_reason_summary"] = precise_plan["reason_summary"]
+        loading["precise_selected_event_ids"] = precise_plan["selected_event_ids"]
+        loading["precise_requested_event_count"] = len(precise_plan["selected_event_ids"])
+        requested_event_ids = [*selected_event_ids, *precise_plan["selected_event_ids"]]
+        loading["requested_event_count"] = len(requested_event_ids)
         if not requested_event_ids:
             return result
 
-        # 読み込み
         records = self.store.load_events_for_evidence(
             memory_set_id=memory_set_id,
             event_ids=selected_event_ids,
@@ -107,183 +96,41 @@ class RecallEventEvidenceMixin:
             if isinstance(record, dict) and isinstance(record.get("event_id"), str)
         }
         records_by_id.update(precise_records_by_id)
-        generation["loaded_event_count"] = len(records_by_id)
-        generation["precise_loaded_event_count"] = len(precise_records_by_id)
+        loading["loaded_event_count"] = len(records_by_id)
+        loading["precise_loaded_event_count"] = len(precise_records_by_id)
 
-        precise_selected_set = set(precise_plan["selected_event_ids"])
-        event_items: list[dict[str, Any]] = []
-        failed_items: list[dict[str, Any]] = []
         for event_id in requested_event_ids:
             record = records_by_id.get(event_id)
             if record is None:
-                failed_items.append(
-                    self._event_evidence_failure_item(
-                        event_id=event_id,
-                        kind="event",
-                        failure_stage="load_event",
-                        failure_reason="selected event was not found in events table.",
-                    )
-                )
-                continue
-            event_ref = f"event:{len(event_items)}"
-            try:
-                source_item = self._build_event_evidence_source_item(
-                    primary_recall_focus=primary_recall_focus,
-                    sections=sections,
+                loading["failed_items"].append(self._event_evidence_failure_item(
                     event_id=event_id,
-                    event_ref=event_ref,
-                    record=record,
-                    selection_mode="precise" if event_id in precise_selected_set else "standard",
-                    precise_reason_summary=(
-                        precise_plan["reason_summary"] if event_id in precise_selected_set else None
-                    ),
-                )
-            except Exception as exc:  # noqa: BLE001
-                failed_items.append(
-                    self._event_evidence_failure_item(
-                        event_id=event_id,
-                        kind=self._event_evidence_kind(record),
-                        failure_stage="build_source_pack",
-                        failure_reason=str(exc),
-                    )
-                )
+                    kind="event",
+                    failure_stage="load_event",
+                    failure_reason="selected event was not found in events table.",
+                ))
                 continue
-            event_items.append(
-                {
-                    "event_id": event_id,
-                    "event_ref": event_ref,
-                    "kind": self._event_evidence_kind(record),
-                    "source_item": source_item,
-                }
-            )
-
-        event_evidence: list[dict[str, Any]] = []
-        if event_items:
-            source_pack = {
-                "persona_context": persona_context.to_prompt_payload(),
-                "primary_recall_focus": primary_recall_focus,
-                "secondary_recall_focuses": self._secondary_recall_focuses(recall_hint),
-                "time_reference": str(recall_hint.get("time_reference") or "none"),
-                "risk_flags": list(recall_hint.get("risk_flags") or []),
-                "events": [item["source_item"] for item in event_items],
-            }
             try:
-                payload = self.llm.generate_event_evidence(
-                    model_config=model_config,
-                    persona_context=persona_context,
-                    source_pack=source_pack,
-                )
-                generated_by_ref = self._event_evidence_items_from_batch_payload(payload)
-            except LLMContractError as exc:
-                for item in event_items:
-                    failed_items.append(
-                        self._event_evidence_failure_item(
-                            event_id=item["event_id"],
-                            kind=item["kind"],
-                            failure_stage="contract_validation",
-                            failure_reason=str(exc),
-                        )
-                    )
-                generated_by_ref = {}
-            except LLMError as exc:
-                for item in event_items:
-                    failed_items.append(
-                        self._event_evidence_failure_item(
-                            event_id=item["event_id"],
-                            kind=item["kind"],
-                            failure_stage="llm_generation",
-                            failure_reason=str(exc),
-                        )
-                    )
-                generated_by_ref = {}
-            except Exception as exc:  # noqa: BLE001
-                for item in event_items:
-                    failed_items.append(
-                        self._event_evidence_failure_item(
-                            event_id=item["event_id"],
-                            kind=item["kind"],
-                            failure_stage="llm_generation",
-                            failure_reason=str(exc),
-                        )
-                    )
-                generated_by_ref = {}
-
-            failed_ids = {item["event_id"] for item in failed_items}
-            for item in event_items:
-                if item["event_id"] in failed_ids:
-                    continue
-                slot_payload = generated_by_ref.get(item["event_ref"])
-                if isinstance(slot_payload, Exception):
-                    failed_items.append(
-                        self._event_evidence_failure_item(
-                            event_id=item["event_id"],
-                            kind=item["kind"],
-                            failure_stage="contract_validation",
-                            failure_reason=str(slot_payload),
-                        )
-                    )
-                    continue
-                if not isinstance(slot_payload, dict):
-                    failed_items.append(
-                        self._event_evidence_failure_item(
-                            event_id=item["event_id"],
-                            kind=item["kind"],
-                            failure_stage="contract_validation",
-                            failure_reason="event_ref was not returned.",
-                        )
-                    )
-                    continue
-                try:
-                    event_evidence.append(
-                        self._event_evidence_item_from_payload(
-                            event_id=item["event_id"],
-                            kind=item["kind"],
-                            payload=slot_payload,
-                            source_item=item["source_item"],
-                        )
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    failed_items.append(
-                        self._event_evidence_failure_item(
-                            event_id=item["event_id"],
-                            kind=item["kind"],
-                            failure_stage="contract_validation",
-                            failure_reason=str(exc),
-                        )
-                    )
-
-        result["event_evidence"] = event_evidence
-        result["event_evidence_generation"]["succeeded_event_count"] = len(event_evidence)
-        result["event_evidence_generation"]["failed_items"] = failed_items
+                evidence = {"event_id": event_id, **self._event_evidence_source_event(record)}
+            except (KeyError, TypeError, ValueError) as exc:
+                loading["failed_items"].append(self._event_evidence_failure_item(
+                    event_id=event_id,
+                    kind=record["kind"] if isinstance(record.get("kind"), str) else "event",
+                    failure_stage="validate_event",
+                    failure_reason=str(exc),
+                ))
+                continue
+            result["event_evidence"].append(evidence)
+        loading["succeeded_event_count"] = len(result["event_evidence"])
         return result
-
-    def _event_evidence_items_from_batch_payload(self, payload: dict[str, Any]) -> dict[str, dict[str, Any] | Exception]:
-        evidence = payload.get("evidence")
-        if not isinstance(evidence, list):
-            return {}
-        generated: dict[str, dict[str, Any] | Exception] = {}
-        for item in evidence:
-            event_ref = item.get("event_ref") if isinstance(item, dict) else None
-            if not isinstance(event_ref, str) or not event_ref.startswith("event:"):
-                continue
-            if event_ref in generated:
-                continue
-            try:
-                validate_event_evidence_item(item)
-            except Exception as exc:  # noqa: BLE001
-                generated[event_ref] = exc
-                continue
-            generated[event_ref] = item
-        return generated
 
     def _empty_event_evidence_result(self) -> dict[str, Any]:
         return {
             "event_evidence": [],
             "selected_event_ids": [],
-            "event_evidence_generation": self._empty_event_evidence_generation(),
+            "event_evidence_loading": self._empty_event_evidence_loading(),
         }
 
-    def _empty_event_evidence_generation(self) -> dict[str, Any]:
+    def _empty_event_evidence_loading(self) -> dict[str, Any]:
         return {
             "requested_event_count": 0,
             "loaded_event_count": 0,
@@ -427,7 +274,7 @@ class RecallEventEvidenceMixin:
             return {
                 "used": False,
                 "reason_codes": ["not_needed"],
-                "reason_summary": "曖昧性や継続確認の条件が無いため、圧縮済み event_evidence だけを使う。",
+                "reason_summary": "曖昧性や継続確認の条件が無いため、標準選定の event_evidence だけを使う。",
                 "selected_event_ids": [],
             }
 
@@ -555,7 +402,7 @@ class RecallEventEvidenceMixin:
         if "no_selected_events" in reason_codes:
             return "selected event が無いため、追加 event の確認は行わない。"
         if reason_codes == ["not_needed"]:
-            return "曖昧性や継続確認の条件が無いため、圧縮済み event_evidence だけを使う。"
+            return "曖昧性や継続確認の条件が無いため、標準選定の event_evidence だけを使う。"
 
         reason_texts: list[str] = []
         for code in reason_codes:
@@ -622,140 +469,40 @@ class RecallEventEvidenceMixin:
             seen.add(value)
         return ordered
 
-    def _build_event_evidence_source_item(
-        self,
-        *,
-        primary_recall_focus: str,
-        sections: dict[str, list[dict[str, Any]]],
-        event_id: str,
-        event_ref: str,
-        record: dict[str, Any],
-        selection_mode: str = "standard",
-        precise_reason_summary: str | None = None,
-    ) -> dict[str, Any]:
-        matched_sources = self._matched_event_evidence_sources(
-            primary_recall_focus=primary_recall_focus,
-            sections=sections,
-            event_id=event_id,
-        )
-        selection_basis = self._event_evidence_selection_basis(matched_sources)
-        event_payload = self._event_evidence_source_event(record)
-        item: dict[str, Any] = {
-            "event_ref": event_ref,
-            "selection_mode": selection_mode,
-            "retrieval_sections": selection_basis.get("retrieval_sections", []),
-            "source_summaries": selection_basis.get("source_summaries", []),
-            **event_payload,
-        }
-        if precise_reason_summary is not None:
-            item["precise_reason_summary"] = precise_reason_summary
-        return item
-
-    def _matched_event_evidence_sources(
-        self,
-        *,
-        primary_recall_focus: str,
-        sections: dict[str, list[dict[str, Any]]],
-        event_id: str,
-    ) -> list[tuple[str, dict[str, Any]]]:
-        # 収集
-        matched: list[tuple[str, dict[str, Any]]] = []
-        for section_name in self._event_evidence_section_priority(primary_recall_focus):
-            for item in sections.get(section_name, []):
-                if event_id not in self._prioritized_event_ids_for_item(item):
-                    continue
-                matched.append((section_name, item))
-        return matched
-
-    def _event_evidence_selection_basis(
-        self,
-        matched_sources: list[tuple[str, dict[str, Any]]],
-    ) -> dict[str, Any]:
-        # section 群
-        retrieval_sections: list[str] = []
-        source_summaries: list[str] = []
-        for section_name, item in matched_sources:
-            if section_name not in retrieval_sections:
-                retrieval_sections.append(section_name)
-
-            summary_text = self._event_evidence_source_summary(item)
-            if summary_text is None or summary_text in source_summaries:
-                continue
-            source_summaries.append(summary_text)
-            if len(source_summaries) >= EVENT_EVIDENCE_SOURCE_SUMMARY_LIMIT:
-                break
-
-        # 結果
-        return {
-            "retrieval_sections": retrieval_sections,
-            "source_summaries": source_summaries,
-        }
-
-    def _event_evidence_source_summary(self, item: dict[str, Any]) -> str | None:
-        return self._optional_text(item.get("summary_text"))
-
     def _event_evidence_source_event(self, record: dict[str, Any]) -> dict[str, Any]:
-        kind = self._event_evidence_kind(record)
-        return {
-            "kind": kind,
-            **{key: record[key] for key in EVENT_EVIDENCE_PROVENANCE_KEYS if key in record},
-            "role": self._optional_text(record.get("role")),
-            "created_at": self._optional_text(record.get("created_at")),
-            "text": self._optional_text(record.get("text")),
-            "result_kind": self._optional_text(record.get("result_kind")),
-            "external_result_kind": self._optional_text(record.get("external_result_kind")),
-            "reason_code": self._optional_text(record.get("reason_code")),
-            "reason_summary": self._optional_text(record.get("reason_summary")),
-            "pending_intent_summary": self._compact_pending_intent_summary(record.get("pending_intent_summary")),
-        }
-
-    def _compact_pending_intent_summary(self, value: Any) -> dict[str, str] | None:
-        if not isinstance(value, dict):
-            return None
-
-        payload: dict[str, str] = {}
-        for key_name in ("intent_kind", "intent_summary", "reason_summary"):
-            normalized = self._optional_text(value.get(key_name))
-            if normalized is not None:
-                payload[key_name] = normalized
-        if not payload:
-            return None
-        return payload
-
-    def _event_evidence_item_from_payload(
-        self,
-        *,
-        event_id: str,
-        kind: str,
-        payload: dict[str, Any],
-        source_item: dict[str, Any],
-    ) -> dict[str, Any]:
-        # 基底
-        item = {
-            "event_id": event_id,
-            "kind": kind,
-        }
-
-        # slot 群
-        for key_name in ("anchor", "topic", "decision_or_result", "tone_or_note"):
-            value = payload.get(key_name)
-            if value is None:
+        kind = record["kind"]
+        if not isinstance(kind, str) or not kind.strip():
+            raise ValueError("event.kind must be a non-empty string.")
+        item: dict[str, Any] = {"kind": kind}
+        for key in EVENT_EVIDENCE_TEXT_KEYS:
+            if key not in record:
                 continue
-            item[key_name] = str(value).strip()
-
-        if len(item) <= 2:
-            raise ValueError("EventEvidence payload did not contain any present slots.")
-        item.update({key: source_item[key] for key in EVENT_EVIDENCE_PROVENANCE_KEYS if key in source_item})
+            value = record[key]
+            if value is not None and not isinstance(value, str):
+                raise ValueError(f"event.{key} must be a string or null.")
+            item[key] = value
+        if "participant_refs" in record:
+            refs = record["participant_refs"]
+            if refs is not None and (
+                not isinstance(refs, list) or any(not isinstance(ref, str) for ref in refs)
+            ):
+                raise ValueError("event.participant_refs must be an array of strings or null.")
+            item["participant_refs"] = refs
+        if "pending_intent_summary" in record:
+            item["pending_intent_summary"] = self._compact_pending_intent_summary(record["pending_intent_summary"])
         return item
 
-    def _event_evidence_kind(self, record: dict[str, Any]) -> str:
-        return str(record.get("kind", "event")).strip() or "event"
-
-    def _optional_text(self, value: Any) -> str | None:
-        # LLM 根拠として渡す文字列は、長さでは切らない。
-        if not isinstance(value, str):
+    def _compact_pending_intent_summary(self, value: Any) -> dict[str, str | None] | None:
+        if value is None:
             return None
-        normalized = value.strip()
-        if not normalized:
-            return None
-        return normalized
+        if not isinstance(value, dict):
+            raise ValueError("event.pending_intent_summary must be an object or null.")
+        payload: dict[str, str | None] = {}
+        for key in ("intent_kind", "intent_summary", "reason_summary"):
+            if key not in value:
+                continue
+            text = value[key]
+            if text is not None and not isinstance(text, str):
+                raise ValueError(f"event.pending_intent_summary.{key} must be a string or null.")
+            payload[key] = text
+        return payload

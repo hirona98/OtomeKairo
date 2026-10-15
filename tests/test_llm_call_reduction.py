@@ -7,7 +7,6 @@ from typing import Any
 from unittest.mock import Mock
 
 from otomekairo.llm.contracts import (
-    validate_event_evidence_contract,
     validate_memory_interpretation_contract,
     validate_memory_reflection_summary_contract,
 )
@@ -18,7 +17,7 @@ from otomekairo.memory.consolidator import MemoryConsolidator
 from otomekairo.memory.reflection.summary import MemoryReflectionSummaryMixin
 from otomekairo.memory.utils import source_text_hash
 from otomekairo.memory.vector import MemoryVectorIndexer
-from otomekairo.recall.event_evidence import PRECISE_EVENT_EVIDENCE_LIMIT, RecallEventEvidenceMixin
+from otomekairo.recall.event_evidence import PRECISE_EVENT_EVIDENCE_LIMIT
 from otomekairo.store.file_store import FileStore
 
 
@@ -159,28 +158,6 @@ class LlmCallReductionTests(unittest.TestCase):
             }
         )
 
-    def test_event_evidence_batch_contract_is_envelope_only(self) -> None:
-        validate_event_evidence_contract(
-            {
-                "evidence": [
-                    {
-                        "event_ref": "event:0",
-                        "anchor": "前回の相談の場面",
-                        "topic": "体調",
-                        "decision_or_result": None,
-                        "tone_or_note": None,
-                    },
-                    {
-                        "event_ref": "event:1",
-                        "anchor": None,
-                        "topic": None,
-                        "decision_or_result": None,
-                        "tone_or_note": None,
-                    },
-                ]
-            }
-        )
-
     def test_reflection_keeps_valid_items_when_one_item_is_invalid(self) -> None:
         harness = _DirtyScopeHarness()
         harness.llm.generate_memory_reflection_summary.return_value = {
@@ -213,31 +190,6 @@ class LlmCallReductionTests(unittest.TestCase):
         self.assertEqual(set(texts), {"scope:1"})
         self.assertEqual(len(summary_generation["failed_scopes"]), 1)
         self.assertEqual(summary_generation["failed_scopes"][0]["scope_key"], "self|person:a")
-
-    def test_event_evidence_keeps_valid_items_when_one_item_is_invalid(self) -> None:
-        mixin = RecallEventEvidenceMixin()
-        generated = mixin._event_evidence_items_from_batch_payload(
-            {
-                "evidence": [
-                    {
-                        "event_ref": "event:0",
-                        "anchor": "前回の相談の場面",
-                        "topic": None,
-                        "decision_or_result": None,
-                        "tone_or_note": None,
-                    },
-                    {
-                        "event_ref": "event:1",
-                        "anchor": None,
-                        "topic": None,
-                        "decision_or_result": None,
-                        "tone_or_note": None,
-                    },
-                ]
-            }
-        )
-        self.assertIsInstance(generated["event:0"], dict)
-        self.assertIsInstance(generated["event:1"], Exception)
 
     def test_memory_interpretation_allows_invalid_correction_without_failing_turn_contract(self) -> None:
         base = {
@@ -283,7 +235,7 @@ class LlmCallReductionTests(unittest.TestCase):
             {"correction_status": "no_correction", "selected_targets": []},
         )
 
-    def test_mock_reflection_and_event_evidence_use_batch_payloads(self) -> None:
+    def test_mock_reflection_uses_batch_payload(self) -> None:
         client = MockLLMClient()
         reflection = client.generate_memory_reflection_summary(
             {"model": "mock"},
@@ -301,29 +253,6 @@ class LlmCallReductionTests(unittest.TestCase):
         )
         self.assertEqual(reflection["summaries"][0]["scope_ref"], "scope:0")
         self.assertTrue(reflection["summaries"][0]["summary_text"])
-
-        evidence = client.generate_event_evidence(
-            {"model": "mock"},
-            {
-                "primary_recall_focus": "episodic",
-                "time_reference": "past",
-                "events": [
-                    {
-                        "event_ref": "event:0",
-                        "kind": "decision",
-                        "retrieval_sections": ["episodic_evidence"],
-                        "reason_summary": "様子を見ることにした。",
-                    },
-                    {
-                        "event_ref": "event:1",
-                        "kind": "speech",
-                        "retrieval_sections": ["active_topics"],
-                        "text": "また話そう。",
-                    },
-                ],
-            },
-        )
-        self.assertEqual([item["event_ref"] for item in evidence["evidence"]], ["event:0", "event:1"])
 
     def test_correction_apply_does_not_call_llm(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

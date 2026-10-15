@@ -15,7 +15,6 @@
 - `recall_hint`
 - `pending_intent_selection`
 - `recall_pack_selection`
-- `event_evidence_generation`
 - `memory_interpretation`
 - `memory_candidate_review`
 - `affect_review`

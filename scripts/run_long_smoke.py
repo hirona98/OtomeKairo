@@ -3121,7 +3121,7 @@ class LongSmokeRunner:
         decision_trace = trace.get("decision_trace", {})
         if not isinstance(decision_trace, dict):
             decision_trace = {}
-        raw_event_evidence_generation = recall_trace.get("event_evidence_generation")
+        raw_event_evidence_loading = recall_trace.get("event_evidence_loading")
         raw_recall_pack_selection = recall_trace.get("recall_pack_selection")
         raw_memory_link_context = recall_trace.get("memory_link_context")
         recall_hint = recall_trace.get("recall_hint_summary", {})
@@ -3130,9 +3130,9 @@ class LongSmokeRunner:
         recall_pack_summary = recall_trace.get("recall_pack_summary", {})
         if not isinstance(recall_pack_summary, dict):
             recall_pack_summary = {}
-        event_evidence_generation = raw_event_evidence_generation
-        if not isinstance(event_evidence_generation, dict):
-            event_evidence_generation = {}
+        event_evidence_loading = raw_event_evidence_loading
+        if not isinstance(event_evidence_loading, dict):
+            event_evidence_loading = {}
         recall_pack_selection = raw_recall_pack_selection
         if not isinstance(recall_pack_selection, dict):
             recall_pack_selection = {}
@@ -3153,7 +3153,7 @@ class LongSmokeRunner:
         return {
             "cycle_id": trace.get("cycle_id"),
             "trace_shape": {
-                "has_event_evidence_generation": isinstance(raw_event_evidence_generation, dict),
+                "has_event_evidence_loading": isinstance(raw_event_evidence_loading, dict),
                 "has_recall_pack_selection": isinstance(raw_recall_pack_selection, dict),
                 "has_memory_link_context": isinstance(raw_memory_link_context, dict),
                 "has_selection_memory_link_fields": isinstance(raw_recall_pack_selection, dict)
@@ -3172,20 +3172,20 @@ class LongSmokeRunner:
             "selected_episode_count": len(string_list(recall_trace.get("selected_episode_ids"))),
             "selected_event_count": len(string_list(recall_trace.get("selected_event_ids"))),
             "recall_pack_summary": recall_pack_summary,
-            "event_evidence_generation": {
-                "requested_event_count": int(event_evidence_generation.get("requested_event_count", 0) or 0),
-                "loaded_event_count": int(event_evidence_generation.get("loaded_event_count", 0) or 0),
-                "succeeded_event_count": int(event_evidence_generation.get("succeeded_event_count", 0) or 0),
-                "precise_evidence_used": bool(event_evidence_generation.get("precise_evidence_used", False)),
-                "precise_reason_codes": string_list(event_evidence_generation.get("precise_reason_codes")),
+            "event_evidence_loading": {
+                "requested_event_count": int(event_evidence_loading.get("requested_event_count", 0) or 0),
+                "loaded_event_count": int(event_evidence_loading.get("loaded_event_count", 0) or 0),
+                "succeeded_event_count": int(event_evidence_loading.get("succeeded_event_count", 0) or 0),
+                "precise_evidence_used": bool(event_evidence_loading.get("precise_evidence_used", False)),
+                "precise_reason_codes": string_list(event_evidence_loading.get("precise_reason_codes")),
                 "precise_requested_event_count": int(
-                    event_evidence_generation.get("precise_requested_event_count", 0) or 0
+                    event_evidence_loading.get("precise_requested_event_count", 0) or 0
                 ),
                 "precise_loaded_event_count": int(
-                    event_evidence_generation.get("precise_loaded_event_count", 0) or 0
+                    event_evidence_loading.get("precise_loaded_event_count", 0) or 0
                 ),
                 "precise_selected_event_count": len(
-                    string_list(event_evidence_generation.get("precise_selected_event_ids"))
+                    string_list(event_evidence_loading.get("precise_selected_event_ids"))
                 ),
             },
             "recall_pack_selection": {
@@ -3293,7 +3293,7 @@ class LongSmokeRunner:
         if not isinstance(trace_shape, dict):
             return False
         return (
-            trace_shape.get("has_event_evidence_generation") is True
+            trace_shape.get("has_event_evidence_loading") is True
             and trace_shape.get("has_recall_pack_selection") is True
             and trace_shape.get("has_memory_link_context") is True
             and trace_shape.get("has_selection_memory_link_fields") is True
@@ -3301,19 +3301,19 @@ class LongSmokeRunner:
         )
 
     def _recall_quality_event_shape(self, entry: Any) -> bool:
-        event_evidence_generation = (
-            entry.get("event_evidence_generation")
+        event_evidence_loading = (
+            entry.get("event_evidence_loading")
             if isinstance(entry, dict)
             else None
         )
-        if not isinstance(event_evidence_generation, dict):
+        if not isinstance(event_evidence_loading, dict):
             return False
         return (
-            isinstance(event_evidence_generation.get("requested_event_count"), int)
-            and isinstance(event_evidence_generation.get("loaded_event_count"), int)
-            and isinstance(event_evidence_generation.get("succeeded_event_count"), int)
-            and isinstance(event_evidence_generation.get("precise_evidence_used"), bool)
-            and isinstance(event_evidence_generation.get("precise_reason_codes"), list)
+            isinstance(event_evidence_loading.get("requested_event_count"), int)
+            and isinstance(event_evidence_loading.get("loaded_event_count"), int)
+            and isinstance(event_evidence_loading.get("succeeded_event_count"), int)
+            and isinstance(event_evidence_loading.get("precise_evidence_used"), bool)
+            and isinstance(event_evidence_loading.get("precise_reason_codes"), list)
         )
 
     def _recall_quality_memory_link_shape(self, entry: Any, key: str) -> bool:
@@ -3368,7 +3368,7 @@ class LongSmokeRunner:
 
         ambiguous_hint = ambiguous.get("recall_hint", {})
         ambiguous_summary = ambiguous.get("recall_pack_summary", {})
-        ambiguous_event = ambiguous.get("event_evidence_generation", {})
+        ambiguous_event = ambiguous.get("event_evidence_loading", {})
         ambiguous_decision = ambiguous.get("decision", {})
         if not isinstance(ambiguous_hint, dict):
             ambiguous_hint = {}

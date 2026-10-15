@@ -497,29 +497,6 @@ def memory_reflection_summary_response_format() -> dict[str, Any]:
     )
 
 
-def event_evidence_response_format() -> dict[str, Any]:
-    slot = nullable({"type": "string"})
-    return structured_response_format(
-        "event_evidence",
-        closed_object(
-            {
-                "evidence": {
-                    "type": "array",
-                    "items": closed_object(
-                        {
-                            "event_ref": {"type": "string"},
-                            "anchor": slot,
-                            "topic": slot,
-                            "decision_or_result": slot,
-                            "tone_or_note": slot,
-                        }
-                    ),
-                }
-            }
-        ),
-    )
-
-
 def recall_pack_selection_response_format() -> dict[str, Any]:
     return structured_response_format(
         "recall_pack_selection",
@@ -688,7 +665,6 @@ def all_response_formats() -> dict[str, dict[str, Any]]:
         "memory_retention_review": memory_retention_review_response_format(),
         "affect_review": affect_review_response_format(),
         "memory_reflection_summary": memory_reflection_summary_response_format(),
-        "event_evidence": event_evidence_response_format(),
         "recall_pack_selection": recall_pack_selection_response_format(),
         "pending_intent_selection": pending_intent_selection_response_format(),
         "initiative_entry_check": initiative_entry_check_response_format(),
