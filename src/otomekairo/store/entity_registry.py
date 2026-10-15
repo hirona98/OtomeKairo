@@ -388,7 +388,7 @@ class StoreEntityRegistryMixin:
             ],
         }
 
-        self._upsert_entity_registry_record(conn, record)
+        record = self._upsert_entity_registry_record(conn, record)
         for alias in aliases:
             self._upsert_entity_alias(
                 conn,
@@ -466,7 +466,8 @@ class StoreEntityRegistryMixin:
         payload = json.loads(row["payload_json"])
         return payload if isinstance(payload, dict) else None
 
-    def _upsert_entity_registry_record(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
+    def _upsert_entity_registry_record(self, conn: sqlite3.Connection, record: dict[str, Any]) -> dict[str, Any]:
+        record = self._preserve_stored_event_reference_integrity(conn, source_kind="entity_registry", record=record)
         # 追加
         conn.execute(
             """
@@ -500,6 +501,8 @@ class StoreEntityRegistryMixin:
                 self._to_json(record),
             ),
         )
+
+        return record
 
     def _upsert_entity_alias(
         self,

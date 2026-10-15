@@ -13,6 +13,7 @@ from otomekairo.llm.contexts import (
     person_utterances_from_turns,
 )
 from otomekairo.interaction import InteractionContext
+from otomekairo.memory.event_references import apply_event_reference_repairs
 from otomekairo.service.agent_skills import (
     SELF_INITIATED_SOURCE_KINDS,
     origin_source_kind_from_capability_request,
@@ -100,6 +101,7 @@ class ServiceInputPipelineMixin:
         self,
         *,
         state: dict[str, Any],
+        cycle_id: str,
         started_at: str,
         current_input: CurrentInput,
         recent_turns: list[dict[str, Any]],
@@ -133,6 +135,7 @@ class ServiceInputPipelineMixin:
             isolated_input = self._self_activity_current_input(current_input, workspace_context)
             isolated_recall = self._build_pipeline_recall_inputs(
                 state=state,
+                cycle_id=cycle_id,
                 started_at=started_at,
                 input_text=isolated_input.text,
                 current_input=isolated_input,
@@ -195,7 +198,7 @@ class ServiceInputPipelineMixin:
         started_at: str,
         input_text: str,
         recent_turns: list[dict[str, Any]],
-        cycle_id: str | None = None,
+        cycle_id: str,
         trigger_kind: str = "user_message",
         client_context: dict[str, Any] | None = None,
         interaction_context: InteractionContext | None = None,
@@ -247,6 +250,7 @@ class ServiceInputPipelineMixin:
         # 想起入力
         recall_inputs = self._build_pipeline_recall_inputs(
             state=state,
+            cycle_id=cycle_id,
             started_at=started_at,
             input_text=input_text,
             current_input=current_input,
@@ -289,6 +293,7 @@ class ServiceInputPipelineMixin:
 
         disclosure_context = self._build_disclosure_context(
             memory_set_id=state["selected_memory_set_id"], current_input=current_input,
+            cycle_id=cycle_id, detected_at=started_at,
             recall_pack=recall_pack, recent_interactions=recent_interactions, recent_turns=recent_turns,
         )
         # 行動・共有範囲・最終本文を同じ生成で決める。
@@ -713,6 +718,7 @@ class ServiceInputPipelineMixin:
         self,
         *,
         state: dict[str, Any],
+        cycle_id: str,
         started_at: str,
         input_text: str,
         current_input: CurrentInput,
@@ -762,6 +768,7 @@ class ServiceInputPipelineMixin:
         # recall_pack構築
         recall_pack = self.recall.build_recall_pack(
             state=state,
+            cycle_id=cycle_id,
             augmented_query_text=augmented_query_text,
             recall_hint=recall_hint,
             current_person_ref=(
@@ -1045,6 +1052,7 @@ class ServiceInputPipelineMixin:
         )
         skill_materials = self._build_pipeline_skill_and_self_activity_materials(
             state=state,
+            cycle_id=cycle_id,
             started_at=started_at,
             current_input=current_input,
             recent_turns=recent_turns,
@@ -2537,6 +2545,8 @@ class ServiceInputPipelineMixin:
         self,
         *,
         memory_set_id: str,
+        cycle_id: str,
+        detected_at: str,
         current_input: CurrentInput,
         recall_pack: dict[str, Any],
         recent_interactions: list[dict[str, Any]] | None = None,
@@ -2556,20 +2566,27 @@ class ServiceInputPipelineMixin:
             for event_id in source["source_item"].get(key, [])
         ))
         source_turns: list[dict[str, Any]] = []
+        missing_event_ids: list[str] = []
+        repaired_sources: list[dict[str, Any]] = []
         if evidence_ids:
-            events = self.store.load_events_for_evidence(
+            result = self.store.load_and_repair_event_evidence(
                 memory_set_id=memory_set_id, event_ids=evidence_ids, limit=len(evidence_ids),
+                cycle_id=cycle_id, detected_at=detected_at,
             )
-            if {event["event_id"] for event in events} != set(evidence_ids):
-                raise ValueError("共有許可の根拠 event を取得できません。")
+            missing_event_ids = result["missing_event_ids"]
+            repaired_sources = result["repaired_sources"]
+            apply_event_reference_repairs(recall_pack, repaired_sources)
+            apply_event_reference_repairs(sensitive_sources, repaired_sources)
             source_turns = [{
                 key: event.get(key)
                 for key in ("event_id", "role", "text", "speaker_ref", "participant_refs", "interaction_ref", "created_at")
-            } for event in events]
+            } for event in result["events"]]
         return {
             "person_utterances": person_utterances_from_turns([*(recent_turns or []), *source_turns]),
             "other_person_sources": [source["source_item"] for source in sensitive_sources],
             "source_refs": [source["source_ref"] for source in sensitive_sources],
+            "missing_event_ids": missing_event_ids,
+            "repaired_sources": repaired_sources,
         }
 
     def _disclosure_sources(

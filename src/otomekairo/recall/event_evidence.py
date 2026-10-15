@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from otomekairo.memory.event_references import apply_event_reference_repairs
+
 # 定数
 EVENT_EVIDENCE_LIMIT = 8
 EVENT_EVIDENCE_FOCUSES = {
@@ -41,6 +43,8 @@ class RecallEventEvidenceMixin:
         self,
         *,
         memory_set_id: str,
+        cycle_id: str,
+        detected_at: str,
         primary_recall_focus: str,
         recall_hint: dict[str, Any],
         sections: dict[str, list[dict[str, Any]]],
@@ -75,21 +79,27 @@ class RecallEventEvidenceMixin:
         if not requested_event_ids:
             return result
 
-        records = self.store.load_events_for_evidence(
+        standard = self.store.load_and_repair_event_evidence(
             memory_set_id=memory_set_id,
             event_ids=selected_event_ids,
             limit=EVENT_EVIDENCE_LIMIT,
+            cycle_id=cycle_id, detected_at=detected_at,
         )
+        records = standard["events"]
         records_by_id = {
             record["event_id"]: record
             for record in records
             if isinstance(record, dict) and isinstance(record.get("event_id"), str)
         }
-        precise_records = self.store.load_events_for_evidence(
+        precise = self.store.load_and_repair_event_evidence(
             memory_set_id=memory_set_id,
             event_ids=precise_plan["selected_event_ids"],
             limit=PRECISE_EVENT_EVIDENCE_LIMIT,
+            cycle_id=cycle_id, detected_at=detected_at,
         )
+        precise_records = precise["events"]
+        result["repaired_sources"] = [*standard["repaired_sources"], *precise["repaired_sources"]]
+        apply_event_reference_repairs(sections, result["repaired_sources"])
         precise_records_by_id = {
             record["event_id"]: record
             for record in precise_records
@@ -128,6 +138,7 @@ class RecallEventEvidenceMixin:
             "event_evidence": [],
             "selected_event_ids": [],
             "event_evidence_loading": self._empty_event_evidence_loading(),
+            "repaired_sources": [],
         }
 
     def _empty_event_evidence_loading(self) -> dict[str, Any]:

@@ -31,6 +31,7 @@ from otomekairo.llm.contracts import (
     WORLD_STATE_HINT_VALUES,
     WORLD_STATE_TTL_HINT_VALUES,
 )
+from otomekairo.memory.event_references import event_reference_context
 from otomekairo.memory.utils import MEMORY_OBJECT_REF_PREFIXES, llm_local_time_text, localize_timestamp_fields, memory_claim_context
 from otomekairo.recall.event_evidence import EVENT_EVIDENCE_MODEL_KEYS
 from otomekairo.world_state.models import WorldStateSourcePack
@@ -303,6 +304,9 @@ def _memory_evidence_time_instruction() -> str:
         "memory_type、subject_ref、predicate と更新の根拠を照合し、revoked は取り消した理解、superseded は後の理解へ置き換わった履歴として、その対象と期間を判断します。"
         "置換前の要約に含まれる対象名や本人報告は、更新された主張と分けて照合します。共有条件や方針だけの変更なら、情報を知った経験と未変更の内容の根拠は保持し、現在の共有条件で伝えられる範囲を決めます。"
         "情報の根拠を確認できることと、現在の相手へ開示できることを区別し、共有を留保する回答では未確定の許可条件を説明します。"
+        "event_reference_integrity は、元eventの欠損を確認し参照を修復した記録です。"
+        "保持された記憶の内容と、現在確認できる元発話を区別し、根拠が欠けた部分は未確認として扱います。"
+        "取得できた根拠で今回の判断と応答を進め、共有許可を確認できない内容は開示を留保します。"
         "具体的な confirmed の継続理解と古い episode や推論要約が異なるときは、本人と対象、有効期間、訂正の経緯を照合し、現在の理解と当時の報告を分けて答えます。\n"
         "人物が当時述べた経験や心情は、その本人報告を根拠にします。過去の assistant の回答やその要約に『不明』『聞いていない』とある場合も、本人の報告と照合します。今の想起で確認できないことは未確認として伝え、経験や報告がなかったこととは区別します。\n"
     )
@@ -2853,6 +2857,7 @@ def _compact_episode_context_item(item: dict[str, Any]) -> dict[str, Any]:
         "primary_scope_key": item["primary_scope_key"],
         "summary_text": item["summary_text"],
         "open_loops": item.get("open_loops", []),
+        **event_reference_context(item),
     }
     if item.get("formed_at") is not None:
         payload["formed_at"] = item["formed_at"]
@@ -2928,4 +2933,8 @@ def _compact_memory_link_context(value: Any) -> dict[str, Any]:
         "label_counts": value.get("label_counts", {}),
         "representative_links": representatives,
         "source_reports": value.get("source_reports", []),
+        "source_report_loading": {
+            "missing_event_count": len(value.get("source_report_loading", {}).get("missing_event_ids", [])),
+            "repaired_source_count": len(value.get("source_report_loading", {}).get("repaired_sources", [])),
+        },
     }

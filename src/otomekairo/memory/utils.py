@@ -6,6 +6,8 @@ import hashlib
 import json
 from typing import Any
 
+from otomekairo.memory.event_references import event_reference_context
+
 
 # JSON処理
 def to_json_string(value: Any) -> str:
@@ -35,6 +37,7 @@ def memory_claim_context(record: dict[str, Any]) -> dict[str, Any]:
         )
         if key in record
     }
+    context.update(event_reference_context(record))
     qualifiers = record.get("qualifiers")
     if isinstance(qualifiers, dict):
         retained = {

@@ -30,14 +30,15 @@ def _sources():
 def test_shared_source_events_are_loaded_once_before_generation_and_kept_complete():
     event, pack = _sources()
     service = ServiceInputPipelineMixin()
-    service.store = SimpleNamespace(load_events_for_evidence=Mock(return_value=[event]))
+    service.store = SimpleNamespace(load_and_repair_event_evidence=Mock(return_value={"events": [event], "missing_event_ids": [], "repaired_sources": []}))
     turns = [{"role": "assistant", "text": "過去の自分の解釈。"}]
     disclosure = service._build_disclosure_context(
-        memory_set_id="memory_set:test", current_input=_current_input(),
+        memory_set_id="memory_set:test", cycle_id="cycle:test", detected_at="2026-10-15T09:00:00+09:00", current_input=_current_input(),
         recall_pack=pack, recent_turns=turns,
     )
-    service.store.load_events_for_evidence.assert_called_once_with(
+    service.store.load_and_repair_event_evidence.assert_called_once_with(
         memory_set_id="memory_set:test", event_ids=["event:source"], limit=1,
+        cycle_id="cycle:test", detected_at="2026-10-15T09:00:00+09:00",
     )
     assert disclosure["person_utterances"] == [event]
     assert disclosure["other_person_sources"] == pack["person_model"]
@@ -45,14 +46,19 @@ def test_shared_source_events_are_loaded_once_before_generation_and_kept_complet
     assert disclosure["person_utterances"][0]["text"] == event["text"]
 
 
-def test_missing_sharing_source_is_an_explicit_failure():
+def test_missing_sharing_source_is_explicit_and_does_not_stop_generation():
     _, pack = _sources()
     service = ServiceInputPipelineMixin()
-    service.store = SimpleNamespace(load_events_for_evidence=Mock(return_value=[]))
-    with pytest.raises(ValueError, match="共有許可の根拠 event"):
-        service._build_disclosure_context(
-            memory_set_id="memory_set:test", current_input=_current_input(), recall_pack=pack,
-        )
+    service.store = SimpleNamespace(load_and_repair_event_evidence=Mock(return_value={
+        "events": [], "missing_event_ids": ["event:source"], "repaired_sources": [],
+    }))
+    result = service._build_disclosure_context(
+        memory_set_id="memory_set:test", cycle_id="cycle:test", detected_at="2026-10-15T09:00:00+09:00",
+        current_input=_current_input(), recall_pack=pack,
+    )
+    assert result["person_utterances"] == []
+    assert result["missing_event_ids"] == ["event:source"]
+    assert result["other_person_sources"] == pack["person_model"]
 
 
 def test_own_sources_need_no_extra_event_lookup():
@@ -60,20 +66,20 @@ def test_own_sources_need_no_extra_event_lookup():
     service.store = Mock()
     current = _current_input()
     result = service._build_disclosure_context(
-        memory_set_id="memory_set:test", current_input=current,
+        memory_set_id="memory_set:test", cycle_id="cycle:test", detected_at="2026-10-15T09:00:00+09:00", current_input=current,
         recall_pack={"person_model": [{"source_participant_refs": list(current.response_target_refs)}]},
     )
     assert result is None
-    service.store.load_events_for_evidence.assert_not_called()
+    service.store.load_and_repair_event_evidence.assert_not_called()
 
 
 @pytest.mark.parametrize("kind", ["speech", "noop"])
 def test_sharing_conditions_and_final_text_use_the_same_completion(kind):
     event, pack = _sources()
     service = ServiceInputPipelineMixin()
-    service.store = SimpleNamespace(load_events_for_evidence=Mock(return_value=[event]))
+    service.store = SimpleNamespace(load_and_repair_event_evidence=Mock(return_value={"events": [event], "missing_event_ids": [], "repaired_sources": []}))
     disclosure = service._build_disclosure_context(
-        memory_set_id="memory_set:test", current_input=_current_input(), recall_pack=pack,
+        memory_set_id="memory_set:test", cycle_id="cycle:test", detected_at="2026-10-15T09:00:00+09:00", current_input=_current_input(), recall_pack=pack,
     )
     context = replace(_decision_context([]), disclosure_context=disclosure, recall_pack=pack)
     candidate = {

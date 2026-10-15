@@ -190,6 +190,8 @@ class StoreMemoryLinksMixin:
             **memory_claim_context(payload),
             "memory_unit_id": payload.get("memory_unit_id"),
             "evidence_event_ids": payload.get("evidence_event_ids", []),
+            **({"event_reference_integrity": payload["event_reference_integrity"]}
+               if "event_reference_integrity" in payload else {}),
             "confidence": payload.get("confidence"),
             "salience": payload.get("salience"),
         }
@@ -205,7 +207,8 @@ class StoreMemoryLinksMixin:
 
         # memory unit upsert実行
         if memory_unit is not None:
-            self._upsert_memory_unit(conn, memory_unit)
+            stored_unit = self._upsert_memory_unit(conn, memory_unit)
+            action = {**action, "memory_unit": stored_unit, "after_snapshot": stored_unit}
 
         # 改訂追加
         self._insert_revision(conn, action)
@@ -213,7 +216,8 @@ class StoreMemoryLinksMixin:
         # 関係追加
         return self._upsert_memory_links_from_action(conn, action)
 
-    def _upsert_memory_unit(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
+    def _upsert_memory_unit(self, conn: sqlite3.Connection, record: dict[str, Any]) -> dict[str, Any]:
+        record = self._preserve_stored_event_reference_integrity(conn, source_kind="memory_unit", record=record)
         # 追加
         conn.execute(
             """
@@ -263,6 +267,8 @@ class StoreMemoryLinksMixin:
                 self._to_json(record),
             ),
         )
+
+        return record
 
     def _insert_revision(self, conn: sqlite3.Connection, action: dict[str, Any]) -> None:
         # payload構築

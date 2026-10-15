@@ -283,7 +283,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         service = DummyInputService()
 
         recall_inputs = service._build_pipeline_recall_inputs(
-            state={},
+            cycle_id="cycle:test", state={},
             started_at="2026-06-22T22:30:00+09:00",
             input_text="定期思考。",
             current_input=CurrentInput(
@@ -1205,7 +1205,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
             text="定期思考。画面ではリズムゲームのS評価が見えている。",
         )
         materials = service._build_pipeline_skill_and_self_activity_materials(
-            state={"model_presets": {}, "selected_model_preset_id": "m", "personas": {}, "selected_persona_id": "p"},
+            cycle_id="cycle:test", state={"model_presets": {}, "selected_model_preset_id": "m", "personas": {}, "selected_persona_id": "p"},
             started_at="2026-08-16T19:33:00+09:00",
             current_input=current_input,
             recent_turns=[{"role": "user", "text": "よろしく"}],

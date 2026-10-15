@@ -4,6 +4,7 @@ from typing import Any
 
 from otomekairo.llm.client import LLMClient
 from otomekairo.llm.contexts import build_persona_context
+from otomekairo.memory.event_references import apply_event_reference_repairs
 from otomekairo.memory.utils import memory_claim_context, normalized_text_list, now_iso
 from otomekairo.recall.association import (
     ACTIVE_COMMITMENT_STATES,
@@ -43,6 +44,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         self,
         *,
         state: dict[str, Any],
+        cycle_id: str,
         augmented_query_text: str,
         recall_hint: dict[str, Any],
         current_person_ref: str | None,
@@ -271,32 +273,37 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             limit_per_unit=8,
             total_limit=80,
         )
-        self._attach_memory_link_summaries_to_sections(
-            sections=sections,
-            memory_links=memory_links,
-        )
-        memory_link_context = self._build_memory_link_context(
-            memory_links=memory_links,
-            selected_memory_ids=selected_memory_ids,
-        )
-        memory_link_context["source_reports"] = self._build_memory_link_source_reports(
+        detected_at = current_time or now_iso()
+        source_reports = self._build_memory_link_source_reports(
             memory_set_id=memory_set_id,
+            cycle_id=cycle_id, detected_at=detected_at,
             memory_links=memory_links,
             selected_memory_ids=selected_memory_ids,
         )
-        recall_pack_selection = dict(selection_result["recall_pack_selection"])
-        self._attach_memory_link_context_to_selection_trace(
-            recall_pack_selection=recall_pack_selection,
-            memory_link_context=memory_link_context,
-        )
+        apply_event_reference_repairs(sections, source_reports["repaired_sources"])
         event_evidence_result = self._build_event_evidence(
             memory_set_id=memory_set_id,
+            cycle_id=cycle_id, detected_at=detected_at,
             primary_recall_focus=primary_recall_focus,
             recall_hint=recall_hint,
             sections=sections,
         )
         event_evidence = event_evidence_result["event_evidence"]
         selected_event_ids = event_evidence_result["selected_event_ids"]
+        apply_event_reference_repairs(memory_links, event_evidence_result["repaired_sources"])
+        self._attach_memory_link_summaries_to_sections(sections=sections, memory_links=memory_links)
+        memory_link_context = self._build_memory_link_context(
+            memory_links=memory_links, selected_memory_ids=selected_memory_ids,
+        )
+        memory_link_context["source_reports"] = source_reports["reports"]
+        memory_link_context["source_report_loading"] = {
+            "missing_event_ids": source_reports["missing_event_ids"],
+            "repaired_sources": source_reports["repaired_sources"],
+        }
+        recall_pack_selection = dict(selection_result["recall_pack_selection"])
+        self._attach_memory_link_context_to_selection_trace(
+            recall_pack_selection=recall_pack_selection, memory_link_context=memory_link_context,
+        )
         relation_index_trace = self._relation_index_recall_trace(
             result=relation_index_result,
             selected_memory_ids=selected_memory_ids,
@@ -1289,9 +1296,11 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         self,
         *,
         memory_set_id: str,
+        cycle_id: str,
+        detected_at: str,
         memory_links: list[dict[str, Any]],
         selected_memory_ids: list[str],
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         # 読み込み済みの直接の更新元だけを確かめ、リンクの先は再探索しない。
         selected = set(selected_memory_ids)
         event_ids: list[str] = []
@@ -1306,16 +1315,18 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
                     event_ids.append(event_id)
         requested = event_ids[:MEMORY_LINK_SOURCE_EVENT_LIMIT]
         if not requested:
-            return []
-        records = self.store.load_events_for_evidence(
+            return {"reports": [], "missing_event_ids": [], "repaired_sources": []}
+        result = self.store.load_and_repair_event_evidence(
             memory_set_id=memory_set_id, event_ids=requested, limit=MEMORY_LINK_SOURCE_EVENT_LIMIT,
+            cycle_id=cycle_id, detected_at=detected_at,
         )
-        if {record["event_id"] for record in records} != set(requested):
-            raise ValueError("選定記憶の更新元の根拠 event を取得できません。")
-        return [{
+        apply_event_reference_repairs(memory_links, result["repaired_sources"])
+        reports = [{
             key: record.get(key)
             for key in ("role", "text", "speaker_ref", "participant_refs", "interaction_ref", "created_at")
-        } for record in records if record.get("role") == "person"]
+        } for record in result["events"] if record.get("role") == "person"]
+        return {"reports": reports, "missing_event_ids": result["missing_event_ids"],
+                "repaired_sources": result["repaired_sources"]}
 
     def _attach_memory_link_summaries_to_sections(
         self,
@@ -1597,6 +1608,8 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "confidence": record["confidence"],
             "salience": record["salience"],
             "evidence_event_ids": record.get("evidence_event_ids", []),
+            **({"event_reference_integrity": record["event_reference_integrity"]}
+               if "event_reference_integrity" in record else {}),
         }
 
     def _to_episode_item(self, record: dict[str, Any]) -> dict[str, Any]:
@@ -1615,6 +1628,8 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "salience": record["salience"],
             "formed_at": record["formed_at"],
             "linked_event_ids": record.get("linked_event_ids", []),
+            **({"event_reference_integrity": record["event_reference_integrity"]}
+               if "event_reference_integrity" in record else {}),
         }
 
     def _to_visual_observation_item(self, record: dict[str, Any]) -> dict[str, Any]:
@@ -1694,4 +1709,6 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "salience": record["salience"],
             "formed_at": record["formed_at"],
             "linked_event_ids": record.get("linked_event_ids", []),
+            **({"event_reference_integrity": record["event_reference_integrity"]}
+               if "event_reference_integrity" in record else {}),
         }

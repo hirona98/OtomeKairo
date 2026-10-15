@@ -17,12 +17,16 @@ class RecallEvidenceStatusTests(unittest.TestCase):
     def _load_evidence(self, records, *, event_ids=None, store=None, risk_flags=None):
         builder = RecallBuilder.__new__(RecallBuilder)
         by_id = {record["event_id"]: record for record in records}
-        builder.store = store if store is not None else SimpleNamespace(load_events_for_evidence=Mock(
-            side_effect=lambda **kwargs: [by_id[event_id] for event_id in kwargs["event_ids"] if event_id in by_id]
+        builder.store = store if store is not None else SimpleNamespace(load_and_repair_event_evidence=Mock(
+            side_effect=lambda **kwargs: {
+                "events": [by_id[event_id] for event_id in kwargs["event_ids"] if event_id in by_id],
+                "missing_event_ids": [event_id for event_id in kwargs["event_ids"] if event_id not in by_id],
+                "repaired_sources": [],
+            }
         ))
         builder.llm = Mock(spec=[])
         result = builder._build_event_evidence(
-            memory_set_id="memory_set:test", primary_recall_focus="episodic",
+            memory_set_id="memory_set:test", cycle_id="cycle:test", detected_at="2026-10-15T09:00:00+09:00", primary_recall_focus="episodic",
             recall_hint={"time_reference": "past", "risk_flags": risk_flags or []},
             sections={"episodic_evidence": [{"source_kind": "episode", "linked_event_ids":
                                            list(by_id) if event_ids is None else event_ids}]},
@@ -127,16 +131,16 @@ class RecallEvidenceStatusTests(unittest.TestCase):
         self.assertEqual(result["selected_event_ids"], standard)
         self.assertEqual(result["event_evidence_loading"]["precise_selected_event_ids"], precise)
         self.assertEqual([item["event_id"] for item in result["event_evidence"]], standard + precise)
-        calls = builder.store.load_events_for_evidence.call_args_list
+        calls = builder.store.load_and_repair_event_evidence.call_args_list
         self.assertEqual([call.kwargs["event_ids"] for call in calls], [standard, precise])
         self.assertEqual([call.kwargs["limit"] for call in calls], [8, 8])
 
     def test_no_candidates_skip_loading_and_database_errors_propagate(self) -> None:
         builder, result = self._load_evidence([], event_ids=[])
-        builder.store.load_events_for_evidence.assert_not_called()
+        builder.store.load_and_repair_event_evidence.assert_not_called()
         self.assertEqual(result["event_evidence"], [])
         self.assertEqual(result["event_evidence_loading"]["requested_event_count"], 0)
-        store = SimpleNamespace(load_events_for_evidence=Mock(side_effect=sqlite3.OperationalError("DB unavailable")))
+        store = SimpleNamespace(load_and_repair_event_evidence=Mock(side_effect=sqlite3.OperationalError("DB unavailable")))
         with self.assertRaises(sqlite3.OperationalError):
             self._load_evidence([], event_ids=["event:missing"], store=store)
 
@@ -148,7 +152,7 @@ class RecallEvidenceStatusTests(unittest.TestCase):
             "interaction_ref": "interaction:owner", "created_at": "2026-10-04T09:00:39+09:00",
         }
         assistant = {**report, "event_id": "event:assistant", "role": "assistant"}
-        builder.store = SimpleNamespace(load_events_for_evidence=Mock(return_value=[report, assistant]))
+        builder.store = SimpleNamespace(load_and_repair_event_evidence=Mock(return_value={"events": [report, assistant], "missing_event_ids": [], "repaired_sources": []}))
         direct = {
             "label": "derived_from", "source_memory_unit_id": "memory:selected",
             "target_memory_unit_id": "memory:prior",
@@ -158,37 +162,44 @@ class RecallEvidenceStatusTests(unittest.TestCase):
                  {**direct, "source_memory_unit_id": "memory:prior"},
                  {**direct, "target_memory_unit": {"status": "confirmed", "evidence_event_ids": ["event:excluded"]}}]
         reports = builder._build_memory_link_source_reports(
-            memory_set_id="memory_set:test", memory_links=links, selected_memory_ids=["memory:selected"],
+            memory_set_id="memory_set:test", cycle_id="cycle:test", detected_at="2026-10-15T09:00:00+09:00", memory_links=links, selected_memory_ids=["memory:selected"],
         )
-        builder.store.load_events_for_evidence.assert_called_once_with(
+        builder.store.load_and_repair_event_evidence.assert_called_once_with(
             memory_set_id="memory_set:test", event_ids=["event:owner", "event:assistant"], limit=16,
+            cycle_id="cycle:test", detected_at="2026-10-15T09:00:00+09:00",
         )
-        self.assertEqual(reports, [{key: report[key] for key in
+        self.assertEqual(reports["reports"], [{key: report[key] for key in
                                    ("role", "text", "speaker_ref", "participant_refs", "interaction_ref", "created_at")}])
-        compact = _compact_recall_pack({"memory_link_context": {"source_reports": reports}})
-        self.assertEqual(compact["memory_link_context"]["source_reports"], reports)
-        self.assertNotIn("event_id", reports[0])
+        compact = _compact_recall_pack({"memory_link_context": {"source_reports": reports["reports"]}})
+        self.assertEqual(compact["memory_link_context"]["source_reports"], reports["reports"])
+        self.assertNotIn("event_id", reports["reports"][0])
 
-    def test_update_source_reports_bound_events_and_fail_on_missing_evidence(self) -> None:
+    def test_update_source_reports_bound_events_and_report_missing_evidence(self) -> None:
         builder = RecallBuilder.__new__(RecallBuilder)
         ids = [f"event:{index}" for index in range(20)]
         link = {"label": "derived_from", "source_memory_unit_id": "memory:selected",
                 "target_memory_unit": {"status": "revoked", "evidence_event_ids": ids}}
-        builder.store = SimpleNamespace(load_events_for_evidence=Mock(return_value=[
-            {"event_id": event_id, "role": "person", "text": "架空の報告。"} for event_id in ids[:16]
-        ]))
+        builder.store = SimpleNamespace(load_and_repair_event_evidence=Mock(return_value={
+            "events": [{"event_id": event_id, "role": "person", "text": "架空の報告。"} for event_id in ids[:16]],
+            "missing_event_ids": [], "repaired_sources": [],
+        }))
         reports = builder._build_memory_link_source_reports(
-            memory_set_id="memory_set:test", memory_links=[link], selected_memory_ids=["memory:selected"],
+            memory_set_id="memory_set:test", cycle_id="cycle:test", detected_at="2026-10-15T09:00:00+09:00", memory_links=[link], selected_memory_ids=["memory:selected"],
         )
-        self.assertEqual(len(reports), 16)
-        builder.store.load_events_for_evidence.assert_called_once_with(
+        self.assertEqual(len(reports["reports"]), 16)
+        builder.store.load_and_repair_event_evidence.assert_called_once_with(
             memory_set_id="memory_set:test", event_ids=ids[:16], limit=16,
+            cycle_id="cycle:test", detected_at="2026-10-15T09:00:00+09:00",
         )
-        builder.store.load_events_for_evidence.return_value = []
-        with self.assertRaisesRegex(ValueError, "更新元の根拠 event"):
-            builder._build_memory_link_source_reports(
-                memory_set_id="memory_set:test", memory_links=[link], selected_memory_ids=["memory:selected"],
-            )
+        builder.store.load_and_repair_event_evidence.return_value = {
+            "events": [], "missing_event_ids": ids[:16], "repaired_sources": [],
+        }
+        missing = builder._build_memory_link_source_reports(
+            memory_set_id="memory_set:test", cycle_id="cycle:test", detected_at="2026-10-15T09:00:00+09:00",
+            memory_links=[link], selected_memory_ids=["memory:selected"],
+        )
+        self.assertEqual(missing["reports"], [])
+        self.assertEqual(missing["missing_event_ids"], ids[:16])
 
     def test_search_rationale_stays_in_audit_without_becoming_retrieved_evidence(self) -> None:
         contract = {

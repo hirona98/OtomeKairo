@@ -70,6 +70,7 @@ class ServiceInputLoggingMixin:
             "link_count": int(value.get("link_count", 0) or 0),
             "label_counts": value.get("label_counts", {}),
             "representative_links": representative_links,
+            "source_report_loading": value.get("source_report_loading", {"missing_event_ids": [], "repaired_sources": []}),
             "result_status": value.get("result_status", "empty"),
         }
 

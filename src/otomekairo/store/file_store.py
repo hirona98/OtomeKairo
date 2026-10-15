@@ -13,6 +13,7 @@ from otomekairo.store.clone import StoreCloneMixin
 from otomekairo.store.config import ConfigStore
 from otomekairo.store.cycle import StoreCycleMixin
 from otomekairo.store.entity_registry import StoreEntityRegistryMixin
+from otomekairo.store.event_evidence import StoreEventEvidenceMixin
 from otomekairo.store.memory_links import StoreMemoryLinksMixin
 from otomekairo.store.relation_index import StoreRelationIndexMixin
 from otomekairo.store.schema import MEMORY_DB_FILE_NAME, StoreSchemaMixin
@@ -23,6 +24,7 @@ from otomekairo.store.visual import StoreVisualMixin
 # 保存
 class SQLiteMemoryStore(
     StoreCycleMixin,
+    StoreEventEvidenceMixin,
     StoreMemoryLinksMixin,
     StoreRelationIndexMixin,
     StoreEntityRegistryMixin,
@@ -892,56 +894,6 @@ class SQLiteMemoryStore(
             })
         return messages
 
-    def load_events_for_evidence(
-        self,
-        *,
-        memory_set_id: str,
-        event_ids: list[str],
-        limit: int,
-    ) -> list[dict[str, Any]]:
-        # 空
-        if not event_ids or limit <= 0:
-            return []
-
-        # Query部品群
-        requested_ids = [
-            event_id
-            for event_id in event_ids
-            if isinstance(event_id, str)
-        ]
-        if not requested_ids:
-            return []
-        placeholders = ", ".join("?" for _ in requested_ids)
-
-        # クエリ
-        with self._memory_db() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT event_id, payload_json
-                FROM events
-                WHERE memory_set_id = ?
-                  AND event_id IN ({placeholders})
-                """,
-                (memory_set_id, *requested_ids),
-            ).fetchall()
-
-        # 順序付け
-        rows_by_id = {
-            row["event_id"]: json.loads(row["payload_json"])
-            for row in rows
-        }
-        ordered: list[dict[str, Any]] = []
-        for event_id in requested_ids:
-            record = rows_by_id.get(event_id)
-            if record is None:
-                continue
-            ordered.append(record)
-            if len(ordered) >= limit:
-                break
-
-        # 結果
-        return ordered
-
     def list_boundary_events_for_evidence(
         self,
         *,
@@ -1536,6 +1488,7 @@ class SQLiteMemoryStore(
         )
 
     def _insert_episode(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
+        record = self._preserve_stored_event_reference_integrity(conn, source_kind="episode", record=record)
         # 派生項目
         open_loops = record.get("open_loops", [])
 
