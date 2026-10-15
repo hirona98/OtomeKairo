@@ -8,7 +8,8 @@
 
 - `LLMClient` への矢印はアプリ内の論理処理呼び出しを示す。1 回の論理処理が、生成、審査、修復のために複数回 API を呼ぶことがある。
 - `通常生成API`、`送信前チェックAPI`、`Embedding API` への矢印は、実際のモデル呼び出しを示す。応答矢印は必要な箇所だけ記載する。
-- 「図 N」と付いた処理は、対応する図へ展開する。コード側の候補収集、契約検証、保存は、それぞれの担当内の処理として示す。
+- `DB` への矢印は主要な検索・読み込み・保存を示し、個別のクエリは処理単位にまとめる。
+- 「図 N」と付いた処理は、対応する図へ展開する。コード側の候補統合や契約検証は、それぞれの担当内の処理として示す。
 - `opt` は条件付き処理、`alt` は分岐、`loop` は繰り返し、`par` は独立して進む処理、開いた矢印は非同期の要求・通知を示す。
 
 | 呼び出し先 | 設定の参照先 |
@@ -37,33 +38,60 @@ sequenceDiagram
     participant U as 外部接点
     participant C as 判断サイクル
     participant R as 想起
+    participant D as DB
     participant L as LLMClient
     participant E as Embedding API
     participant M as 記憶統合
 
     U->>C: 人物発話
+    C->>D: 直近会話を取得（events）
+    D-->>C: 直近会話
     opt 思考前観測または添付画像がある
         C->>C: 観測と画像解釈（図7）
     end
     C->>L: generate_input_interpretation（人格や会話など）
     L-->>C: recall_hint と answer_contract
     C->>R: build_recall_pack
-    R->>R: scope別の候補収集
+    R->>D: scope別の記憶・エピソード候補を取得（memory_units・episodes）
+    D-->>R: 記憶・エピソード候補
     opt 関連検索のクエリがある
         R->>E: クエリ群の埋め込み
         E-->>R: 検索用ベクトル
-        R->>R: 関連候補を検索・統合
+        R->>D: 記憶・エピソードをベクトル検索
+        D-->>R: 関連候補
     end
+    R->>D: 関係索引を取得（relation_index）
+    D-->>R: 関係索引の記憶候補
+    R->>R: 候補を統合
+    R->>D: 競合比較用記憶を取得（memory_units）
+    D-->>R: 同じ対象についての記憶
+    R->>R: 競合を検出
+    R->>D: 候補間リンクを取得（memory_links）
+    D-->>R: 候補の関係情報
+    R->>R: 選別用source packを構築
     opt 想起候補または競合がある
         R->>L: generate_recall_pack_selection
         L-->>R: 採用・配置する候補
     end
-    opt event根拠を必要とし、選択済みeventがある
-        R->>R: event読込とsource pack構築
-        R->>L: generate_event_evidence（選択済みevent群）
-        L-->>R: 各eventの短い根拠表現
-        R->>R: 項目検証と出所の付与
+    R->>D: 選定済み記憶の周辺リンクを取得（memory_links）
+    D-->>R: 選定済み記憶の関係情報
+    opt 記憶の更新元報告を確認する必要がある
+        R->>D: load_events_for_evidence（更新元event_id）
+        D-->>R: 更新元の報告本文と出所（events）
     end
+    opt event根拠を必要とし、選択済みeventがある
+        R->>R: event_idを選定（標準・precise追加）
+        R->>D: load_events_for_evidence（選定済みevent_id）
+        D-->>R: event本文・判断理由・出所（events）
+        R->>R: 取得したeventからsource packを構築
+        opt source packを構築できたeventがある
+            R->>L: generate_event_evidence（選定済みevent群のsource pack）
+            L-->>R: 各eventの短い根拠表現
+            R->>R: 項目検証と出所の付与
+        end
+    end
+    R->>D: 視覚観測と日次要約を取得
+    D-->>R: visual_observation_records・daily_visual_digests
     R-->>C: RecallPack
     C->>C: 回答根拠を解決
     opt 空でない人物発話がある
@@ -97,7 +125,7 @@ sequenceDiagram
     else 保留またはnoop
         C->>C: 判断結果を保持
     end
-    C->>C: cycleのeventとtraceを保存
+    C->>D: cycleのeventとtraceを保存
     C->>M: consolidate_turn（図6）
     M-->>C: 統合結果と後処理job
     C-)M: 後処理jobをキューへ登録
@@ -117,7 +145,8 @@ sequenceDiagram
 
 `generate_world_state()` と `generate_activity_state()` は、それぞれ候補と根拠判定を同じ生成で取得し、コード側で採用候補を選ぶ。具体的な根拠判定は [状態候補の根拠判定](状態候補根拠審査.md) を参照する。
 人物発話の報告抽出と `world_state` 生成の統合は、模擬データによるテストで精度に問題があったため見送った。
-`generate_event_evidence()` は対象 event 群をまとめて呼び出し、返った各項目を想起側で検証する。
+`generate_recall_pack_selection()` は DB から集めた記憶・エピソードの候補を受け取る。
+`generate_event_evidence()` の前に、想起側が `load_events_for_evidence()` で選定済み event を DB から読み、本文や判断理由を含む source pack を組み立てる。対象 event 群をまとめて LLM へ渡し、返った各項目を想起側で検証する。
 
 実装: [入力サイクル](../../../src/otomekairo/service/input/cycle.py)、[共通パイプライン](../../../src/otomekairo/service/input/pipeline.py)、[想起構築](../../../src/otomekairo/recall/builder.py)、[Skill文脈](../../../src/otomekairo/service/agent_skills.py)、[結果の保存](../../../src/otomekairo/service/input/trace_persist.py)。
 契約: [想起と判断](../memory/想起と判断.md)、[RecallPackのLLM選別](../memory/RecallPackのLLM選別.md)、[event_evidenceのLLM圧縮](../memory/event_evidenceのLLM圧縮.md)、[状態候補根拠審査](状態候補根拠審査.md)、[AgentSkills統合](../integration/AgentSkills統合.md)。
