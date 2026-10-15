@@ -133,7 +133,7 @@ sequenceDiagram
 ## 図 2: 判断と発話の審査
 
 入口は `generate_decision()` と、発話を選んだ場合の `generate_speech()`。
-審査も通常生成と同じモデル設定を使う。MCP 引数の根拠審査と、外部送信直前の開示可否チェック（図 3）は別の段階である。
+内容の確認には、通常生成と同じモデル設定を使う。ツールに渡す内容の確認と、外部送信直前の送信可否チェック［図 3］は、別の段階で行う。
 
 ```mermaid
 sequenceDiagram
@@ -141,47 +141,47 @@ sequenceDiagram
     participant L as LLMClient
     participant G as 通常生成API
 
-    C->>L: 行動を判断（generate_decision）
-    L->>G: 判断候補を生成（decision_generation）
-    G-->>L: 判断候補
-    opt 候補にMCPツール呼び出しがある
-        L->>G: 能力の呼び出し引数を根拠と照合（capability_input_grounding_review）
-        G-->>L: 根拠との照合結果
-        opt 再検討が必要（reconsider）
-            L->>G: 審査理由を添えて判断を修復
-            Note over L,G: 再候補も契約検証とMCP引数の根拠審査を通す
+    C->>L: 何をするか考える（generate_decision）
+    L->>G: 行動の案を作る（decision_generation）
+    G-->>L: 行動の案
+    opt 行動の案にMCPツールの利用が含まれる
+        L->>G: ツールに渡す内容が、発言・観測・記憶と合っているか確認（capability_input_grounding_review）
+        G-->>L: 確認結果と理由
+        opt 内容に修正が必要（reconsider）
+            L->>G: 指摘された理由を添えて、行動を考え直す
+            Note over L,G: 作り直した案も、入力形式とツールに渡す内容を確認
         end
     end
-    alt 全体比較で人物に応答し、自律作業以外を選んだ（full）
-        L->>G: 将来の行為の履行範囲を照合（future_action_alignment_review）
-        G-->>L: 履行範囲との整合結果
-        opt 不整合
-            L->>G: 履行範囲の不整合を修復（decision_future_action_retry）
-            opt 再候補も自律作業以外を選んだ
-                L->>G: 将来の行為の履行範囲を照合（future_action_alignment_review）
+    alt 人物への返答で、自律作業を選んでいない（full）
+        L->>G: 返答後に必要な作業を、約束だけで済ませていないか確認（future_action_alignment_review）
+        G-->>L: その判断でよいか、自律作業が必要かの結果
+        opt 自律作業が必要だと分かった
+            L->>G: 必要な作業を含めて、行動を考え直す（decision_future_action_retry）
+            opt 考え直した結果も、自律作業を選んでいない
+                L->>G: 返答後に必要な作業を、約束だけで済ませていないか確認（future_action_alignment_review）
             end
         end
-    else 自律判断で対人発話を比較（outward_speech）
-        L->>G: 判断候補を根拠と照合（decision_grounding_review）
-        G-->>L: 採用（allow）または再検討（reconsider）
-        opt 再検討が必要（reconsider）
-            L->>G: 根拠に沿って判断を修復（decision_grounding_reconsider）
-            L->>G: 判断候補を根拠と照合（decision_grounding_review）
+    else 自発的に人へ話しかけるか考える場合（outward_speech）
+        L->>G: 判断の理由が、発言や観測と合っているか確認（decision_grounding_review）
+        G-->>L: そのまま採用（allow）または考え直す（reconsider）
+        opt 内容に修正が必要（reconsider）
+            L->>G: 指摘を踏まえて、行動を考え直す（decision_grounding_reconsider）
+            L->>G: 判断の理由が、発言や観測と合っているか確認（decision_grounding_review）
         end
     end
-    L-->>C: 審査を通った判断
-    opt 発話生成へ進む
-        C->>L: 発話を生成（generate_speech）
-        L->>G: 自由文の発話候補を生成（expression_generation）
-        G-->>L: 発話候補
-        L->>G: 発話候補を根拠と照合（speech_grounding_review）
-        G-->>L: 採用または根拠に沿った修正文
-        L-->>C: 発話と根拠審査結果
-        opt 他人物由来の開示審査対象がある
-            C->>L: 開示の可否を審査（generate_disclosure_review）
-            L->>G: 開示判定を生成（disclosure_review）
-            G-->>L: 開示判定
-            L-->>C: 採用・書き換え・見送りの判定
+    L-->>C: 確認を通った行動の案
+    opt 発話すると決まった
+        C->>L: 話す内容を作る（generate_speech）
+        L->>G: 話す文章の案を作る（expression_generation）
+        G-->>L: 話す文章の案
+        L->>G: 話す内容が、発言・観測・記憶と合っているか確認（speech_grounding_review）
+        G-->>L: そのまま使う、または裏付けのある表現に修正
+        L-->>C: 話す文章と確認結果
+        opt 他の人の情報について、共有の確認が必要
+            C->>L: 今の相手に伝えてよいか確認（generate_disclosure_review）
+            L->>G: 伝える相手・内容・許可の条件を確認（disclosure_review）
+            G-->>L: 共有してよい範囲の判定
+            L-->>C: そのまま伝える・書き換える・伝えない、の判定
         end
     end
 ```
