@@ -50,7 +50,7 @@ sequenceDiagram
         C->>C: 観測と画像解釈（図7）
     end
     C->>L: generate_input_interpretation（人格や会話など）
-    L-->>C: recall_hint と answer_contract
+    L-->>C: recall_hint（検索すべき内容） と answer_contract（根拠は必要？などの条件）
     C->>R: build_recall_pack
     R->>D: scope別の記憶・エピソード候補を取得（memory_units・episodes）
     D-->>R: 記憶・エピソード候補
