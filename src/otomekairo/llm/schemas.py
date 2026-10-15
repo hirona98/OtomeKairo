@@ -558,13 +558,6 @@ def decision_grounding_review_response_format() -> dict[str, Any]:
     }))
 
 
-def capability_input_grounding_review_response_format() -> dict[str, Any]:
-    return structured_response_format("capability_input_grounding_review", closed_object({
-        "outcome": string_enum({"allow", "reconsider"}),
-        "reason_summary": {"type": "string"},
-    }))
-
-
 def world_state_source_selection_response_format() -> dict[str, Any]:
     return structured_response_format("world_state_source_selection", closed_object({
         "reported_states": {"type": "array", "maxItems": 5, "items": closed_object({

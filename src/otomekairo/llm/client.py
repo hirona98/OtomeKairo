@@ -56,7 +56,6 @@ from otomekairo.llm.schemas import (
     activity_state_response_format,
     world_state_source_selection_response_format,
     decision_grounding_review_response_format,
-    capability_input_grounding_review_response_format,
     agent_skill_material_selection_response_format,
     agent_skill_selection_response_format,
     autonomous_completion_review_response_format,
@@ -99,7 +98,6 @@ from otomekairo.llm.prompts import (
     build_autonomous_step_repair_prompt,
     build_decision_messages,
     build_decision_repair_prompt,
-    build_capability_input_grounding_review_messages,
     build_disclosure_review_messages,
     build_disclosure_review_repair_prompt,
     build_speech_grounding_review_messages,
@@ -469,32 +467,6 @@ class LLMClient:
         if not isinstance(payload["reason_summary"], str) or not payload["reason_summary"].strip():
             raise LLMError("GroundingReview.reason_summary が必要です。")
 
-    def _review_capability_input_grounding(
-        self, *, model_config: dict, persona_context: PersonaContext,
-        source_messages: list[dict[str, Any]], candidate_request: dict[str, Any] | None,
-    ) -> None:
-        if not isinstance(candidate_request, dict) or candidate_request.get("capability_id") != "mcp.call_tool":
-            return
-        try:
-            review = self._generate_structured_payload(
-                model_config=model_config,
-                messages=build_capability_input_grounding_review_messages(
-                    persona_context=persona_context,
-                    source_messages=[message for message in source_messages if message["role"] == "user"],
-                    candidate_request=candidate_request,
-                ),
-                validator=self._validate_grounding_review,
-                repair_prompt_builder=lambda error: "outcome=allow|reconsider と非空の reason_summary を返してください。" + error,
-                response_format=capability_input_grounding_review_response_format(),
-                failure_message="MCP 本文の根拠審査に失敗しました。",
-                operation="capability_input_grounding_review",
-            )
-        except Exception as exc:
-            # Reviewer failure is not a reason to regenerate an unchecked action.
-            raise RuntimeError("MCP 本文の根拠審査に失敗しました。") from exc
-        if review["outcome"] == "reconsider":
-            raise LLMError("MCP arguments の事実表現を同じ根拠の確かさへ対応させて判断し直してください。審査理由: " + review["reason_summary"])
-
     def _validate_input_interpretation_contract(self, payload: dict[str, Any]) -> None:
         _validate_exact_keys(payload, {"recall_hint", "answer_contract"}, "InputInterpretation")
         recall_hint = payload["recall_hint"]
@@ -533,10 +505,6 @@ class LLMClient:
 
             def validate_candidate(candidate: dict[str, Any]) -> None:
                 self._validate_decision_contract_for_context(payload=candidate, context=context)
-                self._review_capability_input_grounding(
-                    model_config=model_config, persona_context=persona_context,
-                    source_messages=messages, candidate_request=candidate.get("capability_request"),
-                )
 
             payload = self._generate_structured_payload(
                 model_config=model_config,
@@ -779,10 +747,6 @@ class LLMClient:
 
             def validate_candidate(candidate: dict[str, Any]) -> None:
                 self._validate_autonomous_step_contract_for_context(payload=candidate, context=context)
-                self._review_capability_input_grounding(
-                    model_config=model_config, persona_context=persona_context,
-                    source_messages=messages, candidate_request=candidate["action"].get("capability_request"),
-                )
 
             payload = self._generate_structured_payload(
                 model_config=model_config,

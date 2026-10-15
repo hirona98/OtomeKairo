@@ -133,7 +133,7 @@ sequenceDiagram
 ## 図 2: 判断と発話の審査
 
 入口は `generate_decision()` と、発話を選んだ場合の `generate_speech()`。
-内容の確認には、通常生成と同じモデル設定を使う。ツールに渡す内容の確認と、外部送信直前の送信可否チェック［図 3］は、別の段階で行う。
+内容の確認には、通常生成と同じモデル設定を使う。ツールに渡す本文は行動の案と同じ生成で根拠に沿って作り、外部送信直前の送信可否チェック［図 3］は別の段階で行う。
 
 ```mermaid
 sequenceDiagram
@@ -142,16 +142,8 @@ sequenceDiagram
     participant G as 通常生成API
 
     C->>L: 何をするか考える（generate_decision）
-    L->>G: 行動の案を作る（decision_generation）
+    L->>G: 行動と必要なツール入力の案を作る（decision_generation）
     G-->>L: 行動の案
-    opt 行動の案にMCPツールの利用が含まれる
-        L->>G: ツールに渡す内容が、発言・観測・記憶と合っているか確認（capability_input_grounding_review）
-        G-->>L: 確認結果と理由
-        opt 内容に修正が必要（reconsider）
-            L->>G: 指摘された理由を添えて、行動を考え直す
-            Note over L,G: 作り直した案も、入力形式とツールに渡す内容を確認
-        end
-    end
     alt 人物への返答で、自律作業を選んでいない（full）
         L->>G: 返答後に必要な作業を、約束だけで済ませていないか確認（future_action_alignment_review）
         G-->>L: その判断でよいか、自律作業が必要かの結果
@@ -186,8 +178,8 @@ sequenceDiagram
     end
 ```
 
-実装: [LLMClient](../../../src/otomekairo/llm/client.py) の `generate_decision()`、`_review_capability_input_grounding()`、`_ground_outward_decision()`、`generate_speech()` と、[パイプライン](../../../src/otomekairo/service/input/pipeline.py) の `_apply_disclosure_review()`。
-契約: [判断と行動](../runtime/判断と行動.md)、[判断根拠審査](判断根拠審査.md)、[外部本文の根拠照合](外部本文の根拠照合.md)、[想起と判断の共有許可](../memory/想起と判断.md#共有許可と受け手の照合)。
+実装: [LLMClient](../../../src/otomekairo/llm/client.py) の `generate_decision()`、`_ground_outward_decision()`、`generate_speech()` と、[パイプライン](../../../src/otomekairo/service/input/pipeline.py) の `_apply_disclosure_review()`。
+契約: [判断と行動](../runtime/判断と行動.md)、[判断根拠審査](判断根拠審査.md)、[外部本文の生成と根拠](外部本文の根拠照合.md)、[想起と判断の共有許可](../memory/想起と判断.md#共有許可と受け手の照合)。
 
 ## 図 3: 能力実行、送信前チェック、結果からの後続判断
 
@@ -343,11 +335,8 @@ sequenceDiagram
             A->>A: 自律作業・現在状態・Skillの文脈を構築
             Note over A,L: Skill一覧と追加資料があればSkill選択APIも呼ぶ
             A->>L: 自律作業の次の一手を判断（generate_autonomous_step）
-            L->>G: 次の一手の候補を生成（autonomous_step_generation）
+            L->>G: 次の一手と必要なツール入力の案を生成（autonomous_step_generation）
             G-->>L: 次の一手の候補
-            opt MCPツール呼び出しの候補
-                L->>G: 能力の呼び出し引数を根拠と照合（capability_input_grounding_review）［図 2］
-            end
             L-->>A: 今回の行動（action）と作業の状態遷移（transition）
             opt 発話を選んだ（speech）
                 A->>L: 発話を生成（generate_speech）

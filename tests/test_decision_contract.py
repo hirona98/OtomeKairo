@@ -171,9 +171,6 @@ class DecisionContractTests(unittest.TestCase):
         self.assertIn('利用できる factor_ref 一覧=["current_input:user_message", "memory:person_model:0"]', repair)
 
     def setUp(self) -> None:
-        grounding_patch = patch.object(LLMClient, "_review_capability_input_grounding", return_value=None)
-        grounding_patch.start()
-        self.addCleanup(grounding_patch.stop)
         review_patch = patch.object(
             LLMClient, "generate_future_action_alignment_review",
             return_value={"outcome": "aligned", "reason_summary": "このテストの判断は現在の応答で完結する。"},

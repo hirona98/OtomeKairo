@@ -1,3 +1,4 @@
+"""MCP入力の生成と検証を確認する。自然文の精度は評価しない。"""
 from copy import deepcopy
 from dataclasses import replace
 import json
@@ -21,69 +22,128 @@ def _view():
              }]}]}]
 
 
-def _request(text):
-    return {"mcp_server_id": "elyth", "tool_name": "publish", "arguments": {"body": text}}
-
-
-def _context():
-    return replace(_decision_context(_view()), visual_observation_context={
-        "visual_summary_text": "空中の線が雨筋のように見える。現在の降雨は確認できない。",
-    })
-
-
-@pytest.mark.parametrize('repaired', [True, False])
-def test_decision_repairs_mcp_content_before_returning_or_fails(monkeypatch, repaired):
-    draft = _capability_decision('mcp.call_tool', _request('現在、公園では雨が降っている。'))
-    safe = _capability_decision('mcp.call_tool', _request('空中に雨筋のように見える線がある。'))
-    reject = {'outcome': 'reconsider', 'reason_summary': '雨筋のように見えるという観測を降雨の確定へ強めている。'}
-    allow = {'outcome': 'allow', 'reason_summary': '観測で確認した確かさを保っている。'}
-    completion = Mock(side_effect=[_wire_response(draft), json.dumps(reject),
-                                   _wire_response(safe if repaired else draft), json.dumps(allow if repaired else reject)])
-    monkeypatch.setattr('otomekairo.llm.client.complete_text', completion)
+@pytest.fixture(params=["decision", "followup", "step"])
+def generation(request, monkeypatch):
+    view = _view()
+    text = "  雨筋のように見える線がある。\n降雨は確認できない。  "
+    result_text = "架空のツールから取得した結果。"
+    person_text = "本人による過去の報告。"
+    memory_text = "本人が以前に伝えた内容。"
+    result_context = {"source_capability_id": "mcp.call_tool", "allowed_followup_capability_ids": ["mcp.call_tool"],
+                      "result_kind": "success", "result_summary": result_text}
+    recent_turns = [{"role": "person", "message": person_text}]
+    current = _current_input()
+    if request.param == "followup":
+        current = replace(current, sender_kind="system", sender_ref=None,
+                          source_kind="capability_result", response_target_refs=(), text="能力の実行結果。")
+    mcp_request = {"capability_id": "mcp.call_tool", "input": {
+        "mcp_server_id": "elyth", "tool_name": "publish", "arguments": {"body": text},
+    }}
     client = LLMClient()
+    # このテストではMCP入力生成の回数を測り、独立した未来行動審査は分離する。
     monkeypatch.setattr(LLMClient, 'generate_future_action_alignment_review', Mock(return_value={
         'outcome': 'aligned', 'reason_summary': '今回の操作で完了する。'}))
-    def generate():
-        return client.generate_decision(model_config={'model': 'provider/test'},
-            persona_context=_persona_context(), context=_context())
-    if repaired:
-        assert generate()['capability_request']['input'] == safe['capability_request']['input']
+    if request.param == "step":
+        candidate = {
+            'action': {'kind': 'capability_request', 'capability_request': mcp_request, 'speech': None},
+            'transition': {'kind': 'continue', 'next_run_at': None},
+            'run_update': {'current_step_summary': '投稿する。', 'history_summary': '観測を受け取った。'},
+        }
+        context = AutonomousStepContext(
+            run={'run_id': 'autonomous_run:test'}, current_input=current,
+            recent_turns=recent_turns, time_context={}, foreground_world_state=None, activity_context=None,
+            ongoing_action_summary=None, capability_decision_view=view, last_result_context=result_context,
+            affect_context={}, observation_context={'visual_summary_text': text},
+        )
+        def generate():
+            return client.generate_autonomous_step(model_config={'model': 'provider/test'},
+                persona_context=_persona_context(), context=context)
+        expected_sources = [text, result_text, person_text]
     else:
-        with pytest.raises(LLMError, match='事実表現'):
-            generate()
-    assert completion.call_count == 4
-    assert completion.call_args_list[1].kwargs['response_format']['json_schema']['name'] == 'capability_input_grounding_review'
-    source = completion.call_args_list[1].kwargs['messages'][-1]['content']
-    assert '現在の降雨は確認できない' in source
-    assert '雨筋のように見える' in source
+        candidate = _capability_decision('mcp.call_tool', mcp_request['input'])
+        context = replace(_decision_context(view), current_input=current, input_text=current.text,
+            trigger_kind='capability_result' if request.param == 'followup' else 'user_message',
+            recent_turns=recent_turns, visual_observation_context={'visual_summary_text': text},
+            capability_result_context=result_context, recall_pack={'event_evidence': [{
+                'kind': 'conversation_input', 'role': 'person', 'text': memory_text,
+            }]})
+        def generate():
+            return client.generate_decision(model_config={'model': 'provider/test'},
+                persona_context=_persona_context(), context=context)
+        expected_sources = [text, result_text, person_text, memory_text]
+    return generate, candidate, view, expected_sources
 
 
-def test_grounding_reviewer_failure_does_not_regenerate_unchecked_request(monkeypatch):
-    draft = _capability_decision('mcp.call_tool', _request('水面が見える。'))
-    completion = Mock(side_effect=[_wire_response(draft), LLMError('provider failed')])
+def _strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
+
+
+def test_mcp_generation_keeps_arguments_and_source_context_in_one_completion(monkeypatch, generation):
+    generate, candidate, _, expected_sources = generation
+    before = deepcopy(candidate)
+    completion = Mock(return_value=_wire_response(candidate))
     monkeypatch.setattr('otomekairo.llm.client.complete_text', completion)
-    with pytest.raises(RuntimeError, match='根拠審査'):
-        LLMClient().generate_decision(model_config={'model': 'provider/test'},
-            persona_context=_persona_context(), context=_context())
+    assert generate() == before
+    assert candidate == before
+    completion.assert_called_once()
+    assert completion.call_args.kwargs['response_format']['json_schema']['name'] in {'decision', 'autonomous_step'}
+    # JSONの入力資料がそのまま届くことを確認し、文章の意味を判定するテストにはしない。
+    payloads = [json.loads(message['content'].splitlines()[1])
+                for message in completion.call_args.kwargs['messages'] if message['role'] == 'user']
+    actual_sources = list(_strings(payloads))
+    for source in expected_sources:
+        assert source in actual_sources
+
+
+def test_malformed_json_repairs_once_without_a_separate_review(monkeypatch, generation):
+    generate, candidate, _, _ = generation
+    completion = Mock(side_effect=['{invalid', _wire_response(candidate)])
+    monkeypatch.setattr('otomekairo.llm.client.complete_text', completion)
+    assert generate() == candidate
     assert completion.call_count == 2
 
 
-def test_autonomous_step_uses_the_same_mcp_content_grounding(monkeypatch):
-    request = {'capability_id': 'mcp.call_tool', 'input': _request('今、雨が降っている。')}
-    draft = {'action': {'kind': 'capability_request', 'capability_request': request, 'speech': None},
-             'transition': {'kind': 'continue', 'next_run_at': None},
-             'run_update': {'current_step_summary': '投稿する。', 'history_summary': '観測した。'}}
-    safe = deepcopy(draft)
-    safe['action']['capability_request']['input'] = _request('雨筋のように見える線がある。')
-    completion = Mock(side_effect=[_wire_response(draft), json.dumps({
-        'outcome': 'reconsider', 'reason_summary': '降雨の確定は観測されていない。'}),
-        _wire_response(safe), json.dumps({'outcome': 'allow', 'reason_summary': '確かさを保っている。'})])
+def test_invalid_arguments_are_repaired_before_returning(monkeypatch, generation):
+    generate, candidate, _, _ = generation
+    invalid = deepcopy(candidate)
+    mcp_request = invalid['action']['capability_request'] if 'action' in invalid else invalid['capability_request']
+    mcp_request['input']['arguments']['body'] = 123
+    completion = Mock(side_effect=[_wire_response(invalid), _wire_response(candidate)])
     monkeypatch.setattr('otomekairo.llm.client.complete_text', completion)
-    context = AutonomousStepContext(run={'run_id': 'autonomous_run:test'}, current_input=_current_input(),
-        recent_turns=[], time_context={}, foreground_world_state=None, activity_context=None,
-        ongoing_action_summary=None, capability_decision_view=_view(), last_result_context=None, affect_context={},
-        observation_context={'visual_summary_text': '雨筋のように見えるが降雨は未確認。'})
-    result = LLMClient().generate_autonomous_step(model_config={'model': 'provider/test'},
-        persona_context=_persona_context(), context=context)
-    assert result == safe
-    assert completion.call_count == 4
+    assert generate() == candidate
+    assert completion.call_count == 2
+
+
+@pytest.mark.parametrize('failure', ['invalid_arguments', 'unavailable'])
+def test_invalid_or_unavailable_mcp_request_fails_after_one_repair(monkeypatch, generation, failure):
+    generate, candidate, view, _ = generation
+    invalid = deepcopy(candidate)
+    if failure == 'unavailable':
+        view[0]['available'] = False
+        view[0]['unavailable_reason'] = 'no_binding'
+    else:
+        mcp_request = invalid['action']['capability_request'] if 'action' in invalid else invalid['capability_request']
+        mcp_request['input']['arguments']['body'] = 123
+    completion = Mock(return_value=_wire_response(invalid))
+    monkeypatch.setattr('otomekairo.llm.client.complete_text', completion)
+    with pytest.raises(LLMError):
+        generate()
+    assert completion.call_count == 2
+
+
+def test_generation_failure_propagates_without_additional_calls(monkeypatch, generation):
+    generate, _, _, _ = generation
+    failure = LLMError('provider failed')
+    completion = Mock(side_effect=failure)
+    monkeypatch.setattr('otomekairo.llm.client.complete_text', completion)
+    with pytest.raises(LLMError) as raised:
+        generate()
+    assert raised.value is failure
+    completion.assert_called_once()
