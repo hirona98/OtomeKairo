@@ -130,10 +130,10 @@ sequenceDiagram
 実装: [入力サイクル](../../../src/otomekairo/service/input/cycle.py)、[共通パイプライン](../../../src/otomekairo/service/input/pipeline.py)、[想起構築](../../../src/otomekairo/recall/builder.py)、[Skill文脈](../../../src/otomekairo/service/agent_skills.py)、[結果の保存](../../../src/otomekairo/service/input/trace_persist.py)。
 契約: [想起と判断](../memory/想起と判断.md)、[RecallPackのLLM選別](../memory/RecallPackのLLM選別.md)、[event_evidenceの取得](../memory/event_evidenceの取得.md)、[状態候補根拠審査](状態候補根拠審査.md)、[AgentSkills統合](../integration/AgentSkills統合.md)。
 
-## 図 2: 判断と発話の審査
+## 図 2: 判断と発話の生成
 
 入口は `generate_decision()` と、発話を選んだ場合の `generate_speech()`。
-発話内容の確認には、通常生成と同じモデル設定を使う。ツールに渡す本文は行動の案と同じ生成で根拠に沿って作り、外部送信直前の送信可否チェック［図 3］は別の段階で行う。
+発話本文は、現在入力・観測・記憶・実行状態の根拠に沿って最初の生成で作る。ツールに渡す本文も行動の案と同じ生成で作り、外部送信直前の送信可否チェック［図 3］は別の段階で行う。
 必要な自律作業は、最初の行動の案に含める。
 外向きに話すか控えるかも、理由を根拠に合わせて最初の行動の案で決める。
 
@@ -149,11 +149,9 @@ sequenceDiagram
     L-->>C: 採用する行動の案
     opt 発話すると決まった
         C->>L: 話す内容を作る（generate_speech）
-        L->>G: 話す文章の案を作る（expression_generation）
-        G-->>L: 話す文章の案
-        L->>G: 話す内容が、発言・観測・記憶と合っているか確認（speech_grounding_review）
-        G-->>L: そのまま使う、または裏付けのある表現に修正
-        L-->>C: 話す文章と確認結果
+        L->>G: 根拠に沿って話す文章を作る（expression_generation）
+        G-->>L: 話す文章
+        L-->>C: 話す文章
         opt 他の人の情報について、共有の確認が必要
             C->>L: 今の相手に伝えてよいか確認（generate_disclosure_review）
             L->>G: 伝える相手・内容・許可の条件を確認（disclosure_review）
@@ -277,7 +275,7 @@ sequenceDiagram
                 end
             end
             C->>L: 対人発話を判断（generate_decision / comparison_scope=outward_speech）
-            L->>G: 対人発話の判断と根拠審査［図 2］
+            L->>G: 対人発話を判断［図 2］
             C->>C: 両方の判断を合成して出力へ
         else 共通の判断を使う
             C->>L: 行動を判断（generate_decision）［図 2］
@@ -325,7 +323,7 @@ sequenceDiagram
             L-->>A: 今回の行動（action）と作業の状態遷移（transition）
             opt 発話を選んだ（speech）
                 A->>L: 発話を生成（generate_speech）
-                L->>G: 発話候補を生成し、根拠と照合（expression_generation・speech_grounding_review）［図 2］
+                L->>G: 根拠に沿って発話を生成（expression_generation）［図 2］
             end
             opt 能力実行以外で作業完了を候補にする（complete）
                 A->>L: 自律作業の完了を審査（generate_autonomous_completion_review）
@@ -340,7 +338,7 @@ sequenceDiagram
                 A-)X: 同じ実行境界を通して要求［図 3］
                 X-)A: 結果到着、状態と履歴へ反映
             else 発話を選んだ（speech）
-                A-)X: 審査済み発話を配送
+                A-)X: 生成した発話を配送
             else 外向きの行動を選ばなかった（none）
                 A->>A: 外向き出力なし
             end

@@ -31,7 +31,6 @@ from otomekairo.llm.contracts import (
     validate_autonomous_step_contract,
     validate_decision_contract,
     validate_disclosure_review_contract,
-    validate_speech_grounding_review_contract,
     validate_initiative_entry_check_contract,
 
     validate_memory_interpretation_contract,
@@ -61,7 +60,6 @@ from otomekairo.llm.schemas import (
     autonomous_step_response_format,
     decision_response_format,
     disclosure_review_response_format,
-    speech_grounding_review_response_format,
     initiative_entry_check_response_format,
     input_interpretation_response_format,
     memory_interpretation_response_format,
@@ -96,8 +94,6 @@ from otomekairo.llm.prompts import (
     build_decision_repair_prompt,
     build_disclosure_review_messages,
     build_disclosure_review_repair_prompt,
-    build_speech_grounding_review_messages,
-    build_speech_grounding_review_repair_prompt,
     build_initiative_entry_check_messages,
     build_initiative_entry_check_repair_prompt,
     build_input_interpretation_messages,
@@ -1072,19 +1068,6 @@ class LLMClient:
                 "speech_style_notes": f"model={model_config.get('model')}",
                 "confidence_note": "litellm_model",
             }
-            review = self.generate_speech_grounding_review(
-                model_config=model_config,
-                persona_context=persona_context,
-                context=context,
-                candidate_speech=speech_text,
-            )
-            payload["speech_text"] = (
-                speech_text if review["outcome"] == "allow" else review["speech_text"].strip()
-            )
-            payload["grounding_review"] = {
-                "outcome": review["outcome"],
-                "reason_summary": review["reason_summary"],
-            }
             debug_log(
                 "LLM",
                 (
@@ -1097,30 +1080,6 @@ class LLMClient:
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc, level='ERROR')}", level="ERROR")
             raise
-
-    def generate_speech_grounding_review(
-        self,
-        *,
-        model_config: dict,
-        persona_context: PersonaContext,
-        context: SpeechContext,
-        candidate_speech: str,
-    ) -> dict[str, Any]:
-        if self._is_mock_model_config(model_config):
-            return {"outcome": "allow", "speech_text": None, "reason_summary": "mock speech を維持する。"}
-        return self._generate_structured_payload(
-            model_config=model_config,
-            messages=build_speech_grounding_review_messages(
-                context=context,
-                persona_context=persona_context,
-                candidate_speech=candidate_speech,
-            ),
-            validator=validate_speech_grounding_review_contract,
-            repair_prompt_builder=build_speech_grounding_review_repair_prompt,
-            failure_message="SpeechGroundingReview の生成に失敗しました。",
-            response_format=speech_grounding_review_response_format(),
-            operation="speech_grounding_review",
-        )
 
     def generate_disclosure_review(
         self,

@@ -3,7 +3,7 @@ import unittest
 
 from otomekairo.llm.contexts import CurrentInput, DecisionContext, PersonaContext, SpeechContext
 from otomekairo.llm.prompts import (
-    build_decision_messages, build_speech_messages, build_speech_grounding_review_messages,
+    build_decision_messages, build_speech_messages,
     build_memory_candidate_review_messages, build_memory_retention_review_messages,
 )
 from otomekairo.service.input.pipeline import ServiceInputPipelineMixin
@@ -23,7 +23,7 @@ class ConfiguredActivityContextTests(unittest.TestCase):
         self.assertEqual(candidate_payload["memory_context"]["recall_pack"]["active_topics"], [])
         self.assertEqual(retention_payload["evidence_context"]["configured_activity_topics"], topics)
 
-    def test_review_uses_successful_wake_image_before_world_state_adoption(self) -> None:
+    def test_expression_receives_wake_observations_before_world_state_adoption(self) -> None:
         current = CurrentInput(sender_kind="person", sender_ref="person:test", source_kind="user_message",
                                response_target_refs=("person:test",), interaction_context=None,
                                text="今のカメラ画像を説明して。")
@@ -31,10 +31,10 @@ class ConfiguredActivityContextTests(unittest.TestCase):
                        "summary_text": "木の机に透明なカップが見える。", "age_label": "たった今"}
         persona = PersonaContext(display_name="Test", persona_prompt_text="テスト人格。",
                                  expression_addon=None, use_policy="判断の基底。")
-        for capability, expected in [
-            ({"id": "vision.capture", "fresh_world_state_by_vision_source": [observation]}, "observed"),
-            ({"id": "vision.capture", "available": True}, "not_observed"),
-            ({"id": "mcp.call_tool", "fresh_world_state_by_vision_source": [observation]}, "not_observed"),
+        for capability in [
+            {"id": "vision.capture", "fresh_world_state_by_vision_source": [observation]},
+            {"id": "vision.capture", "available": True},
+            {"id": "mcp.call_tool", "available": True},
         ]:
             with self.subTest(capability=capability):
                 context = SpeechContext(
@@ -45,14 +45,12 @@ class ConfiguredActivityContextTests(unittest.TestCase):
                     prediction_error_context=None, workspace_context=None, recall_hint={}, recall_pack={},
                     decision={"kind": "speech"}, capability_decision_view=[capability],
                 )
-                messages = build_speech_grounding_review_messages(
-                    context=context, persona_context=persona, candidate_speech="木の机に透明なカップが見えます。")
-                payload = json.loads(messages[1]["content"].split("\n")[1])
-                self.assertEqual(payload["perception_evidence"]["visual_status"], expected)
-                self.assertEqual(payload["perception_evidence"]["fresh_visual_observations"],
-                                 [observation] if expected == "observed" else [])
+                messages = build_speech_messages(context=context, persona_context=persona)
+                block = next(message["content"] for message in messages
+                             if message["content"].startswith("<<<OTOMEKAIRO_CAPABILITY_DECISION_VIEW>>>"))
+                self.assertEqual(json.loads(block.split("\n")[1]), [capability])
 
-    def test_grounding_review_receives_the_expression_affect_and_relationship_evidence(self) -> None:
+    def test_expression_receives_complete_conversation_affect_and_relationship_evidence(self) -> None:
         current = CurrentInput(sender_kind="person", sender_ref="person:test", source_kind="user_message",
                                response_target_refs=("person:test",), interaction_context=None,
                                text="このやり取りをどう受け止めた？")
@@ -79,18 +77,14 @@ class ConfiguredActivityContextTests(unittest.TestCase):
                         if m["content"].startswith("<<<OTOMEKAIRO_INTERNAL_CONTEXT>>>"))
         expression_payload = json.loads(internal.split("\n")[1])
         evidence = expression_payload["internal_context"]
-        review = build_speech_grounding_review_messages(context=context, persona_context=persona,
-                    candidate_speech="私は、率直な指摘を今のやり取りを見直す材料として受け止めました。")
-        reviewed = json.loads(review[1]["content"].split("\n")[1])
-        self.assertEqual(reviewed["recent_turns"], expression_payload["recent_turns"])
-        self.assertEqual(reviewed["recent_turns"], turns)
-        self.assertEqual(reviewed["affect_context"], evidence["affect_context"])
-        self.assertEqual(reviewed["affect_context"], affect)
-        self.assertEqual(reviewed["relationship_context"], evidence["relationship_context"])
-        self.assertEqual(reviewed["relationship_context"], relationship)
-        self.assertEqual(reviewed["current_input"]["text"], current.text)
+        self.assertEqual(expression_payload["recent_turns"], turns)
+        self.assertEqual(evidence["affect_context"], affect)
+        self.assertEqual(evidence["relationship_context"], relationship)
+        current_block = next(message["content"] for message in expression
+                             if message["content"].startswith("<<<OTOMEKAIRO_CURRENT_INPUT>>>"))
+        self.assertEqual(json.loads(current_block.split("\n")[1])["text"], current.text)
 
-    def test_conversation_generation_and_review_receive_configuration_separately_from_memory(self) -> None:
+    def test_conversation_generation_receives_configuration_separately_from_memory(self) -> None:
         subject = ServiceInputPipelineMixin()
         topics = subject._configured_activity_topic_context(state={"periodic_thought_topics": [
             {"topic_id": "external", "enabled": True, "topic_summary": "外部の交流に関わる。",
@@ -127,10 +121,6 @@ class ConfiguredActivityContextTests(unittest.TestCase):
                 if role == "speech":
                     internal = next(m["content"] for m in messages
                                     if m["content"].startswith("<<<OTOMEKAIRO_INTERNAL_CONTEXT>>>"))
-                    self.assertEqual(json.loads(internal.split("\n")[1])["internal_context"]["autonomous_run_summaries"], pending_runs)
-        review = build_speech_grounding_review_messages(persona_context=persona, context=speech,
-                                                        candidate_speech="交流の手段は現在使えません。")
-        payload = json.loads(review[1]["content"].split("\n")[1])
-        self.assertEqual(payload["configured_activity_topics"], topics)
-        self.assertEqual(payload["autonomous_run_summaries"], pending_runs)
-        self.assertEqual(payload["recall_pack"]["active_topics"], [])
+                    evidence = json.loads(internal.split("\n")[1])["internal_context"]
+                    self.assertEqual(evidence["autonomous_run_summaries"], pending_runs)
+                    self.assertEqual(evidence["recall_pack"]["active_topics"], [])

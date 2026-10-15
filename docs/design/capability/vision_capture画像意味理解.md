@@ -19,7 +19,7 @@ raw image、base64、OCR 全文、UI 座標、資格情報、内部 URL、配送
 一方で、LLM が画像から生成した `visual_summary_text` は、視覚経験の詳細説明として保存する。
 短い要約は検索、一覧、重複判定、日次整理の派生値であり、詳細説明を置き換えない。
 
-通常の能力要求では、判断に用いた視覚観測の詳細説明、source、観測時刻を内部の要求記録 `source_visual_observations` に保持する。非同期の結果処理では `capability_result_context.source_visual_observations` として判断、発話生成、発話根拠審査へ渡し、さらに能力要求を続ける場合も引き継ぐ。これは要求時点の根拠であり、結果到着時点の新たな観測や現在状態へ読み替えない。外部toolへの引数や配送payloadへは追加しない。
+通常の能力要求では、判断に用いた視覚観測の詳細説明、source、観測時刻を内部の要求記録 `source_visual_observations` に保持する。非同期の結果処理では `capability_result_context.source_visual_observations` として判断と発話生成へ渡し、さらに能力要求を続ける場合も引き継ぐ。これは要求時点の根拠であり、結果到着時点の新たな観測や現在状態へ読み替えない。外部toolへの引数や配送payloadへは追加しない。
 
 ## 視覚記録
 

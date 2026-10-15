@@ -518,19 +518,6 @@ def validate_disclosure_review_contract(payload: dict[str, Any]) -> None:
         raise LLMError("DisclosureReview.reason_code は空にできません。")
 
 
-def validate_speech_grounding_review_contract(payload: dict[str, Any]) -> None:
-    _validate_exact_keys(payload, {"outcome", "speech_text", "reason_summary"}, "SpeechGroundingReview")
-    if payload["outcome"] not in {"allow", "rewrite"}:
-        raise LLMError("SpeechGroundingReview.outcome が不正です。")
-    if payload["outcome"] == "allow":
-        if payload["speech_text"] is not None:
-            raise LLMError("SpeechGroundingReview.outcome=allow の speech_text は null です。")
-    elif not isinstance(payload["speech_text"], str) or not payload["speech_text"].strip():
-        raise LLMError("SpeechGroundingReview.outcome=rewrite には speech_text が必要です。")
-    if not isinstance(payload["reason_summary"], str) or not payload["reason_summary"].strip():
-        raise LLMError("SpeechGroundingReview.reason_summary は空にできません。")
-
-
 def validate_pre_send_check_contract(payload: dict[str, Any]) -> None:
     # 外部送信は許可か保留の二値とし、reviewer に本文を書き換えさせない。
     _validate_exact_keys(

@@ -1,7 +1,7 @@
 import json
 from unittest.mock import Mock
 
-from otomekairo.llm.prompts import build_speech_messages, build_speech_grounding_review_messages
+from otomekairo.llm.prompts import build_speech_messages
 from otomekairo.llm.contexts import SpeechContext
 from otomekairo.memory.utils import localize_timestamp_fields
 from otomekairo.service.capability import ServiceCapabilityMixin
@@ -41,7 +41,7 @@ def test_original_visual_evidence_survives_request_and_result_context():
     assert "source_visual_observations" not in record["input"]
 
 
-def test_speech_and_grounding_receive_the_complete_capability_evidence():
+def test_speech_receives_the_complete_capability_evidence():
     result_context = {"source_visual_observations": [{
         "observed_at": "2026-10-04T09:00:00+09:00", "summary_text": "詳細な観測。" * 120,
     }]}
@@ -57,8 +57,3 @@ def test_speech_and_grounding_receive_the_complete_capability_evidence():
     payloads = [json.loads(message["content"].split("\n")[1])
                 for message in messages if message["role"] == "user" and message["content"].startswith("<<<OTOMEKAIRO_INTERNAL_CONTEXT>>>")]
     assert payloads[0]["internal_context"]["capability_result_context"] == localize_timestamp_fields(result_context)
-    review = build_speech_grounding_review_messages(
-        persona_context=_persona_context(), context=context, candidate_speech="結果を報告します。",
-    )
-    payload = json.loads(review[-1]["content"].split("\n")[1])
-    assert payload["capability_result_context"] == localize_timestamp_fields(result_context)
