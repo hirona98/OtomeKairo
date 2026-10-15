@@ -20,7 +20,7 @@
 ## 図 1: 通常の判断サイクル
 
 入口は人物発話を受ける `handle_conversation()`。
-図中の `LLMClient` 呼び出しは、下位の生成と審査をまとめて示す。
+入力解釈や想起などは `LLMClient` への論理呼び出しで示し、行動・共有範囲・最終本文の生成は API 呼び出しまで示す。
 
 ```mermaid
 sequenceDiagram
@@ -29,6 +29,7 @@ sequenceDiagram
     participant R as 想起
     participant D as DB
     participant L as LLMClient
+    participant G as 通常生成API
     participant E as Embedding API
     participant M as 記憶統合
 
@@ -36,7 +37,7 @@ sequenceDiagram
     C->>D: 直近会話を取得（events）
     D-->>C: 直近会話
     opt 思考前観測または添付画像がある
-        C->>C: 観測と画像解釈［図 7］
+        C->>C: 観測と画像解釈［図 6］
     end
     C->>L: 人格・会話などを参照して入力を解釈（generate_input_interpretation）
     L-->>C: 検索すべき内容（recall_hint）と回答に必要な根拠の条件（answer_contract）
@@ -95,23 +96,31 @@ sequenceDiagram
             C->>C: 選択資料の読込と文脈への追加
         end
     end
-    opt 他人物由来の共有条件を確認する資料がある
-        C->>D: 選定済み出所eventの元発話を取得
-        D-->>C: 共有許可の元発話と出所
+    C->>C: 判断材料の参加者IDを、現在の応答相手のIDと比較
+    opt 判断材料に、現在の相手以外の人物に由来する情報が含まれる
+        opt その情報に出所eventの参照がある
+            C->>D: 出所eventをIDで取得（load_events_for_evidence）
+            D-->>C: 元発話・話者・参加者・発生日時
+            Note over C,D: 指定したeventが揃わなければ明示的に失敗
+        end
+        C->>C: 共有条件の確認資料を構築（disclosure_context）
     end
-    C->>L: 行動・共有範囲・最終本文を生成（generate_decision）［図 2］
-    L-->>C: 判断と、発話する場合の最終本文
+    C->>L: 行動と、伝えてよい最終本文を考える（generate_decision）
+    L->>G: 行動・共有範囲・最終本文を生成（decision_generation）
+    G-->>L: 行動と、発話する場合の本文（speech_text）
+    L->>L: 出力契約・参照・能力の実行条件を検証
+    L-->>C: 採用する判断と最終本文
     alt 発話を選ぶ
         C->>C: 判断に含まれる最終本文を配送
     else 能力実行を選ぶ（capability_request）
-        C->>C: 能力の実行境界へ要求を渡す［図 3］
+        C->>C: 能力の実行境界へ要求を渡す［図 2］
     else 自律作業を選ぶ（autonomous_run）
-        C->>C: 自律作業の開始審査と最初の一手［図 5］
+        C->>C: 自律作業の開始審査と最初の一手［図 4］
     else 保留または何もしない（pending_intent・noop）
         C->>C: 判断結果を保持
     end
     C->>D: サイクルのイベントと追跡情報を保存
-    C->>M: 会話の記憶を統合（consolidate_turn）［図 6］
+    C->>M: 会話の記憶を統合（consolidate_turn）［図 5］
     M-->>C: 統合結果と後処理ジョブ
     C-)M: 後処理ジョブをキューへ登録
     C-->>U: サイクル結果
@@ -128,42 +137,17 @@ sequenceDiagram
 
 例えば「前に私が言ったことを原文で教えて」という入力では、本人の過去の会話を想起の対象とし、本人の発話原文を必要な根拠として指定する。この段階では検索方針を決め、長期記憶の検索や原文取得は後続処理が行う。行動選択と返答本文の生成は、後段の `generate_decision()` がまとめて担当する。
 
-実装: [入力サイクル](../../../src/otomekairo/service/input/cycle.py)、[共通パイプライン](../../../src/otomekairo/service/input/pipeline.py)、[想起構築](../../../src/otomekairo/recall/builder.py)、[Skill文脈](../../../src/otomekairo/service/agent_skills.py)、[結果の保存](../../../src/otomekairo/service/input/trace_persist.py)。
-契約: [想起と判断](../memory/想起と判断.md)、[RecallPackのLLM選別](../memory/RecallPackのLLM選別.md)、[event_evidenceの取得](../memory/event_evidenceの取得.md)、[状態候補根拠審査](状態候補根拠審査.md)、[AgentSkills統合](../integration/AgentSkills統合.md)。
+`generate_decision()` は、行動選択、今の相手へ伝えてよい範囲、最終本文を1回の生成で決める。人物発話・別の場の会話・観測・記憶・共有条件は出所を分けて渡す。
 
-## 図 2: 判断と発話の生成
+共有条件の確認資料を用意する対象は、選定された記憶や参照会話の参加者IDと、現在の応答相手のIDを比較して決める。現在の相手以外の人物に由来する情報が含まれ、その情報に出所eventの参照があれば、生成前にDBから取得する。指定したeventが揃わない場合は明示的に失敗する。取得済みの会話と追加取得した本人発話を、対象の情報・出所とともに `disclosure_context` へまとめる。共有を許可する記述の有無や、今の相手へ伝えてよい範囲の意味判断は、最終本文を作る同じ生成が行う。
 
-入口は `generate_decision()`。行動選択、今の相手へ伝えてよい範囲、最終本文を1回の生成で決める。
-必要な共有許可の元発話は、生成前にDBから取得する。人物発話・別の場の会話・観測・記憶・共有条件は出所を分けて渡す。
 通常の成功経路で、発話生成や開示確認のための後続LLM呼び出しは行わない。出力契約違反時の1回のrepairは共通の構造化生成の規則に従う。
-外部MCPへ送る要求の送信前チェック［図 3］は別の実行境界で行う。
+外部MCPへ送る要求の送信前チェック［図 2］は別の実行境界で行う。
 
-```mermaid
-sequenceDiagram
-    participant C as 判断パイプライン
-    participant D as DB
-    participant L as LLMClient
-    participant G as 通常生成API
+実装: [入力サイクル](../../../src/otomekairo/service/input/cycle.py)、[共通パイプライン](../../../src/otomekairo/service/input/pipeline.py) の `_build_disclosure_context()` と `_run_pipeline_output()`、[想起構築](../../../src/otomekairo/recall/builder.py)、[Skill文脈](../../../src/otomekairo/service/agent_skills.py)、[LLMClient](../../../src/otomekairo/llm/client.py) の `generate_decision()`、[結果の保存](../../../src/otomekairo/service/input/trace_persist.py)。
+契約: [想起と判断](../memory/想起と判断.md)、[RecallPackのLLM選別](../memory/RecallPackのLLM選別.md)、[event_evidenceの取得](../memory/event_evidenceの取得.md)、[状態候補根拠審査](状態候補根拠審査.md)、[AgentSkills統合](../integration/AgentSkills統合.md)、[判断と行動](../runtime/判断と行動.md)、[プロンプトの意味レイヤー](プロンプト文脈分離方針.md#意味レイヤー)、[外部本文の生成と根拠](外部本文の根拠照合.md)、[想起と判断の共有許可](../memory/想起と判断.md#共有許可と受け手の照合)。
 
-    opt 共有条件の根拠となる元発話が必要
-        C->>D: 選定済み出所eventを取得
-        D-->>C: 元発話・人物・参加者・発生日時
-        Note over C,D: 必要な根拠を取得できなければ明示的に失敗
-    end
-    C->>L: 行動と、伝えてよい最終本文を考える（generate_decision）
-    L->>G: 行動・共有範囲・最終本文を生成（decision_generation）
-    G-->>L: 行動と、発話する場合の本文（speech_text）
-    L->>L: 出力契約・参照・能力の実行条件を検証
-    L-->>C: 採用する判断と最終本文
-    opt 発話を選んだ
-        C->>C: 判断に含まれる最終本文を配送
-    end
-```
-
-実装: [LLMClient](../../../src/otomekairo/llm/client.py) の `generate_decision()` と、[パイプライン](../../../src/otomekairo/service/input/pipeline.py) の `_build_disclosure_context()`、`_run_pipeline_output()`。
-契約: [判断と行動](../runtime/判断と行動.md)、[プロンプトの意味レイヤー](プロンプト文脈分離方針.md#意味レイヤー)、[外部本文の生成と根拠](外部本文の根拠照合.md)、[想起と判断の共有許可](../memory/想起と判断.md#共有許可と受け手の照合)。
-
-## 図 3: 能力実行、送信前チェック、結果からの後続判断
+## 図 2: 能力実行、送信前チェック、結果からの後続判断
 
 入口は判断または自律 step が返した `capability_request`。
 通常判断、能力結果からの後続判断、自律作業のいずれも同じ dispatch 境界を通る。
@@ -197,7 +181,7 @@ sequenceDiagram
         else 外部送信を見送る（withhold）
             B-->>C: 外部送信の見送り
             opt 最初の送信見送り
-                C->>L: 固定の再判断理由を添えて行動を判断（generate_decision）［図 2］
+                C->>L: 固定の再判断理由を添えて行動を判断（generate_decision）［図 1］
                 L-->>C: 同じ目的の別案、または何もしない判断（noop）
             end
             Note over C,B: 再候補も同じ境界へ。再度見送りなら送信せず終了
@@ -210,9 +194,9 @@ sequenceDiagram
         X-)C: 能力の実行結果（capability_result）
         C->>C: 結果の解釈・必要な画像処理
         alt 通常の能力要求
-            C->>C: 共通パイプラインで後続判断［図 1・図 2］
+            C->>C: 共通パイプラインで後続判断［図 1］
         else 自律作業に属する能力要求（autonomous_run）
-            C->>C: 状態と自律作業の履歴へ反映して次の一手へ［図 5］
+            C->>C: 状態と自律作業の履歴へ反映して次の一手へ［図 4］
         end
     end
 ```
@@ -224,7 +208,7 @@ sequenceDiagram
 実装: [能力実行境界](../../../src/otomekairo/service/capability.py)、[通常の能力結果サイクル](../../../src/otomekairo/service/spontaneous/capability_cycle.py)、[自律作業](../../../src/otomekairo/service/autonomous_run.py)。
 契約: [実行連携](../api/実行連携.md)、[判断と行動の実行結果](../runtime/判断と行動.md#実行結果の扱い)。
 
-## 図 4: 自律判断の入口と分離判断
+## 図 3: 自律判断の入口と分離判断
 
 入口は API の `wake` または定期思考の `background_thinking`。
 時刻や候補の適格性はコードが扱い、候補の意味的な選別と判断を LLM が担当する。
@@ -247,7 +231,7 @@ sequenceDiagram
     end
     opt 定期思考の観測が有効
         C->>O: 設定された思考前観測
-        O->>O: 画像解釈と状態反映［図 7］
+        O->>O: 画像解釈と状態反映［図 6］
         O-->>C: 観測結果と更新済み文脈
     end
     opt 選択済み候補がなく、直接の入口もなく、入口判定の材料がある
@@ -274,12 +258,12 @@ sequenceDiagram
                 end
             end
             C->>L: 対人発話を判断（generate_decision / comparison_scope=outward_speech）
-            L->>G: 対人発話を判断［図 2］
+            L->>G: 対人発話を判断［図 1］
             C->>C: 両方の判断を合成して出力へ
         else 共通の判断を使う
-            C->>L: 行動を判断（generate_decision）［図 2］
+            C->>L: 行動を判断（generate_decision）［図 1］
         end
-        C->>C: 発話・能力実行・自律作業・保留［図 1・図 3・図 5］
+        C->>C: 発話・能力実行・自律作業・保留［図 1・図 2・図 4］
     else 今回は入口がない、または実行境界で見送る
         C->>C: 何もしない判断を記録（noop）
     end
@@ -292,7 +276,7 @@ sequenceDiagram
 実装: [起床サイクル](../../../src/otomekairo/service/spontaneous/wake.py)、[保留意図の選別](../../../src/otomekairo/service/spontaneous/pending_intent.py)、[起床パイプライン](../../../src/otomekairo/service/input/wake_pipeline.py)、[分離判断](../../../src/otomekairo/service/input/decision_comparison.py)。
 契約: [自律initiative_loop](../runtime/自律initiative_loop.md)、[保留意図候補のLLM選別](保留意図候補のLLM選別.md)、[判断と行動](../runtime/判断と行動.md)、[プロンプト文脈分離方針](プロンプト文脈分離方針.md)。
 
-## 図 5: 自律作業の開始、step、完了
+## 図 4: 自律作業の開始、step、完了
 
 入口は `kind=autonomous_run` の判断。
 通常判断は目的を作り、以後の一手は `generate_autonomous_step()` が決める。
@@ -330,7 +314,7 @@ sequenceDiagram
                 end
             end
             alt 能力実行を選んだ（capability_request）
-                A-)X: 同じ実行境界を通して要求［図 3］
+                A-)X: 同じ実行境界を通して要求［図 2］
                 X-)A: 結果到着、状態と履歴へ反映
             else 発話を選んだ（speech）
                 A-)X: 生成した発話を配送
@@ -345,7 +329,7 @@ sequenceDiagram
                 M->>L: 約束の状態更新に使う要約を生成（generate_commitment_lifecycle_summaries）
                 L->>G: 約束の状態更新に使う要約を生成
             end
-            A->>M: 終了時のイベントを記憶に統合し、後処理を登録［図 6］
+            A->>M: 終了時のイベントを記憶に統合し、後処理を登録［図 5］
         end
     else 開始拒否または審査失敗
         A-->>C: 明示失敗
@@ -360,7 +344,7 @@ step の再生成は開始時と同じ文脈構築から行うため、Skill 選
 実装: [自律作業](../../../src/otomekairo/service/autonomous_run.py) の `_start_autonomous_run_from_decision()`、`_build_autonomous_step_context()`、`_generate_reviewed_autonomous_step_candidate()`、`_execute_autonomous_capability_result_cycle_inner()`、`_finalize_autonomous_run_commitments()`。
 契約: [autonomous_run](../runtime/autonomous_run.md)、[送信前チェック](pre_send_check.md)、[音声出力](../audio/音声出力.md)。
 
-## 図 6: 記憶統合と非同期後処理
+## 図 5: 記憶統合と非同期後処理
 
 入口は cycle 成功後の `consolidate_turn()`、または自律作業の終端からの記憶統合。
 通常会話では記憶解釈と審査・保存までを同期実行し、後処理をキューへ登録してからサイクル結果を返す。
@@ -427,7 +411,7 @@ sequenceDiagram
 実装: [記憶統合](../../../src/otomekairo/memory/consolidator.py)、[記憶候補の解決](../../../src/otomekairo/memory/actions.py)、[記憶worker](../../../src/otomekairo/service/memory.py)、[内省統合](../../../src/otomekairo/memory/reflection/consolidator.py)、[内省要約](../../../src/otomekairo/memory/reflection/summary.py)。
 契約: [記憶更新と再整理](../memory/記憶更新と再整理.md)、[内省要約のLLM生成](../memory/内省要約のLLM生成.md)、[感情モデル](../runtime/感情モデル.md)。
 
-## 図 7: 視覚観測と日次整理
+## 図 6: 視覚観測と日次整理
 
 入口は会話添付画像、思考前の `vision.capture`、または能力実行で取得した画像。
 画像を解釈して保存する処理と、保存済み観測を後から整理する日次 worker は別の実行経路である。
@@ -466,7 +450,7 @@ sequenceDiagram
     else 会話添付または通常の能力結果
         C->>C: 観測結果を共通パイプラインへ［図 1］
     else 自律作業の能力結果
-        C->>C: 状態更新と次の一手へ［図 5］
+        C->>C: 状態更新と次の一手へ［図 4］
     end
     Note over S,W: 日次整理は独立したバックグラウンド処理
     W->>S: 対象日の保存済み視覚観測を読む
@@ -481,7 +465,7 @@ sequenceDiagram
         G-->>L: 別日の反復根拠との照合結果
         L-->>W: 候補ごとの支持根拠
         opt 支持された昇格対象がある
-            W->>W: 記憶の更新操作を構築［図 6］
+            W->>W: 記憶の更新操作を構築［図 5］
             W->>S: 推定記憶と根拠を保存
             opt 索引への反映が必要
                 W->>E: 昇格記憶の埋め込み
