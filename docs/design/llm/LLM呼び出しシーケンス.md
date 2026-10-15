@@ -6,21 +6,22 @@
 
 ## 図の読み方とモデルの境界
 
-- `LLMClient` への矢印はアプリ内の論理処理呼び出しを示す。1 回の論理処理が、生成、審査、修復のために複数回 API を呼ぶことがある。
-- `通常生成API`、`送信前チェックAPI`、`Embedding API` への矢印は、実際のモデル呼び出しを示す。応答矢印は必要な箇所だけ記載する。
+- `LLMClient` への矢印は、生成や審査を依頼するアプリ内の論理処理呼び出しを示す。通常の生成APIへの送受信は `LLMClient` 内にまとめ、生成・審査・検証の処理名を矢印に記す。
+- 1 回の論理処理が、生成、審査、修復のために複数回 API を呼ぶことがある。各図は通常の成功経路を示し、出力契約違反時の修復は各処理の契約に従って `LLMClient` 内で行う。
+- `送信前チェックAPI` と `Embedding API` への矢印は、それぞれ専用モデルと埋め込みモデルの呼び出しを示す。応答矢印は必要な箇所だけ記載する。
 - 入力や処理条件の説明は本文に記し、他の図への参照は `［図 N］` で示す。
 - `opt` は条件付き処理、`alt` は分岐、`loop` は繰り返し、`par` は独立して進む処理、開いた矢印は非同期の要求・通知を示す。
 
-| 呼び出し先 | 設定の参照先 |
+| モデルの用途 | 設定の参照先 |
 | --- | --- |
-| 通常生成API | 選択中の `selected_model_preset_id` が指すモデルプリセット。解釈、判断、表現、審査、記憶、視覚で共有する |
+| `LLMClient` による通常の生成・審査 | 選択中の `selected_model_preset_id` が指すモデルプリセット。解釈、判断、表現、審査、記憶、視覚で共有する |
 | 送信前チェックAPI | `pre_send_check_model_preset_id` が指す専用プリセット |
 | Embedding API | 選択中の記憶集合の `memory_set.embedding` |
 
 ## 図 1: 通常の判断サイクル
 
 入口は人物発話を受ける `handle_conversation()`。
-入力解釈や想起などは `LLMClient` への論理呼び出しで示し、行動・共有範囲・最終本文の生成は API 呼び出しまで示す。
+入力解釈、想起候補の選別、行動・共有範囲・最終本文の生成を、`LLMClient` への呼び出しで示す。
 
 ```mermaid
 sequenceDiagram
@@ -29,7 +30,6 @@ sequenceDiagram
     participant R as 想起
     participant D as DB
     participant L as LLMClient
-    participant G as 通常生成API
     participant E as Embedding API
     participant M as 記憶統合
 
@@ -105,11 +105,9 @@ sequenceDiagram
         end
         C->>C: 共有条件の確認資料を構築（disclosure_context）
     end
-    C->>L: 行動と、伝えてよい最終本文を考える（generate_decision）
-    L->>G: 行動・共有範囲・最終本文を生成（decision_generation）
-    G-->>L: 行動と、発話する場合の本文（speech_text）
+    C->>L: 行動・共有範囲・最終本文を生成（generate_decision）
     L->>L: 出力契約・参照・能力の実行条件を検証
-    L-->>C: 採用する判断と最終本文
+    L-->>C: 採用する判断と、発話する場合の最終本文（speech_text）
     alt 発話を選ぶ
         C->>C: 判断に含まれる最終本文を配送
     else 能力実行を選ぶ（capability_request）
@@ -219,14 +217,11 @@ sequenceDiagram
     participant C as 自律判断パイプライン
     participant O as 思考前観測
     participant L as LLMClient
-    participant G as 通常生成API
 
     W->>C: 起床（wake）または定期思考（background_thinking）
     C->>C: 適用する起床条件を確認
     opt 評価可能な保留意図候補がある
         C->>L: 保留意図の候補を選別（generate_pending_intent_selection）
-        L->>G: 保留意図の選別結果を生成（pending_intent_selection）
-        G-->>L: 選別結果
         L-->>C: 保留意図候補1件、または該当なし（none）
     end
     opt 定期思考の観測が有効
@@ -236,8 +231,6 @@ sequenceDiagram
     end
     opt 選択済み候補がなく、直接の入口もなく、入口判定の材料がある
         C->>L: 自律判断へ進む入口を審査（generate_initiative_entry_check）
-        L->>G: 自律判断の入口判定を生成（initiative_entry_check）
-        G-->>L: 入口判定
         L-->>C: 入口判定
     end
     alt 判断へ進む入口がある
@@ -245,23 +238,20 @@ sequenceDiagram
         alt 自身の活動を分離して比較する
             C->>C: 隔離した活動用入力で想起とSkill文脈を構築
             C->>L: 自身の活動を判断（generate_decision / comparison_scope=self_activity）
-            L->>G: 自身の活動の判断
-            G-->>L: 判断候補
             L-->>C: 自身の活動の判断
             opt 自律作業を選んだ（autonomous_run）
                 C->>L: 自身の活動の目的と主根拠を照合（generate_autonomous_activity_alignment_review）
-                L->>G: 自身の活動の整合判定を生成（autonomous_activity_alignment_review）
-                G-->>L: 整合審査結果
                 L-->>C: 整合審査結果
                 opt 目的と主根拠が不整合
                     C->>L: 自身の活動だけを再判断・必要なら再審査
                 end
             end
-            C->>L: 対人発話を判断（generate_decision / comparison_scope=outward_speech）
-            L->>G: 対人発話を判断［図 1］
+            C->>L: 対人発話を判断し、最終本文を生成（generate_decision / comparison_scope=outward_speech）［図 1］
+            L-->>C: 対人発話の判断と、発話する場合の最終本文
             C->>C: 両方の判断を合成して出力へ
         else 共通の判断を使う
             C->>L: 行動を判断（generate_decision）［図 1］
+            L-->>C: 判断と、発話する場合の最終本文
         end
         C->>C: 発話・能力実行・自律作業・保留［図 1・図 2・図 4］
     else 今回は入口がない、または実行境界で見送る
@@ -286,28 +276,21 @@ sequenceDiagram
     participant C as 判断サイクル
     participant A as 自律作業
     participant L as LLMClient
-    participant G as 通常生成API
     participant X as 実行先・外部接点
     participant M as 記憶統合
 
     C->>A: 自律作業の開始候補（autonomous_run）
     A->>L: 自律作業の開始を審査（generate_autonomous_start_review）
-    L->>G: 自律作業の開始判定を生成（autonomous_start_review）
-    G-->>L: 開始判定
     L-->>A: 開始判定
     alt 開始を許可
         A->>A: 必要な既存作業の置換と新規作業の保存
         loop 初回、時刻到来、結果到着など、次の一手を判断する機会
             A->>A: 自律作業・現在状態・Skillの文脈を構築
             Note over A,L: Skill一覧と追加資料があればSkill選択APIも呼ぶ
-            A->>L: 自律作業の次の一手を判断（generate_autonomous_step）
-            L->>G: 次の一手・必要な入力・最終発話本文を生成（autonomous_step_generation）
-            G-->>L: 次の一手の候補
-            L-->>A: 今回の行動（action）と作業の状態遷移（transition）
+            A->>L: 次の一手・必要な入力・最終発話本文を生成（generate_autonomous_step）
+            L-->>A: 今回の行動（action）・作業の状態遷移（transition）・発話する場合の本文（speech_text）
             opt 能力実行以外で作業完了を候補にする（complete）
                 A->>L: 自律作業の完了を審査（generate_autonomous_completion_review）
-                L->>G: 自律作業の完了判定を生成（autonomous_completion_review）
-                G-->>L: 完了可否
                 L-->>A: 完了可否
                 opt 継続が必要
                     A->>A: 審査理由を添えて次の一手から再生成・再審査
@@ -327,7 +310,7 @@ sequenceDiagram
             A->>M: 紐付く約束の状態を更新（commitment）
             opt 更新対象の約束がある（commitment）
                 M->>L: 約束の状態更新に使う要約を生成（generate_commitment_lifecycle_summaries）
-                L->>G: 約束の状態更新に使う要約を生成
+                L-->>M: 約束の状態更新に使う要約
             end
             A->>M: 終了時のイベントを記憶に統合し、後処理を登録［図 5］
         end
@@ -354,21 +337,21 @@ sequenceDiagram
     participant U as 外部接点
     participant C as 判断サイクル
     participant M as 記憶統合
-    participant G as 通常生成API
+    participant L as LLMClient
     participant S as 記憶store・jobキュー
     participant W as 記憶後処理worker
     participant E as Embedding API
 
     C->>M: 会話の記憶を統合（consolidate_turn）
     M->>M: 訂正対象候補と記憶文脈を準備
-    M->>G: 経験と記憶を解釈（memory_interpretation）
-    G-->>M: エピソード・記憶候補・感情候補
-    M->>G: 記憶候補の保持を審査（memory_retention_review）
-    G-->>M: 候補の保持判断
-    M->>G: エピソードと訂正候補を審査（memory_candidate_review）
-    G-->>M: エピソードと訂正の審査結果
-    M->>G: 感情候補を審査（affect_review）
-    G-->>M: 感情候補の審査結果
+    M->>L: 経験と記憶を解釈（generate_memory_interpretation）
+    L-->>M: エピソード・記憶候補・感情候補
+    M->>L: 記憶候補とエピソード・訂正候補を審査（generate_memory_candidate_review）
+    L->>L: 記憶候補の保持を審査（memory_retention_review）
+    L->>L: エピソードと訂正候補を審査（memory_candidate_review）
+    L-->>M: 候補の保持判断・エピソードと訂正の審査結果
+    M->>L: 感情候補を審査（generate_affect_review）
+    L-->>M: 感情候補の審査結果
     M->>M: エピソード・記憶更新操作・感情を正規化
     opt 記憶候補と既存記憶の意味比較が必要
         M->>E: 候補と未キャッシュの比較対象の埋め込み
@@ -390,8 +373,8 @@ sequenceDiagram
             W->>W: 内省・集約用の根拠を構築
             W->>S: 感情状態の更新を保存
             loop 要約を生成する対象範囲ごと（scope）
-                W->>G: 内省による集約要約を生成（memory_reflection_summary）
-                G-->>W: 集約要約
+                W->>L: 内省による集約要約を生成（generate_memory_reflection_summary）
+                L-->>W: 集約要約
             end
             W->>S: 要約・記憶更新・記憶間リンクを反映
             opt 要約などの更新を索引へ反映する
@@ -420,29 +403,22 @@ sequenceDiagram
 sequenceDiagram
     participant C as 観測・入力処理
     participant L as LLMClient
-    participant G as 通常生成API
     participant S as 視覚記録・記憶store
     participant W as 日次視覚worker
     participant E as Embedding API
 
     C->>L: 画像と文脈から視覚観測を解釈（generate_visual_observation_summary）
-    L->>G: 視覚観測の説明と変化判定を生成（visual_observation）
-    G-->>L: 詳細説明・確信度・視覚変化判定
     L->>L: 出力契約を検証
     L-->>C: 契約検証済みの視覚観測
     C->>S: 視覚観測の記録を保存（visual_observation_record）
     alt 思考前観測の結果
         opt 世界状態の生成対象がある（world_state）
             C->>L: 世界状態の候補と根拠判定を生成（generate_world_state）
-            L->>G: 世界状態の候補と根拠判定を生成（world_state）
-            G-->>L: 状態候補と候補ごとの根拠判定
             L->>L: 全候補の契約検証と根拠種別による採用候補の選別
             L-->>C: 採用された状態候補
         end
         opt 活動状態の生成対象がある（activity_state）
             C->>L: 活動状態の候補と根拠判定を生成（generate_activity_state）
-            L->>G: 活動状態の候補と根拠判定を生成（activity_state）
-            G-->>L: 活動候補と候補ごとの根拠判定
             L->>L: 全候補の契約検証と根拠種別・人物同定による採用候補の選別
             L-->>C: 採用された活動候補
         end
@@ -455,14 +431,10 @@ sequenceDiagram
     Note over S,W: 日次整理は独立したバックグラウンド処理
     W->>S: 対象日の保存済み視覚観測を読む
     W->>L: 視覚観測を日単位で整理（generate_visual_daily_grouping）
-    L->>G: 観測のグループと記憶候補を生成（visual_daily_grouping）
-    G-->>L: 観測のグループと記憶候補
     L-->>W: 観測のグループと記憶候補
     W->>S: 日次の視覚要約と観測の整理結果を保存（daily_visual_digest）
     opt 昇格候補と過去日の比較材料がある
         W->>L: 別日の観測から昇格候補の支持根拠を確認（generate_visual_daily_support）
-        L->>G: 別日の反復根拠との照合結果を生成（visual_daily_support）
-        G-->>L: 別日の反復根拠との照合結果
         L-->>W: 候補ごとの支持根拠
         opt 支持された昇格対象がある
             W->>W: 記憶の更新操作を構築［図 5］
