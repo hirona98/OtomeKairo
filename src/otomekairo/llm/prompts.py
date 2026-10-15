@@ -11,7 +11,6 @@ from otomekairo.llm.contexts import (
     PersonaContext,
     SpeechContext,
     fresh_visual_observations_from_capability_view,
-    person_utterances_from_turns,
 )
 from otomekairo.llm.contracts import (
     ANSWER_BOUNDARY_VALUES,
@@ -342,10 +341,15 @@ def _outward_speech_suppression_boundary_instruction() -> str:
     return (
         "外向き伝達では、今発話する意味と、現在のやり取りの間合いを保つ意味を比較します。"
         "今伝える意味が上回るときは speech、あとで再評価する材料だけ残すなら pending_intent、今は出さないなら noop を選びます。\n"
+        "話す場合も控える場合も、reason_summary、foreground_selection、target_stances の理由を、今回渡された根拠に対応させて最初の判断を組み立てます。"
+        "本人の申告は、current_input.sender_kind=person の今回の発話と、recent_turns および recent_interactions[].turns の role=person の発話から読みます。"
+        "人格、観測、活動推定、自分の発話、記憶要約はそれぞれの出所の材料として分けます。"
+        "本人が集中、没頭、意欲などを明示したと説明する場合は、その人物の発話を根拠にします。"
+        "role=assistant の発話は、返答の実行、受領応答、反復を確認する履歴として使い、その文に含まれる人物状態の推測とは分けて扱います。\n"
         "人物から今回届いた質問や再確認は、その問いへ応答する価値として扱います。"
         "同じ観測や内容をすでに伝えていても、今回の求めに合わせて現在分かる内容を説明します。"
         "自発的な説明の重複抑制と、相手から新しく届いた質問への応答を分けて判断します。\n"
-        "noop の理由は、会話の返答待ち、明示された希望、直近重複、進行中コミットメント、観測不足、構造化済み抑制根拠のような根拠名で書きます。\n"
+        "noop の理由は、会話の返答待ち、明示された希望、直近重複、進行中コミットメント、観測不足、構造化済み抑制根拠、今新たに働きかける意味の乏しさのような根拠名で書きます。\n"
         "観測可能な活動事実は前景の説明です。自己申告された注意状態はユーザー発話の内容として扱います。\n"
         "response_target_refs が空の speech は、相手の反応を前提にしない短い独り言です。"
         "発話を選んだ場合は、観測事実に基づく一文の状況認識として表現します。"

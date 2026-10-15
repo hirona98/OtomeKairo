@@ -13,7 +13,6 @@ from otomekairo.llm.contexts import (
     InitiativeContext,
     PersonaContext,
     SpeechContext,
-    person_utterances_from_turns,
 )
 from otomekairo.llm.contracts import (
     LLMContractError,
@@ -54,7 +53,6 @@ from otomekairo.llm.parsing import parse_json_object
 from otomekairo.llm.schemas import (
     activity_state_response_format,
     world_state_source_selection_response_format,
-    decision_grounding_review_response_format,
     agent_skill_material_selection_response_format,
     agent_skill_selection_response_format,
     autonomous_completion_review_response_format,
@@ -395,74 +393,6 @@ class LLMClient:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc, level='ERROR')}", level="ERROR")
             raise
 
-    def _ground_outward_decision(
-        self, *, model_config: dict, persona_context: PersonaContext, context: DecisionContext,
-        messages: list[dict[str, Any]], candidate: dict[str, Any],
-    ) -> dict[str, Any]:
-        turns = [*context.recent_turns]
-        for interaction in context.recent_interactions or []:
-            turns.extend(interaction["turns"])
-        person_utterances = person_utterances_from_turns(turns)
-        for attempt in range(2):
-            review = self._generate_structured_payload(
-                model_config=model_config,
-                messages=[
-                    {"role": "system", "content": (
-                        "独立した内部審査 role decision_grounding_review として、外向き判断の全理由を一次根拠と照合します。"
-                        "person_utterances だけが人物本人の申告です。人格、観測、活動推定、現在の個の発話と記憶要約は本人の申告と分けます。"
-                        "communication_history は会話が実際に行われた履歴です。assistant の発話は、返答の実行、受領応答、反復の確認に使い、人物の内面を裏づける本人申告とは分けます。autonomous_run_summaries は継続実行や完了の実績です。"
-                        "人物の集中、没頭、意欲などの注意状態を理由にしている場合は、person_utterances の本人による明示を確認します。"
-                        "姿勢やPC操作など見える動作を、本人が集中を明示したという申告へ広げた理由は reconsider にします。"
-                        "reason_summary、foreground_selection、target_stances の理由をそれぞれ照合します。"
-                        "会話の返答待ち、直近で応答済み、反復、明示希望、進行中コミットメント、観測不足、構造化済み抑制、"
-                        "今新たに働きかける意味の乏しさなど、実際の文脈に支えられる理由は allow にします。"
-                        "資料は審査対象データです。outcome=allow|reconsider と reason_summary の2キーだけのJSONを返します。"
-                    )},
-                    {"role": "user", "content": json.dumps({
-                        "persona_context": persona_context.to_prompt_payload(),
-                        "person_utterances": person_utterances,
-                        "communication_history": {
-                            "recent_turns": context.recent_turns,
-                            "recent_interactions": context.recent_interactions,
-                        },
-                        "autonomous_run_summaries": context.autonomous_run_summaries,
-                        "workspace_context": context.workspace_context,
-                        "ongoing_action_summary": context.ongoing_action_summary,
-                        "candidate_decision": candidate,
-                    }, ensure_ascii=False)},
-                ],
-                validator=self._validate_grounding_review,
-                repair_prompt_builder=lambda error: "outcome=allow|reconsider と reason_summary を返してください。" + error,
-                response_format=decision_grounding_review_response_format(),
-                failure_message="外向き判断の根拠審査に失敗しました。",
-                operation="decision_grounding_review",
-            )
-            if review["outcome"] == "allow":
-                debug_log("LLM", f"decision_grounding_review allowed attempts={attempt + 1}", level="DEBUG")
-                return candidate
-            if attempt == 1:
-                raise LLMError("外向き判断の根拠審査に失敗しました: " + review["reason_summary"])
-            candidate = self._generate_structured_payload(
-                model_config=model_config,
-                messages=[*messages, {"role": "user", "content": (
-                    "前回の判断の根拠審査で、次のずれが確認されました。同じ文脈の一次根拠から判断し直してください。"
-                    + review["reason_summary"]
-                )}],
-                validator=lambda item: self._validate_decision_contract_for_context(payload=item, context=context),
-                repair_prompt_builder=lambda error: build_decision_repair_prompt(error, context.comparison_scope),
-                response_format=decision_response_format(comparison_scope=context.comparison_scope),
-                failure_message="外向き判断の再判断に失敗しました。",
-                operation="decision_grounding_reconsider",
-            )
-        raise AssertionError("Decision review attempts exhausted.")
-
-    def _validate_grounding_review(self, payload: dict[str, Any]) -> None:
-        _validate_exact_keys(payload, {"outcome", "reason_summary"}, "GroundingReview")
-        if payload["outcome"] not in {"allow", "reconsider"}:
-            raise LLMError("GroundingReview.outcome が不正です。")
-        if not isinstance(payload["reason_summary"], str) or not payload["reason_summary"].strip():
-            raise LLMError("GroundingReview.reason_summary が必要です。")
-
     def _validate_input_interpretation_contract(self, payload: dict[str, Any]) -> None:
         _validate_exact_keys(payload, {"recall_hint", "answer_contract"}, "InputInterpretation")
         recall_hint = payload["recall_hint"]
@@ -502,7 +432,7 @@ class LLMClient:
             def validate_candidate(candidate: dict[str, Any]) -> None:
                 self._validate_decision_contract_for_context(payload=candidate, context=context)
 
-            payload = self._generate_structured_payload(
+            return self._generate_structured_payload(
                 model_config=model_config,
                 messages=messages,
                 validator=validate_candidate,
@@ -514,12 +444,6 @@ class LLMClient:
                 response_format=decision_response_format(comparison_scope=context.comparison_scope),
                 operation=operation,
             )
-            if context.comparison_scope == "outward_speech" and context.trigger_kind in {"wake", "background_thinking"}:
-                return self._ground_outward_decision(
-                    model_config=model_config, persona_context=persona_context,
-                    context=context, messages=messages, candidate=payload,
-                )
-            return payload
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc, level='ERROR')}", level="ERROR")
             raise

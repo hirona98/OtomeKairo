@@ -860,42 +860,64 @@ class DecisionContractTests(unittest.TestCase):
             self.assertIn('"primary_factor_ref":"visual_observation:current"', message)
             self.assertIn('"supporting_factor_refs":[]', message)
 
-    def test_outward_grounding_reconsiders_and_uses_only_person_utterances(self) -> None:
-        context = replace(
-            _decision_context([]), comparison_scope="outward_speech", trigger_kind="wake",
-            recent_turns=[{"role": "person", "text": "様子を教えて"}, {"role": "assistant", "text": "作業が見えます"}],
-            recent_interactions=[{"interaction_ref": "interaction:other", "turns": [{"role": "assistant", "text": "返答しました"}]}],
-            autonomous_run_summaries=[{"run_id": "run:completed", "status": "completed"}],
-        )
-        candidate = {"kind": "noop", "reason_summary": "人物が集中を明示した"}
-        corrected = {"kind": "noop", "reason_summary": "直近で応答済み"}
-        with patch.object(LLMClient, "_generate_structured_payload", side_effect=[
-            {"outcome": "reconsider", "reason_summary": "本人の申告がない"}, corrected,
-            {"outcome": "allow", "reason_summary": "対話履歴に一致"},
-        ]) as generate:
-            result = LLMClient()._ground_outward_decision(
-                model_config={"model": "test"}, persona_context=_persona_context(),
-                context=context, messages=[], candidate=candidate,
-            )
-        self.assertEqual(result, corrected)
-        review_input = json.loads(generate.call_args_list[0].kwargs["messages"][1]["content"])
-        self.assertEqual(review_input["person_utterances"], [{"role": "person", "text": "様子を教えて"}])
-        self.assertEqual(review_input["communication_history"], {"recent_turns": context.recent_turns, "recent_interactions": context.recent_interactions})
-        self.assertEqual(review_input["autonomous_run_summaries"], context.autonomous_run_summaries)
-        self.assertEqual(generate.call_count, 3)
-
-    def test_outward_grounding_fails_when_reconsidered_reason_is_unsupported(self) -> None:
-        context = replace(_decision_context([]), comparison_scope="outward_speech", trigger_kind="wake")
-        candidate = {"kind": "noop", "reason_summary": "根拠のない理由"}
-        with patch.object(LLMClient, "_generate_structured_payload", side_effect=[
-            {"outcome": "reconsider", "reason_summary": "一次根拠がない"}, candidate,
-            {"outcome": "reconsider", "reason_summary": "一次根拠がない"},
-        ]):
-            with self.assertRaises(LLMError):
-                LLMClient()._ground_outward_decision(
-                    model_config={"model": "test"}, persona_context=_persona_context(),
-                    context=context, messages=[], candidate=candidate,
-                )
+    def test_outward_decision_returns_first_valid_candidate_with_source_context(self) -> None:
+        # 生成結果と資料の受け渡し、呼び出し回数を確認し、自然文の精度は評価しない。
+        for trigger_kind in ("wake", "background_thinking"):
+            for kind in ("speech", "noop", "pending_intent"):
+                with self.subTest(trigger_kind=trigger_kind, kind=kind):
+                    current = replace(
+                        _current_input(), sender_kind="system", sender_ref=None,
+                        source_kind=trigger_kind, response_target_refs=(), text="自己評価。",
+                    )
+                    context = replace(
+                        _decision_context([]), comparison_scope="outward_speech",
+                        trigger_kind=trigger_kind, input_text=current.text, current_input=current,
+                        recent_turns=[
+                            {"role": "person", "text": "様子を教えて。"},
+                            {"role": "assistant", "text": "机の前でPCを操作している人物が見える。"},
+                        ],
+                        recent_interactions=[{
+                            "interaction_ref": "interaction:other",
+                            "turns": [{"role": "assistant", "text": "依頼を受け取った。"}],
+                        }],
+                        visual_observation_context={"visual_summary_text": "PCを操作している人物が見える。"},
+                        workspace_context={"workspace_candidates": [{
+                            "factor_ref": "conversation_context:current", "kind": "conversation_context",
+                            "summary_text": "直近のやり取りを比較する。",
+                        }]},
+                    )
+                    candidate = {
+                        "kind": kind, "reason_code": "outward_comparison",
+                        "reason_summary": "直近の会話と今伝える意味を比較した。",
+                        "requires_confirmation": False, "capability_request": None, "autonomous_run": None,
+                        "pending_intent": {
+                            "intent_kind": "outward_speech", "intent_summary": "あとで伝える意味を再評価する。",
+                            "dedupe_key": "outward:test",
+                        } if kind == "pending_intent" else None,
+                        "foreground_selection": {
+                            "primary_factor_ref": "conversation_context:current", "supporting_factor_refs": [],
+                            "suppressed_factors": [], "summary_text": "直近のやり取りを主因にした。",
+                        },
+                        "target_stances": build_decision_target_stances_for_kind(
+                            kind, required_targets=("outward_speech",), reason_summary="直近の会話を踏まえる。",
+                        ),
+                    }
+                    with patch("otomekairo.llm.client.complete_text", return_value=_wire_response(candidate)) as complete:
+                        result = LLMClient().generate_decision(
+                            model_config={"model": "real-test"},
+                            persona_context=_persona_context(), context=context,
+                        )
+                    self.assertEqual(result, candidate)
+                    complete.assert_called_once()
+                    self.assertEqual(complete.call_args.kwargs["response_format"]["json_schema"]["name"], "decision_outward_speech")
+                    payloads = [json.loads(message["content"].splitlines()[1])
+                                for message in complete.call_args.kwargs["messages"] if message["role"] == "user"]
+                    source = next(payload for payload in payloads if isinstance(payload, dict) and "internal_context" in payload)
+                    self.assertEqual(source["recent_turns"], context.recent_turns)
+                    self.assertEqual(source["recent_interactions"], context.recent_interactions)
+                    self.assertEqual(source["internal_context"]["workspace_context"], context.workspace_context)
+                    self.assertEqual(source["internal_context"]["visual_observation_context"], context.visual_observation_context)
+                    self.assertIn(current.to_prompt_payload(), payloads)
 
     def test_decision_parse_failed_log_includes_rejected_content(self) -> None:
         logs: list[tuple[str, str, str]] = []

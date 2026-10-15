@@ -133,8 +133,9 @@ sequenceDiagram
 ## 図 2: 判断と発話の審査
 
 入口は `generate_decision()` と、発話を選んだ場合の `generate_speech()`。
-内容の確認には、通常生成と同じモデル設定を使う。ツールに渡す本文は行動の案と同じ生成で根拠に沿って作り、外部送信直前の送信可否チェック［図 3］は別の段階で行う。
+発話内容の確認には、通常生成と同じモデル設定を使う。ツールに渡す本文は行動の案と同じ生成で根拠に沿って作り、外部送信直前の送信可否チェック［図 3］は別の段階で行う。
 必要な自律作業は、最初の行動の案に含める。
+外向きに話すか控えるかも、理由を根拠に合わせて最初の行動の案で決める。
 
 ```mermaid
 sequenceDiagram
@@ -145,14 +146,6 @@ sequenceDiagram
     C->>L: 何をするか考える（generate_decision）
     L->>G: 行動と必要なツール入力の案を作る（decision_generation）
     G-->>L: 行動の案
-    opt 自発的に人へ話しかけるか考える場合（outward_speech）
-        L->>G: 判断の理由が、発言や観測と合っているか確認（decision_grounding_review）
-        G-->>L: そのまま採用（allow）または考え直す（reconsider）
-        opt 内容に修正が必要（reconsider）
-            L->>G: 指摘を踏まえて、行動を考え直す（decision_grounding_reconsider）
-            L->>G: 判断の理由が、発言や観測と合っているか確認（decision_grounding_review）
-        end
-    end
     L-->>C: 採用する行動の案
     opt 発話すると決まった
         C->>L: 話す内容を作る（generate_speech）
@@ -170,8 +163,8 @@ sequenceDiagram
     end
 ```
 
-実装: [LLMClient](../../../src/otomekairo/llm/client.py) の `generate_decision()`、`_ground_outward_decision()`、`generate_speech()` と、[パイプライン](../../../src/otomekairo/service/input/pipeline.py) の `_apply_disclosure_review()`。
-契約: [判断と行動](../runtime/判断と行動.md)、[判断根拠審査](判断根拠審査.md)、[外部本文の生成と根拠](外部本文の根拠照合.md)、[想起と判断の共有許可](../memory/想起と判断.md#共有許可と受け手の照合)。
+実装: [LLMClient](../../../src/otomekairo/llm/client.py) の `generate_decision()`、`generate_speech()` と、[パイプライン](../../../src/otomekairo/service/input/pipeline.py) の `_apply_disclosure_review()`。
+契約: [判断と行動](../runtime/判断と行動.md)、[プロンプトの意味レイヤー](プロンプト文脈分離方針.md#意味レイヤー)、[外部本文の生成と根拠](外部本文の根拠照合.md)、[想起と判断の共有許可](../memory/想起と判断.md#共有許可と受け手の照合)。
 
 ## 図 3: 能力実行、送信前チェック、結果からの後続判断
 
