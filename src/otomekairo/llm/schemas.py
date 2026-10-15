@@ -288,16 +288,6 @@ def speech_grounding_review_response_format() -> dict[str, Any]:
     )
 
 
-def future_action_alignment_review_response_format() -> dict[str, Any]:
-    return structured_response_format(
-        "future_action_alignment_review",
-        closed_object({
-            "outcome": string_enum(["aligned", "requires_autonomous_run"]),
-            "reason_summary": {"type": "string"},
-        }),
-    )
-
-
 def pre_send_check_response_format() -> dict[str, Any]:
     return structured_response_format(
         "pre_send_check",
@@ -648,7 +638,6 @@ def all_response_formats() -> dict[str, dict[str, Any]]:
         "autonomous_step": autonomous_step_response_format(),
         "disclosure_review": disclosure_review_response_format(),
         "speech_grounding_review": speech_grounding_review_response_format(),
-        "future_action_alignment_review": future_action_alignment_review_response_format(),
         "pre_send_check": pre_send_check_response_format(),
         "autonomous_completion_review": autonomous_completion_review_response_format(),
         "autonomous_start_review": autonomous_start_review_response_format(),

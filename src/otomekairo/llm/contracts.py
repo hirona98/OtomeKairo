@@ -531,14 +531,6 @@ def validate_speech_grounding_review_contract(payload: dict[str, Any]) -> None:
         raise LLMError("SpeechGroundingReview.reason_summary は空にできません。")
 
 
-def validate_future_action_alignment_review_contract(payload: dict[str, Any]) -> None:
-    _validate_exact_keys(payload, {"outcome", "reason_summary"}, "FutureActionAlignmentReview")
-    if payload["outcome"] not in {"aligned", "requires_autonomous_run"}:
-        raise LLMError("FutureActionAlignmentReview.outcome が不正です。")
-    if not isinstance(payload["reason_summary"], str) or not payload["reason_summary"].strip():
-        raise LLMError("FutureActionAlignmentReview.reason_summary は空にできません。")
-
-
 def validate_pre_send_check_contract(payload: dict[str, Any]) -> None:
     # 外部送信は許可か保留の二値とし、reviewer に本文を書き換えさせない。
     _validate_exact_keys(

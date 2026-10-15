@@ -36,7 +36,6 @@ PERSONA_CONTEXT_ROLES = frozenset({
     "memory_candidate_review",
     "commitment_lifecycle_summary",
     "affect_review",
-    "future_action_alignment_review",
     "memory_reflection_summary",
     "world_state",
     "activity_state",

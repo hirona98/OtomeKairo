@@ -134,6 +134,7 @@ sequenceDiagram
 
 入口は `generate_decision()` と、発話を選んだ場合の `generate_speech()`。
 内容の確認には、通常生成と同じモデル設定を使う。ツールに渡す本文は行動の案と同じ生成で根拠に沿って作り、外部送信直前の送信可否チェック［図 3］は別の段階で行う。
+必要な自律作業は、最初の行動の案に含める。
 
 ```mermaid
 sequenceDiagram
@@ -144,16 +145,7 @@ sequenceDiagram
     C->>L: 何をするか考える（generate_decision）
     L->>G: 行動と必要なツール入力の案を作る（decision_generation）
     G-->>L: 行動の案
-    alt 人物への返答で、自律作業を選んでいない（full）
-        L->>G: 返答後に必要な作業を、約束だけで済ませていないか確認（future_action_alignment_review）
-        G-->>L: その判断でよいか、自律作業が必要かの結果
-        opt 自律作業が必要だと分かった
-            L->>G: 必要な作業を含めて、行動を考え直す（decision_future_action_retry）
-            opt 考え直した結果も、自律作業を選んでいない
-                L->>G: 返答後に必要な作業を、約束だけで済ませていないか確認（future_action_alignment_review）
-            end
-        end
-    else 自発的に人へ話しかけるか考える場合（outward_speech）
+    opt 自発的に人へ話しかけるか考える場合（outward_speech）
         L->>G: 判断の理由が、発言や観測と合っているか確認（decision_grounding_review）
         G-->>L: そのまま採用（allow）または考え直す（reconsider）
         opt 内容に修正が必要（reconsider）
@@ -161,7 +153,7 @@ sequenceDiagram
             L->>G: 判断の理由が、発言や観測と合っているか確認（decision_grounding_review）
         end
     end
-    L-->>C: 確認を通った行動の案
+    L-->>C: 採用する行動の案
     opt 発話すると決まった
         C->>L: 話す内容を作る（generate_speech）
         L->>G: 話す文章の案を作る（expression_generation）

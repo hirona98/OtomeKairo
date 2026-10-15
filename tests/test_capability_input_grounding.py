@@ -23,7 +23,7 @@ def _view():
 
 
 @pytest.fixture(params=["decision", "followup", "step"])
-def generation(request, monkeypatch):
+def generation(request):
     view = _view()
     text = "  雨筋のように見える線がある。\n降雨は確認できない。  "
     result_text = "架空のツールから取得した結果。"
@@ -40,9 +40,6 @@ def generation(request, monkeypatch):
         "mcp_server_id": "elyth", "tool_name": "publish", "arguments": {"body": text},
     }}
     client = LLMClient()
-    # このテストではMCP入力生成の回数を測り、独立した未来行動審査は分離する。
-    monkeypatch.setattr(LLMClient, 'generate_future_action_alignment_review', Mock(return_value={
-        'outcome': 'aligned', 'reason_summary': '今回の操作で完了する。'}))
     if request.param == "step":
         candidate = {
             'action': {'kind': 'capability_request', 'capability_request': mcp_request, 'speech': None},

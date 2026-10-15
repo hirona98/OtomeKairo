@@ -170,90 +170,46 @@ class DecisionContractTests(unittest.TestCase):
         repair = complete.call_args_list[1].kwargs["messages"][-1]["content"]
         self.assertIn('利用できる factor_ref 一覧=["current_input:user_message", "memory:person_model:0"]', repair)
 
-    def setUp(self) -> None:
-        review_patch = patch.object(
-            LLMClient, "generate_future_action_alignment_review",
-            return_value={"outcome": "aligned", "reason_summary": "このテストの判断は現在の応答で完結する。"},
-        )
-        review_patch.start()
-        self.addCleanup(review_patch.stop)
-
-    def test_future_action_request_cannot_finish_as_speech(self) -> None:
-        text = "1分後に読書を終えて作業へ戻るよう声をかけて。"
-        context = replace(
-            _decision_context([]),
-            input_text=text,
-            current_input=replace(_current_input(), text=text),
-        )
-        initial = {"kind": "speech", "reason_summary": "後で声をかけると伝える。"}
-        corrected = {"kind": "autonomous_run", "reason_summary": "1分後の声かけを実行する。"}
-        with patch.object(
-            LLMClient, "_generate_structured_payload", side_effect=[initial, corrected],
-        ) as generate, patch.object(
-            LLMClient, "generate_future_action_alignment_review",
-            return_value={"outcome": "requires_autonomous_run", "reason_summary": "未来の声かけ依頼。"},
+    def test_full_decision_returns_first_valid_candidate_in_one_completion(self) -> None:
+        # LLMが選んだ判断の受け渡しと呼び出し回数を検証し、自然文の精度は評価しない。
+        for kind, text in (
+            ("speech", "通知機能について教えて。"),
+            ("capability_request", "通知を一度確認して教えて。"),
+            ("autonomous_run", "1分後に読書を終えて作業へ戻るよう声をかけて。"),
         ):
-            result = LLMClient().generate_decision(
-                model_config={"model": "real-test"},
-                persona_context=_persona_context(), context=context,
-            )
-
-        self.assertEqual(result["kind"], "autonomous_run")
-        self.assertEqual(generate.call_count, 2)
-
-    def test_future_action_review_receives_the_complete_capability_candidate(self) -> None:
-        candidate = _capability_decision("mcp.call_tool", {
-            "mcp_server_id": "elyth", "tool_name": "get_notifications", "arguments": {},
-        })
-        with patch.object(LLMClient, "_generate_structured_payload", return_value=candidate), patch.object(
-            LLMClient, "generate_future_action_alignment_review",
-            return_value={"outcome": "aligned", "reason_summary": "今の問いを満たす取得。"},
-        ) as review:
-            result = LLMClient().generate_decision(model_config={"model": "real-test"},
-                persona_context=_persona_context(), context=_decision_context(_mcp_capability_view()))
-        self.assertEqual(result, candidate)
-        self.assertEqual(review.call_args.kwargs["review_context"]["candidate_decision"], candidate)
-
-    def test_corrected_immediate_capability_is_reviewed_before_acceptance(self) -> None:
-        text = "今ここで一度投稿し、返却結果を確認して教えて。"
-        context = replace(_decision_context(_mcp_capability_view()), input_text=text,
-                          current_input=replace(_current_input(), text=text))
-        initial = {"kind": "speech", "reason_summary": "操作を受け取ったと返す。"}
-        corrected = _capability_decision("mcp.call_tool", {
-            "mcp_server_id": "elyth", "tool_name": "create_post",
-            "arguments": {"content": "検証用の公開文章。"},
-        })
-        with patch.object(LLMClient, "_generate_structured_payload", side_effect=[initial, corrected]), patch.object(
-            LLMClient, "generate_future_action_alignment_review", side_effect=[
-                {"outcome": "requires_autonomous_run", "reason_summary": "実行責務が残る。"},
-                {"outcome": "aligned", "reason_summary": "一度の実行と返却結果で完結する。"},
-            ],
-        ) as review:
-            result = LLMClient().generate_decision(model_config={"model": "real-test"},
-                                                   persona_context=_persona_context(), context=context)
-        self.assertEqual(result, corrected)
-        self.assertEqual(review.call_count, 2)
-        self.assertEqual(review.call_args_list[0].kwargs["review_context"]["candidate_decision"], initial)
-        self.assertEqual(review.call_args_list[1].kwargs["review_context"]["candidate_decision"], corrected)
-        for key in ("current_input", "recent_turns", "autonomous_run_summaries", "ongoing_action_summary"):
-            self.assertEqual(review.call_args_list[0].kwargs["review_context"][key],
-                             review.call_args_list[1].kwargs["review_context"][key])
-
-    def test_corrected_capability_with_remaining_future_obligation_fails(self) -> None:
-        text = "来週まで通知を定期的に確認して知らせて。"
-        context = replace(_decision_context(_mcp_capability_view()), input_text=text,
-                          current_input=replace(_current_input(), text=text))
-        candidate = _capability_decision("mcp.call_tool", {
-            "mcp_server_id": "elyth", "tool_name": "get_notifications", "arguments": {},
-        })
-        with patch.object(LLMClient, "_generate_structured_payload", return_value=candidate), patch.object(
-            LLMClient, "generate_future_action_alignment_review",
-            return_value={"outcome": "requires_autonomous_run", "reason_summary": "継続確認が未設定。"},
-        ) as review:
-            with self.assertRaises(LLMError):
-                LLMClient().generate_decision(model_config={"model": "real-test"},
-                                               persona_context=_persona_context(), context=context)
-        self.assertEqual(review.call_count, 2)
+            with self.subTest(kind=kind):
+                candidate = _capability_decision("mcp.call_tool", {
+                    "mcp_server_id": "elyth", "tool_name": "get_notifications", "arguments": {},
+                })
+                candidate["kind"] = kind
+                candidate["reason_summary"] = "今回の依頼に応じる。"
+                if kind != "capability_request":
+                    candidate["capability_request"] = None
+                if kind == "autonomous_run":
+                    candidate["autonomous_run"] = {
+                        "objective_summary": "1分後に読書を終えて作業へ戻るよう声をかける。",
+                        "initial_step_summary": "声かけ時刻を決めて待機する。",
+                        "coordination": {
+                            "mode": "create_new", "target_run_ids": [],
+                            "reason_summary": "新しい依頼として開始する。",
+                        },
+                    }
+                candidate["target_stances"] = build_decision_target_stances_for_kind(
+                    kind, required_targets=("outward_speech", "self_activity"),
+                    reason_summary="今回の依頼に応じる。",
+                )
+                context = replace(
+                    _decision_context(_mcp_capability_view()), input_text=text,
+                    current_input=replace(_current_input(), text=text),
+                )
+                with patch("otomekairo.llm.client.complete_text", return_value=_wire_response(candidate)) as complete:
+                    result = LLMClient().generate_decision(
+                        model_config={"model": "real-test"},
+                        persona_context=_persona_context(), context=context,
+                    )
+                self.assertEqual(result, candidate)
+                complete.assert_called_once()
+                self.assertEqual(complete.call_args.kwargs["response_format"]["json_schema"]["name"], "decision")
 
     def test_decision_contract_requires_foreground_selection(self) -> None:
         payload = {

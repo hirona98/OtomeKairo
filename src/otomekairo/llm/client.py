@@ -33,7 +33,6 @@ from otomekairo.llm.contracts import (
     validate_decision_contract,
     validate_disclosure_review_contract,
     validate_speech_grounding_review_contract,
-    validate_future_action_alignment_review_contract,
     validate_initiative_entry_check_contract,
 
     validate_memory_interpretation_contract,
@@ -65,7 +64,6 @@ from otomekairo.llm.schemas import (
     decision_response_format,
     disclosure_review_response_format,
     speech_grounding_review_response_format,
-    future_action_alignment_review_response_format,
     initiative_entry_check_response_format,
     input_interpretation_response_format,
     memory_interpretation_response_format,
@@ -102,8 +100,6 @@ from otomekairo.llm.prompts import (
     build_disclosure_review_repair_prompt,
     build_speech_grounding_review_messages,
     build_speech_grounding_review_repair_prompt,
-    build_future_action_alignment_review_messages,
-    build_future_action_alignment_review_repair_prompt,
     build_initiative_entry_check_messages,
     build_initiative_entry_check_repair_prompt,
     build_input_interpretation_messages,
@@ -518,79 +514,15 @@ class LLMClient:
                 response_format=decision_response_format(comparison_scope=context.comparison_scope),
                 operation=operation,
             )
-            if (
-                context.comparison_scope != "full"
-                or context.current_input.sender_kind != "person"
-                or not context.current_input.response_target_refs
-                or payload["kind"] == "autonomous_run"
-            ):
-                if context.comparison_scope == "outward_speech" and context.trigger_kind in {"wake", "background_thinking"}:
-                    return self._ground_outward_decision(
-                        model_config=model_config, persona_context=persona_context,
-                        context=context, messages=messages, candidate=payload,
-                    )
-                return payload
-            review_context = {
-                "persona_context": persona_context.to_prompt_payload(),
-                "current_input": context.current_input.to_prompt_payload(),
-                "recent_turns": context.recent_turns,
-                "autonomous_run_summaries": context.autonomous_run_summaries or [],
-                "ongoing_action_summary": context.ongoing_action_summary,
-                "candidate_decision": payload,
-            }
-            review = self.generate_future_action_alignment_review(
-                model_config=model_config,
-                review_context=review_context,
-            )
-            if review["outcome"] == "aligned":
-                return payload
-            retry_messages = [
-                *messages,
-                {"role": "assistant", "content": json.dumps(payload, ensure_ascii=False)},
-                {"role": "user", "content": (
-                    "前の判断は、現在の人物発話が求める行動の履行範囲に整合していません。"
-                    "現在の run と ongoing action、依頼の完了条件を確認して判断を作り直してください。"
-                    "複合・待機・継続の履行責務は autonomous_run に載せ、今回の単発操作と返却結果の報告で完結するなら、その実行を行う capability_request を選びます。"
-                    f"審査理由: {review['reason_summary']}"
-                )},
-            ]
-            corrected = self._generate_structured_payload(
-                model_config=model_config,
-                messages=retry_messages,
-                validator=validate_candidate,
-                repair_prompt_builder=lambda error: build_decision_repair_prompt(
-                    error, context.comparison_scope,
-                ),
-                failure_message="未来行動の依頼に沿う判断の生成に失敗しました。",
-                response_format=decision_response_format(comparison_scope=context.comparison_scope),
-                operation="decision_future_action_retry",
-            )
-            if corrected["kind"] != "autonomous_run":
-                corrected_review = self.generate_future_action_alignment_review(
-                    model_config=model_config,
-                    review_context={**review_context, "candidate_decision": corrected},
+            if context.comparison_scope == "outward_speech" and context.trigger_kind in {"wake", "background_thinking"}:
+                return self._ground_outward_decision(
+                    model_config=model_config, persona_context=persona_context,
+                    context=context, messages=messages, candidate=payload,
                 )
-                if corrected_review["outcome"] != "aligned":
-                    raise LLMError("人物の行動依頼の履行範囲に整合する判断が得られませんでした。")
-            return corrected
+            return payload
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc, level='ERROR')}", level="ERROR")
             raise
-
-    def generate_future_action_alignment_review(
-        self, *, model_config: dict, review_context: dict[str, Any],
-    ) -> dict[str, Any]:
-        if self._is_mock_model_config(model_config):
-            return {"outcome": "aligned", "reason_summary": "mock decision を維持する。"}
-        return self._generate_structured_payload(
-            model_config=model_config,
-            messages=build_future_action_alignment_review_messages(review_context=review_context),
-            validator=validate_future_action_alignment_review_contract,
-            repair_prompt_builder=build_future_action_alignment_review_repair_prompt,
-            failure_message="FutureActionAlignmentReview の生成に失敗しました。",
-            response_format=future_action_alignment_review_response_format(),
-            operation="future_action_alignment_review",
-        )
 
     def _validate_decision_contract_for_context(
         self,
