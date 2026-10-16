@@ -34,7 +34,7 @@ class WorkspaceContextTests(unittest.TestCase):
             capability_decision_view=None,
             initiative_context=None,
             capability_result_context=None,
-            visual_observation_context=None,
+            current_visual_observations=[],
             affect_context={
                 "mood_state": {"current_vad": {"v": 0.1, "a": 0.0, "d": 0.0}},
                 "affect_states": [
@@ -138,7 +138,7 @@ class WorkspaceContextTests(unittest.TestCase):
             capability_decision_view=None,
             initiative_context=None,
             capability_result_context=None,
-            visual_observation_context=None,
+            current_visual_observations=[],
             self_state_context=None,
             relationship_context={"relationship_items": relationship_items},
             prediction_error_context=None,
@@ -180,7 +180,7 @@ class WorkspaceContextTests(unittest.TestCase):
             ],
             initiative_context=None,
             capability_result_context=None,
-            visual_observation_context=None,
+            current_visual_observations=[],
             self_state_context=None,
             relationship_context={
                 "relationship_items": [
@@ -228,7 +228,7 @@ class WorkspaceContextTests(unittest.TestCase):
             ],
             initiative_context=None,
             capability_result_context=None,
-            visual_observation_context=None,
+            current_visual_observations=[],
             affect_context={
                 "recent_episode_affects": [
                     {
@@ -292,7 +292,7 @@ class WorkspaceContextTests(unittest.TestCase):
             capability_decision_view=None,
             initiative_context=None,
             capability_result_context=None,
-            visual_observation_context=None,
+            current_visual_observations=[],
             affect_context={
                 "recent_episode_affects": [
                     {"summary_text": f"直近感情{index}", "affect_label": "composed"}
@@ -417,7 +417,7 @@ class WorkspaceContextTests(unittest.TestCase):
             capability_decision_view=None,
             initiative_context=None,
             capability_result_context=None,
-            visual_observation_context=None,
+            current_visual_observations=[],
             self_state_context=None,
             relationship_context=None,
             prediction_error_context=None,
@@ -460,7 +460,7 @@ class WorkspaceContextTests(unittest.TestCase):
             capability_decision_view=None,
             initiative_context=None,
             capability_result_context=None,
-            visual_observation_context=None,
+            current_visual_observations=[],
             self_state_context=None,
             relationship_context=None,
             prediction_error_context=None,

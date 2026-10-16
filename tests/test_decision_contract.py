@@ -92,7 +92,7 @@ def _decision_context(capability_decision_view: list[dict]) -> DecisionContext:
         capability_decision_view=capability_decision_view,
         initiative_context=None,
         capability_result_context=None,
-        visual_observation_context=None,
+        current_visual_observations=[],
         self_state_context=None,
         relationship_context=None,
         prediction_error_context=None,
@@ -880,7 +880,7 @@ class DecisionContractTests(unittest.TestCase):
                             "interaction_ref": "interaction:other",
                             "turns": [{"role": "assistant", "text": "依頼を受け取った。"}],
                         }],
-                        visual_observation_context={"visual_summary_text": "PCを操作している人物が見える。"},
+                        current_visual_observations=[{"visual_summary_text": "PCを操作している人物が見える。"}],
                         workspace_context={"workspace_candidates": [{
                             "factor_ref": "conversation_context:current", "kind": "conversation_context",
                             "summary_text": "直近のやり取りを比較する。",
@@ -916,7 +916,7 @@ class DecisionContractTests(unittest.TestCase):
                     self.assertEqual(source["recent_turns"], context.recent_turns)
                     self.assertEqual(source["recent_interactions"], context.recent_interactions)
                     self.assertEqual(source["internal_context"]["workspace_context"], context.workspace_context)
-                    self.assertEqual(source["internal_context"]["visual_observation_context"], context.visual_observation_context)
+                    self.assertEqual(source["internal_context"]["current_visual_observations"], context.current_visual_observations)
                     self.assertIn(current.to_prompt_payload(), payloads)
 
     def test_decision_parse_failed_log_includes_rejected_content(self) -> None:

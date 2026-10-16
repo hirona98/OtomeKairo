@@ -518,6 +518,7 @@ class ServiceInputTraceBuildMixin:
         recall_pack_summary = self._summarize_recall_pack(recall_pack)
         trace = {
             "recall_hint_summary": recall_hint,
+            "visual_recall": recall_pack.get("visual_recall", {}),
             "candidate_count": recall_pack["candidate_count"],
             "selected_memory_unit_ids": recall_pack["selected_memory_ids"],
             "selected_episode_ids": recall_pack["selected_episode_ids"],
@@ -605,7 +606,7 @@ class ServiceInputTraceBuildMixin:
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
-        visual_observation_context: dict[str, Any] | None,
+        current_visual_observations: list[dict[str, Any]],
         self_state_context: dict[str, Any] | None,
         relationship_context: dict[str, Any] | None,
         prediction_error_context: dict[str, Any] | None,
@@ -634,7 +635,7 @@ class ServiceInputTraceBuildMixin:
                 "capability_decision_view": capability_decision_view,
                 "initiative_context": initiative_context.to_prompt_payload() if initiative_context is not None else None,
                 "capability_result_context": capability_result_context,
-                "visual_observation_context": visual_observation_context,
+                "current_visual_observations": current_visual_observations,
                 "self_state_context": self_state_context,
                 "relationship_context": relationship_context,
                 "prediction_error_context": prediction_error_context,

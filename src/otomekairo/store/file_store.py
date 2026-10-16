@@ -19,6 +19,7 @@ from otomekairo.store.relation_index import StoreRelationIndexMixin
 from otomekairo.store.schema import MEMORY_DB_FILE_NAME, StoreSchemaMixin
 from otomekairo.store.vector import StoreVectorMixin
 from otomekairo.store.visual import StoreVisualMixin
+from otomekairo.store.visual_vector import StoreVisualVectorMixin
 
 
 # 保存
@@ -33,6 +34,7 @@ class SQLiteMemoryStore(
     StoreCloneMixin,
     StoreVectorMixin,
     StoreVisualMixin,
+    StoreVisualVectorMixin,
     StoreSchemaMixin,
 ):
     def __init__(self, root_dir: Path) -> None:

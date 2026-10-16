@@ -222,65 +222,65 @@ class ServiceInputVisualMixin:
             payload[key] = value
         return payload
 
-    def _pipeline_augmented_query_text(
-        self,
-        *,
-        input_text: str,
-        trigger_kind: str,
-        observation_summary: dict[str, Any] | None,
-        current_input: Any = None,
-    ) -> str:
-        if (
-            trigger_kind == "capability_result"
-            and getattr(current_input, "sender_kind", None) == "person"
-        ):
-            return self._person_orientation_augmented_query_text(
-                origin_text=input_text,
-                observation_summary=observation_summary,
-            )
-        if trigger_kind != "user_message":
-            return input_text
-        visual_summary_text = self._visual_observation_summary_text(observation_summary)
-        if visual_summary_text is None:
-            return input_text
-        normalized_input_text = input_text.strip()
-        if visual_summary_text in normalized_input_text:
-            return input_text
-        label = (
-            "conversation_attachment_visual_summary"
-            if self._observation_summary_is_conversation_attachment(observation_summary)
-            else "visual_summary"
-        )
-        visual_input_summary = (
-            f"<<<OTOMEKAIRO_INTERNAL_CONTEXT {label}>>>\n"
-            f"{visual_summary_text}\n"
-            "<<<END_OTOMEKAIRO_INTERNAL_CONTEXT>>>"
-        )
-        if not normalized_input_text:
-            return visual_input_summary
-        return f"{normalized_input_text}\n\n{visual_input_summary}"
+    def _build_current_visual_observations(
+        self, *, trigger_kind: str, observation_summary: dict[str, Any] | None,
+        client_context: dict[str, Any], observed_at: str,
+    ) -> list[dict[str, Any]]:
+        sources = [(observation_summary, False)]
+        sources.extend((item, True) for item in client_context.get("wake_observations", [])
+                       if isinstance(item, dict) and item.get("status") == "succeeded")
+        observations: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for summary, is_wake in sources:
+            if not isinstance(summary, dict) or summary.get("image_interpreted") is not True:
+                continue
+            visual_id = summary.get("visual_observation_id")
+            text = summary.get("visual_summary_text")
+            if not isinstance(visual_id, str) or not visual_id.strip() or not isinstance(text, str) or not text.strip():
+                raise ValueError("interpreted visual observation requires an ID and a detailed description")
+            if visual_id in seen:
+                continue
+            if is_wake:
+                context = {"source": "wake_observation", "image_interpreted": True,
+                           "image_input_kind": summary["image_input_kind"], "visual_summary_text": text}
+            else:
+                context = self._build_visual_observation_decision_context(
+                    trigger_kind=trigger_kind, observation_summary=summary,
+                )
+                if context is None:
+                    raise ValueError("unsupported interpreted visual observation source")
+            context.update({"visual_observation_id": visual_id, "observed_at": observed_at,
+                            "visual_summary_text": text})
+            for key in ("vision_source_id", "source_kind", "source_label", "image_count", "request_id",
+                        "change_state", "change_basis", "change_reason_summary"):
+                if key in summary:
+                    context[key] = summary[key]
+            if "visual_confidence_hint" in summary:
+                context["confidence_hint"] = summary["visual_confidence_hint"]
+            context.pop("visual_confidence_hint", None)
+            owner = visual_source_owner(summary.get("source_kind"))
+            if owner is not None:
+                context["source_owner"] = owner
+            observations.append(context)
+            seen.add(visual_id)
+        return observations
 
-    def _person_orientation_augmented_query_text(
-        self,
-        *,
-        origin_text: str,
+    def _pipeline_augmented_query_text(
+        self, *, input_text: str, trigger_kind: str,
         observation_summary: dict[str, Any] | None,
+        current_visual_observations: list[dict[str, Any]], current_input: Any = None,
     ) -> str:
-        result_summary = None
-        if isinstance(observation_summary, dict):
-            for key in ("mcp_result_summary", "visual_summary_text"):
-                value = observation_summary.get(key)
-                if isinstance(value, str) and value.strip():
-                    result_summary = value.strip()
-                    break
-        if result_summary is None:
-            return origin_text
-        return (
-            f"{origin_text.strip()}\n\n"
-            "<<<OTOMEKAIRO_INTERNAL_CONTEXT capability_result>>>\n"
-            f"{result_summary}\n"
-            "<<<END_OTOMEKAIRO_INTERNAL_CONTEXT>>>"
-        )
+        parts = [input_text]
+        if trigger_kind == "capability_result" and getattr(current_input, "sender_kind", None) == "person":
+            result = (observation_summary or {}).get("mcp_result_summary")
+            if isinstance(result, str) and result.strip():
+                parts.append("<<<OTOMEKAIRO_INTERNAL_CONTEXT capability_result>>>\n" + result
+                             + "\n<<<END_OTOMEKAIRO_INTERNAL_CONTEXT>>>")
+        for observation in current_visual_observations:
+            parts.append("<<<OTOMEKAIRO_INTERNAL_CONTEXT current_visual_observation>>>\n"
+                         + str(observation["source"]) + "\n" + observation["visual_summary_text"]
+                         + "\n<<<END_OTOMEKAIRO_INTERNAL_CONTEXT>>>")
+        return "\n\n".join(parts)
 
     def _observation_summary_is_conversation_attachment(self, observation_summary: dict[str, Any] | None) -> bool:
         if not isinstance(observation_summary, dict):

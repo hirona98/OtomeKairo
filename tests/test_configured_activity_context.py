@@ -58,7 +58,7 @@ class ConfiguredActivityContextTests(unittest.TestCase):
                     input_text=current.text, current_input=current, recent_turns=[], time_context={},
                     affect_context={}, drive_state_summary=None, foreground_world_state=[],
                     activity_context=None, ongoing_action_summary=None, initiative_context=None,
-                    visual_observation_context=None, self_state_context=None, relationship_context=None,
+                    current_visual_observations=[], self_state_context=None, relationship_context=None,
                     prediction_error_context=None, workspace_context=None, recall_hint={}, recall_pack={},
                     capability_decision_view=[capability],
                 )
@@ -84,7 +84,7 @@ class ConfiguredActivityContextTests(unittest.TestCase):
                   "created_at": "2026-10-04T09:00:36+09:00"}]
         context = replace(_decision_context([]), input_text=current.text, current_input=current, recent_turns=turns, time_context={},
             affect_context=affect, drive_state_summary=None, foreground_world_state=[], activity_context=None,
-            ongoing_action_summary=None, initiative_context=None, visual_observation_context=None,
+            ongoing_action_summary=None, initiative_context=None, current_visual_observations=[],
             self_state_context=None, relationship_context=relationship, prediction_error_context=None,
             workspace_context=None, recall_hint={}, recall_pack={})
         persona = PersonaContext(display_name="Test", persona_prompt_text="落ち着いて対等に関わる。",
@@ -116,7 +116,7 @@ class ConfiguredActivityContextTests(unittest.TestCase):
         common = dict(input_text=current.text, current_input=current, recent_turns=[], time_context={},
                       affect_context={}, drive_state_summary=None, foreground_world_state=None,
                       activity_context=None, ongoing_action_summary=None, initiative_context=None,
-                      visual_observation_context=None, self_state_context=None, relationship_context=None,
+                      current_visual_observations=[], self_state_context=None, relationship_context=None,
                       prediction_error_context=None, workspace_context=None, recall_hint={},
                       recall_pack={"active_topics": []}, configured_activity_topics=topics)
         decision = DecisionContext(**common, trigger_kind="user_message", autonomous_run_summaries=None,

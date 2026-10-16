@@ -61,6 +61,7 @@ class _PipelineService(ServiceInputDecisionComparisonMixin, ServiceInputPipeline
         self._debug_cycle_label = Mock(return_value="cycle:test")
         self._short_identifier = Mock(return_value="memory:test")
         self._pipeline_assistant_message_target_client_id = Mock(return_value=None)
+        self._build_current_visual_observations = Mock(return_value=[])
         self._pipeline_augmented_query_text = Mock(return_value="投稿して")
         self._build_visual_observation_decision_context = Mock(return_value=None)
         self._load_activity_context = Mock(return_value=None)

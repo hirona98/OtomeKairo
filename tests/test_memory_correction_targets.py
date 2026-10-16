@@ -110,7 +110,7 @@ class MemoryCorrectionTargetTests(unittest.TestCase):
                 "section_selection": [], "conflict_summaries": [],
             }):
                 recall = RecallBuilder(store=store, llm=llm).build_recall_pack(
-                    state=state, cycle_id="cycle:test", augmented_query_text="飲み物の好みを訂正する。",
+                    current_visual_observations=[], state=state, cycle_id="cycle:test", augmented_query_text="飲み物の好みを訂正する。",
                     recall_hint={
                         "primary_recall_focus": "preference", "secondary_recall_focuses": [],
                         "focus_scopes": [], "mentioned_entities": [], "mentioned_topics": [],

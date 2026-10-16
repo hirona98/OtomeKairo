@@ -19,7 +19,7 @@ def _context() -> DecisionContext:
         recent_turns=[], time_context={}, affect_context={}, drive_state_summary=None,
         foreground_world_state=None, activity_context=None, ongoing_action_summary=None,
         autonomous_run_summaries=None, capability_decision_view=None, initiative_context=None,
-        capability_result_context=None, visual_observation_context=None, self_state_context=None,
+        capability_result_context=None, current_visual_observations=[], self_state_context=None,
         relationship_context=None, prediction_error_context=None, default_mode_context=None,
         workspace_context={"workspace_candidates": [
             {"factor_ref": "periodic_thought_topic:elyth", "kind": "periodic_thought_topic",

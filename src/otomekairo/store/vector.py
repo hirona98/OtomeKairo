@@ -408,6 +408,7 @@ class StoreVectorMixin:
             raise ValueError(f"{table_name} dimension does not match current embedding_dimension.")
 
     def _delete_vector_index_entries(self, conn: sqlite3.Connection, memory_set_id: str) -> None:
+        self._delete_visual_observation_vectors(conn, memory_set_id)
         # クエリ
         rows = conn.execute(
             """

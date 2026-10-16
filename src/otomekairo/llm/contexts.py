@@ -288,7 +288,7 @@ class DecisionContext:
     capability_decision_view: list[dict[str, Any]] | None
     initiative_context: InitiativeContext | None
     capability_result_context: dict[str, Any] | None
-    visual_observation_context: dict[str, Any] | None
+    current_visual_observations: list[dict[str, Any]]
     self_state_context: dict[str, Any] | None
     relationship_context: dict[str, Any] | None
     prediction_error_context: dict[str, Any] | None

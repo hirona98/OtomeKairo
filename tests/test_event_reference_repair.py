@@ -234,7 +234,7 @@ def test_recall_builder_preserves_missing_update_source_in_links_and_next_recall
     for index in range(2):
         with patch.object(store, "load_and_repair_event_evidence", wraps=store.load_and_repair_event_evidence) as loading:
             pack = builder.build_recall_pack(
-                state=state, cycle_id=f"cycle:recall-{index}", current_time=STAMP,
+                current_visual_observations=[], state=state, cycle_id=f"cycle:recall-{index}", current_time=STAMP,
                 augmented_query_text="以前の報告と現在の理解を教えて。", current_person_ref="person:other",
                 recall_hint={"primary_recall_focus": "fact", "secondary_recall_focuses": [], "time_reference": "past",
                              "focus_scopes": [], "mentioned_entities": [], "mentioned_topics": [], "risk_flags": []},

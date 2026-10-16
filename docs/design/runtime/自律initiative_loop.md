@@ -122,7 +122,7 @@ initiative loop は、候補を次の 3 系統に分ける。
 視覚観測の `first_seen / changed` で通常判断へ direct entry する場合も、判断前観測で更新された `activity_context` は `initiative_context` と `workspace_context` に残す。
 direct entry は視覚新規性だけへ判断材料を縮約する仕組みではなく、活動遷移、継続時間、source の整合、抑制候補を同じ盤面で比較する入口である。
 due な定期思考トピックは自発系の材料であり、偽の `drive_state` にはしない。その定期思考トピックに関われる手段が無いときの扱いも含め、意味境界は [定期思考トピック.md](定期思考トピック.md) を正とする。
-direct entry でも due な定期思考トピックがあるときは想起解釈を省略せず、盤面を視覚反応へ縮約しない。
+direct entry でも入力解釈と想起を行う。観測から過去の経験を探す契約は [想起と判断](../memory/想起と判断.md#現在の視覚観測を手がかりにした想起) を正とする。
 `background_thinking` は定期思考による自己評価である。感覚への反応と向きへの関与は別比較である。
 外向き伝達を控えることと、自身の活動を控えることは別比較である。同じ判断に畳まない。
 対象ごとに結果は 1 つであり、両方進めてよい。比較の分け方は [判断と行動.md](判断と行動.md) を正とする。
@@ -342,7 +342,7 @@ API起床の自律判断 matrix は次の 9 件に固定する。
 
 matrix の共通判定境界は前述の `initiative_context`、LLM とコードの責務、自発発話抑制に従う。
 `visual_context` だけの前景は thin foreground として扱う。due な定期思考トピックがあるときは、薄い視覚前景だけで `noop` を期待しない。
-視覚観測の `change_state=first_seen / changed` は通常の initiative 判断へ進み、`initiative_entry_check` を追加で呼ばない。due な定期思考トピックがあるときは想起解釈を省略せず、盤面を視覚反応へ縮約しない。
+視覚観測の `change_state=first_seen / changed` は通常の initiative 判断へ進み、`initiative_entry_check` を追加で呼ばない。定期思考トピックの有無にかかわらず通常の入力解釈と想起を行う。
 構造値が強い `drive_state` があり、対応する grounded foreground がない場合、発話より追加観測が自然かを同じ判断盤面で比較する。
 非視覚 capability は state type の一致だけで機械的に遮断しない。
 `vision.capture` の再取得抑止には、判断前の foreground `world_state` または同じ `wake / background_thinking` cycle の思考前観測から反映された、同じ `vision_source_id` の `visual_context` を使う。

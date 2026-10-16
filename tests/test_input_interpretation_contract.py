@@ -66,7 +66,7 @@ class InputInterpretationContractTests(unittest.TestCase):
             ),
             recent_turns=[],
             current_time="2026-06-22T10:00:00+09:00",
-            visual_observation_context=None,
+            current_visual_observations=[],
         )
         system_prompt = messages[0]["content"]
         repair_prompt = build_input_interpretation_repair_prompt("test")

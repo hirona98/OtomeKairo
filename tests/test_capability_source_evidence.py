@@ -49,7 +49,7 @@ def test_speech_receives_the_complete_capability_evidence():
         input_text="結果を報告して。", current_input=_current_input(), recent_turns=[],
         time_context={}, affect_context={}, drive_state_summary=None, foreground_world_state=None,
         activity_context=None, ongoing_action_summary=None, initiative_context=None,
-        visual_observation_context=None, self_state_context=None, relationship_context=None,
+        current_visual_observations=[], self_state_context=None, relationship_context=None,
         prediction_error_context=None, workspace_context=None, recall_hint={}, recall_pack={},
         capability_result_context=result_context,
     )

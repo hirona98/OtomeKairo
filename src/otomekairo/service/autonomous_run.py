@@ -1538,7 +1538,7 @@ class ServiceAutonomousRunMixin:
                 foreground_world_state=foreground_world_state,
                 ongoing_action_summary=self._summarize_ongoing_action(self._current_ongoing_action(state=state, current_time=current_time)),
                 capability_result_context=last_result_context,
-                visual_observation_context=None,
+                current_visual_observations=[],
             ),
             drive_state_summary=self._summarize_drive_states(self._list_current_drive_states(state=state, current_time=current_time)),
             people_context=self._build_people_context(

@@ -9,6 +9,7 @@
 - `LLMClient` への矢印は、生成や審査を依頼するアプリ内の論理処理呼び出しを示す。通常の生成APIへの送受信は `LLMClient` 内にまとめ、生成・審査・検証の処理名を矢印に記す。
 - 1 回の論理処理が、生成、審査、修復のために複数回 API を呼ぶことがある。各図は通常の成功経路を示し、出力契約違反時の修復は各処理の契約に従って `LLMClient` 内で行う。
 - `送信前チェックAPI` と `Embedding API` への矢印は、それぞれ専用モデルと埋め込みモデルの呼び出しを示す。応答矢印は必要な箇所だけ記載する。
+- 取得要求から返り値の内容が分かる場合、戻り矢印の説明を省く。
 - 入力や処理条件の説明は本文に記し、他の図への参照は `［図 N］` で示す。
 - `opt` は条件付き処理、`alt` は分岐、`loop` は繰り返し、`par` は独立して進む処理、開いた矢印は非同期の要求・通知を示す。
 
@@ -35,48 +36,50 @@ sequenceDiagram
 
     U->>C: 人物発話
     C->>D: 直近会話を取得（events）
-    D-->>C: 直近会話
-    opt 思考前観測または添付画像がある
-        C->>C: 観測と画像解釈［図 6］
+    D-->>C:
+    opt 思考前観測の画像または添付画像がある
+        C->>C: 今回の画像を解釈［図 6］
     end
-    C->>L: 人格・会話などを参照して入力を解釈（generate_input_interpretation）
+    C->>L: 人格・会話・今回の観測を参照して入力を解釈（generate_input_interpretation）
     L-->>C: 検索すべき内容（recall_hint）と回答に必要な根拠の条件（answer_contract）
-    C->>R: 想起パックを構築（build_recall_pack）
+    C->>R: 会話と今回の観測を手がかりに想起パックを構築（build_recall_pack）
     R->>D: 適用範囲別の記憶・エピソード候補を取得（memory_units・episodes）
-    D-->>R: 記憶・エピソード候補
+    D-->>R:
     opt 関連検索のクエリがある
-        R->>E: クエリ群の埋め込み
+        R->>D: 過去の視覚記録と意味検索用索引を確認
+        D-->>R:
+        opt 索引の未作成・本文変更・ベクトル欠損がある
+            R->>E: 不足分の視覚記録を埋め込み
+            E-->>R: 記録のベクトル
+            R->>D: 視覚記録の索引を保存
+        end
+        R->>E: 会話・各観測などの検索クエリを一括で埋め込み
         E-->>R: 検索用ベクトル
-        R->>D: 記憶・エピソードをベクトル検索
-        D-->>R: 関連候補
+        R->>D: 記憶・エピソード・過去の視覚記録をベクトル検索
+        D-->>R:
     end
     R->>D: 人物・対象のつながりを手がかりに記憶候補を取得（relation_index）
-    D-->>R: 関係索引の記憶候補
-    R->>R: 候補を統合
+    D-->>R:
     R->>D: 同じ対象・項目についての別の記憶を取得（memory_units）
-    D-->>R: 同じ対象についての記憶
-    R->>R: 競合を検出
+    D-->>R:
     R->>D: 候補の記憶について、支持・矛盾・由来などの関係情報を取得（memory_links）
-    D-->>R: 候補の関係情報
-    R->>R: 選別用の入力を構築（source_pack）
+    D-->>R:
     opt 想起候補または競合がある
         R->>L: 想起候補を選別し、採用順を決定（generate_recall_pack_selection）
         L-->>R: 採用・配置する候補
     end
     R->>D: 採用した記憶について、支持・矛盾・由来などの関係情報を取得（memory_links）
-    D-->>R: 選定済み記憶の関係情報
+    D-->>R:
     opt 記憶の更新元報告を確認する必要がある
         R->>D: 更新元のイベントを取得し、欠損参照を修復（load_and_repair_event_evidence）
         D-->>R: 更新元の報告本文と出所（events）
     end
-    opt イベントの根拠を必要とし、選択済みのイベントがある
-        R->>R: 根拠のイベントIDを選定：標準分と追加確認分
-        R->>D: 選定したイベントを取得し、欠損参照を修復（load_and_repair_event_evidence）
-        D-->>R: イベント本文・判断理由・出所（events）
-        R->>R: 項目の型を確認し、本文・判断理由・出所を想起パックへ追加
+    opt 過去の発話や出来事の記録を確認する場合
+        R->>D: 元の記録を取得（events）
+        D-->>R: 本文・判断理由・出所
     end
-    R->>D: 視覚観測と日次要約を取得
-    D-->>R: 視覚観測と日次要約（visual_observation_records・daily_visual_digests）
+    R->>D: 視覚記録の重要・直近分と日次要約を取得（visual_observation_records・daily_visual_digests）
+    D-->>R:
     R-->>C: 想起パック（RecallPack）
     C->>C: 回答根拠を解決
     opt 空でない人物発話がある
@@ -117,7 +120,7 @@ sequenceDiagram
     else 保留または何もしない（pending_intent・noop）
         C->>C: 判断結果を保持
     end
-    C->>D: サイクルのイベントと追跡情報を保存
+    C->>D: サイクルのイベント・追跡情報・今回の視覚記録を保存
     C->>M: 会話の記憶を統合（consolidate_turn）［図 5］
     M-->>C: 統合結果と後処理ジョブ
     C-)M: 後処理ジョブをキューへ登録
@@ -133,7 +136,11 @@ sequenceDiagram
 
 入力には、現在の入力本文と発信者・会話などの構造化情報、人格設定、直近会話、現在時刻を渡す。解釈済みの画像説明と活動状態がある場合は、内部補助文脈として渡す。入力の詳細と出力契約は [RecallHint](../memory/想起と判断.md#recallhint) と [AnswerContract](../memory/想起と判断.md#answercontract) を正とする。
 
+「今回の画像を解釈」の結果は、現在の判断材料として直接引き継ぐ。過去の視覚記録は意味検索と重要・直近分の取得で集める。当回の観測を手がかりにする想起の契約は [想起と判断](../memory/想起と判断.md#現在の視覚観測を手がかりにした想起) を参照する。通常の会話サイクルで今回の解釈結果を保存するタイミングと、次回以降の想起との関係は [視覚入力のパイプライン統合](../capability/vision_capture画像意味理解.md#パイプライン統合) を参照する。
+
 例えば「前に私が言ったことを原文で教えて」という入力では、本人の過去の会話を想起の対象とし、本人の発話原文を必要な根拠として指定する。この段階では検索方針を決め、長期記憶の検索や原文取得は後続処理が行う。行動選択と返答本文の生成は、後段の `generate_decision()` がまとめて担当する。
+
+元の記録の取得条件・件数上限・検証方法・欠損参照の修復は、[event_evidenceの取得](../memory/event_evidenceの取得.md) を参照する。
 
 `generate_decision()` は、行動選択、今の相手へ伝えてよい範囲、最終本文を1回の生成で決める。人物発話・別の場の会話・観測・記憶・共有条件は出所を分けて渡す。
 
@@ -260,7 +267,7 @@ sequenceDiagram
 ```
 
 新しい有効な視覚観測などから直接判断へ入れる場合は `initiative_entry_check` の API 呼び出しを省く。
-その視覚観測だけを入口にする経路では、入力解釈と記憶検索を通さず観測から直接判断用文脈を作る場合がある。
+視覚観測から判断へ進む場合も、今回の観測を渡して入力解釈と想起を行う。
 自身の活動を分離する場合は、活動用の想起・Skill 選択が追加される。処理順は自身の活動判断、その整合審査、対人発話判断、合成の順である。
 
 実装: [起床サイクル](../../../src/otomekairo/service/spontaneous/wake.py)、[保留意図の選別](../../../src/otomekairo/service/spontaneous/pending_intent.py)、[起床パイプライン](../../../src/otomekairo/service/input/wake_pipeline.py)、[分離判断](../../../src/otomekairo/service/input/decision_comparison.py)。
@@ -410,7 +417,6 @@ sequenceDiagram
     C->>L: 画像と文脈から視覚観測を解釈（generate_visual_observation_summary）
     L->>L: 出力契約を検証
     L-->>C: 契約検証済みの視覚観測
-    C->>S: 視覚観測の記録を保存（visual_observation_record）
     alt 思考前観測の結果
         opt 世界状態の生成対象がある（world_state）
             C->>L: 世界状態の候補と根拠判定を生成（generate_world_state）
@@ -422,12 +428,13 @@ sequenceDiagram
             L->>L: 全候補の契約検証と根拠種別・人物同定による採用候補の選別
             L-->>C: 採用された活動候補
         end
-        C->>C: 観測結果を後続の判断文脈へ
+        C->>C: 今回の観測を入力解釈・想起・判断へ［図 1］
     else 会話添付または通常の能力結果
         C->>C: 観測結果を共通パイプラインへ［図 1］
     else 自律作業の能力結果
         C->>C: 状態更新と次の一手へ［図 4］
     end
+    C->>S: 呼び出し元の判断後、サイクル結果と視覚記録を保存（visual_observation_record）
     Note over S,W: 日次整理は独立したバックグラウンド処理
     W->>S: 対象日の保存済み視覚観測を読む
     W->>L: 視覚観測を日単位で整理（generate_visual_daily_grouping）
@@ -448,6 +455,7 @@ sequenceDiagram
 ```
 
 思考前観測の状態反映と、その後の判断サイクルによる状態処理は別の呼び出し箇所である。
+視覚記録の永続化は、解釈結果を引き継いだ呼び出し元のサイクル結果保存時に行う。保存タイミングの契約は [視覚入力のパイプライン統合](../capability/vision_capture画像意味理解.md#パイプライン統合) を参照する。
 日次視覚整理は、会話ターンの `memory_interpretation` を通す処理とは別に、反復根拠を審査して記憶候補を昇格する。
 
 実装: [視覚入力](../../../src/otomekairo/service/input/visual.py)、[思考前観測](../../../src/otomekairo/service/input/wake_observation.py)、[日次視覚整理](../../../src/otomekairo/service/visual_daily.py)、[LLMClient](../../../src/otomekairo/llm/client.py) の `generate_visual_observation_summary()`。

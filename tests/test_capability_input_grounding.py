@@ -60,7 +60,7 @@ def generation(request):
         candidate = _capability_decision('mcp.call_tool', mcp_request['input'])
         context = replace(_decision_context(view), current_input=current, input_text=current.text,
             trigger_kind='capability_result' if request.param == 'followup' else 'user_message',
-            recent_turns=recent_turns, visual_observation_context={'visual_summary_text': text},
+            recent_turns=recent_turns, current_visual_observations=[{'visual_summary_text': text}],
             capability_result_context=result_context, recall_pack={'event_evidence': [{
                 'kind': 'conversation_input', 'role': 'person', 'text': memory_text,
             }]})

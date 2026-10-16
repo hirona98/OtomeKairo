@@ -27,7 +27,7 @@ def test_episode_retrieval_pool_reaches_llm_before_final_adoption_limit(tmp_path
         {**builder._to_episode_item(records[index]), "retrieval_lane": "association"}
         for index in (0, 24)
     ]
-    builder._build_association_sections = Mock(return_value=association)
+    builder._build_association_sections = Mock(return_value={"sections": association, "visual_hits": [], "visual_index_sync": {"indexed_count": 0}})
     packs = []
 
     def select(**kwargs):
@@ -42,7 +42,7 @@ def test_episode_retrieval_pool_reaches_llm_before_final_adoption_limit(tmp_path
 
     builder.llm.generate_recall_pack_selection = Mock(side_effect=select)
     result = builder.build_recall_pack(
-        state=build_default_state(), cycle_id="cycle:test", augmented_query_text="報告とその後の変化を順番に教えて。",
+        current_visual_observations=[], state=build_default_state(), cycle_id="cycle:test", augmented_query_text="報告とその後の変化を順番に教えて。",
         recall_hint={"primary_recall_focus": primary_focus, "secondary_recall_focuses": [],
                      "time_reference": "past", "focus_scopes": [], "mentioned_entities": [],
                      "mentioned_topics": [], "risk_flags": []},

@@ -146,18 +146,19 @@ LLM の出力は JSON object 1 個に固定する。
 2. raw image を保存せず、LLM へ multimodal input として渡す
 3. LLM が元画像に基づく詳細な `summary_text` と構造化した視覚変化判定を生成し、コードが出力契約を検証する
 4. `observation_summary.image_interpreted=true`、`image_input_kind`、`visual_observation_id`、`visual_summary_text` を付ける
-5. `visual_summary_text` を `visual_observation_record.detailed_summary_text` として保存する
-6. `scene_entities / activity_labels / environment_labels` と検索用 index を派生する
-7. `VisualObservationContext` として `recall_hint / recall_pack / decision / speech` に渡す
-8. `vision.capture` 由来の視覚観測は `world_state.visual_context` 更新候補にする
+5. 解釈結果を当回の観測一覧 `current_visual_observations` に集め、入力解釈・想起・通常判断へ渡す。思考前観測は現在の視覚状態や活動状態にも反映する
+6. `vision.capture` 由来の視覚観測は `world_state.visual_context` 更新候補にする
+7. サイクル結果保存時に、`visual_summary_text` を `visual_observation_record.detailed_summary_text` として保存する
+8. `scene_entities / activity_labels / environment_labels` と検索用 index を派生する
 9. 会話や行動と結びつく場合は episode に紐づける
 10. 重要、反復、継続、会話結合を満たす場合は記憶候補にする
 
 この段階の出力は `visual_observation_record` と派生データに集約する。
-通常の成功経路では、`visual_observation` の 1 回の生成で詳細説明と視覚変化判定を得る。生成時に物体の名称と形・構造・配置、人物の同定、属性ごとの確かさを元画像へ照合し、確信度と変化判定を最終説明の根拠に揃える。コードの出力契約検証を通過した結果を保存し、後段の判断へ渡す。契約違反時の repair と provider 生成失敗時の再送は [LLM構造化出力transport](../llm/LLM構造化出力transport.md) に従い、生成または契約検証が完了しない場合は入力サイクルを明示的に失敗させる。
+通常の会話サイクルでは、今回の解釈結果を内部文脈から直接判断へ渡し、判断後のサイクル結果保存時に視覚記録も永続化する。同じ回の想起にある視覚記録・日次要約の取得は、その時点でDBに保存済みの資料を対象とし、今回の新しい解釈結果を読み直す経路にはしない。今回の視覚記録は、保存後の次回以降の想起で取得候補になる。日次要約は保存済み観測を後段の日次整理でまとめて生成する。
+通常の成功経路では、`visual_observation` の 1 回の生成で詳細説明と視覚変化判定を得る。生成時に物体の名称と形・構造・配置、人物の同定、属性ごとの確かさを元画像へ照合し、確信度と変化判定を最終説明の根拠に揃える。コードの出力契約検証を通過した結果を当回の判断へ渡し、サイクル結果とともに保存する。契約違反時の repair と provider 生成失敗時の再送は [LLM構造化出力transport](../llm/LLM構造化出力transport.md) に従い、生成または契約検証が完了しない場合は入力サイクルを明示的に失敗させる。
 詳細説明は直接見える形・色・配置・動きと、種類・内容・量などの解釈を区別する。複数の解釈が残る属性は、見える外見と判別できない点を分けて記述する。レコード全体の `confidence_hint` が高くても、各属性の不確かさは消さない。
 物体の同定は今回の画像にある形と構造を根拠にする。用途や内部の状態が確認できない場合は、形・色・内部に見えるものを記述し、用途を確定させる名称より観測できる説明を選ぶ。過去の観測要約は変化の比較に使い、今回の物体名や属性を同定する根拠にはしない。
-短期状態、episode、記憶候補は `visual_observation_record` と派生データを経由して作る。
+当回の短期状態と記憶整理には解釈結果を直接引き継ぐ。後続会話や日次整理では、保存済みの `visual_observation_record` と派生データを使う。
 
 ## world_state との関係
 
@@ -270,10 +271,7 @@ LLM の出力は JSON object 1 個に固定する。
 4. `daily_visual_digest`
 5. 長期 memory
 
-`RecallPack.visual_observations` は、検索一致枠、重要枠、直近枠に分けて選ぶ。
-最終投入上限は `3` 件とし、duplicate group と source の分散を入れて選ぶ。
-特定対象の有無確認では検索一致枠を優先し、query に強く一致する `compressed` を直近の `active` より上に置く。
-日次整理前の当日記録は大量に `active` のまま存在するため、`RecallPack.visual_observations` は直近性、query 一致、source 分散、duplicate group 分散で選ぶ。
+今回見た内容から過去の経験を探す入力と、`RecallPack.visual_observations` の意味検索・選定・件数上限は [想起と判断](../memory/想起と判断.md#現在の視覚観測を手がかりにした想起) と [視覚記録の想起投入](../memory/想起と判断.md#visual_observations-の想起投入) を正とする。
 
 応答と判断は `visual_observations[].detailed_summary_text` の範囲で、画像内の対象有無を確認する。
 

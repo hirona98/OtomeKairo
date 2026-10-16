@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import unittest
+from unittest.mock import Mock
 from datetime import datetime
 
 from otomekairo.defaults import DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_SUMMARY
@@ -222,9 +223,9 @@ class WakeInterventionLoadTests(unittest.TestCase):
             cycle_id=None,
         )
 
-        self.assertIsNot(checked_context, client_context)
+        self.assertIs(checked_context, client_context)
         self.assertNotIn("initiative_entry_check", checked_context)
-        self.assertTrue(checked_context["autonomous_visual_observation_direct_entry"])
+        self.assertNotIn("autonomous_visual_observation_direct_entry", checked_context)
         self.assertTrue(
             service._has_autonomous_initiative_context(
                 state={},
@@ -279,73 +280,31 @@ class WakeInterventionLoadTests(unittest.TestCase):
             )
         )
 
-    def test_visual_observation_direct_entry_skips_recall_interpretation(self) -> None:
+    def test_visual_observation_entry_runs_interpretation_and_recall(self) -> None:
         service = DummyInputService()
-
+        hint = service._empty_recall_hint()
+        contract = {"contract": "summary"}
+        service.llm = Mock()
+        service.llm.generate_input_interpretation.return_value = {"recall_hint": hint, "answer_contract": contract}
+        service.recall = Mock()
+        service.recall.build_recall_pack.return_value = service._empty_recall_pack()
+        service.evidence = Mock()
+        service.evidence.build_evidence_resolution.return_value = {"evidence_pack": {"status": "summary"},
+                                                                  "fact_resolution_trace": {}}
+        observation = {"visual_observation_id": "visual:now", "visual_summary_text": "以前見た赤い器がある。"}
         recall_inputs = service._build_pipeline_recall_inputs(
-            cycle_id="cycle:test", state={},
-            started_at="2026-06-22T22:30:00+09:00",
-            input_text="定期思考。",
-            current_input=CurrentInput(
-                sender_kind="system",
-                sender_ref=None,
-                source_kind="background_thinking",
-                response_target_refs=(),
-                interaction_context=None,
-                text="定期思考。",
-            ),
-            recent_turns=[],
-            augmented_query_text="定期思考。",
-            visual_observation_context=None,
-            activity_context=None,
-            model_config={},
-            persona_context=None,
-            client_context={"autonomous_visual_observation_direct_entry": True},
-            cycle_label="[test]",
+            cycle_id="cycle:test", state={"selected_memory_set_id": "memory_set:default"}, started_at="2026-06-22T22:30:00+09:00",
+            input_text="定期思考。", current_input=CurrentInput(
+                sender_kind="system", sender_ref=None, source_kind="background_thinking",
+                response_target_refs=(), interaction_context=None, text="定期思考。"),
+            recent_turns=[], augmented_query_text="定期思考。", current_visual_observations=[observation],
+            activity_context=None, model_config={}, persona_context=None, client_context={}, cycle_label="[test]",
         )
-
-        self.assertEqual(recall_inputs["recall_hint"], service._empty_recall_hint())
-        self.assertEqual(recall_inputs["answer_contract"]["contract"], "summary")
-        self.assertEqual(recall_inputs["recall_pack"]["candidate_count"], 0)
-        self.assertEqual(recall_inputs["evidence_pack"]["status"], "summary")
-
-    def test_due_periodic_thought_topic_keeps_recall_on_visual_direct_entry(self) -> None:
-        service = DummyInputService()
-        current_input = CurrentInput(
-            sender_kind="system",
-            sender_ref=None,
-            source_kind="background_thinking",
-            response_target_refs=(),
-            interaction_context=None,
-            text="定期思考。",
-        )
-        client_context = {"autonomous_visual_observation_direct_entry": True}
-
-        self.assertFalse(
-            service._should_skip_recall_interpretation_for_wake_visual_observation(
-                state={
-                    "periodic_thought_topics": [
-                        {
-                            "topic_id": "elyth",
-                            "enabled": True,
-                            "min_periodic_thinking_interval_seconds": 600,
-                            "topic_summary": DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_SUMMARY,
-                        }
-                    ]
-                },
-                current_time="2026-08-13T12:20:00+09:00",
-                current_input=current_input,
-                client_context=client_context,
-            )
-        )
-        self.assertTrue(
-            service._should_skip_recall_interpretation_for_wake_visual_observation(
-                state={"periodic_thought_topics": []},
-                current_time="2026-08-13T12:20:00+09:00",
-                current_input=current_input,
-                client_context=client_context,
-            )
-        )
+        service.llm.generate_input_interpretation.assert_called_once()
+        assert service.llm.generate_input_interpretation.call_args.kwargs["current_visual_observations"] == [observation]
+        service.recall.build_recall_pack.assert_called_once()
+        assert service.recall.build_recall_pack.call_args.kwargs["current_visual_observations"] == [observation]
+        assert recall_inputs["recall_pack"]["evidence_pack"]["status"] == "summary"
 
     def test_wake_input_text_keeps_capability_on_the_board(self) -> None:
         service = DummyInputService()
@@ -1104,7 +1063,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertNotIn("visual_observations", context.recall_pack)
         self.assertEqual(context.agent_skill_context, {"skills": ["isolated"]})
         self.assertIsNone(context.foreground_world_state)
-        self.assertIsNone(context.visual_observation_context)
+        self.assertEqual(context.current_visual_observations, [])
 
     def test_outward_speech_context_drops_agent_skills(self) -> None:
         service = DummyInputService()
@@ -1237,7 +1196,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
 
         self.assertEqual(len(service.recall_calls), 1)
         self.assertEqual(service.recall_calls[0]["current_input"].text, SELF_ACTIVITY_PERIODIC_THOUGHT_TOPIC_INPUT_TEXT)
-        self.assertIsNone(service.recall_calls[0]["visual_observation_context"])
+        self.assertEqual(service.recall_calls[0]["current_visual_observations"], [])
         self.assertEqual(service.recall_calls[0]["recent_turns"], [])
         self.assertEqual(len(service.skill_calls), 1)
         self.assertEqual(service.skill_calls[0]["current_input"].text, SELF_ACTIVITY_PERIODIC_THOUGHT_TOPIC_INPUT_TEXT)
@@ -1329,7 +1288,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                     }
                 ]
             },
-            visual_observation_context=None,
+            current_visual_observations=[],
             decision=decision,
             assistant_message_target_client_id=None,
             cycle_label="cycle:test",
@@ -1427,7 +1386,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
             capability_decision_view=None,
             initiative_context=initiative_context,
             capability_result_context=None,
-            visual_observation_context=None,
+            current_visual_observations=[],
             self_state_context=None,
             relationship_context=None,
             prediction_error_context=None,
@@ -1501,7 +1460,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
             capability_decision_view=None,
             initiative_context=initiative_context,
             capability_result_context=None,
-            visual_observation_context=None,
+            current_visual_observations=[],
             self_state_context=None,
             relationship_context=None,
             prediction_error_context=None,

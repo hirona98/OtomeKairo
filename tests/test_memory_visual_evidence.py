@@ -53,7 +53,7 @@ def test_workspace_has_separate_current_observation_old_state_and_available_capa
         ongoing_action_summary=None, autonomous_run_summaries=None,
         capability_decision_view=[{"id": "vision.capture", "available": True,
             "what_it_does": "カメラを観測する。", "fresh_world_state_by_vision_source": [observation]}],
-        initiative_context=None, capability_result_context=None, visual_observation_context=None,
+        initiative_context=None, capability_result_context=None, current_visual_observations=[],
         self_state_context=None, relationship_context=None, prediction_error_context=None, default_mode_context=None,
     )
     candidates = {c["factor_ref"]: c for c in result["workspace_candidates"]}

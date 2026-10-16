@@ -281,7 +281,7 @@ class PeriodicThoughtTopicWorkspaceTests(unittest.TestCase):
             capability_decision_view=None,
             initiative_context=None,
             capability_result_context=None,
-            visual_observation_context=None,
+            current_visual_observations=[],
             self_state_context=None,
             relationship_context=None,
             prediction_error_context=None,

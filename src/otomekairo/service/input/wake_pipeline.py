@@ -269,10 +269,7 @@ class ServiceInputWakePipelineMixin:
         ):
             return client_context
         if self._client_context_has_judgable_visual_observation(client_context):
-            return {
-                **client_context,
-                "autonomous_visual_observation_direct_entry": True,
-            }
+            return client_context
         foreground_world_state = self._summarize_foreground_world_states(
             self._list_current_world_states(
                 state=state,

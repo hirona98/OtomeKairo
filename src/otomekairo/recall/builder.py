@@ -12,6 +12,7 @@ from otomekairo.recall.association import (
     RecallAssociationMixin,
 )
 from otomekairo.recall.event_evidence import RecallEventEvidenceMixin
+from otomekairo.recall.visual import RecallVisualMixin
 from otomekairo.recall.selection import SECTION_LIMITS, RecallPackSelectionError, RecallSelectionMixin
 from otomekairo.store.file_store import FileStore
 
@@ -34,7 +35,7 @@ VISUAL_DAILY_MEMORY_CANDIDATE_LIMIT = 8
 
 
 # recall構築
-class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvidenceMixin):
+class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvidenceMixin, RecallVisualMixin):
     def __init__(self, *, store: FileStore, llm: LLMClient) -> None:
         # 依存関係
         self.store = store
@@ -45,6 +46,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         *,
         state: dict[str, Any],
         cycle_id: str,
+        current_visual_observations: list[dict[str, Any]],
         augmented_query_text: str,
         recall_hint: dict[str, Any],
         current_person_ref: str | None,
@@ -143,12 +145,13 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         self._collect_raw_candidate_ids(raw_candidate_ids, episodic_evidence)
 
         # 関連セクション群
-        association_sections = self._build_association_sections(
-            state=state,
+        association_result = self._build_association_sections(
+            state=state, cycle_id=cycle_id, current_visual_observations=current_visual_observations,
             input_text=augmented_query_text,
             recall_hint=recall_hint,
             scope_context=scope_context,
         )
+        association_sections = association_result["sections"]
         self._collect_raw_candidate_ids(raw_candidate_ids, association_sections["self_model"])
         self._collect_raw_candidate_ids(raw_candidate_ids, association_sections["person_model"])
         self._collect_raw_candidate_ids(raw_candidate_ids, association_sections["relationship_model"])
@@ -310,7 +313,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         )
         visual_observations = self._build_visual_observations(
             memory_set_id=memory_set_id,
-            augmented_query_text=augmented_query_text,
+            cycle_id=cycle_id, queried_records=[hit["record"] for hit in association_result["visual_hits"]],
             limit=VISUAL_OBSERVATION_RECALL_LIMIT,
         )
         visual_daily_digests = self._build_visual_daily_digests(
@@ -324,6 +327,9 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             **sections,
             "event_evidence": event_evidence,
             "visual_observations": visual_observations,
+            "visual_recall": {"index_sync": association_result["visual_index_sync"],
+                              "candidate_ids": [hit["record"]["visual_observation_id"] for hit in association_result["visual_hits"]],
+                              "selected_ids": [item["visual_observation_id"] for item in visual_observations]},
             "visual_daily_digests": visual_daily_digests,
             "event_evidence_loading": event_evidence_result["event_evidence_loading"],
             "selected_memory_ids": selected_memory_ids,
@@ -1102,15 +1108,11 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         self,
         *,
         memory_set_id: str,
-        augmented_query_text: str,
+        cycle_id: str,
+        queried_records: list[dict[str, Any]],
         limit: int,
     ) -> list[dict[str, Any]]:
-        # 検索一致、重要、直近の枠を分け、毎分キャプチャで直近だけに寄らないようにする。
-        queried_records = self.store.list_visual_observation_records(
-            memory_set_id=memory_set_id,
-            query_text=augmented_query_text,
-            limit=max(limit * 4, 12),
-        )
+        # 意味検索、重要、直近の枠を分け、毎分キャプチャで直近だけに寄らないようにする。
         important_records = self.store.list_important_visual_observation_records(
             memory_set_id=memory_set_id,
             limit=max(limit * 2, 6),
@@ -1119,6 +1121,9 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             memory_set_id=memory_set_id,
             limit=max(limit * 2, 6),
         )
+
+        important_records = [record for record in important_records if record["cycle_id"] != cycle_id]
+        recent_records = [record for record in recent_records if record["cycle_id"] != cycle_id]
 
         # 枠別選定
         selected_records: list[dict[str, Any]] = []

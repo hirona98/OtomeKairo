@@ -13,6 +13,7 @@ ASSOCIATION_QUERY_KIND_WEIGHTS = {
     "input": 1.0,
     "entity": 0.92,
     "topic": 0.88,
+    "visual": 1.0,
 }
 
 
@@ -21,19 +22,25 @@ class RecallAssociationMixin:
         self,
         *,
         state: dict[str, Any],
+        cycle_id: str,
+        current_visual_observations: list[dict[str, Any]],
         input_text: str,
         recall_hint: dict[str, Any],
         scope_context: dict[str, list[tuple[str, str]]],
-    ) -> dict[str, list[dict[str, Any]]]:
+    ) -> dict[str, Any]:
         # クエリ仕様群
-        query_specs = self._association_query_specs(input_text, recall_hint)
+        query_specs = self._association_query_specs(input_text, recall_hint, current_visual_observations)
         if not query_specs:
-            return self._empty_association_sections()
+            return {"sections": self._empty_association_sections(), "visual_hits": [], "visual_index_sync": {"indexed_count": 0}}
 
         # 埋め込みコンテキスト
         selected_memory_set = state["memory_sets"][state["selected_memory_set_id"]]
         embedding_definition = selected_memory_set["embedding"]
         embedding_dimension = self._embedding_dimension(embedding_definition)
+
+        visual_index_sync = self._sync_visual_observation_index(
+            state=state, cycle_id=cycle_id,
+        )
 
         # クエリ埋め込み群
         query_embeddings = self.llm.generate_embeddings(
@@ -45,8 +52,20 @@ class RecallAssociationMixin:
         memory_candidates: dict[str, dict[str, Any]] = {}
         episode_candidates: dict[str, dict[str, Any]] = {}
 
+        visual_hits: dict[str, dict[str, Any]] = {}
+
         # クエリループ
         for spec, query_embedding in zip(query_specs, query_embeddings, strict=True):
+            for hit in self._search_visual_observation_vectors(
+                memory_set_id=state["selected_memory_set_id"], cycle_id=cycle_id,
+                query_embedding=query_embedding, embedding_dimension=embedding_dimension, limit=32,
+            ):
+                visual_id = hit["record"]["visual_observation_id"]
+                hit = {**hit, "query_priority": 0 if spec["kind"] == "visual" else 1}
+                previous = visual_hits.get(visual_id)
+                if previous is None or (hit["query_priority"], hit["distance"]) < (previous["query_priority"], previous["distance"]):
+                    visual_hits[visual_id] = hit
+
             # memory hit群
             memory_hits = self.store.search_memory_unit_vector_entries(
                 memory_set_id=state["selected_memory_set_id"],
@@ -130,12 +149,14 @@ class RecallAssociationMixin:
             )
 
         # 結果
-        return sections
+        return {"sections": sections, "visual_hits": sorted(visual_hits.values(), key=lambda hit: (hit["query_priority"], hit["distance"])),
+                "visual_index_sync": visual_index_sync}
 
     def _association_query_specs(
         self,
         input_text: str,
         recall_hint: dict[str, Any],
+        current_visual_observations: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         # 基底状態
         specs: list[dict[str, Any]] = []
@@ -157,6 +178,9 @@ class RecallAssociationMixin:
                     ),
                 }
             )
+
+        for observation in current_visual_observations:
+            specs.append({"kind": "visual", "text": observation["visual_summary_text"], "weight": 1.0})
 
         # エンティティクエリ
         entity_terms = self._association_hint_terms(recall_hint.get("mentioned_entities", []))

@@ -322,7 +322,7 @@ class ServiceMemoryMixin:
                     current_input=pipeline.get("current_input"),
                     people_context=pipeline.get("people_context"),
                     foreground_world_state=pipeline.get("foreground_world_state"),
-                    visual_observation_context=pipeline.get("visual_observation_context"),
+                    current_visual_observations=pipeline.get("current_visual_observations"),
                     capability_decision_view=pipeline.get("capability_decision_view"),
                     person_utterances=pipeline.get("person_utterances"),
                     configured_activity_topics=pipeline.get("configured_activity_topics"),
@@ -436,7 +436,7 @@ class ServiceMemoryMixin:
         ongoing_action_transition_summary: dict[str, Any] | None,
         autonomous_run_summary: dict[str, Any] | None,
         foreground_world_state: list[dict[str, Any]] | None = None,
-        visual_observation_context: dict[str, Any] | None = None,
+        current_visual_observations: list[dict[str, Any]] | None = None,
         capability_decision_view: list[dict[str, Any]] | None = None,
         person_utterances: list[dict[str, Any]] | None = None,
         recall_pack: dict[str, Any] | None = None,
@@ -453,7 +453,7 @@ class ServiceMemoryMixin:
         if isinstance(people_context, list) and people_context:
             payload["people_context"] = people_context
         payload["foreground_world_state"] = foreground_world_state
-        payload["visual_observation_context"] = visual_observation_context
+        payload["current_visual_observations"] = current_visual_observations
         payload["capability_decision_view"] = capability_decision_view
         payload["fresh_visual_observations"] = fresh_visual_observations_from_capability_view(capability_decision_view)
         payload["person_utterances"] = person_utterances or []

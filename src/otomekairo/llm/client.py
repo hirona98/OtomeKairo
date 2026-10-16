@@ -319,7 +319,7 @@ class LLMClient:
         current_input: CurrentInput,
         recent_turns: list[dict],
         current_time: str,
-        visual_observation_context: dict[str, Any] | None,
+        current_visual_observations: list[dict[str, Any]],
         activity_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         operation = "input_interpretation"
@@ -361,7 +361,7 @@ class LLMClient:
                 current_input=current_input,
                 recent_turns=recent_turns,
                 current_time=current_time,
-                visual_observation_context=visual_observation_context,
+                current_visual_observations=current_visual_observations,
                 activity_context=activity_context,
             )
             payload = self._generate_structured_payload(
