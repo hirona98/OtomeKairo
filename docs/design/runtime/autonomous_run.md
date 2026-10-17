@@ -149,38 +149,15 @@ run の `objective_summary` は作成時に固定し、`autonomous_step_generati
 ユーザー起点の開始直後で外向き承諾が自然な場合、`autonomous_step_generation` は `action.kind=speech` と `transition.kind=wait_until` を同時に選ぶ。
 固定承諾文は server が生成しない。
 
-## 完了前意味検証
+## 完了判断と保存
 
-`transition.kind=complete` は、run の目的が今回までの実績で満たされたときだけ確定する。
-server は capability request 以外の complete 候補について、状態遷移や発話配送より前に `autonomous_completion_review` を行う。
+`autonomous_step_generation` が目的の達成を判断し、`transition.kind=complete` を確定する。判断には現在時刻、run の目的・起点入力・判断起点時刻 `source_started_at`・履歴・観測済み capability result を渡す。達成状況は当該 run の実績と今回選ぶ行為から評価し、同じ内容を持つ過去の依頼の完了は、その過去の run の実績として扱う。
 
-review には次だけを渡す。
+相対時刻を含む目的は、固定した判断起点 `source_started_at` と起点入力から解釈し、現在時刻と照合する。`created_at` は run の保存時刻、`next_run_at` は次の実行機会である。開始直後の即時実行は、待機を登録する機会となる。step の生成と発話本文の組み立てには同じ起点情報を使い、server は必須の起点時刻の形式をコードで検証する。
 
-- 現在時刻の `TimeContext` と、run の ID、状態、保存時刻、判断起点時刻 `source_started_at`、次の実行機会、起点 cycle ID、起点入力
-- run の目的、現在段階、履歴、観測済み capability result 要約
-- complete 候補の `action.kind / run_update`
-- `action.kind=speech` の場合だけ生成済み候補本文
+発話自体が目的である run では、今回の speech を完了実績にできる。外界への作用が目的である run では、その run に属する観測済みの実行結果を完了実績とする。`speech + complete` は、今回の発話で伝達目的を果たす場合、または既に得られた実績を報告して閉じる場合に使う。残る外界作用には `capability_request`、観測や時刻の待機には `wait_until` を選ぶ。
 
-review の結果は `allow_complete / continue_run` のいずれかである。
-
-相対時刻を含む目的は固定した判断起点 `source_started_at` と起点入力から解釈し、現在時刻と照合する。server は開始候補を判断した入力サイクルの時刻を run に保存する。`created_at` は run の保存時刻であり、判断生成・保存・再開にかかった時間で相対時刻の起点を変えない。この起点は step、完了審査、発話生成に共通して渡す。step は起点時刻を必須とし、取得できない場合は明示的に失敗する。
-`next_run_at` は次の実行機会であり、開始直後の即時実行は待機を登録する機会となる。
-目的達成は当該 run の履歴・観測実績と候補行為から評価する。同じ内容を持つ過去の依頼の完了は、その過去の run の実績として扱う。
-step 判断にも同じ起点情報を渡し、直近会話の実績と今回の run の実績を区別する。
-
-- `allow_complete` は、観測済みの実行結果または今回の発話行為そのものによって目的が満たされ、候補発話も実績と一致していることを表す
-- `continue_run` は、目的達成にまだ外界作用、観測、待機が必要か、候補発話が未実行の次行動を現在 run の続きとして表していることを表す
-
-発話自体が目的である run では、今回の speech を完了実績にできる。
-外界への作用が目的である run では、予定、準備、意思表明だけを作用の完了実績にしない。
-`speech + complete` は、今回の発話で伝達目的を果たす場合、または既に得られた実績を報告して閉じる場合に使う。
-次の外界作用を行う向きが残る場合は、その作用を capability request として実行するか、適切な時刻まで `wait_until` で run を維持する。
-
-最初の review が `continue_run` の場合、候補発話を配送せず、complete 遷移も適用しない。
-server は候補本文や reviewer の理由を戻さず、固定 feedback で `autonomous_step_generation` を 1 回だけ再実行する。
-再生成した complete 候補も `continue_run` の場合、または review 自体が失敗した場合は、未検証の完了へ進めず当該 run を `cancelled` にして明示的な内部失敗として扱う。
-
-各 review は `autonomous_completion_review` event として監査する。保存内容の正本は [デバッグ可能性.md](デバッグ可能性.md) とする。
+server は出力契約と作業の実行可能状態をコードで検証する。発話を配送・イベント保存した後に、完了状態と履歴を `autonomous_runs` へ保存し、約束の更新と終了サイクルの記憶統合へ進む。開始元サイクルへ本文を返す場合は、そのサイクルから発話を配送する。監査保存は [デバッグ可能性.md](デバッグ可能性.md) を正とする。
 
 ## capability 連鎖
 

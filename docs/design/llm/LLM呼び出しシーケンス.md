@@ -232,7 +232,7 @@ sequenceDiagram
     end
 ```
 
-自律 step の送信見送りでは、`decision` の代わりに `autonomous_step` を再生成する。生成と完了審査の順序は図 4 の step 区間と同じである。
+自律 step の送信見送りでは、`decision` の代わりに `autonomous_step` を再生成する。
 図 2 の通常判断・自律 step からの要求では、現在の能力定義はいずれも `ongoing_actions` を保存する。結果を待っている目的と使用能力を、結果処理や後続判断で参照するためである。
 思考前観測はその場で取得結果を待ち、得られた観測を図 1 の入力解釈と判断へ直接引き継ぐ。
 
@@ -311,7 +311,7 @@ sequenceDiagram
 
 図 1・3 の `decision` が自律作業の開始（`kind=autonomous_run`）を決定すると、図 4 へ進む。
 **コードで形式・参照 ID・対象作業の状態を検証して作業を保存し、初回 step を生成する。**
-各 step は生成・必要な審査後に行動と状態遷移を反映する。
+各 step が次の行動と完了・継続を決定し、行動と状態遷移を反映する。
 終了時は、約束の更新と、終了サイクルの記憶統合を続けて行う。
 
 ```mermaid
@@ -329,25 +329,17 @@ sequenceDiagram
     C->>D: 新規作業を保存（autonomous_runs）
     D-->>C: 保存完了
     loop 初回・時刻到来・能力結果の反映後など、次の一手を判断する機会
-        loop step 候補の生成（完了審査で継続を求められた場合は1回だけ再生成）
-            opt Skill の選別が必要
-                C->>L: 使用する Skill を選別<br>（agent_skill_selection）
-                L-->>C: 採用する Skill
-                loop 未確認の関連 Skill・資料を追加で選ぶ間
-                    C->>L: 追加資料を選別<br>（agent_skill_material_selection）
-                    L-->>C: 追加で読む資料
-                end
-            end
-            C->>L: 次の行動・状態遷移・発話本文を生成<br>（autonomous_step）
-            L-->>C: action・transition・発話する場合の本文
-            opt 能力実行以外で完了を候補にする
-                C->>L: 作業の完了を審査<br>（autonomous_completion_review）
-                L-->>C: allow_complete または continue_run
-                C->>D: 完了審査の監査イベントを保存（events）
-                D-->>C: 保存完了
+        opt Skill の選別が必要
+            C->>L: 使用する Skill を選別<br>（agent_skill_selection）
+            L-->>C: 採用する Skill
+            loop 未確認の関連 Skill・資料を追加で選ぶ間
+                C->>L: 追加資料を選別<br>（agent_skill_material_selection）
+                L-->>C: 追加で読む資料
             end
         end
-        Note over C,D: 採用できる step が得られた場合に行動へ進む
+        C->>L: 次の行動・状態遷移・発話本文を生成<br>（autonomous_step）
+        L-->>C: action・transition・発話する場合の本文
+        Note over C,D: 出力契約と作業の実行可能状態をコードで検証
         alt 能力実行を選んだ
             Note over C,D: 図 2 の送信前チェック・進行中の行動保存・配送を実行
         else 発話を選んだ
@@ -395,7 +387,6 @@ sequenceDiagram
 ```
 
 能力実行の結果待ちは step の後で行う。結果到着前に、要求を出した step の状態遷移が保存される。
-完了審査が再度継続を求めた場合は明示失敗とし、未審査の完了状態を保存しない。
 送信見送り時の追加 step は図 2、生成自体の再送・修復は図 7 を参照する。
 
 実装: [自律作業](../../../src/otomekairo/service/autonomous_run.py)、[約束の終了時更新](../../../src/otomekairo/memory/consolidator.py)。

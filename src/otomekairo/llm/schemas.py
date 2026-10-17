@@ -9,7 +9,6 @@ from otomekairo.llm.contracts import (
     ANSWER_BOUNDARY_VALUES,
     ANSWER_CONTRACT_VALUES,
     ANSWER_TARGET_ACTOR_VALUES,
-    AUTONOMOUS_COMPLETION_REVIEW_OUTCOMES,
     DECISION_COMPARISON_SCOPE_KINDS,
     DECISION_TARGET_STANCE_VALUES,
     DECISION_TARGET_VALUES,
@@ -290,18 +289,6 @@ def autonomous_activity_alignment_review_response_format() -> dict[str, Any]:
     )
 
 
-def autonomous_completion_review_response_format() -> dict[str, Any]:
-    return structured_response_format(
-        "autonomous_completion_review",
-        closed_object(
-            {
-                "outcome": string_enum(AUTONOMOUS_COMPLETION_REVIEW_OUTCOMES),
-                "reason_summary": {"type": "string"},
-            }
-        ),
-    )
-
-
 def _episode_affect_schema() -> dict[str, Any]:
     return closed_object({
         "target_scope_type": string_enum(SCOPE_TYPE_VALUES),
@@ -549,7 +536,6 @@ def all_response_formats() -> dict[str, dict[str, Any]]:
         "decision_outward_speech": decision_response_format(comparison_scope="outward_speech"),
         "autonomous_step": autonomous_step_response_format(),
         "pre_send_check": pre_send_check_response_format(),
-        "autonomous_completion_review": autonomous_completion_review_response_format(),
         "autonomous_activity_alignment_review": autonomous_activity_alignment_review_response_format(),
         "memory_interpretation": memory_interpretation_response_format(),
         "memory_reflection_summary": memory_reflection_summary_response_format(),

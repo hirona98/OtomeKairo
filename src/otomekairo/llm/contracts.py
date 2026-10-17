@@ -216,10 +216,6 @@ PRE_SEND_CHECK_OUTCOMES = {
     "allow",
     "withhold",
 }
-AUTONOMOUS_COMPLETION_REVIEW_OUTCOMES = {
-    "allow_complete",
-    "continue_run",
-}
 MAX_ANSWER_CONTRACT_REASON_CODES = 3
 MAX_ANSWER_CONTRACT_QUERY_TERMS = 5
 ANSWER_CONTRACT_REQUIRED_KEYS = (
@@ -519,19 +515,6 @@ def validate_autonomous_activity_alignment_review_contract(payload: dict[str, An
         raise LLMError("AutonomousActivityAlignmentReview.outcome が不正です。")
     if not isinstance(payload["reason_summary"], str) or not payload["reason_summary"].strip():
         raise LLMError("AutonomousActivityAlignmentReview.reason_summary は空にできません。")
-
-
-def validate_autonomous_completion_review_contract(payload: dict[str, Any]) -> None:
-    _validate_exact_keys(
-        payload,
-        {"outcome", "reason_summary"},
-        "AutonomousCompletionReview",
-    )
-    if payload["outcome"] not in AUTONOMOUS_COMPLETION_REVIEW_OUTCOMES:
-        raise LLMError("AutonomousCompletionReview.outcome が不正です。")
-    reason_summary = payload["reason_summary"]
-    if not isinstance(reason_summary, str) or not reason_summary.strip():
-        raise LLMError("AutonomousCompletionReview.reason_summary は空にできません。")
 
 
 def validate_world_state_source_selection_contract(payload: dict[str, Any], *, input_text: str) -> None:

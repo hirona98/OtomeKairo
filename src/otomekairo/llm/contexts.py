@@ -320,7 +320,6 @@ class AutonomousStepContext:
     observation_context: dict[str, Any] | None = None
     people_context: list[dict[str, str]] | None = None
     pre_send_check_feedback: str | None = None
-    completion_review_feedback: str | None = None
     agent_skill_context: dict[str, Any] | None = None
     self_state_context: dict[str, Any] | None = None
     drive_state_summary: list[dict[str, Any]] | None = None
@@ -346,6 +345,4 @@ class AutonomousStepContext:
         }
         if self.pre_send_check_feedback is not None:
             payload["pre_send_check_feedback"] = self.pre_send_check_feedback
-        if self.completion_review_feedback is not None:
-            payload["completion_review_feedback"] = self.completion_review_feedback
         return payload
