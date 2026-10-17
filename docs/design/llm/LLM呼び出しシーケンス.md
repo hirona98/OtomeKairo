@@ -43,12 +43,10 @@ sequenceDiagram
     loop 有効な思考前観測で画像を取得できた対象ごと
         C->>L: 画像を解釈<br>（visual_observation）
         L-->>C: 今回の視覚観測
-        opt 世界状態の生成対象がある
-            C->>L: 世界状態を生成<br>（world_state）
-            L-->>C: 状態候補と根拠判定
-            C->>D: 世界状態の更新・置換・失効を保存（world_states）
-            D-->>C: 保存完了
-        end
+        C->>L: 世界状態を生成<br>（world_state）
+        L-->>C: 状態候補と根拠判定
+        C->>D: 世界状態の更新・置換・失効を保存（world_states）
+        D-->>C: 保存完了
         opt 活動状態の生成対象がある
             C->>L: 活動状態を生成<br>（activity_state）
             L-->>C: 活動候補と根拠判定
@@ -99,7 +97,7 @@ sequenceDiagram
         C->>L: 世界状態に使う本人報告を選別<br>（world_state_source_selection）
         L-->>C: 更新根拠となる報告
     end
-    opt 世界状態の生成対象がある
+    opt 観測要約・能力結果・状態更新の根拠のいずれかがある
         C->>L: 世界状態を生成<br>（world_state）
         L-->>C: 状態候補と根拠判定
         C->>D: 世界状態の更新・置換・失効を保存（world_states）
@@ -160,6 +158,8 @@ sequenceDiagram
 `input_interpretation` は、想起方針と回答に必要な根拠の条件を 1 回で返す。同期の記憶統合も `memory_interpretation` の **1 回の生成 API** で、記憶の採否、エピソード、感情、訂正対象を決める。出力の形式・参照・数値範囲はコードで検証する。
 保存前の意味比較に使う Embedding と、保存後に検索索引へ反映する Embedding［図 5］は別の呼び出しである。
 思考前観測の状態更新と、その後の人物発話に基づく状態更新も別の呼び出し箇所である。
+後半の世界状態生成は、先行する `world_state_source_selection` が状態報告なしを返し、観測要約や他の状態更新の根拠もなければ省略する。この場合も、非空の人物発話に対する選別 API は呼ぶ。一般的な質問だけで、観測や現在状態の追加情報がない場合が該当する。
+前半の思考前観測は能力結果の更新経路を通るため、画像解釈後に世界状態の生成 API を呼ぶ。API を呼んだ結果として状態候補が 0 件になる場合と、API 自体を呼ばない場合を区別する。
 
 実装: [会話入口](../../../src/otomekairo/service/input/cycle.py)、[入力パイプライン](../../../src/otomekairo/service/input/pipeline.py)、[サイクル保存](../../../src/otomekairo/service/input/trace_persist.py)、[記憶統合](../../../src/otomekairo/memory/consolidator.py)、[記憶処理の確定](../../../src/otomekairo/service/memory.py)。
 契約: [想起と判断](../memory/想起と判断.md)、[世界状態](../runtime/world_state.md)、[活動状態](../runtime/activity_state.md)、[視覚入力のパイプライン統合](../capability/vision_capture画像意味理解.md#パイプライン統合)、[記憶更新と再整理](../memory/記憶更新と再整理.md)。
@@ -167,7 +167,7 @@ sequenceDiagram
 ## 図 2: 能力実行 — 送信前チェックと結果到着後
 
 入口は判断または自律 step が返した `capability_request`。
-**送信前チェックを通った後、追跡対象の行動を DB に保存してから要求を配送する。**
+**送信前チェックを通った後、実行目的・使用能力・結果待ち状態を `ongoing_actions` に保存してから要求を配送する。**
 要求そのものの受付待ちはメモリ上に保持する。サイクルの要求要約・監査情報は、呼び出し元の記録保存時に残る。
 
 ```mermaid
@@ -188,10 +188,8 @@ sequenceDiagram
             end
         end
         alt 実行を許可できる
-            opt 行動を追跡する
-                C->>D: 進行中の行動を保存（ongoing_actions）
-                D-->>C: 保存完了
-            end
+            C->>D: 実行目的・使用能力・結果待ち状態を保存<br>（ongoing_actions）
+            D-->>C: 保存完了
             Note over C,D: 要求をメモリ上に保持して配送<br>呼び出し元のサイクル保存へ戻る［図 1・4］
         else 外部送信を見送る
             opt 最初の見送りで、通常サイクルの再判断を行う
@@ -205,7 +203,7 @@ sequenceDiagram
     end
 
     Note over C,D: 後で能力結果が到着（要求受付とは別の処理機会）
-    opt 追跡対象の行動がある
+    opt 保存済みの行動が結果到着時も有効
         C->>D: 結果処理中の行動へ更新・保存（ongoing_actions）
         D-->>C: 保存完了
     end
@@ -221,12 +219,10 @@ sequenceDiagram
         end
         Note over C,D: 図 1 のサイクル保存へ<br>記憶統合の対象なら同期統合とジョブ保存も実行
     else 自律作業に属する結果
-        opt 世界状態の生成対象がある
-            C->>L: 世界状態を生成<br>（world_state）
-            L-->>C: 状態候補と根拠判定
-            C->>D: 世界状態の更新を保存（world_states）
-            D-->>C: 保存完了
-        end
+        C->>L: 世界状態を生成<br>（world_state）
+        L-->>C: 状態候補と根拠判定
+        C->>D: 世界状態の更新を保存（world_states）
+        D-->>C: 保存完了
         C->>D: 能力結果イベントを保存（events）
         D-->>C: 保存完了
         Note over C,D: 観測された人物の登録も、この位置で別途保存する
@@ -237,7 +233,8 @@ sequenceDiagram
 ```
 
 自律 step の送信見送りでは、`decision` の代わりに `autonomous_step` を再生成する。生成と完了審査の順序は図 4 の step 区間と同じである。
-思考前観測は取得を待って図 1 の観測区間へ進み、独立した通常の結果サイクルには入らない。
+図 2 の通常判断・自律 step からの要求では、現在の能力定義はいずれも `ongoing_actions` を保存する。結果を待っている目的と使用能力を、結果処理や後続判断で参照するためである。
+思考前観測はその場で取得結果を待ち、得られた観測を図 1 の入力解釈と判断へ直接引き継ぐ。
 
 実装: [能力実行](../../../src/otomekairo/service/capability.py)、[通常の結果サイクル](../../../src/otomekairo/service/spontaneous/capability_cycle.py)、[自律作業の結果処理](../../../src/otomekairo/service/autonomous_run.py)。
 契約: [送信前チェック](pre_send_check.md)、[状態モデル](../runtime/状態モデル.md)、[自律作業](../runtime/autonomous_run.md)。
@@ -312,8 +309,9 @@ sequenceDiagram
 
 ## 図 4: 自律作業 — 開始・各 step・終了
 
-入口は `kind=autonomous_run` の判断。
-**開始審査後に作業を保存し、各 step の生成・必要な審査後に行動と状態遷移を反映する。**
+図 1・3 の `decision` が自律作業の開始（`kind=autonomous_run`）を決定すると、図 4 へ進む。
+**コードで形式・参照 ID・対象作業の状態を検証して作業を保存し、初回 step を生成する。**
+各 step は生成・必要な審査後に行動と状態遷移を反映する。
 終了時は、約束の更新と、終了サイクルの記憶統合を続けて行う。
 
 ```mermaid
@@ -323,82 +321,76 @@ sequenceDiagram
     participant E as Embedding API
     participant D as 記憶 DB
 
-    C->>L: 自律作業の開始を審査<br>（autonomous_start_review）
-    L-->>C: allow_start または reject_start
-    C->>D: 開始審査の監査イベントを保存（events）
+    Note over C,L: 図 1・3 の decision で自律作業の開始を決定済み
+    Note over C,D: コードで形式・参照 ID・対象作業の状態を検証
+    opt 既存作業を置換する
+        Note over C,D: 対象作業ごとに終了状態を保存<br>同図末尾の終了時処理を実行
+    end
+    C->>D: 新規作業を保存（autonomous_runs）
     D-->>C: 保存完了
-    alt 開始を許可
-        opt 既存作業を置換する
-            Note over C,D: 対象作業ごとに終了状態を保存<br>同図末尾の終了時処理を実行
+    loop 初回・時刻到来・能力結果の反映後など、次の一手を判断する機会
+        loop step 候補の生成（完了審査で継続を求められた場合は1回だけ再生成）
+            opt Skill の選別が必要
+                C->>L: 使用する Skill を選別<br>（agent_skill_selection）
+                L-->>C: 採用する Skill
+                loop 未確認の関連 Skill・資料を追加で選ぶ間
+                    C->>L: 追加資料を選別<br>（agent_skill_material_selection）
+                    L-->>C: 追加で読む資料
+                end
+            end
+            C->>L: 次の行動・状態遷移・発話本文を生成<br>（autonomous_step）
+            L-->>C: action・transition・発話する場合の本文
+            opt 能力実行以外で完了を候補にする
+                C->>L: 作業の完了を審査<br>（autonomous_completion_review）
+                L-->>C: allow_complete または continue_run
+                C->>D: 完了審査の監査イベントを保存（events）
+                D-->>C: 保存完了
+            end
         end
-        C->>D: 新規作業を保存（autonomous_runs）
+        Note over C,D: 採用できる step が得られた場合に行動へ進む
+        alt 能力実行を選んだ
+            Note over C,D: 図 2 の送信前チェック・進行中の行動保存・配送を実行
+        else 発話を選んだ
+            Note over C,D: 発話を配送。開始元サイクルに本文を返す場合もある
+            opt この step で発話イベントを記録する
+                C->>D: 発話イベントを保存（events）
+                D-->>C: 保存完了
+            end
+        else 外向き行動なし
+            Note over C,D: 配送なし
+        end
+        Note over C,D: 先行する能力要求が終了する場合は ongoing_actions も更新する
+        C->>D: 作業の状態遷移と履歴を保存（autonomous_runs）
         D-->>C: 保存完了
-        loop 初回・時刻到来・能力結果の反映後など、次の一手を判断する機会
-            loop step 候補の生成（完了審査で継続を求められた場合は1回だけ再生成）
-                opt Skill の選別が必要
-                    C->>L: 使用する Skill を選別<br>（agent_skill_selection）
-                    L-->>C: 採用する Skill
-                    loop 未確認の関連 Skill・資料を追加で選ぶ間
-                        C->>L: 追加資料を選別<br>（agent_skill_material_selection）
-                        L-->>C: 追加で読む資料
-                    end
-                end
-                C->>L: 次の行動・状態遷移・発話本文を生成<br>（autonomous_step）
-                L-->>C: action・transition・発話する場合の本文
-                opt 能力実行以外で完了を候補にする
-                    C->>L: 作業の完了を審査<br>（autonomous_completion_review）
-                    L-->>C: allow_complete または continue_run
-                    C->>D: 完了審査の監査イベントを保存（events）
-                    D-->>C: 保存完了
-                end
-            end
-            Note over C,D: 採用できる step が得られた場合に行動へ進む
-            alt 能力実行を選んだ
-                Note over C,D: 図 2 の送信前チェック・進行中の行動保存・配送を実行
-            else 発話を選んだ
-                Note over C,D: 発話を配送。開始元サイクルに本文を返す場合もある
-                opt この step で発話イベントを記録する
-                    C->>D: 発話イベントを保存（events）
-                    D-->>C: 保存完了
-                end
-            else 外向き行動なし
-                Note over C,D: 配送なし
-            end
-            Note over C,D: 先行する能力要求が終了する場合は ongoing_actions も更新する
-            C->>D: 作業の状態遷移と履歴を保存（autonomous_runs）
-            D-->>C: 保存完了
-            Note over C,D: 継続・時刻待ち・結果待ち・終了<br>能力結果は図 2 で保存・履歴反映して次の step へ
-        end
+        Note over C,D: 継続・時刻待ち・結果待ち・終了<br>能力結果は図 2 で保存・履歴反映して次の step へ
+    end
 
-        opt 作業が終了状態へ遷移
-            C->>D: 終了イベントを保存（events）
+    opt 作業が終了状態へ遷移
+        C->>D: 終了イベントを保存（events）
+        D-->>C: 保存完了
+        opt 更新対象の約束がある
+            C->>L: 約束の履行状態に合わせた要約を生成<br>（commitment_lifecycle_summary）
+            L-->>C: 更新する約束の要約
+            C->>D: 約束の状態・要約・revision・リンクを保存
             D-->>C: 保存完了
-            opt 更新対象の約束がある
-                C->>L: 約束の履行状態に合わせた要約を生成<br>（commitment_lifecycle_summary）
-                L-->>C: 更新する約束の要約
-                C->>D: 約束の状態・要約・revision・リンクを保存
-                D-->>C: 保存完了
-                C->>D: 人物・対象の登録を更新（entity_registry など）
-                D-->>C: 保存完了
-                opt 更新本文の埋め込みが必要
-                    C->>E: 更新した約束を埋め込み
-                    E-->>C: ベクトル
-                end
-                C->>D: ベクトル索引を保存（vector_index_entries）
-                D-->>C: 保存完了
-                C->>D: 関係索引を再生成・保存（relation_index）
-                D-->>C: 保存完了
+            C->>D: 人物・対象の登録を更新（entity_registry など）
+            D-->>C: 保存完了
+            opt 更新本文の埋め込みが必要
+                C->>E: 更新した約束を埋め込み
+                E-->>C: ベクトル
             end
-            C->>D: 約束の更新結果を作業へ保存（autonomous_runs）
+            C->>D: ベクトル索引を保存（vector_index_entries）
             D-->>C: 保存完了
-            C->>D: 終了サイクルの要約・検索履歴・追跡情報を保存
-            D-->>C: 保存完了
-            Note over C,D: 図 1 の同期記憶統合・追跡情報更新<br>・後処理ジョブ保存を実行
-            C->>D: 終了時の統合結果を作業へ保存（autonomous_runs）
+            C->>D: 関係索引を再生成・保存（relation_index）
             D-->>C: 保存完了
         end
-    else 開始拒否または審査失敗
-        Note over C,D: 作業を新規作成せず明示失敗<br>審査失敗時も監査イベントを保存する
+        C->>D: 約束の更新結果を作業へ保存（autonomous_runs）
+        D-->>C: 保存完了
+        C->>D: 終了サイクルの要約・検索履歴・追跡情報を保存
+        D-->>C: 保存完了
+        Note over C,D: 図 1 の同期記憶統合・追跡情報更新<br>・後処理ジョブ保存を実行
+        C->>D: 終了時の統合結果を作業へ保存（autonomous_runs）
+        D-->>C: 保存完了
     end
 ```
 
@@ -536,12 +528,12 @@ sequenceDiagram
 実装: [日次視覚整理](../../../src/otomekairo/service/visual_daily.py)、[記憶更新操作](../../../src/otomekairo/memory/actions.py)。
 契約: [記憶更新と再整理の視覚記憶昇格](../memory/記憶更新と再整理.md#daily_visual_digest-からの長期記憶昇格)。
 
-## 図 7: 共通 — 追加の再送・出力修復と失敗時の保存
+## 図 7: 共通 — 追加の再送・出力修復と処理の失敗確定
 
 図 1〜6 の生成 API・送信前チェック API の矢印は、通常成功時の 1 回を示す。
 **同じ位置で API 呼び出しが追加される場合**を下図に示す。
 生成途中の provider エラーによる同一要求の再送と、受信した JSON の契約違反による修復は別の処理である。
-Embedding の呼び出しはこの生成出力の修復には含まれない。
+一時的な API エラーや修復の試行は運用ログへ記録する。呼び出し元のサイクル・記憶統合などの失敗が確定した時点で、その処理結果を DB に保存する。
 
 ```mermaid
 sequenceDiagram
@@ -554,6 +546,7 @@ sequenceDiagram
         C->>L: 初回要求、または修復理由付きの要求
         L-->>C: 生成応答、または失敗
         opt provider の生成途中エラーで1回だけ再送する
+            Note over C,L: 一時エラーと再送理由は運用ログへ記録
             C->>L: 同一モデル・同一入力・同一設定で再送
             L-->>C: 再送の生成応答、または失敗
         end
@@ -571,17 +564,17 @@ sequenceDiagram
         end
     end
 
-    opt 呼び出し元が生成失敗を確定した
+    opt 最終的に呼び出し元の処理が失敗した
         alt 入力解釈・想起選別・行動判断などサイクル中核の失敗
-            C->>D: 失敗イベント・検索履歴・サイクル要約・追跡情報などを保存
+            C->>D: 入力イベントとサイクルの失敗結果を保存<br>（監査イベント・検索履歴・要約・追跡情報も含む）
             D-->>C: 保存完了
-            Note over C,D: サイクルを失敗として返す<br>通常の同期記憶統合へ進まない
+            Note over C,D: サイクルを internal_failure として確定・返却
         else 判断後の同期記憶統合が失敗
-            C->>D: 記憶統合の失敗イベントを保存（events）
+            C->>D: 記憶統合の失敗結果を監査イベントとして保存（events）
             D-->>C: 保存完了
             C->>D: 記憶統合の失敗を追跡情報へ保存（cycle_traces）
             D-->>C: 保存完了
-            Note over C,D: 保存済みの判断結果を返す<br>後処理ジョブは登録しない
+            Note over C,D: 記憶統合を失敗として確定<br>保存済みの判断結果を返す
         else 状態生成・自律作業・scope・ジョブ・日次整理などの失敗
             Note over C,D: 各契約の単位で失敗を記録し、監査・追跡・処理状態を保存
         end
@@ -590,6 +583,7 @@ sequenceDiagram
 
 HTTP 要求や schema の拒否、出力上限、content filter などは、JSON 修復へ進める生成応答とは区別する。
 同一要求の再送でも生成途中エラーが続けば、その時点で明示失敗となる。
+現在の実装では、サイクルや記憶統合の失敗結果に `failure_reason` として例外の文言も保存する。運用ログと DB に残る処理結果の役割は [デバッグ可能性](../runtime/デバッグ可能性.md) を参照する。
 失敗範囲と追加呼び出しの条件は [LLM 構造化出力 transport](LLM構造化出力transport.md)、[LLM 補助契約共通](LLM補助契約共通.md)、各 role の契約を正とする。
 
 実装: [生成・検証・修復](../../../src/otomekairo/llm/client.py)、[API transport](../../../src/otomekairo/llm/transport.py)、[入力失敗の確定](../../../src/otomekairo/service/input/cycle.py)、[記憶統合失敗の確定](../../../src/otomekairo/service/memory.py)。

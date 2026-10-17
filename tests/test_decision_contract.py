@@ -201,6 +201,14 @@ class DecisionContractTests(unittest.TestCase):
                 context = replace(
                     _decision_context(_mcp_capability_view()), input_text=text,
                     current_input=replace(_current_input(), text=text),
+                    time_context={
+                        "current_time_text": "現在時刻: 2026年6月20日 10時59分00秒", "weekday": "saturday",
+                        "part_of_day": "morning",
+                    },
+                    autonomous_run_summaries=[{
+                        "run_id": f"autonomous_run:{index}", "status": "waiting_timer",
+                        "objective_summary": "指定時刻に一度知らせる。",
+                    } for index in range(21)],
                 )
                 with patch("otomekairo.llm.client.complete_text", return_value=_wire_response(candidate)) as complete:
                     result = LLMClient().generate_decision(
@@ -210,6 +218,13 @@ class DecisionContractTests(unittest.TestCase):
                 self.assertEqual(result, candidate)
                 complete.assert_called_once()
                 self.assertEqual(complete.call_args.kwargs["response_format"]["json_schema"]["name"], "decision")
+                payloads = [json.loads(message["content"].splitlines()[1])
+                            for message in complete.call_args.kwargs["messages"] if message["role"] == "user"]
+                internal = next(payload["internal_context"] for payload in payloads
+                                if isinstance(payload, dict) and "internal_context" in payload)
+                self.assertEqual(internal["time_context"], context.time_context)
+                self.assertEqual(internal["autonomous_run_summaries"], context.autonomous_run_summaries)
+                self.assertIn(context.current_input.to_prompt_payload(), payloads)
 
     def test_decision_contract_requires_foreground_selection(self) -> None:
         payload = {"speech_text": "検証用の発話です。",
@@ -1368,23 +1383,6 @@ class AutonomousCompletionReviewContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class AutonomousStartReviewTests(unittest.TestCase):
-    def test_start_review_uses_structured_transport_and_repairs_invalid_outcome(self) -> None:
-        valid = {"outcome": "reject_start", "reason_summary": "既存実行で満たされる。"}
-        with patch("otomekairo.llm.client.complete_text", side_effect=[
-            json.dumps({"outcome": "allow", "reason_summary": "invalid"}), json.dumps(valid)
-        ]) as complete:
-            result = LLMClient().generate_autonomous_start_review(
-                model_config={"model": "real-model"}, review_context={"existing_runs": [], "decision": {}}
-            )
-        self.assertEqual(result, valid)
-        self.assertEqual(complete.call_count, 2)
-
-    def test_mock_start_review_requires_explicit_test_double(self) -> None:
-        with self.assertRaises(LLMError):
-            LLMClient().generate_autonomous_start_review(model_config={"model": "mock-test"}, review_context={})
 
 
 class AutonomousActivityAlignmentReviewTests(unittest.TestCase):

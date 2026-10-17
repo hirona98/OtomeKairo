@@ -513,14 +513,6 @@ def validate_pre_send_check_contract(payload: dict[str, Any]) -> None:
         raise LLMError("PreSendCheck.reason_summary は空にできません。")
 
 
-def validate_autonomous_start_review_contract(payload: dict[str, Any]) -> None:
-    _validate_exact_keys(payload, {"outcome", "reason_summary"}, "AutonomousStartReview")
-    if payload["outcome"] not in ("allow_start", "reject_start"):
-        raise LLMError("AutonomousStartReview.outcome が不正です。")
-    if not isinstance(payload["reason_summary"], str) or not payload["reason_summary"].strip():
-        raise LLMError("AutonomousStartReview.reason_summary は空にできません。")
-
-
 def validate_autonomous_activity_alignment_review_contract(payload: dict[str, Any]) -> None:
     _validate_exact_keys(payload, {"outcome", "reason_summary"}, "AutonomousActivityAlignmentReview")
     if payload["outcome"] not in ("allow", "reject"):

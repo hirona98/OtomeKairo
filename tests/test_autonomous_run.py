@@ -84,8 +84,15 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             active = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"], status="waiting_timer")
             active["run_id"] = "autonomous_run:long-wait"
             service.store.upsert_autonomous_run(autonomous_run=active)
+            for index in range(20):
+                service.store.upsert_autonomous_run(autonomous_run={
+                    **active, "run_id": f"autonomous_run:active-{index}",
+                })
             summaries = service._list_autonomous_run_prompt_summaries(state=state, current_time="2026-10-04T10:00:00+09:00")
-            self.assertEqual({r["run_id"] for r in summaries}, {active["run_id"], *[f"autonomous_run:cancelled-{i}" for i in range(2, 7)]})
+            self.assertEqual({r["run_id"] for r in summaries}, {
+                active["run_id"], *[f"autonomous_run:active-{i}" for i in range(20)],
+                *[f"autonomous_run:cancelled-{i}" for i in range(2, 7)],
+            })
             self.assertEqual(len([r for r in summaries if r["status"] == "cancelled"]), 5)
 
     def test_completion_context_keeps_the_current_requests_origin_and_time(self) -> None:
@@ -209,102 +216,36 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                     run=run, current_time="2026-09-21T10:00:00+09:00", step_trigger="invalid",
                 )
 
-    def test_start_review_blocks_creation_and_replacement_before_side_effects(self) -> None:
-        for mode in ("create_new", "replace_existing"):
-            for response in (
-                {"outcome": "reject_start", "reason_summary": "既存実行の待機を続ける目的です。"},
-                {"outcome": "invalid"}, LLMError("failed"),
-            ):
-                with self.subTest(mode=mode, response=response), tempfile.TemporaryDirectory() as temp_dir:
-                    service = OtomeKairoService(Path(temp_dir))
-                    state = service.store.read_state()
-                    run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
-                    service.store.upsert_autonomous_run(autonomous_run=run)
-                    service.store.append_events = Mock(wraps=service.store.append_events)
-                    review = Mock(side_effect=response) if isinstance(response, Exception) else Mock(return_value=response)
-                    service.llm = SimpleNamespace(generate_autonomous_start_review=review)
-                    service._execute_autonomous_run_step = Mock()
-                    with self.assertRaises(LLMError):
-                        service._start_autonomous_run_from_decision(
-                            state=state, current_time=run["created_at"],
-                            source_started_at=run["source_started_at"],
-                            decision={"kind": "autonomous_run", "reason_summary": "既存の待機を維持する。",
-                                "autonomous_run": {"objective_summary": "交流機会を確認する。",
-                                    "initial_step_summary": "待つ。", "coordination": {
-                                        "mode": mode,
-                                        "target_run_ids": [run["run_id"]] if mode == "replace_existing" else [],
-                                        "reason_summary": "既存の待機を維持する。"}}},
-                            source_current_input=run["source_current_input"],
-                            source_cycle_id="cycle:test-review", assistant_message_target_client_id=None,
-                        )
-                    self.assertEqual(service.store.get_autonomous_run(run_id=run["run_id"]), run)
-                    self.assertEqual(len(service.store.list_autonomous_runs(memory_set_id=run["memory_set_id"])), 1)
-                    service._execute_autonomous_run_step.assert_not_called()
-                    self.assertEqual(review.call_args.kwargs["review_context"]["existing_runs"][0]["run_id"], run["run_id"])
-                    context = review.call_args.kwargs["review_context"]
-                    self.assertEqual(context["time_context"], service._build_time_context(current_time=run["created_at"]))
-                    event = service.store.append_events.call_args.kwargs["events"][0]
-                    self.assertEqual(event["kind"], "autonomous_start_review")
-                    audit = event["start_review"]
-                    self.assertEqual(audit["candidate_summary"], context["decision"])
-                    self.assertEqual(audit["time_context"], context["time_context"])
-                    rejected = isinstance(response, dict) and response["outcome"] == "reject_start"
-                    self.assertEqual(audit["reason_summary"], response["reason_summary"] if rejected else None)
-                    self.assertEqual(audit["result_status"], "completed" if rejected else "failed")
-
-    def test_start_review_preserves_decision_clock_across_generation_delay(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            service = OtomeKairoService(Path(temp_dir))
-            state = service.store.read_state()
-            decision_clock = service._build_time_context(current_time="2027-10-04T09:00:47+09:00")
-            review_time = "2027-10-04T09:02:17+09:00"
-            review = Mock(return_value={"outcome": "allow_start", "reason_summary": "依頼時点から5分後の一回通知です。"})
-            service.llm = SimpleNamespace(generate_autonomous_start_review=review)
-            service.store.append_events = Mock(wraps=service.store.append_events)
-            service._review_autonomous_start_candidate(
-                state=state, current_time=review_time, time_context=decision_clock,
-                source_cycle_id="cycle:delayed-review",
-                source_current_input={"sender_kind": "person", "source_kind": "user_message",
-                    "text": "今から5分後に一度知らせて。", "response_target_refs": ["person:master"]},
-                decision={"kind": "autonomous_run", "reason_summary": "時刻まで待って知らせる依頼です。",
-                    "autonomous_run": {"objective_summary": "2027年10月4日9時5分47秒に一度知らせて終了する。",
-                        "initial_step_summary": "指定時刻まで待機する。",
-                        "coordination": {"mode": "create_new", "target_run_ids": [], "reason_summary": "独立した依頼です。"}}},
-            )
-            context = review.call_args.kwargs["review_context"]
-            self.assertEqual(context["time_context"], decision_clock)
-            self.assertNotEqual(context["time_context"], service._build_time_context(current_time=review_time))
-            event = service.store.append_events.call_args.kwargs["events"][0]
-            self.assertEqual(event["created_at"], review_time)
-            self.assertEqual(event["start_review"]["time_context"], decision_clock)
-            self.assertEqual(event["start_review"]["reason_summary"], review.return_value["reason_summary"])
-            context["time_context"]["current_time_text"] = "changed"
-            self.assertEqual(event["start_review"]["time_context"], decision_clock)
-
-    def test_allowed_start_review_creates_run_and_includes_all_existing_runs(self) -> None:
+    def test_start_saves_decision_and_origin_before_first_step(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))
             state = service.store.read_state()
             run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
-            for index in range(21):
-                service.store.upsert_autonomous_run(autonomous_run={**run, "run_id": f"autonomous_run:{index}"})
-            review = Mock(return_value={"outcome": "allow_start", "reason_summary": "独立した追加目的。"})
-            service.llm = SimpleNamespace(generate_autonomous_start_review=review)
-            service._execute_autonomous_run_step = Mock(return_value={"status": "active"})
+            service.store.upsert_autonomous_run(autonomous_run=run)
+            service.llm = SimpleNamespace()
+
+            def execute_step(**kwargs):
+                saved = service.store.get_autonomous_run(run_id=kwargs["run_id"])
+                self.assertEqual(saved["status"], "active")
+                self.assertEqual(saved["objective_summary"], "指定時刻に声をかけて完了する。")
+                self.assertEqual(saved["current_step_summary"], "時刻を確認する。")
+                self.assertEqual(saved["source_started_at"], "2026-06-20T10:59:00+09:00")
+                self.assertEqual(saved["source_cycle_id"], "cycle:test-start")
+                self.assertEqual(saved["source_current_input"], run["source_current_input"])
+                return {"status": "active"}
+
+            service._execute_autonomous_run_step = Mock(side_effect=execute_step)
             result = service._start_autonomous_run_from_decision(
                 state=state, current_time=run["created_at"],
                 source_started_at="2026-06-20T10:59:00+09:00",
                 decision={"kind": "autonomous_run", "autonomous_run": {
                     "objective_summary": "指定時刻に声をかけて完了する。", "initial_step_summary": "時刻を確認する。",
                     "coordination": {"mode": "create_new", "target_run_ids": [], "reason_summary": "独立した依頼。"}}},
-                source_current_input=run["source_current_input"], source_cycle_id="cycle:test-review",
+                source_current_input=run["source_current_input"], source_cycle_id="cycle:test-start",
                 assistant_message_target_client_id=None,
             )
-            self.assertEqual(len(review.call_args.kwargs["review_context"]["existing_runs"]), 21)
-            self.assertEqual(
-                review.call_args.kwargs["review_context"]["time_context"],
-                service._build_time_context(current_time="2026-06-20T10:59:00+09:00"),
-            )
+            self.assertEqual(service.store.get_autonomous_run(run_id=run["run_id"]), run)
+            self.assertEqual(len(service.store.list_autonomous_runs(memory_set_id=run["memory_set_id"])), 2)
             self.assertEqual(result["autonomous_run"]["status"], "active")
             saved = service.store.get_autonomous_run(run_id=result["autonomous_run"]["run_id"])
             self.assertEqual(saved["source_started_at"], "2026-06-20T10:59:00+09:00")
@@ -313,6 +254,59 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             self.assertEqual(summary["source_started_at"], saved["source_started_at"])
             self.assertEqual(service._autonomous_completion_review_run_context(summary)["source_started_at"], saved["source_started_at"])
             service._execute_autonomous_run_step.assert_called_once()
+
+    def test_start_validates_contract_targets_and_clock_before_side_effects(self) -> None:
+        cases = (
+            {"coordination": None},
+            {"coordination": {"mode": "invalid"}},
+            {"coordination": {"target_run_ids": "autonomous_run:test"}},
+            {"coordination": {"target_run_ids": ["autonomous_run:missing"]}},
+            {"coordination": {"target_run_ids": ["autonomous_run:test", "autonomous_run:test"]}},
+            {"coordination": {"target_run_ids": []}},
+            {"coordination": {"mode": "create_new"}},
+            {"coordination": {"reason_summary": ""}},
+            {"target_change": {"memory_set_id": "memory_set:other"}},
+            {"target_change": {"status": "completed"}},
+            {"target_change": {"status": "cancelled"}},
+            {"payload": {"objective_summary": ""}},
+            {"payload": {"initial_step_summary": ""}},
+            *({"source_started_at": value} for value in (None, "", "invalid", "2026-10-04T09:00:47")),
+        )
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temp_dir:
+                service = OtomeKairoService(Path(temp_dir))
+                state = service.store.read_state()
+                run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
+                run.update(run_id="autonomous_run:test", **case.get("target_change", {}))
+                service.store.upsert_autonomous_run(autonomous_run=run)
+                service.llm = SimpleNamespace()
+                service.store.upsert_autonomous_run = Mock(wraps=service.store.upsert_autonomous_run)
+                service._finalize_autonomous_run_commitments = Mock()
+                service._execute_autonomous_run_step = Mock()
+                coordination = {
+                    "mode": "replace_existing", "target_run_ids": [run["run_id"]],
+                    "reason_summary": "依頼に合わせて目的を変更する。",
+                }
+                if "coordination" in case:
+                    coordination = (None if case["coordination"] is None
+                                    else {**coordination, **case["coordination"]})
+                payload = {
+                    "objective_summary": "指定時刻に一度知らせて終える。",
+                    "initial_step_summary": "指定時刻まで待機する。",
+                    "coordination": coordination, **case.get("payload", {}),
+                }
+                with self.assertRaises(ValueError):
+                    service._start_autonomous_run_from_decision(
+                        state=state, current_time=run["created_at"],
+                        source_started_at=case.get("source_started_at", run["source_started_at"]),
+                        decision={"kind": "autonomous_run", "autonomous_run": payload},
+                        source_current_input=run["source_current_input"], source_cycle_id="cycle:test-start",
+                        assistant_message_target_client_id=None,
+                    )
+                service.store.upsert_autonomous_run.assert_not_called()
+                service._finalize_autonomous_run_commitments.assert_not_called()
+                service._execute_autonomous_run_step.assert_not_called()
+                self.assertEqual(service.store.get_autonomous_run(run_id=run["run_id"]), run)
 
     def test_step_requires_the_saved_time_origin_before_model_calls(self) -> None:
         for value in (None, "", "invalid", "2026-10-04T09:00:47"):
@@ -359,9 +353,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                         service.store.upsert_autonomous_run(autonomous_run={
                             **run, "run_id": target_id, "periodic_thought_topic_ids": topic_ids,
                         })
-                    service.llm = SimpleNamespace(generate_autonomous_start_review=Mock(return_value={
-                        "outcome": "allow_start", "reason_summary": "今回の目的と操作が一致している。",
-                    }))
+                    service.llm = SimpleNamespace()
                     service._execute_autonomous_run_step = Mock(return_value={"status": "active"})
                     # 置換時の記憶統合と外部 LLM 呼び出しは、この保存・候補化境界の対象外。
                     service._finalize_autonomous_run_commitments = Mock(side_effect=lambda **kwargs: kwargs["run"])
@@ -392,9 +384,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                     if select_new_topic:
                         expected.add("new")
                     self.assertEqual(replacement.get("periodic_thought_topic_ids", []), sorted(expected))
-                    service.llm.generate_autonomous_start_review.assert_called_once()
-                    review_context = service.llm.generate_autonomous_start_review.call_args.kwargs["review_context"]
-                    self.assertNotIn("periodic_thought_topic_ids", review_context)
+                    service._execute_autonomous_run_step.assert_called_once()
                     self.assertNotIn("source_factors", replacement)
                     self.assertNotIn("periodic_thought_topic_ids", service._autonomous_run_prompt_summary(replacement))
                     self.assertEqual(
