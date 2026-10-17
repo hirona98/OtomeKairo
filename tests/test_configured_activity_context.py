@@ -5,7 +5,7 @@ from dataclasses import replace
 from otomekairo.llm.contexts import CurrentInput, DecisionContext, PersonaContext
 from otomekairo.llm.prompts import (
     build_decision_messages,
-    build_memory_candidate_review_messages, build_memory_retention_review_messages,
+    build_memory_interpretation_messages,
 )
 from otomekairo.service.input.pipeline import ServiceInputPipelineMixin
 from test_decision_contract import _decision_context
@@ -27,18 +27,17 @@ class ConfiguredActivityContextTests(unittest.TestCase):
                 else:
                     self.assertEqual(payload["expression_addon"], persona.expression_addon)
 
-    def test_memory_roles_receive_setting_evidence_without_turning_it_into_recalled_memory(self) -> None:
+    def test_memory_interpretation_receives_setting_evidence_separately_from_recalled_memory(self) -> None:
         topics = [{"topic_id": "topic:activity", "topic_summary": "公開情報から学び、交流する。"}]
-        context = {"persona_context": {}, "input_text": "今の関心と活動は？", "episode": {}, "decision": {}, "speech_text": None,
-                   "recall_hint": {}, "candidates": [], "correction_selection": {},
-                   "memory_context": {"configured_activity_topics": topics, "recall_pack": {"active_topics": []}}}
-        candidate = build_memory_candidate_review_messages(review_context=context)
-        retention = build_memory_retention_review_messages(review_context=context)
-        candidate_payload = json.loads(candidate[1]["content"].split("\n")[1])
-        retention_payload = json.loads(retention[1]["content"].split("\n")[1])
-        self.assertEqual(candidate_payload["memory_context"]["configured_activity_topics"], topics)
-        self.assertEqual(candidate_payload["memory_context"]["recall_pack"]["active_topics"], [])
-        self.assertEqual(retention_payload["evidence_context"]["configured_activity_topics"], topics)
+        persona = PersonaContext("Test", "テスト人格。", None, "判断の基底。")
+        messages = build_memory_interpretation_messages(
+            persona_context=persona, input_text="今の関心と活動は？", decision={}, speech_text=None,
+            recall_hint={}, current_time="2026-10-17T09:00:00+09:00",
+            memory_context={"configured_activity_topics": topics, "recall_pack": {"active_topics": []}},
+        )
+        payload = json.loads(messages[1]["content"].split("\n")[1])
+        self.assertEqual(payload["memory_context"]["configured_activity_topics"], topics)
+        self.assertEqual(payload["memory_context"]["recall_pack"]["active_topics"], [])
 
     def test_expression_receives_wake_observations_before_world_state_adoption(self) -> None:
         current = CurrentInput(sender_kind="person", sender_ref="person:test", source_kind="user_message",

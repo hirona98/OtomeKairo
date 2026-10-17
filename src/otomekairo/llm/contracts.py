@@ -529,69 +529,6 @@ def validate_autonomous_activity_alignment_review_contract(payload: dict[str, An
         raise LLMError("AutonomousActivityAlignmentReview.reason_summary は空にできません。")
 
 
-def validate_memory_candidate_review_contract(
-    payload: dict[str, Any], *, candidate_count: int,
-    target_revision_ids: set[str] | None = None,
-) -> None:
-    _validate_exact_keys(payload, {"episode_review", "decisions", "correction_review"}, "MemoryCandidateReview")
-    correction_review = payload["correction_review"]
-    _validate_exact_keys(
-        correction_review, {"prior_claim_assessment", "contradicted_revision_ids", "replacement_candidate_indices", "reason_summary"}, "MemoryCandidateReview.correction_review",
-    )
-    if correction_review["prior_claim_assessment"] not in {"contradicted", "consistent", "undetermined", "not_reviewed"}:
-        raise LLMError("MemoryCandidateReview.correction_review.prior_claim_assessment が不正です。")
-    if not isinstance(correction_review["reason_summary"], str) or not correction_review["reason_summary"].strip():
-        raise LLMError("MemoryCandidateReview.correction_review.reason_summary は空にできません。")
-    revision_ids = correction_review["contradicted_revision_ids"]
-    if not isinstance(revision_ids, list) or not all(isinstance(item, str) and item for item in revision_ids):
-        raise LLMError("MemoryCandidateReview.correction_review.contradicted_revision_ids が不正です。")
-    if len(set(revision_ids)) != len(revision_ids):
-        raise LLMError("MemoryCandidateReview.correction_review.contradicted_revision_ids が重複しています。")
-    if bool(revision_ids) != (correction_review["prior_claim_assessment"] == "contradicted"):
-        raise LLMError("MemoryCandidateReview.correction_review の評価と訂正対象が一致しません。")
-    if target_revision_ids is not None and not set(revision_ids).issubset(target_revision_ids):
-        raise LLMError("MemoryCandidateReview.correction_review は提示された revision_id だけを参照できます。")
-    replacement_indices = correction_review["replacement_candidate_indices"]
-    if not isinstance(replacement_indices, list) or not all(type(index) is int and 0 <= index < candidate_count for index in replacement_indices):
-        raise LLMError("MemoryCandidateReview.correction_review.replacement_candidate_indices が不正です。")
-    if len(set(replacement_indices)) != len(replacement_indices) or (replacement_indices and not revision_ids):
-        raise LLMError("MemoryCandidateReview.correction_review の置換候補と訂正対象が一致しません。")
-    episode = payload["episode_review"]
-    _validate_exact_keys(
-        episode, {"summary_text", "outcome_text", "open_loops", "reason_summary"},
-        "MemoryCandidateReview.episode_review",
-    )
-    if not isinstance(episode["summary_text"], str) or not episode["summary_text"].strip():
-        raise LLMError("MemoryCandidateReview.episode_review.summary_text は空にできません。")
-    if episode["outcome_text"] is not None and not isinstance(episode["outcome_text"], str):
-        raise LLMError("MemoryCandidateReview.episode_review.outcome_text が不正です。")
-    if not isinstance(episode["open_loops"], list) or not all(
-        isinstance(item, str) and item.strip() for item in episode["open_loops"]
-    ):
-        raise LLMError("MemoryCandidateReview.episode_review.open_loops が不正です。")
-    if not isinstance(episode["reason_summary"], str) or not episode["reason_summary"].strip():
-        raise LLMError("MemoryCandidateReview.episode_review.reason_summary は空にできません。")
-    validate_memory_retention_review_contract({"decisions": payload["decisions"]}, candidate_count=candidate_count)
-
-
-def validate_memory_retention_review_contract(payload: dict[str, Any], *, candidate_count: int) -> None:
-    _validate_exact_keys(payload, {"decisions"}, "MemoryRetentionReview")
-    decisions = payload["decisions"]
-    if not isinstance(decisions, list) or len(decisions) != candidate_count:
-        raise LLMError("MemoryCandidateReview.decisions は候補ごとに1件必要です。")
-    seen_indices: set[int] = set()
-    for decision in decisions:
-        _validate_exact_keys(decision, {"index", "retention_basis", "reason_summary"}, "MemoryCandidateReview.decision")
-        index = decision["index"]
-        if type(index) is not int or not 0 <= index < candidate_count or index in seen_indices:
-            raise LLMError("MemoryCandidateReview.index が不正または重複しています。")
-        seen_indices.add(index)
-        if decision["retention_basis"] not in {"explicit_pattern", "repeated_experience", "future_commitment", "current_episode", "unsupported"}:
-            raise LLMError("MemoryCandidateReview.retention_basis が不正です。")
-        if not isinstance(decision["reason_summary"], str) or not decision["reason_summary"].strip():
-            raise LLMError("MemoryCandidateReview.reason_summary は空にできません。")
-
-
 def validate_autonomous_completion_review_contract(payload: dict[str, Any]) -> None:
     _validate_exact_keys(
         payload,
@@ -1231,8 +1168,10 @@ def validate_memory_interpretation_contract(
         raise LLMError("MemoryInterpretation episode.episode_series_id が不正です。")
     if episode["outcome_text"] is not None and not isinstance(episode["outcome_text"], str):
         raise LLMError("MemoryInterpretation episode.outcome_text が不正です。")
-    if not isinstance(episode["open_loops"], list):
-        raise LLMError("MemoryInterpretation episode.open_loops は配列である必要があります。")
+    if not isinstance(episode["open_loops"], list) or not all(
+        isinstance(item, str) and item.strip() for item in episode["open_loops"]
+    ):
+        raise LLMError("MemoryInterpretation episode.open_loops は空でない文字列の配列である必要があります。")
     if not isinstance(episode["salience"], (int, float)):
         raise LLMError("MemoryInterpretation episode.salience は数値である必要があります。")
     _validate_scope_identity(
@@ -1396,25 +1335,8 @@ def _validate_episode_affects(episode_affects: Any, *, label: str) -> None:
             raise LLMError(f"{label} episode_affects に重複した target/label の組を含めてはいけません。")
         seen_episode_affects.add(affect_key)
 
-
-def validate_affect_review_contract(payload: dict[str, Any]) -> None:
-    _validate_exact_keys(payload, {"self_reaction", "other_affects", "reason_summary"}, "AffectReview")
-    self_reaction = payload["self_reaction"]
-    _validate_exact_keys(self_reaction, {"affect", "reason_summary"}, "AffectReview.self_reaction")
-    if not isinstance(self_reaction["reason_summary"], str) or not self_reaction["reason_summary"].strip():
-        raise LLMError("AffectReview.self_reaction.reason_summary は空にできません。")
-    if not isinstance(payload["reason_summary"], str) or not payload["reason_summary"].strip():
-        raise LLMError("AffectReview.reason_summary は空にできません。")
-    other_affects = payload["other_affects"]
-    if not isinstance(other_affects, list):
-        raise LLMError("AffectReview.other_affects は配列である必要があります。")
-    self_affect = self_reaction["affect"]
-    reviewed_affects = ([self_affect] if self_affect is not None else []) + other_affects
-    _validate_episode_affects(reviewed_affects, label="AffectReview")
-    if self_affect is not None and self_affect["target_scope_type"] != "self":
-        raise LLMError("AffectReview.self_reaction.affect は self である必要があります。")
-    if any(affect["target_scope_type"] == "self" for affect in other_affects):
-        raise LLMError("AffectReview.other_affects に self を含めてはいけません。")
+    if sum(affect["target_scope_type"] == "self" for affect in episode_affects) > 1:
+        raise LLMError(f"{label} episode_affects の自己反応は最大 1 件です。")
 
 
 def validate_memory_reflection_summary_text(summary_text: Any, *, label: str = "MemoryReflectionSummary") -> str:

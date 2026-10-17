@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from otomekairo.store.file_store import FileStore
 
 
-# 直近の更新と、今回の入力に対して検索された記憶を訂正審査へ渡す。
+# 直近の更新と、今回の入力に対して検索された記憶を記憶解釈へ渡す。
 CORRECTION_CYCLE_LIMIT = 6
 CORRECTION_TARGET_LIMIT = 12
 
@@ -57,7 +57,7 @@ class MemoryCorrectionReconciler:
         }
 
     def queued_trace(self, *, targets: list[dict[str, Any]]) -> dict[str, Any]:
-        # 同期側では候補化だけ行い、判断は後段 worker に渡す。
+        # 同期の記憶解釈で選定し、選定結果の反映は後段 worker に渡す。
         result_status = "queued" if targets else "skipped"
         selection_status = "queued" if targets else "not_requested"
         return {
@@ -102,15 +102,7 @@ class MemoryCorrectionReconciler:
             return [], self.skipped_trace(reason="no_context")
 
         targets = context.get("targets")
-        if context.get("selection_review_issue") == "review_found_unselected_correction":
-            return [], {
-                **self.skipped_trace(reason="review_found_unselected_correction"),
-                "result_status": "failed",
-                "selection_status": "failed",
-                "target_candidate_count": len(targets) if isinstance(targets, list) else 0,
-                "failure_reason": "記憶候補審査が過去の主張の誤りを認めましたが、記憶解釈は訂正対象を選定しませんでした。",
-            }
-        if not isinstance(targets, list) or not targets:
+        if not isinstance(targets, list):
             return [], self.skipped_trace(reason="no_targets")
 
         selection = context.get("selection")
@@ -139,6 +131,9 @@ class MemoryCorrectionReconciler:
                 "actions": [],
                 "failure_reason": str(exc),
             }
+
+        if not targets and selection["correction_status"] == "no_correction":
+            return [], self.skipped_trace(reason="no_targets")
 
         # アクション作成
         event_ids = [

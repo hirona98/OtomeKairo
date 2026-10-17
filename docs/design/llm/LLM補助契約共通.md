@@ -16,8 +16,6 @@
 - `pending_intent_selection`
 - `recall_pack_selection`
 - `memory_interpretation`
-- `memory_candidate_review`
-- `affect_review`
 - `memory_reflection_summary`
 - `pre_send_check`
 - `world_state` 候補抽出

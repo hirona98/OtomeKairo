@@ -312,39 +312,6 @@ def autonomous_completion_review_response_format() -> dict[str, Any]:
     )
 
 
-def memory_candidate_review_response_format() -> dict[str, Any]:
-    return structured_response_format(
-        "memory_candidate_review",
-        closed_object({
-            "episode_review": closed_object({
-                "summary_text": {"type": "string"},
-                "outcome_text": nullable({"type": "string"}),
-                "open_loops": string_array(),
-                "reason_summary": {"type": "string"},
-            }),
-            "correction_review": closed_object({
-                "prior_claim_assessment": string_enum(["contradicted", "consistent", "undetermined", "not_reviewed"]),
-                "contradicted_revision_ids": string_array(),
-                "replacement_candidate_indices": {"type": "array", "items": {"type": "integer"}},
-                "reason_summary": {"type": "string"},
-            }),
-        }),
-    )
-
-
-def memory_retention_review_response_format() -> dict[str, Any]:
-    return structured_response_format("memory_retention_review", closed_object({
-            "decisions": {
-                "type": "array",
-                "items": closed_object({
-                    "reason_summary": {"type": "string"},
-                    "retention_basis": string_enum(["explicit_pattern", "repeated_experience", "future_commitment", "current_episode", "unsupported"]),
-                    "index": {"type": "integer"},
-                }),
-            },
-    }))
-
-
 def _episode_affect_schema() -> dict[str, Any]:
     return closed_object({
         "target_scope_type": string_enum(SCOPE_TYPE_VALUES),
@@ -359,24 +326,6 @@ def _episode_affect_schema() -> dict[str, Any]:
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         "summary_text": {"type": "string"},
     })
-
-
-def affect_review_response_format() -> dict[str, Any]:
-    return structured_response_format(
-        "affect_review",
-        closed_object({
-            "self_reaction": closed_object({
-                "affect": nullable(_episode_affect_schema()),
-                "reason_summary": {"type": "string"},
-            }),
-            "other_affects": {
-                "type": "array",
-                "maxItems": 4,
-                "items": _episode_affect_schema(),
-            },
-            "reason_summary": {"type": "string"},
-        }),
-    )
 
 
 def memory_interpretation_response_format() -> dict[str, Any]:
@@ -614,9 +563,6 @@ def all_response_formats() -> dict[str, dict[str, Any]]:
         "autonomous_start_review": autonomous_start_review_response_format(),
         "autonomous_activity_alignment_review": autonomous_activity_alignment_review_response_format(),
         "memory_interpretation": memory_interpretation_response_format(),
-        "memory_candidate_review": memory_candidate_review_response_format(),
-        "memory_retention_review": memory_retention_review_response_format(),
-        "affect_review": affect_review_response_format(),
         "memory_reflection_summary": memory_reflection_summary_response_format(),
         "recall_pack_selection": recall_pack_selection_response_format(),
         "pending_intent_selection": pending_intent_selection_response_format(),
