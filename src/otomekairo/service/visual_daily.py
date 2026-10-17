@@ -346,7 +346,7 @@ class ServiceVisualDailyMixin:
         # 昇格
         memory_set_id = digest["memory_set_id"]
         finished_at = self._now_iso()
-        actions: list[dict[str, Any]] = []
+        memory_candidates: list[dict[str, Any]] = []
         skipped_count = 0
         candidates = candidates[:VISUAL_DAILY_PROMOTION_LIMIT_PER_DIGEST]
         try:
@@ -362,16 +362,14 @@ class ServiceVisualDailyMixin:
                 continue
             memory_candidate = self._visual_daily_memory_candidate(digest=digest, candidate=candidate)
             memory_candidate["qualifiers_hint"]["support_group_refs"] = support[index]
-            candidate_actions = self.memory.action_resolver.resolve_memory_actions(
-                memory_set_id=memory_set_id,
-                finished_at=finished_at,
-                event_ids=[],
-                cycle_ids=[],
-                candidate=memory_candidate,
+            memory_candidates.append(memory_candidate)
+        actions = self._cap_visual_daily_memory_action_scores(
+            self.memory.action_resolver.resolve_memory_actions_batch(
+                memory_set_id=memory_set_id, finished_at=finished_at,
+                event_ids=[], cycle_ids=[], candidates=memory_candidates,
                 embedding_definition=state["memory_sets"][memory_set_id]["embedding"],
-                allow_summary=False,
             )
-            actions.extend(self._cap_visual_daily_memory_action_scores(candidate_actions))
+        )
 
         if not actions:
             self._store_visual_daily_promotion_result(

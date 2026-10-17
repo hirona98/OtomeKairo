@@ -38,14 +38,9 @@ class RecallAssociationMixin:
         embedding_definition = selected_memory_set["embedding"]
         embedding_dimension = self._embedding_dimension(embedding_definition)
 
-        visual_index_sync = self._sync_visual_observation_index(
+        visual_index_sync, query_embeddings = self._embed_association_inputs(
             state=state, cycle_id=cycle_id,
-        )
-
-        # クエリ埋め込み群
-        query_embeddings = self.llm.generate_embeddings(
-            model_config=embedding_definition,
-            texts=[spec["text"] for spec in query_specs],
+            query_texts=[spec["text"] for spec in query_specs],
         )
 
         # 候補状態

@@ -105,7 +105,7 @@ class MemoryConsolidator:
         )
 
         # 記憶アクション群
-        memory_actions: list[dict[str, Any]] = []
+        candidates: list[dict[str, Any]] = []
         for candidate_payload in interpretation["candidate_memory_units"]:
             candidate = deepcopy(candidate_payload)
             if provenance:
@@ -113,16 +113,12 @@ class MemoryConsolidator:
                     **candidate.get("qualifiers_hint", {}),
                     **provenance,
                 }
-            memory_actions.extend(
-                self.action_resolver.resolve_memory_actions(
-                    memory_set_id=selected_memory_set_id,
-                    finished_at=finished_at,
-                    event_ids=event_ids,
-                    cycle_ids=[cycle_id],
-                    candidate=candidate,
-                    embedding_definition=embedding_definition,
-                )
-            )
+            candidates.append(candidate)
+        memory_actions = self.action_resolver.resolve_memory_actions_batch(
+            memory_set_id=selected_memory_set_id, finished_at=finished_at,
+            event_ids=event_ids, cycle_ids=[cycle_id], candidates=candidates,
+            embedding_definition=embedding_definition,
+        )
 
         # episode affect群
         episode_affects = [

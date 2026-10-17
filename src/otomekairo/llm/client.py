@@ -62,6 +62,7 @@ from otomekairo.llm.schemas import (
     world_state_response_format,
 )
 from otomekairo.llm.prompts import (
+    world_state_report_instruction,
     build_agent_skill_material_selection_messages,
     build_agent_skill_material_selection_repair_prompt,
     build_agent_skill_selection_messages,
@@ -1236,15 +1237,8 @@ class LLMClient:
             model_config=model_config,
             messages=[
                 {"role": "system", "content": (
-                    "内部処理 role world_state_source_selection として、人物発話に明示された現在の外界状況の報告を抽出します。"
-                    "人格は判断主体の基底ですが、抽出元は input_text の人物発話だけです。"
-                    "質問や回答依頼だけなら reported_states は空配列です。"
-                    "予定や仮定を現在状態へ移さず、窓を閉めたなど現在も成立する結果は状態の報告として扱います。"
-                    "environment は周囲の物理条件、location は人物の現在場所、device は機器の状態、"
-                    "external_service は外部サービスの現在条件、social_context は人物が報告した対人状況です。"
-                    "人物の活動は activity_state で扱います。人格の自己設定や、情報がないという説明は抽出対象の外界報告と分けます。"
-                    "reported_states だけのJSONを返し、各要素は state_type と evidence_text です。"
-                    "各 state_type は1件までです。evidence_text は報告内容を含む input_text の連続した原文を引用します。"
+                    "内部処理 role world_state_source_selection として、"
+                    + world_state_report_instruction("input_text", standalone=True)
                 )},
                 {"role": "user", "content": json.dumps({
                     "persona_context": persona_context.to_prompt_payload(), "input_text": input_text,

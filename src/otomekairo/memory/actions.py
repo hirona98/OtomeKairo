@@ -7,6 +7,7 @@ import re
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from otomekairo.llm.embeddings import embed_text_batches
 from otomekairo.memory.utils import (
     NON_SEMANTIC_QUALIFIER_KEYS,
     memory_object_reference,
@@ -95,19 +96,74 @@ class MemoryActionResolver:
         embedding_definition: dict[str, Any] | None = None,
         allow_summary: bool = False,
     ) -> list[dict[str, Any]]:
-        # 候補
-        normalized_candidate = self._normalized_candidate(candidate, finished_at=finished_at)
-        normalized_candidate = self._canonicalized_candidate_refs(
-            memory_set_id=memory_set_id,
-            candidate=normalized_candidate,
+        return self.resolve_memory_actions_batch(
+            memory_set_id=memory_set_id, finished_at=finished_at,
+            event_ids=event_ids, cycle_ids=cycle_ids, candidates=[candidate],
+            embedding_definition=embedding_definition, allow_summary=allow_summary,
         )
+
+    def resolve_memory_actions_batch(
+        self,
+        *,
+        memory_set_id: str,
+        finished_at: str,
+        event_ids: list[str],
+        cycle_ids: list[str],
+        candidates: list[dict[str, Any]],
+        embedding_definition: dict[str, Any] | None = None,
+        allow_summary: bool = False,
+    ) -> list[dict[str, Any]]:
+        # 全候補を保存前の正本へ照合し、必要な意味比較だけをまとめる。
+        prepared: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+        comparisons: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+        for candidate in candidates:
+            normalized = self._canonicalized_candidate_refs(
+                memory_set_id=memory_set_id,
+                candidate=self._normalized_candidate(candidate, finished_at=finished_at),
+            )
+            matches = []
+            if not self._should_noop_candidate(normalized, allow_summary=allow_summary):
+                matches = self._ordered_matches(self.store.find_memory_units_for_compare(
+                    memory_set_id=memory_set_id,
+                    memory_type=normalized["memory_type"],
+                    scope_type=normalized["scope_type"], scope_key=normalized["scope_key"],
+                    subject_ref=normalized["subject_ref"], predicate=normalized["predicate"],
+                ))
+            prepared.append((normalized, matches))
+            comparisons.append((normalized, self._semantic_comparison_matches(
+                candidate=normalized, matches=matches, embedding_definition=embedding_definition,
+            )))
+
+        annotated = self._annotate_semantic_match_batches(
+            comparisons=comparisons, embedding_definition=embedding_definition,
+            memory_set_id=memory_set_id,
+        )
+        actions: list[dict[str, Any]] = []
+        for (candidate, matches), semantic_matches in zip(prepared, annotated, strict=True):
+            actions.extend(self._resolve_prepared_memory_actions(
+                memory_set_id=memory_set_id, finished_at=finished_at,
+                event_ids=event_ids, cycle_ids=cycle_ids, candidate=candidate,
+                matches=matches,
+                semantic_refine_match=self._semantic_refine_match(semantic_matches, candidate),
+                allow_summary=allow_summary,
+            ))
+        return actions
+
+    def _resolve_prepared_memory_actions(
+        self, *, memory_set_id: str, finished_at: str,
+        event_ids: list[str], cycle_ids: list[str], candidate: dict[str, Any],
+        matches: list[dict[str, Any]], semantic_refine_match: dict[str, Any] | None,
+        allow_summary: bool,
+    ) -> list[dict[str, Any]]:
+        normalized_candidate = candidate
         actions = self._resolve_candidate_memory_actions(
             memory_set_id=memory_set_id,
             finished_at=finished_at,
             event_ids=event_ids,
             cycle_ids=cycle_ids,
             candidate=normalized_candidate,
-            embedding_definition=embedding_definition,
+            matches=matches,
+            semantic_refine_match=semantic_refine_match,
             allow_summary=allow_summary,
         )
         if normalized_candidate["qualifiers"].get("replace_prior") is not True:
@@ -149,28 +205,13 @@ class MemoryActionResolver:
         event_ids: list[str],
         cycle_ids: list[str],
         candidate: dict[str, Any],
-        embedding_definition: dict[str, Any] | None,
+        matches: list[dict[str, Any]],
+        semantic_refine_match: dict[str, Any] | None,
         allow_summary: bool,
     ) -> list[dict[str, Any]]:
         normalized_candidate = candidate
         if self._should_noop_candidate(normalized_candidate, allow_summary=allow_summary):
             return []
-
-        # 検索
-        matches = self._annotate_semantic_matches(
-            matches=self.store.find_memory_units_for_compare(
-                memory_set_id=memory_set_id,
-                memory_type=normalized_candidate["memory_type"],
-                scope_type=normalized_candidate["scope_type"],
-                scope_key=normalized_candidate["scope_key"],
-                subject_ref=normalized_candidate["subject_ref"],
-                predicate=normalized_candidate["predicate"],
-            ),
-            candidate=normalized_candidate,
-            embedding_definition=embedding_definition,
-            memory_set_id=memory_set_id,
-        )
-        matches = self._ordered_matches(matches)
 
         # 特別なstatus
         if normalized_candidate["status"] == "revoked":
@@ -195,10 +236,6 @@ class MemoryActionResolver:
         # 一致選択
         same_memory_match = self._same_memory_match(matches, normalized_candidate)
         primary_match = self._primary_match(matches, normalized_candidate)
-        semantic_refine_match: dict[str, Any] | None = None
-        if primary_match is None or not self._same_object(primary_match, normalized_candidate):
-            semantic_refine_match = self._semantic_refine_match(matches, normalized_candidate)
-
         # create経路
         if same_memory_match is None and primary_match is None and semantic_refine_match is None:
             return [
@@ -271,6 +308,24 @@ class MemoryActionResolver:
                 matches=matches,
             )
 
+        # 条件を満たす意味補助の更新は、object 差による通常の並存より先に採用する。
+        if semantic_refine_match is not None:
+            refined_candidate = deepcopy(normalized_candidate)
+            if optional_text(refined_candidate.get("object_ref_or_value")) is None:
+                refined_candidate["object_ref_or_value"] = semantic_refine_match["object_ref_or_value"]
+                if "object_kind" in semantic_refine_match.get("qualifiers", {}):
+                    refined_candidate["qualifiers"]["object_kind"] = semantic_refine_match["qualifiers"]["object_kind"]
+            updated_unit = self.build_refined_memory_unit(
+                existing=semantic_refine_match, candidate=refined_candidate,
+                finished_at=finished_at, event_ids=event_ids, cycle_ids=cycle_ids,
+            )
+            return [self.build_memory_action(
+                operation="refine", memory_set_id=memory_set_id, finished_at=finished_at,
+                memory_unit=updated_unit, related_memory_unit_ids=[],
+                before_snapshot=semantic_refine_match, after_snapshot=updated_unit,
+                reason=normalized_candidate["reason"], event_ids=event_ids,
+            )]
+
         # parallel経路
         if primary_match is not None and self._should_create_parallel(primary_match, normalized_candidate):
             return [
@@ -322,29 +377,6 @@ class MemoryActionResolver:
                     reason=normalized_candidate["reason"],
                     event_ids=event_ids,
                 ),
-            ]
-
-        # semantic refine経路
-        if semantic_refine_match is not None:
-            updated_unit = self.build_refined_memory_unit(
-                existing=semantic_refine_match,
-                candidate=normalized_candidate,
-                finished_at=finished_at,
-                event_ids=event_ids,
-                cycle_ids=cycle_ids,
-            )
-            return [
-                self.build_memory_action(
-                    operation="refine",
-                    memory_set_id=memory_set_id,
-                    finished_at=finished_at,
-                    memory_unit=updated_unit,
-                    related_memory_unit_ids=[],
-                    before_snapshot=semantic_refine_match,
-                    after_snapshot=updated_unit,
-                    reason=normalized_candidate["reason"],
-                    event_ids=event_ids,
-                )
             ]
 
         # 代替
@@ -1000,7 +1032,8 @@ class MemoryActionResolver:
         )
         for match in semantic_matches:
             if self._can_refine_semantically(match, candidate):
-                return match
+                # 比較用の類似度は正本・revisionへ持ち込まない。
+                return {key: value for key, value in match.items() if key != "_semantic_similarity"}
         return None
 
     def _resolve_revoke_request(
@@ -1297,6 +1330,12 @@ class MemoryActionResolver:
         return existing.get("object_ref_or_value") == candidate.get("object_ref_or_value")
 
     def _can_refine_semantically(self, existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
+        return (
+            self._semantic_refine_eligible(existing, candidate)
+            and self._semantic_similarity(existing) >= SEMANTIC_REFINE_THRESHOLD
+        )
+
+    def _semantic_refine_eligible(self, existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
         # 適用範囲
         if candidate["memory_type"] not in SEMANTIC_REFINE_MEMORY_TYPES:
             return False
@@ -1320,8 +1359,7 @@ class MemoryActionResolver:
         ):
             return False
 
-        # 類似度
-        return self._semantic_similarity(existing) >= SEMANTIC_REFINE_THRESHOLD
+        return existing.get("status") in REVIVABLE_MEMORY_STATUSES
 
     def _polarity_conflicts(self, existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
         # 値群
@@ -1358,80 +1396,86 @@ class MemoryActionResolver:
             **candidate.get("qualifiers", {}),
         }
 
-    def _annotate_semantic_matches(
+    def _semantic_comparison_matches(
         self,
         *,
         matches: list[dict[str, Any]],
         candidate: dict[str, Any],
         embedding_definition: dict[str, Any] | None,
-        memory_set_id: str,
     ) -> list[dict[str, Any]]:
-        # 対象外
         if not matches or not self._should_compare_semantically(candidate, embedding_definition):
-            return matches
+            return []
+        if self._same_memory_match(matches, candidate) is not None:
+            return []
+        primary = self._primary_match(matches, candidate)
+        if primary is not None and self._same_object(primary, candidate):
+            return []
+        return [match for match in matches if self._semantic_refine_eligible(match, candidate)]
 
-        # compare text 群
-        candidate_text = build_memory_unit_semantic_text(
-            candidate,
-            exclude_qualifier_keys=SEMANTIC_EXCLUDED_QUALIFIER_KEYS,
-        )
-        if not candidate_text:
-            return matches
+    def _annotate_semantic_match_batches(
+        self, *, comparisons: list[tuple[dict[str, Any], list[dict[str, Any]]]],
+        embedding_definition: dict[str, Any] | None, memory_set_id: str,
+    ) -> list[list[dict[str, Any]]]:
+        memory_unit_ids = list(dict.fromkeys(
+            match["memory_unit_id"] for _, matches in comparisons for match in matches
+        ))
+        if not memory_unit_ids:
+            return [[] for _ in comparisons]
+        if self.llm is None or embedding_definition is None:
+            raise ValueError("意味比較には LLM と埋め込み設定が必要です。")
         stored_embeddings = self.store.get_memory_unit_embeddings(
             memory_set_id=memory_set_id,
-            memory_unit_ids=[
-                str(match.get("memory_unit_id"))
-                for match in matches
-                if isinstance(match.get("memory_unit_id"), str)
-            ],
+            memory_unit_ids=memory_unit_ids,
             embedding_dimension=int(embedding_definition["embedding_dimension"]),
         )
-        reused_embeddings: dict[int, list[float]] = {}
-        texts_to_embed = [candidate_text]
-        embed_slots: list[tuple[str, int]] = [("candidate", 0)]
-        for index, match in enumerate(matches):
-            match_text = build_memory_unit_semantic_text(
-                match,
+        texts_to_embed: dict[str, None] = {}
+        prepared: list[tuple[str, list[tuple[dict[str, Any], str]]]] = []
+        reused_embeddings: dict[tuple[str, str], list[float]] = {}
+        for candidate, matches in comparisons:
+            if not matches:
+                prepared.append(("", []))
+                continue
+            candidate_text = build_memory_unit_semantic_text(
+                candidate,
                 exclude_qualifier_keys=SEMANTIC_EXCLUDED_QUALIFIER_KEYS,
             )
-            memory_unit_id = match.get("memory_unit_id")
-            stored = (
-                stored_embeddings.get(memory_unit_id)
-                if isinstance(memory_unit_id, str)
-                else None
-            )
-            if (
-                isinstance(stored, dict)
-                and stored.get("text_hash") == source_text_hash(match_text)
-                and isinstance(stored.get("embedding"), list)
-            ):
-                reused_embeddings[index] = stored["embedding"]
+            if not candidate_text:
+                prepared.append(("", []))
                 continue
-            embed_slots.append(("match", index))
-            texts_to_embed.append(match_text)
+            texts_to_embed[candidate_text] = None
+            match_texts = []
+            for match in matches:
+                match_text = build_memory_unit_semantic_text(
+                    match, exclude_qualifier_keys=SEMANTIC_EXCLUDED_QUALIFIER_KEYS,
+                )
+                stored = stored_embeddings.get(match["memory_unit_id"])
+                if (
+                    isinstance(stored, dict)
+                    and stored.get("text_hash") == source_text_hash(match_text)
+                    and isinstance(stored.get("embedding"), list)
+                ):
+                    reused_embeddings[(match["memory_unit_id"], match_text)] = stored["embedding"]
+                else:
+                    texts_to_embed[match_text] = None
+                match_texts.append((match, match_text))
+            prepared.append((candidate_text, match_texts))
 
-        generated = self.llm.generate_embeddings(
-            model_config=embedding_definition,
-            texts=texts_to_embed,
-        )
-        generated_by_slot = {
-            slot: embedding
-            for slot, embedding in zip(embed_slots, generated, strict=True)
-        }
-        candidate_embedding = generated_by_slot[("candidate", 0)]
+        texts = list(texts_to_embed)
+        generated: dict[str, list[float]] = {}
+        for offset, vectors in embed_text_batches(self.llm, model_config=embedding_definition, texts=texts):
+            generated.update(zip(texts[offset:offset + len(vectors)], vectors, strict=True))
 
-        annotated_matches: list[dict[str, Any]] = []
-        for index, match in enumerate(matches):
-            match_embedding = reused_embeddings.get(index)
-            if match_embedding is None:
-                match_embedding = generated_by_slot[("match", index)]
-            annotated_matches.append(
-                {
-                    **match,
-                    "_semantic_similarity": self._cosine_similarity(candidate_embedding, match_embedding),
-                }
-            )
-        return annotated_matches
+        annotated: list[list[dict[str, Any]]] = []
+        for candidate_text, matches in prepared:
+            annotated.append([
+                {**match, "_semantic_similarity": self._cosine_similarity(
+                    generated[candidate_text],
+                    reused_embeddings[(match["memory_unit_id"], match_text)]
+                    if (match["memory_unit_id"], match_text) in reused_embeddings else generated[match_text],
+                )}
+                for match, match_text in matches
+            ])
+        return annotated
 
     def _should_compare_semantically(
         self,
@@ -1444,6 +1488,8 @@ class MemoryActionResolver:
 
         # 特殊状態と型
         if candidate["status"] in {"revoked", "dormant"}:
+            return False
+        if self._candidate_is_explicit(candidate) or self._has_structural_update_signal(candidate):
             return False
         return candidate["memory_type"] in SEMANTIC_REFINE_MEMORY_TYPES
 

@@ -48,7 +48,8 @@ def setup(tmp_path):
 
 
 def sync(builder, state, cycle="cycle:now"):
-    return builder._sync_visual_observation_index(state=state, cycle_id=cycle)
+    trace, _ = builder._embed_association_inputs(state=state, cycle_id=cycle, query_texts=[])
+    return trace
 
 
 def search(store, memory_set=MEMORY_SET, cycle="cycle:now", limit=1):
@@ -74,6 +75,7 @@ def test_visual_semantic_recall_finds_old_experience_using_each_current_observat
     assert now in embeddings.call_args.kwargs["texts"]
     assert pack["visual_recall"]["index_sync"]["indexed_count"] == 21
     assert "visual:old" in pack["visual_recall"]["selected_ids"]
+    assert embeddings.call_count == 1
 
 
 def test_visual_index_updates_only_changed_or_missing_vectors(setup):
@@ -205,6 +207,39 @@ def test_multiple_current_observations_are_searched_in_one_query_batch(setup):
     query_batch = embeddings.call_args.kwargs["texts"]
     assert all(query_batch.count(item["visual_summary_text"]) == 1 for item in current)
     assert {item["visual_observation_id"] for item in pack["visual_observations"]} == {"visual:cup", "visual:painting"}
+    assert embeddings.call_count == 1
+
+
+@pytest.mark.parametrize("record_count,query_count,sizes", [(0, 2, [2]), (63, 2, [64, 1]), (64, 65, [64, 64, 1])])
+def test_query_and_index_batch_boundaries_keep_vectors_with_their_sources(setup, record_count, query_count, sizes):
+    store, state, vectors, embeddings, builder = setup
+    records = [record(f"visual:{i}", f"独立した観測 {i}。") for i in range(record_count)]
+    queries = [f"独立した検索 {i}。" for i in range(query_count)]
+    texts = queries + [item["detailed_summary_text"] for item in records]
+    vectors.update({text: [float(i), 0.0] for i, text in enumerate(texts)})
+    put(store, *records)
+    trace, query_vectors = builder._embed_association_inputs(
+        state=state, cycle_id="cycle:now", query_texts=queries,
+    )
+    assert query_vectors == [vectors[text] for text in queries]
+    assert trace == {"source_count": record_count, "indexed_count": record_count}
+    assert [len(call.kwargs["texts"]) for call in embeddings.call_args_list] == sizes
+    for item in records:
+        hits = store.search_visual_observation_vectors(
+            memory_set_id=MEMORY_SET, cycle_id="cycle:now", query_embedding=vectors[item["detailed_summary_text"]],
+            embedding_dimension=2, limit=1,
+        )
+        assert hits[0]["record"]["visual_observation_id"] == item["visual_observation_id"]
+
+
+def test_incomplete_embedding_batch_fails_before_any_index_write(setup):
+    store, state, vectors, embeddings, builder = setup
+    put(store, record("visual:one", "省略できない観測。"))
+    embeddings.side_effect = lambda **kw: [[0.0, 0.0]]
+    with pytest.raises(LLMError, match="意味検索索引"):
+        builder._embed_association_inputs(state=state, cycle_id="cycle:now", query_texts=["検索。"])
+    with store._memory_db() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM visual_observation_vector_entries").fetchone()[0] == 0
 
 
 def test_visual_index_write_failure_rolls_back_metadata(setup):

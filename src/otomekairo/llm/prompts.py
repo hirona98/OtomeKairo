@@ -352,6 +352,24 @@ def _outward_speech_suppression_boundary_instruction() -> str:
     )
 
 
+def world_state_report_instruction(input_label: str, *, standalone: bool = False) -> str:
+    output_instruction = (
+        "reported_states だけのJSONを返し、各要素は state_type と evidence_text です。"
+        if standalone else "reported_states の各要素は state_type と evidence_text です。"
+    )
+    return (
+        "人物発話に明示された現在の外界状況の報告を抽出します。"
+        f"人格は判断主体の基底ですが、抽出元は {input_label} の人物発話だけです。"
+        "質問や回答依頼だけなら reported_states は空配列です。"
+        "予定や仮定を現在状態へ移さず、窓を閉めたなど現在も成立する結果は状態の報告として扱います。"
+        "environment は周囲の物理条件、location は人物の現在場所、device は機器の状態、"
+        "external_service は外部サービスの現在条件、social_context は人物が報告した対人状況です。"
+        "人物の活動は activity_state で扱います。人格の自己設定や、情報がないという説明は抽出対象の外界報告と分けます。"
+        + output_instruction
+        + f"各 state_type は1件までです。evidence_text は報告内容を含む {input_label} の連続した原文を引用します。"
+    )
+
+
 # 入力解釈用の message 群を組み立てる。
 def build_input_interpretation_messages(
     *,
@@ -361,11 +379,12 @@ def build_input_interpretation_messages(
     current_time: str,
     current_visual_observations: list[dict[str, Any]],
     activity_context: dict[str, Any] | None = None,
+    include_world_state_reports: bool = False,
 ) -> list[dict[str, str]]:
     return [
         {
             "role": "system",
-            "content": _build_input_interpretation_system_prompt(),
+            "content": _build_input_interpretation_system_prompt(include_world_state_reports=include_world_state_reports),
         },
         {
             "role": "user",
@@ -1081,12 +1100,15 @@ def build_visual_observation_repair_prompt(validation_error: str) -> str:
     )
 
 
-def build_input_interpretation_repair_prompt(validation_error: str) -> str:
+def build_input_interpretation_repair_prompt(
+    validation_error: str, *, include_world_state_reports: bool = False,
+) -> str:
+    keys = "recall_hint, answer_contract, reported_states の 3 つ" if include_world_state_reports else "recall_hint, answer_contract の 2 つ"
     return (
         "前回の出力は input_interpretation 契約を満たしていませんでした。\n"
         f"validator_error: {validation_error}\n"
         "同じ入力だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
-        "トップレベルキーは recall_hint, answer_contract の 2 つだけです。\n"
+        f"トップレベルキーは {keys}だけです。\n"
         f"recall_hint は {', '.join(RECALL_HINT_REQUIRED_KEYS)} の 8 キーだけを持ちます。\n"
         "recall_hint の配列 field は対象がない場合も省略せず [] を入れてください。\n"
         "recall_hint.confidence は 0.0 以上 1.0 以下の JSON number です。文字列、low/medium/high、百分率は禁止です。\n"
@@ -1096,12 +1118,20 @@ def build_input_interpretation_repair_prompt(validation_error: str) -> str:
     )
 
 
-def _build_input_interpretation_system_prompt() -> str:
+def _build_input_interpretation_system_prompt(*, include_world_state_reports: bool = False) -> str:
+    keys = "recall_hint と answer_contract と reported_states" if include_world_state_reports else "recall_hint と answer_contract"
+    key_count = 3 if include_world_state_reports else 2
+    report_instruction = (
+        "\n" + world_state_report_instruction("current_input.text")
+        + "観測、人格、過去の会話、活動推定はそれぞれの補助文脈として保ち、今回の本人報告と区別します。"
+        if include_world_state_reports else ""
+    )
+    interpretation_scope = "想起焦点と回答根拠契約、および今回の状態報告を整理します" if include_world_state_reports else "想起焦点と回答根拠契約だけを決めます"
     return _render_prompt_sections(
         (
             "役割",
             "内部処理 role `input_interpretation` として入力を解釈します。\n"
-            "入力文を分析し、recall_hint と answer_contract を持つ JSON オブジェクト 1 個だけを返してください。",
+            f"入力文を分析し、{keys} を持つ JSON オブジェクト 1 個だけを返してください。",
         ),
         (
             "入力境界",
@@ -1122,11 +1152,12 @@ def _build_input_interpretation_system_prompt() -> str:
             "意味レイヤー境界",
             _semantic_layer_boundary_instruction("入力解釈層")
             + "\n"
-            "input_interpretation は想起焦点と回答根拠契約だけを決めます。行動選択、外向き発話、抑制根拠の比較は decision_generation に残してください。",
+            f"input_interpretation は{interpretation_scope}。行動選択、外向き発話、抑制根拠の比較は decision_generation に残してください。"
+            + report_instruction,
         ),
         (
             "出力契約",
-            "返す JSON はトップレベルに recall_hint と answer_contract だけを持ちます。\n"
+            f"返す JSON はトップレベルに {keys} だけを持ちます。\n"
             + f"recall_hint は {', '.join(RECALL_HINT_REQUIRED_KEYS)} の 8 キーだけを必ず持ちます。\n"
             + "recall_hint の配列 field は対象がない場合も省略せず [] を入れてください。\n"
             + f"answer_contract は {', '.join(ANSWER_CONTRACT_REQUIRED_KEYS)} の 7 キーだけを必ず持ちます。\n"
@@ -1165,7 +1196,7 @@ def _build_input_interpretation_system_prompt() -> str:
             + "許可 target_actor: "
             + ", ".join(sorted(ANSWER_TARGET_ACTOR_VALUES))
             + "\n"
-            + "トップレベルキーは必ず recall_hint と answer_contract の 2 つだけです。",
+            + f"トップレベルキーは必ず {keys} の {key_count} つだけです。",
         ),
         (
             "禁止",

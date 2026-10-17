@@ -366,8 +366,15 @@ class LlmCallReductionTests(unittest.TestCase):
             }
         }
         resolver.store = store
-        matches = resolver._annotate_semantic_matches(
-            matches=[
+        matches = resolver._annotate_semantic_match_batches(
+            comparisons=[({
+                "memory_type": "interpretation",
+                "status": "inferred",
+                "summary_text": "新しい本文",
+                "predicate": "thinks",
+                "object_ref_or_value": None,
+                "qualifiers": {},
+            }, [
                 {
                     "memory_unit_id": "memory_unit:old",
                     "memory_type": "interpretation",
@@ -376,18 +383,10 @@ class LlmCallReductionTests(unittest.TestCase):
                     "object_ref_or_value": "topic:now",
                     "qualifiers": {},
                 }
-            ],
-            candidate={
-                "memory_type": "interpretation",
-                "status": "inferred",
-                "summary_text": "新しい本文",
-                "predicate": "thinks",
-                "object_ref_or_value": "topic:now",
-                "qualifiers": {},
-            },
+            ])],
             embedding_definition={"embedding_dimension": 2},
             memory_set_id="memory_set:test",
-        )
+        )[0]
         self.assertEqual(resolver.llm.generate_embeddings.call_count, 1)
         self.assertEqual(len(resolver.llm.generate_embeddings.call_args.kwargs["texts"]), 2)
         self.assertIn("_semantic_similarity", matches[0])
