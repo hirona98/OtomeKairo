@@ -127,6 +127,7 @@ def build_default_console_client_settings(
     return {
         "client_id": client_id,
         "process": {
+            "cocoro_shell_enabled": True,
             "console_api_port": 55600,
             "cocoro_shell_port": 55605,
         },

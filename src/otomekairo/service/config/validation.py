@@ -62,9 +62,15 @@ class ServiceConfigValidationMixin:
             raise ServiceError(400, "invalid_console_process_settings", "process must be an object.")
         self._validate_exact_fields(
             definition,
-            {"console_api_port", "cocoro_shell_port"},
+            {"console_api_port", "cocoro_shell_port", "cocoro_shell_enabled"},
             "console_process_settings",
         )
+        if not isinstance(definition["cocoro_shell_enabled"], bool):
+            raise ServiceError(
+                400,
+                "invalid_console_process_settings",
+                "process.cocoro_shell_enabled must be a boolean.",
+            )
         for field_name in ("console_api_port", "cocoro_shell_port"):
             value = definition.get(field_name)
             if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 65535:

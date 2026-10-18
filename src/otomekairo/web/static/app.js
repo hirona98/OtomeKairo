@@ -2884,11 +2884,6 @@ function syncConsoleClientSettings() {
   const excludePatterns = parseLines(textValue("desktop-capture-exclude-patterns"));
   if (state.consoleClient) {
     const settings = state.consoleClient.settings;
-    // process は port 群だけを正本にする。
-    settings.process = {
-      console_api_port: settings.process.console_api_port,
-      cocoro_shell_port: settings.process.cocoro_shell_port,
-    };
     // CocoroConsoleに表示しない取得方式の設定値は変更せず保持する。
     settings.desktop_capture = {
       ...settings.desktop_capture,

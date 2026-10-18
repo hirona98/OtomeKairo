@@ -157,6 +157,15 @@ flowchart LR
 | Shell → Console | アバター位置の確定 | Console: `PUT /api/shell/avatar-position` |
 | 生存確認 | Shell の起動確認 | Shell: `GET /api/status` |
 
+### Shell 起動制御
+
+- ConsoleのヘッダーボタンでCocoroShell.exeを起動・終了する。Debug / Releaseとも同じexeを対象とし、Unity Editorの再生は手動操作とする。
+- 初回接続時に端末設定を通常保存してから、保存済みの起動希望状態を復元する。設定fieldの契約は [../api/状態と設定.md](../api/状態と設定.md) を正とする。
+- ボタンは実際の稼働状態を表示する。起動・終了中は操作を無効化し、失敗は画面へ表示する。保存失敗時はプロセスを操作しない。起動・終了失敗時も保存した希望状態を維持する。
+- 起動状態はConsoleが起動したプロセスで確認し、終了APIの送信前に待受ポートのPIDを照合する。別プロセスやUnity Editorを停止しない。
+- 設定保存では稼働中のShellに実行設定の変更を再起動で反映する。OFF中や外部終了後には起動しない。
+- 接続先変更とConsole終了では進行中の起動を取り消してShellを停止する。Console終了で保存済みの起動希望状態を変更しない。
+
 ### Shell 起動順序
 
 ```mermaid
