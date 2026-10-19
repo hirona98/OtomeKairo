@@ -625,7 +625,7 @@
                 <p class="field-hint field-hint-indent">値を下げると音声を拾いやすくなり、環境音による誤検出も増えます。スライダは未保存値でも上のVADバーに反映します。</p>
               </div>
               <div class="speaker-enrollment">
-                <div class="setting-row setting-row-top">
+                <div class="setting-row">
                   <label>登録済み話者:</label>
                   <div class="speaker-list" id="speaker-list">登録済み話者はいません</div>
                 </div>
@@ -660,26 +660,22 @@
           </section>
 
           <section class="tab-page" data-page="desktop">
-            <fieldset class="settings-group" data-console-setting>
-              <legend>デスクトップキャプチャ</legend>
-              <div class="settings-list">
-                <p class="field-hint">CocoroConsole 未接続でも編集できます。一度も接続していない間はサーバ既定として保持し、初回接続時に端末設定へ渡します。</p>
-                <div class="setting-row">
-                  <label for="desktop-capture-idle-timeout">アイドル時スキップ:</label>
-                  <div class="inline-suffix-control">
-                    <input class="field-width-short" id="desktop-capture-idle-timeout" type="number" min="0">
-                    <span>分（0で無効）</span>
-                  </div>
-                </div>
-                <div class="setting-row setting-row-top">
-                  <label for="desktop-capture-exclude-patterns">スキップタイトルパターン:</label>
-                  <div class="console-control-with-hint">
-                    <textarea id="desktop-capture-exclude-patterns" rows="8" spellcheck="false"></textarea>
-                    <span class="field-hint">正規表現でマッチしたウィンドウタイトルはキャプチャをスキップします。</span>
-                  </div>
+            <div class="settings-list">
+              <label class="checkbox-field">デスクトップを観測する
+                <input id="current-wake-desktop-observation" type="checkbox">
+              </label>
+              <div class="setting-row">
+                <label for="desktop-capture-idle-timeout">アイドル時スキップ:</label>
+                <div class="inline-suffix-control">
+                  <input class="field-width-short" id="desktop-capture-idle-timeout" type="number" min="0">
+                  <span>分（0で無効）</span>
                 </div>
               </div>
-            </fieldset>
+              <div class="setting-row">
+                <label for="desktop-capture-exclude-patterns">スキップタイトルパターン:</label>
+                <textarea id="desktop-capture-exclude-patterns" rows="8" spellcheck="false"></textarea>
+              </div>
+            </div>
           </section>
 
           <section class="tab-page" data-page="persona">
@@ -698,7 +694,7 @@
               <legend>人格本文</legend>
               <div class="settings-list">
                 <p class="field-hint">役割、距離感、価値観、話し方、強い原則を自由文でまとめて書きます。</p>
-                <div class="setting-row setting-row-top">
+                <div class="setting-row">
                   <label for="persona-prompt">本文:</label>
                   <textarea id="persona-prompt" class="persona-prompt-field" rows="20"></textarea>
                 </div>
@@ -708,7 +704,7 @@
               <legend>表現補助</legend>
               <div class="settings-list">
                 <p class="field-hint">会話時の表現生成でだけ使う補助指示を入れます。表情指定や出力補助に使えます。</p>
-                <div class="setting-row setting-row-top">
+                <div class="setting-row">
                   <label for="persona-expression-addon">補助指示:</label>
                   <textarea id="persona-expression-addon" rows="8"></textarea>
                 </div>
@@ -717,7 +713,7 @@
             <fieldset class="settings-group">
               <legend>音声起動ワード</legend>
               <div class="settings-list">
-                <div class="setting-row setting-row-top">
+                <div class="setting-row">
                   <label for="persona-wake-words">音声起動ワード:</label>
                   <div class="console-control-with-hint">
                     <textarea id="persona-wake-words" rows="3"></textarea>
@@ -871,7 +867,7 @@
                     <span>1控えめ / 5標準 / 10多め</span>
                   </div>
                 </div>
-                <div class="setting-row setting-row-top">
+                <div class="setting-row">
                   <label for="run-once-background-thinking">手動実行:</label>
                   <div class="console-control-with-hint">
                     <div class="inline-control-row">
@@ -880,23 +876,6 @@
                     <p class="field-hint">押してから3秒後に、保存済み設定で定期思考を1回実行します。自動実行が無効でも使えます。</p>
                   </div>
                 </div>
-              </div>
-            </fieldset>
-            <fieldset class="settings-group">
-              <legend>デスクトップの観測</legend>
-              <div class="settings-list">
-                <p class="field-hint">定期思考の前にデスクトップを観測するかを設定します。CocoroConsole 未接続でも設定できます。実際の取得要求は接続中だけ送ります。取得の除外条件は「接続
-                  → デスクトップ」で設定します。</p>
-                <label class="checkbox-field">思考前にデスクトップを観測する
-                  <input id="current-wake-desktop-observation" type="checkbox">
-                </label>
-              </div>
-            </fieldset>
-            <fieldset class="settings-group">
-              <legend>カメラの観測</legend>
-              <div class="settings-list">
-                <p class="field-hint">定期思考の前に観測するカメラを選びます。接続情報の登録は「接続 → カメラ」で行います。</p>
-                <div id="wake-camera-observations" class="wake-camera-observations"></div>
               </div>
             </fieldset>
           </section>
@@ -929,7 +908,7 @@
                     </div>
                   </div>
                 </div>
-                <div class="setting-row setting-row-top">
+                <div class="setting-row">
                   <label for="periodic-thought-topic-summary">トピック:</label>
                   <div class="console-control-with-hint">
                     <textarea id="periodic-thought-topic-summary" rows="4" spellcheck="true"></textarea>
@@ -947,46 +926,44 @@
               <button type="button" class="danger-button" data-action="delete-camera">削除</button>
             </div>
             <hr class="settings-separator">
-            <div class="setting-row setting-row-top" data-collection-editor>
-              <label for="camera-display-name">表示名:</label>
-              <div class="console-control-with-hint">
+            <div class="settings-list">
+              <div class="setting-row" data-collection-editor>
+                <label for="camera-display-name">表示名:</label>
                 <input id="camera-display-name" class="field-width-medium">
-                <span class="field-hint">LLMが理解しやすい名前にしてください。</span>
+              </div>
+              <p class="field-hint field-hint-indent">LLMが理解しやすい名前にしてください。</p>
+              <label class="checkbox-field" data-collection-editor>このカメラを使用する
+                <input id="camera-enabled" type="checkbox">
+              </label>
+              <div class="setting-row" data-collection-editor>
+                <label for="camera-host">ホスト/IP:</label>
+                <input id="camera-host" class="field-width-long">
+              </div>
+              <div class="setting-row" data-collection-editor>
+                <label for="camera-username">ユーザー名:</label>
+                <input id="camera-username" class="field-width-medium">
+              </div>
+              <div class="setting-row" data-collection-editor>
+                <label for="camera-password">パスワード:</label>
+                <input id="camera-password" type="password" autocomplete="new-password">
+              </div>
+              <div class="setting-row">
+                <label for="camera-connector-kind">接続種別:</label>
+                <input id="camera-connector-kind" class="field-width-medium" disabled>
+              </div>
+              <div class="setting-row">
+                <label for="camera-client-id">接続クライアント:</label>
+                <input id="camera-client-id" class="field-width-medium" disabled>
+              </div>
+              <div class="setting-row">
+                <label for="camera-vision-source-id">視覚ソースID:</label>
+                <input id="camera-vision-source-id" class="field-width-long" disabled>
+              </div>
+              <div class="setting-row">
+                <label for="camera-watcher-id">watcher ID:</label>
+                <input id="camera-watcher-id" class="field-width-long" disabled>
               </div>
             </div>
-            <fieldset class="settings-group capability-group" data-collection-editor>
-              <legend>カメラ接続</legend>
-              <div class="settings-list">
-                <div class="setting-row">
-                  <label for="camera-host">ホスト/IP:</label>
-                  <input id="camera-host" class="field-width-long">
-                </div>
-                <div class="setting-row">
-                  <label for="camera-username">ユーザー名:</label>
-                  <input id="camera-username" class="field-width-medium">
-                </div>
-                <div class="setting-row">
-                  <label for="camera-password">パスワード:</label>
-                  <input id="camera-password" type="password" autocomplete="new-password">
-                </div>
-                <div class="setting-row">
-                  <label for="camera-connector-kind">接続種別:</label>
-                  <input id="camera-connector-kind" class="field-width-medium" disabled>
-                </div>
-                <div class="setting-row">
-                  <label for="camera-client-id">接続クライアント:</label>
-                  <input id="camera-client-id" class="field-width-medium" disabled>
-                </div>
-                <div class="setting-row">
-                  <label for="camera-vision-source-id">視覚ソースID:</label>
-                  <input id="camera-vision-source-id" class="field-width-long" disabled>
-                </div>
-                <div class="setting-row">
-                  <label for="camera-watcher-id">watcher ID:</label>
-                  <input id="camera-watcher-id" class="field-width-long" disabled>
-                </div>
-              </div>
-            </fieldset>
           </section>
 
           <section class="tab-page" data-page="mcp">
@@ -996,7 +973,7 @@
               <button type="button" class="danger-button" data-action="delete-mcp">削除</button>
             </div>
             <hr class="settings-separator">
-            <div class="setting-row setting-row-top" data-collection-editor>
+            <div class="setting-row" data-collection-editor>
               <label for="mcp-server-id">名前:</label>
               <div class="console-control-with-hint">
                 <input id="mcp-server-id" class="field-width-medium">
@@ -1009,7 +986,7 @@
                 <label class="checkbox-field">有効
                   <input id="mcp-enabled" type="checkbox">
                 </label>
-                <div class="setting-row setting-row-top">
+                <div class="setting-row">
                   <label for="mcp-transport">transport:</label>
                   <div class="console-control-with-hint">
                     <select id="mcp-transport" class="field-width-medium">
@@ -1019,42 +996,42 @@
                     <span class="field-hint">ローカル子 process または HTTPS Remote MCP を選ぶ。</span>
                   </div>
                 </div>
-                <div class="setting-row setting-row-top" data-mcp-stdio-field>
+                <div class="setting-row" data-mcp-stdio-field>
                   <label for="mcp-command">command:</label>
                   <div class="console-control-with-hint">
                     <input id="mcp-command" class="field-width-long">
                     <span class="field-hint">stdio MCP server を起動する実行コマンド。</span>
                   </div>
                 </div>
-                <div class="setting-row setting-row-top" data-mcp-stdio-field>
+                <div class="setting-row" data-mcp-stdio-field>
                   <label for="mcp-args">args:</label>
                   <div class="console-control-with-hint">
                     <textarea id="mcp-args" rows="3" spellcheck="false"></textarea>
                     <span class="field-hint">command に渡す引数。1 行を 1 引数として保存する。空行は保存しない。</span>
                   </div>
                 </div>
-                <div class="setting-row setting-row-top" data-mcp-stdio-field>
+                <div class="setting-row" data-mcp-stdio-field>
                   <label for="mcp-cwd">cwd:</label>
                   <div class="console-control-with-hint">
                     <input id="mcp-cwd" class="field-width-long">
                     <span class="field-hint">MCP server 起動時の作業ディレクトリ。不要な場合は空欄にする。</span>
                   </div>
                 </div>
-                <div class="setting-row setting-row-top" data-mcp-stdio-field>
+                <div class="setting-row" data-mcp-stdio-field>
                   <label for="mcp-env">env:</label>
                   <div class="console-control-with-hint">
                     <textarea id="mcp-env" rows="5" spellcheck="false"></textarea>
                     <span class="field-hint">KEY=VALUE を1行ずつ入力します。</span>
                   </div>
                 </div>
-                <div class="setting-row setting-row-top" data-mcp-http-field>
+                <div class="setting-row" data-mcp-http-field>
                   <label for="mcp-url">URL:</label>
                   <div class="console-control-with-hint">
                     <input id="mcp-url" class="field-width-long">
                     <span class="field-hint">Remote MCP の完全な HTTPS endpoint。</span>
                   </div>
                 </div>
-                <div class="setting-row setting-row-top" data-mcp-http-field>
+                <div class="setting-row" data-mcp-http-field>
                   <label for="mcp-headers">headers:</label>
                   <div class="console-control-with-hint">
                     <textarea id="mcp-headers" rows="5" spellcheck="false"></textarea>
@@ -1088,7 +1065,7 @@
                 <label class="checkbox-field">有効
                   <input id="agent-skill-source-enabled" type="checkbox">
                 </label>
-                <div class="setting-row setting-row-top">
+                <div class="setting-row">
                   <label for="agent-skill-root-path">root path:</label>
                   <div class="console-control-with-hint">
                     <input id="agent-skill-root-path" class="field-width-long">
@@ -1108,7 +1085,7 @@
               <legend>チェック対象のMCP Server</legend>
               <div class="settings-list">
                 <p class="field-hint">呼び出し前に個人情報やセンシティブな内容が含まれていないかLLMでチェックします。</p>
-                <div class="setting-row setting-row-top">
+                <div class="setting-row">
                   <label>対象 MCP:</label>
                   <div class="console-control-with-hint">
                     <div id="pre-send-check-mcp-list" class="pre-send-check-mcp-list"></div>

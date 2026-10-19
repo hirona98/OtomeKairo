@@ -2852,14 +2852,9 @@ function renderAvatarPresentation() {
 function renderConsoleClientSettings() {
   const hasConsoleClient = Boolean(state.consoleClient);
   document.querySelectorAll("[data-console-setting]").forEach((fieldset) => {
-    // VRM など常時無効の欄だけ止め、desktop 取得方針は未接続でも編集する。
+    // VRM など表示専用の欄は常に無効にする。
     if (fieldset.hasAttribute("data-always-disabled")) {
       fieldset.disabled = true;
-      return;
-    }
-    // デスクトップ取得方針は defaults でも編集できる。
-    if (fieldset.querySelector("#desktop-capture-idle-timeout")) {
-      fieldset.disabled = false;
       return;
     }
     fieldset.disabled = !hasConsoleClient;
@@ -3832,7 +3827,7 @@ function renderCapabilities() {
 
 function setCollectionEditorEnabled(selectId, fieldsetSelector, deleteAction, hasItems) {
   // 0 件のときは選択・枠外の名前・編集欄・削除を無効化し、追加だけ残す。
-  // data-collection-editor は編集 fieldset と枠外の名前行に付ける。
+  // data-collection-editor は編集 fieldset または編集行に付ける。
   // 読込状態など編集対象外の fieldset には付けない。
   const select = element(selectId);
   select.disabled = !hasItems;
@@ -3867,6 +3862,7 @@ function renderCamera() {
   const camera = arrayById(cameras, "vision_source_id", state.selectedCameraId);
   const connection = camera?.connection || {};
   element("camera-display-name").value = camera?.display_name || "";
+  element("camera-enabled").checked = camera?.enabled === true;
   element("camera-host").value = connection.host || "";
   element("camera-username").value = connection.camera_username || "";
   element("camera-password").value = connection.camera_password || "";
@@ -3874,67 +3870,6 @@ function renderCamera() {
   element("camera-client-id").value = camera?.client_id || "tapo-c220-connector-main";
   element("camera-vision-source-id").value = camera?.vision_source_id || "";
   element("camera-watcher-id").value = cameraWatcher(camera).watcher_id;
-  // 接続側の表示名変更を定期思考の観測一覧へ反映する。
-  renderCameraObservations();
-}
-
-// 定期思考で観測するカメラの一覧を描画する。接続定義は接続タブ側で編集する。
-function renderCameraObservations() {
-  const container = element("wake-camera-observations");
-  if (!container) {
-    return;
-  }
-  const cameras = state.camera?.camera_sources || [];
-  if (!cameras.length) {
-    const empty = document.createElement("p");
-    empty.className = "field-hint";
-    empty.textContent = "登録済みカメラがありません。「接続 → カメラ」で登録してください。";
-    container.replaceChildren(empty);
-    return;
-  }
-  const labels = cameras.map((camera, index) => {
-    const label = document.createElement("label");
-    label.className = "checkbox-field";
-    const displayName = camera.display_name || camera.vision_source_id || "カメラ";
-    label.append(document.createTextNode(`${displayName} を観測する`));
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    // 表示名変更で vision_source_id が変わっても、描画順で同期できるよう index も持つ。
-    input.dataset.cameraIndex = String(index);
-    input.dataset.visionSourceId = camera.vision_source_id || "";
-    input.checked = camera.enabled === true;
-    label.append(input);
-    return label;
-  });
-  container.replaceChildren(...labels);
-}
-
-// 定期思考タブのカメラ観測チェックを camera_source.enabled へ反映する。
-function syncCameraObservations() {
-  const container = element("wake-camera-observations");
-  if (!container || !state.camera?.camera_sources) {
-    return;
-  }
-  const checkboxes = [...container.querySelectorAll("input[type='checkbox'][data-camera-index]")];
-  if (!checkboxes.length) {
-    return;
-  }
-  const cameras = state.camera.camera_sources;
-  // 一覧は render 時の camera_sources 順と対応させる。ID 再生成後も enabled を落とさない。
-  if (checkboxes.length === cameras.length) {
-    cameras.forEach((camera, index) => {
-      camera.enabled = checkboxes[index].checked;
-    });
-    return;
-  }
-  const enabledById = new Map(
-    checkboxes.map((input) => [input.dataset.visionSourceId, input.checked]),
-  );
-  for (const camera of cameras) {
-    if (enabledById.has(camera.vision_source_id)) {
-      camera.enabled = enabledById.get(camera.vision_source_id) === true;
-    }
-  }
 }
 
 function updateCameraGeneratedIds() {
@@ -3953,14 +3888,13 @@ function updateCameraGeneratedIds() {
 }
 
 function syncCamera() {
-  // 定期思考向けの観測有効フラグは接続フォームではなく観測一覧から同期する。
-  syncCameraObservations();
   const camera = arrayById(state.camera.camera_sources, "vision_source_id", state.selectedCameraId);
   if (!camera) {
     return;
   }
   const previousVisionSourceId = camera.vision_source_id;
   camera.display_name = textValue("camera-display-name");
+  camera.enabled = boolValue("camera-enabled");
   camera.vision_source_id = defaultVisionSourceId(camera);
   camera.connector_kind = textValue("camera-connector-kind");
   camera.client_id = textValue("camera-client-id");

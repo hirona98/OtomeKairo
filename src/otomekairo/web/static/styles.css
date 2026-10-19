@@ -1092,16 +1092,17 @@ a.dashboard-item:hover {
 .setting-row {
   display: grid;
   grid-template-columns: var(--setting-label-width) minmax(0, 1fr);
-  align-items: center;
+  align-items: start;
   gap: var(--setting-column-gap);
 }
 
+/* ラベルは右列の先頭の入力と揃え、説明や一覧はその下へ伸ばす。 */
 .setting-row>label {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-height);
   color: var(--muted);
-}
-
-.setting-row-top {
-  align-items: start;
+  font-size: var(--label-size);
 }
 
 /* 入力幅。未指定は右列いっぱい（full）。 */
@@ -1300,8 +1301,7 @@ a.dashboard-item:hover {
   gap: 10px;
 }
 
-/* 設定行内のラベルはテキストのみ。input を label 子にしない。 */
-.setting-row>label,
+/* レンジのラベルも設定行と同じ文字サイズに揃える。 */
 .range-field>label {
   display: block;
   color: var(--muted);
@@ -1455,11 +1455,6 @@ input[type="checkbox"]:disabled {
 .capability-group {
   display: grid;
   gap: 8px;
-}
-
-.wake-camera-observations {
-  display: grid;
-  gap: 6px;
 }
 
 .settings-actions {
@@ -1631,6 +1626,10 @@ input[type="checkbox"]:disabled {
 
   .setting-row {
     grid-template-columns: 1fr;
+  }
+
+  .setting-row>label {
+    min-height: 0;
   }
 
   .selector-row {
