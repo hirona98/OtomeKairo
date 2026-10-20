@@ -2259,7 +2259,7 @@ function resultText(result) {
     return { kind: "assistant", text: result.speech.text };
   }
   if (result?.result_kind === "noop") {
-    return { kind: "system", text: "応答はありません。" };
+    return null;
   }
   if (result?.result_kind === "internal_failure") {
     const cycleId = typeof result.cycle_id === "string" ? result.cycle_id : "";

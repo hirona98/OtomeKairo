@@ -118,13 +118,15 @@ badge、`.status.processing` / `.status.error` は上記を共有する。
 - person の `display_name` はバルーン直上に右寄せで表示する
 - assistant の `persona_display_name` はその発話バルーン直上に左寄せで表示する
 - 時刻は client が表示した時刻を `HH:mm` で表示し、person はバルーン左側、assistant は右側の下端に揃える
-- system / error / noop には表示名や時刻を付けない
+- system / error には表示名や時刻を付けない
 - 入力元や assistant 発話の起点はバルーン周辺に表示しない
 - assistant 本文は表示直前に `[face:...]`（`...` は任意文字列）をすべて除去し、前後の空白を trim する。規則は CocoroConsole の `RemoveFaceTags` と同じ。`assistant_message.data.message` の wire 自体は除去しない
 
-person と assistant の吹き出しは event stream を表示の正本とし、event 発生時に起動・購読中の全 client で同じ順序に追加する。HTTP response から assistant 吹き出しを追加しない。送信画像は `message_id` に対応づけて送信元ブラウザだけが表示し、他 client へ同期しない。system / error / noop の表示は各 UI のローカル通知とする。
+person と assistant の吹き出しは event stream を表示の正本とし、event 発生時に起動・購読中の全 client で同じ順序に追加する。HTTP response から assistant 吹き出しを追加しない。送信画像は `message_id` に対応づけて送信元ブラウザだけが表示し、他 client へ同期しない。system / error の表示は各 UI のローカル通知とする。
 
 初期表示では `GET /api/conversation/history` から現在の `interaction_ref` に属する直近30件を古い順に表示し、取得完了後に event stream の購読を開始する。保存済み画像は存在しないため履歴表示には画像を含めない。過去イベントに表示名が保存されていない場合は空の表示名として扱い、別の現在設定値で補完しない。
+
+HTTP response の `result_kind=noop` は、会話欄に通知を追加せず正常完了として扱う。
 
 HTTP response の `result_kind=capability_request` は会話吹き出しにしない。能力実行の進行は「いま」パネルの結果待ち表示に寄せ、`capability_id` / `request_id` などの内部識別子を会話本文へ出さない。失敗（`internal_failure`）と `system_notice`（`conversation_visible=true`）は従来どおり会話欄に表示してよい。
 
