@@ -174,7 +174,8 @@
           <option value="avatar" selected>アバター・TTS</option>
         </optgroup>
         <optgroup label="会話">
-          <option value="conversation">呼ばれ方・音声</option>
+          <option value="conversation">呼ばれ方・話者</option>
+          <option value="audio">音声認識・出力</option>
         </optgroup>
         <optgroup label="人格と記憶">
           <option value="persona">人格設定</option>
@@ -204,7 +205,8 @@
         <div class="settings-navigation-category">表現</div>
         <button type="button" class="settings-nav-button active" data-tab="avatar">アバター・TTS</button>
         <div class="settings-navigation-category">会話</div>
-        <button type="button" class="settings-nav-button" data-tab="conversation">呼ばれ方・音声</button>
+        <button type="button" class="settings-nav-button" data-tab="conversation">呼ばれ方・話者</button>
+        <button type="button" class="settings-nav-button" data-tab="audio">音声認識・出力</button>
         <div class="settings-navigation-category">人格と記憶</div>
         <button type="button" class="settings-nav-button" data-tab="persona">人格設定</button>
         <button type="button" class="settings-nav-button" data-tab="model">モデル</button>
@@ -508,22 +510,58 @@
           </section>
 
           <section class="tab-page" data-page="conversation">
+            <div class="selector-row">
+              <select id="settings-conversation-display-name-select"></select>
+              <button type="button" id="add-conversation-display-name">追加</button>
+              <button type="button" id="update-conversation-display-name">変更</button>
+              <button type="button" class="danger-button" id="delete-conversation-display-name">削除</button>
+            </div>
+            <hr class="settings-separator">
+            <div class="setting-row">
+              <label for="conversation-display-name-edit">記憶に使う名前:</label>
+              <div class="console-control-with-hint">
+                <input id="conversation-display-name-edit" class="field-width-medium">
+                <span class="field-hint">対話した人物をこの名前で記憶します。チャット画面では一覧から選ぶか、自由入力できます。</span>
+              </div>
+            </div>
             <fieldset class="settings-group">
-              <legend>対話人物の名前</legend>
+              <legend>話者識別</legend>
               <div class="settings-list">
-                <p class="field-hint">対話した人物をこの名前で記憶します。チャット画面では一覧から選ぶか、自由入力できます。</p>
-                <div class="conversation-display-name-manage">
-                  <select id="settings-conversation-display-name-select"></select>
-                  <button type="button" id="add-conversation-display-name">追加</button>
-                  <button type="button" id="update-conversation-display-name">変更</button>
-                  <button type="button" class="danger-button" id="delete-conversation-display-name">削除</button>
+                <div class="setting-row">
+                  <label for="speaker-registration-status">登録状態:</label>
+                  <input id="speaker-registration-status" class="field-width-medium" disabled>
                 </div>
                 <div class="setting-row">
-                  <label for="conversation-display-name-edit">名前:</label>
-                  <input id="conversation-display-name-edit" class="field-width-medium">
+                  <label>音声登録:</label>
+                  <div class="inline-control-row">
+                    <button type="button" id="start-speaker-enrollment">3発話で登録</button>
+                    <button type="button" class="plain-button" id="cancel-speaker-enrollment" disabled>登録を中止</button>
+                    <button type="button" class="danger-button" id="unregister-speaker" disabled>登録解除</button>
+                  </div>
                 </div>
+                <p class="field-hint field-hint-indent" id="speaker-enrollment-status" hidden></p>
+                <p class="field-hint field-hint-indent">選択中のマイクへ2秒以上の発話を3回入力すると登録が完了します。</p>
+                <div class="range-field">
+                  <label for="speaker-recognition-threshold">識別しきい値:</label>
+                  <input id="speaker-recognition-threshold" type="range" min="0.1" max="0.9" step="0.05">
+                  <output id="speaker-recognition-threshold-value"></output>
+                </div>
+                <div class="audio-meters audio-meters-settings" id="settings-audio-meters-speaker" aria-live="polite">
+                  <div class="audio-meter-row" data-meter="speaker">
+                    <span class="audio-meter-label">識別</span>
+                    <div class="audio-meter-track" aria-hidden="true">
+                      <div class="audio-meter-fill" id="settings-meter-speaker-fill"></div>
+                      <div class="audio-meter-threshold" id="settings-meter-speaker-threshold"></div>
+                    </div>
+                    <span class="audio-meter-value" id="settings-meter-speaker-value">sim 0.00 / thr 0.60</span>
+                  </div>
+                </div>
+                <p class="field-hint field-hint-indent">識別メータは発話処理完了後に3秒間表示します。しきい値超過と最終受理は別判定です。</p>
               </div>
             </fieldset>
+          </section>
+
+          <section class="tab-page" data-page="audio">
             <fieldset class="settings-group">
               <legend>音声認識（現状AmiVoiceのみ）</legend>
               <div class="settings-list">
@@ -555,27 +593,7 @@
               </div>
             </fieldset>
             <fieldset class="settings-group">
-              <legend>音声出力</legend>
-              <div class="settings-list">
-                <div class="setting-row">
-                  <label for="audio-output-destination">出力先:</label>
-                  <select id="audio-output-destination">
-                    <option value="otomekairo">OtomeKairo</option>
-                    <option value="cocoro_console">CocoroConsole</option>
-                    <option value="browser">ブラウザ</option>
-                  </select>
-                </div>
-                <div class="setting-row">
-                  <label for="local-output-device">OtomeKairo:</label>
-                  <select id="local-output-device">
-                    <option value="">未選択</option>
-                  </select>
-                </div>
-                <p class="field-hint field-hint-indent">選択した種類で起動中のすべてのクライアントへ同じ音声を配信します。</p>
-              </div>
-            </fieldset>
-            <fieldset class="settings-group">
-              <legend>マイク・話者識別</legend>
+              <legend>マイク</legend>
               <div class="settings-list">
                 <div class="setting-row">
                   <label for="microphone-input-source">使用するマイク:</label>
@@ -624,37 +642,25 @@
                 </div>
                 <p class="field-hint field-hint-indent">値を下げると音声を拾いやすくなり、環境音による誤検出も増えます。スライダは未保存値でも上のVADバーに反映します。</p>
               </div>
-              <div class="speaker-enrollment">
+            </fieldset>
+            <fieldset class="settings-group">
+              <legend>音声出力</legend>
+              <div class="settings-list">
                 <div class="setting-row">
-                  <label>登録済み話者:</label>
-                  <div class="speaker-list" id="speaker-list">登録済み話者はいません</div>
+                  <label for="audio-output-destination">出力先:</label>
+                  <select id="audio-output-destination">
+                    <option value="otomekairo">OtomeKairo</option>
+                    <option value="cocoro_console">CocoroConsole</option>
+                    <option value="browser">ブラウザ</option>
+                  </select>
                 </div>
                 <div class="setting-row">
-                  <label for="speaker-enrollment-display-name-id">新規登録:</label>
-                  <div class="speaker-registration-row">
-                    <select id="speaker-enrollment-display-name-id"></select>
-                    <button type="button" id="start-speaker-enrollment">3発話で登録</button>
-                    <button type="button" class="plain-button" id="cancel-speaker-enrollment" disabled>登録を中止</button>
-                  </div>
+                  <label for="local-output-device">OtomeKairo:</label>
+                  <select id="local-output-device">
+                    <option value="">未選択</option>
+                  </select>
                 </div>
-                <p class="field-hint field-hint-indent" id="speaker-enrollment-status">会話欄で音声入力を開始してください</p>
-                <p class="field-hint field-hint-indent">選択中のマイクへ2秒以上の発話を3回入力すると登録が完了します。</p>
-                <div class="range-field">
-                  <label for="speaker-recognition-threshold">識別しきい値:</label>
-                  <input id="speaker-recognition-threshold" type="range" min="0.1" max="0.9" step="0.05">
-                  <output id="speaker-recognition-threshold-value"></output>
-                </div>
-                <div class="audio-meters audio-meters-settings" id="settings-audio-meters-speaker" aria-live="polite">
-                  <div class="audio-meter-row" data-meter="speaker">
-                    <span class="audio-meter-label">識別</span>
-                    <div class="audio-meter-track" aria-hidden="true">
-                      <div class="audio-meter-fill" id="settings-meter-speaker-fill"></div>
-                      <div class="audio-meter-threshold" id="settings-meter-speaker-threshold"></div>
-                    </div>
-                    <span class="audio-meter-value" id="settings-meter-speaker-value">sim 0.00 / thr 0.60</span>
-                  </div>
-                </div>
-                <p class="field-hint field-hint-indent">識別メータは発話処理完了後に3秒間表示します。しきい値超過と最終受理は別判定です。</p>
+                <p class="field-hint field-hint-indent">選択した種類で起動中のすべてのクライアントへ同じ音声を配信します。</p>
               </div>
             </fieldset>
           </section>

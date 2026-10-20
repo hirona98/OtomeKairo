@@ -1241,66 +1241,6 @@ a.dashboard-item:hover {
   text-align: right;
 }
 
-.speaker-enrollment {
-  display: grid;
-  gap: 10px;
-  margin-top: 22px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-}
-
-.speaker-list {
-  display: grid;
-  gap: 6px;
-  min-height: 74px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #f8fafc;
-  color: var(--muted);
-  font-size: var(--font-body);
-}
-
-.speaker-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 8px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--line);
-}
-
-.speaker-row:last-child {
-  padding-bottom: 0;
-  border-bottom: 0;
-}
-
-.speaker-registration-status {
-  color: var(--muted);
-  font-size: var(--font-secondary);
-  white-space: nowrap;
-}
-
-.speaker-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.speaker-actions button {
-  min-height: 26px;
-  padding: 3px 7px;
-}
-
-.speaker-registration-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 10px;
-}
-
 /* レンジのラベルも設定行と同じ文字サイズに揃える。 */
 .range-field>label {
   display: block;
@@ -1423,23 +1363,6 @@ input[type="checkbox"]:disabled {
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
-}
-
-.conversation-display-name-manage {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.conversation-display-name-manage select {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.conversation-display-name-manage button {
-  flex: 0 0 auto;
-  min-width: 64px;
 }
 
 .field-hint-indent {
@@ -1570,8 +1493,7 @@ input[type="checkbox"]:disabled {
     grid-template-columns: 1fr;
   }
 
-  .range-field,
-  .speaker-registration-row {
+  .range-field {
     grid-template-columns: 1fr;
   }
 
@@ -1644,18 +1566,6 @@ input[type="checkbox"]:disabled {
   .web-microphone-controls>select {
     flex: 1 1 100%;
     max-width: none;
-  }
-
-  .speaker-row {
-    grid-template-columns: 1fr;
-  }
-
-  .speaker-actions {
-    justify-content: flex-start;
-  }
-
-  .conversation-display-name-manage {
-    flex-wrap: wrap;
   }
 
   .field-hint-indent {

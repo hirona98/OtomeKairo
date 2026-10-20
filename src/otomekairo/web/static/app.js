@@ -2922,7 +2922,6 @@ function renderMicrophoneSettings() {
   element("vad-probability-threshold").value = microphone.vad_probability_threshold;
   element("speaker-recognition-threshold").value = microphone.speaker_recognition_threshold;
   updateMicrophoneSettingLabels();
-  renderSpeakerList();
   renderSpeakerEnrollment();
 }
 
@@ -3097,6 +3096,7 @@ function syncConversationDisplayNameEditFromSelection() {
   );
   element("conversation-display-name-edit").value = definition?.display_name || "";
   state.conversationDisplayName = definition?.display_name || "";
+  renderSpeakerEnrollment();
 }
 
 async function addConversationDisplayName() {
@@ -3198,120 +3198,63 @@ async function deleteConversationDisplayName() {
   }
 }
 
-function renderSpeakerList() {
-  const container = element("speaker-list");
-  if (state.speakers.length === 0) {
-    container.textContent = "登録済み話者はいません";
-    return;
-  }
-  const rows = state.speakers.map((speaker) => {
-    const row = document.createElement("div");
-    row.className = "speaker-row";
-    const name = document.createElement("select");
-    name.dataset.speakerDisplayNameSelect = speaker.person_ref;
-    const availableDefinitions = state.conversationDisplayNames.filter((definition) => (
-      definition.conversation_display_name_id === speaker.conversation_display_name_id
-      || !state.speakers.some((candidate) => (
-        candidate.person_ref !== speaker.person_ref
-        && candidate.conversation_display_name_id === definition.conversation_display_name_id
-      ))
-    ));
-    setSelectOptions(
-      name,
-      availableDefinitions,
-      "conversation_display_name_id",
-      speaker.conversation_display_name_id,
-    );
-    const registration = document.createElement("span");
-    registration.className = "speaker-registration-status";
-    registration.textContent = speaker.registration_status === "registered"
-      ? "音声登録済み"
-      : "音声未登録";
-
-    const actions = document.createElement("div");
-    actions.className = "speaker-actions";
-    for (const [action, label, className] of [
-      ["assign", "割当変更", "plain-button"],
-      ["reenroll", "再登録", "plain-button"],
-      ["unregister", "登録解除", "danger-button"],
-    ]) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = className;
-      button.dataset.speakerAction = action;
-      button.dataset.personRef = speaker.person_ref;
-      button.textContent = label;
-      if (
-        action === "unregister"
-        && speaker.registration_status !== "registered"
-      ) {
-        button.disabled = true;
-      }
-      if (action === "reenroll" && !webMicrophoneHasLease()) {
-        button.disabled = true;
-      }
-      actions.append(button);
-    }
-    row.append(name, registration, actions);
-    return row;
-  });
-  container.replaceChildren(...rows);
+function selectedConversationSpeaker() {
+  const displayNameId = selectedConversationDisplayNameId();
+  return state.speakers.find(
+    (speaker) => speaker.conversation_display_name_id === displayNameId,
+  );
 }
 
 function renderSpeakerEnrollment() {
   const enrollment = state.activeEnrollment || state.audioRuntime?.enrollment;
+  const speaker = selectedConversationSpeaker();
+  const registered = speaker?.registration_status === "registered";
   const startButton = element("start-speaker-enrollment");
-  const cancelButton = element("cancel-speaker-enrollment");
-  const assignedIds = new Set(
-    state.speakers.map((speaker) => speaker.conversation_display_name_id),
-  );
-  const availableDefinitions = state.conversationDisplayNames.filter(
-    (definition) => !assignedIds.has(definition.conversation_display_name_id),
-  );
   const hasInputLease = webMicrophoneHasLease();
-  setSelectOptions(
-    element("speaker-enrollment-display-name-id"),
-    availableDefinitions,
-    "conversation_display_name_id",
-    element("speaker-enrollment-display-name-id").value,
-  );
-  startButton.disabled = Boolean(enrollment)
-    || !hasInputLease
-    || availableDefinitions.length === 0;
-  cancelButton.disabled = !enrollment;
+  const hasSelection = Boolean(selectedConversationDisplayNameId());
+  element("speaker-registration-status").value = !hasSelection
+    ? "呼ばれ方を選択してください"
+    : registered ? "音声登録済み" : "音声未登録";
+  startButton.textContent = registered ? "再登録（3発話）" : "3発話で登録";
+  startButton.disabled = Boolean(enrollment) || !hasInputLease || !hasSelection;
+  element("unregister-speaker").disabled = Boolean(enrollment) || !registered;
+  element("cancel-speaker-enrollment").disabled = !enrollment
+    || enrollment.owner_client_id !== state.clientId;
   if (!enrollment) {
-    let status = "話者登録を開始できます";
-    if (availableDefinitions.length === 0) {
-      status = "新規登録できる未割当の呼ばれ方がありません";
+    let status = "";
+    if (!hasSelection) {
+      status = "呼ばれ方を選択してください";
     } else if (!hasInputLease) {
       status = "音声入力が有効になってから話者登録を開始してください";
     }
     element("speaker-enrollment-status").textContent = status;
-    renderSpeakerList();
+    element("speaker-enrollment-status").hidden = status === "";
     return;
   }
   const completed = enrollment.completed_samples || 0;
   const required = enrollment.required_samples || 3;
+  element("speaker-enrollment-status").hidden = false;
   element("speaker-enrollment-status").textContent =
     `話者登録中: ${completed} / ${required} 発話`;
-  renderSpeakerList();
 }
 
-async function startSpeakerEnrollment(personRef = null) {
+async function startSpeakerEnrollment() {
   if (!webMicrophoneHasLease()) {
     showNotice("音声入力が有効になってから話者登録を開始してください。", true);
     return;
   }
-  const body = personRef
-    ? { owner_client_id: state.clientId, person_ref: personRef }
-    : {
-      owner_client_id: state.clientId,
-      conversation_display_name_id: element("speaker-enrollment-display-name-id").value,
-    };
-  if (!personRef && !body.conversation_display_name_id) {
-    showNotice("未割当の呼ばれ方を登録してください。", true);
+  const displayNameId = selectedConversationDisplayNameId();
+  if (!displayNameId) {
+    showNotice("話者登録する呼ばれ方を選択してください。", true);
     return;
   }
+  const speaker = selectedConversationSpeaker();
+  const body = speaker
+    ? { owner_client_id: state.clientId, person_ref: speaker.person_ref }
+    : {
+      owner_client_id: state.clientId,
+      conversation_display_name_id: displayNameId,
+    };
   try {
     state.activeEnrollment = await apiRequest(
       "/ui/api/audio/speaker-enrollments",
@@ -3340,23 +3283,6 @@ async function cancelSpeakerEnrollment() {
     );
     state.activeEnrollment = null;
     renderSpeakerEnrollment();
-  } catch (error) {
-    showNotice(error.message, true);
-  }
-}
-
-async function assignSpeakerDisplayName(personRef, conversationDisplayNameId) {
-  try {
-    await apiRequest(
-      `/ui/api/audio/speakers/${encodeURIComponent(personRef)}/conversation-display-name`,
-      {
-        method: "PUT",
-        body: JSON.stringify({
-          conversation_display_name_id: conversationDisplayNameId,
-        }),
-      },
-    );
-    await refreshSpeakers();
   } catch (error) {
     showNotice(error.message, true);
   }
@@ -4747,24 +4673,10 @@ function bindEvents() {
     startSpeakerEnrollment();
   });
   element("cancel-speaker-enrollment").addEventListener("click", cancelSpeakerEnrollment);
-  element("speaker-list").addEventListener("click", (event) => {
-    const button = event.target instanceof Element
-      ? event.target.closest("[data-speaker-action]")
-      : null;
-    if (!button || button.disabled) {
-      return;
-    }
-    if (button.dataset.speakerAction === "assign") {
-      const select = element("speaker-list").querySelector(
-        `select[data-speaker-display-name-select="${CSS.escape(button.dataset.personRef)}"]`,
-      );
-      if (select) {
-        assignSpeakerDisplayName(button.dataset.personRef, select.value);
-      }
-    } else if (button.dataset.speakerAction === "reenroll") {
-      startSpeakerEnrollment(button.dataset.personRef);
-    } else if (button.dataset.speakerAction === "unregister") {
-      unregisterSpeaker(button.dataset.personRef);
+  element("unregister-speaker").addEventListener("click", () => {
+    const speaker = selectedConversationSpeaker();
+    if (speaker) {
+      unregisterSpeaker(speaker.person_ref);
     }
   });
   element("settings-conversation-display-name-select").addEventListener("change", () => {
