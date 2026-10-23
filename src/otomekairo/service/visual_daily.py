@@ -349,27 +349,29 @@ class ServiceVisualDailyMixin:
         memory_candidates: list[dict[str, Any]] = []
         skipped_count = 0
         candidates = candidates[:VISUAL_DAILY_PROMOTION_LIMIT_PER_DIGEST]
+        failure_reason = "visual_daily_support_failed"
         try:
             support = self._visual_daily_repeated_support(digest=digest, candidates=candidates, state=state)
+            failure_reason = "visual_daily_promotion_failed"
+            for index, candidate in enumerate(candidates):
+                if not support[index]:
+                    skipped_count += 1
+                    continue
+                memory_candidate = self._visual_daily_memory_candidate(digest=digest, candidate=candidate)
+                memory_candidate["qualifiers_hint"]["support_group_refs"] = support[index]
+                memory_candidates.append(memory_candidate)
+            actions = self._cap_visual_daily_memory_action_scores(
+                self.memory.action_resolver.resolve_memory_actions_batch(
+                    memory_set_id=memory_set_id, finished_at=finished_at,
+                    event_ids=[], cycle_ids=[], candidates=memory_candidates,
+                    embedding_definition=state["memory_sets"][memory_set_id]["embedding"],
+                )
+            )
         except Exception:
             self._store_visual_daily_promotion_result(
                 digest=digest, result_status="failed", promoted_memory_unit_ids=[],
-                skipped_candidate_count=0, failure_reason="visual_daily_support_failed", relation_index_sync=None)
+                skipped_candidate_count=skipped_count, failure_reason=failure_reason, relation_index_sync=None)
             raise
-        for index, candidate in enumerate(candidates):
-            if not support[index]:
-                skipped_count += 1
-                continue
-            memory_candidate = self._visual_daily_memory_candidate(digest=digest, candidate=candidate)
-            memory_candidate["qualifiers_hint"]["support_group_refs"] = support[index]
-            memory_candidates.append(memory_candidate)
-        actions = self._cap_visual_daily_memory_action_scores(
-            self.memory.action_resolver.resolve_memory_actions_batch(
-                memory_set_id=memory_set_id, finished_at=finished_at,
-                event_ids=[], cycle_ids=[], candidates=memory_candidates,
-                embedding_definition=state["memory_sets"][memory_set_id]["embedding"],
-            )
-        )
 
         if not actions:
             self._store_visual_daily_promotion_result(
@@ -485,7 +487,7 @@ class ServiceVisualDailyMixin:
             "scope": "topic",
             "subject_hint": topic_hint,
             "predicate_hint": "visual_daily_pattern",
-            "object_hint": topic_hint,
+            "object_hint": None,
             "summary_text": summary_text,
             "confidence_hint": "medium",
             "qualifiers_hint": {
@@ -544,6 +546,7 @@ class ServiceVisualDailyMixin:
             },
         }
         self.store.upsert_daily_visual_digest(digest=updated_digest, updated_records=[])
+        digest["memory_promotion"] = updated_digest["memory_promotion"]
 
     def _visual_daily_state_for_memory_set(self, *, state: dict[str, Any], memory_set_id: str) -> dict[str, Any]:
         # vector sync は selected_memory_set_id を見るため、対象 memory_set を選択状態にする。
