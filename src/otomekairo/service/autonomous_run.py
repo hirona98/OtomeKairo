@@ -699,11 +699,76 @@ class ServiceAutonomousRunMixin:
         current_time: str,
         reason_summary: str,
     ) -> list[str]:
-        replaced: list[str] = []
+        return self._cancel_existing_autonomous_runs(
+            state=state,
+            target_runs=target_runs,
+            current_time=current_time,
+            reason_summary=reason_summary,
+            mode="replace_existing",
+        )
+
+    def _apply_autonomous_run_intervention(
+        self,
+        *,
+        state: dict[str, Any],
+        current_input: CurrentInput,
+        recent_turns: list[dict[str, Any]],
+        cycle_id: str,
+        current_time: str,
+    ) -> list[str]:
+        if current_input.sender_kind != "person" or current_input.source_kind != "user_message":
+            raise ValueError("Conversation cancellation requires a current person message.")
+        runs = self.store.list_autonomous_runs(
+            memory_set_id=state["selected_memory_set_id"],
+            statuses=sorted(AUTONOMOUS_RUN_ACTIVE_STATUSES),
+            limit=None,
+        )
+        if not runs:
+            return []
+        intervention = self.llm.generate_autonomous_run_intervention(
+            model_config=state["model_presets"][state["selected_model_preset_id"]],
+            persona_context=self._build_selected_persona_context(state=state, role="autonomous_run_intervention"),
+            context={
+                "current_input": current_input.to_prompt_payload(),
+                "recent_turns": recent_turns,
+                "time_context": self._build_time_context(current_time=current_time),
+                "autonomous_runs": [self._autonomous_run_prompt_summary(run) for run in runs],
+            },
+        )
+        target_runs = self._autonomous_run_coordination_target_runs(
+            memory_set_id=state["selected_memory_set_id"], target_run_ids=intervention["cancel_run_ids"],
+        )
+        cancelled = self._cancel_existing_autonomous_runs(
+            state=state,
+            target_runs=target_runs,
+            current_time=current_time,
+            reason_summary=intervention["reason_summary"],
+            mode="cancel_existing",
+        )
+        self.store.append_events(events=[{
+            "event_id": f"event:{uuid.uuid4().hex}", "cycle_id": cycle_id,
+            "memory_set_id": state["selected_memory_set_id"], "created_at": current_time,
+            "kind": "autonomous_run_intervention", "role": "system", "text": None,
+            "cancel_run_ids": cancelled, "reason_summary": intervention["reason_summary"],
+        }])
+        return cancelled
+
+    def _cancel_existing_autonomous_runs(
+        self,
+        *,
+        state: dict[str, Any],
+        target_runs: list[dict[str, Any]],
+        current_time: str,
+        reason_summary: str,
+        mode: str,
+    ) -> list[str]:
+        cancelled: list[str] = []
         for run in target_runs:
             run_id = str(run.get("run_id") or "").strip()
             with self._autonomous_run_execution_lock(run_id):
-                current = self.store.get_autonomous_run(run_id=run_id) or run
+                current = self.store.get_autonomous_run(run_id=run_id)
+                if current is None:
+                    raise ValueError(f"Cancellation target run is missing: {run_id}")
                 if current.get("status") in AUTONOMOUS_RUN_TERMINAL_STATUSES:
                     continue
                 updated = self._terminal_autonomous_run(
@@ -714,7 +779,7 @@ class ServiceAutonomousRunMixin:
                 )
                 updated["history_summary"] = self._append_autonomous_run_coordination_history(
                     run=current,
-                    mode="replace_existing",
+                    mode=mode,
                     reason_summary=reason_summary,
                 )
                 self.store.upsert_autonomous_run(autonomous_run=updated)
@@ -725,10 +790,10 @@ class ServiceAutonomousRunMixin:
                     current_time=current_time,
                     evidence_events=[],
                 )
-                replaced.append(run_id)
-        if replaced:
-            debug_log("AutonomousRun", f"replaced runs={','.join(replaced)} reason={self._clamp(reason_summary)}")
-        return replaced
+                cancelled.append(run_id)
+        if cancelled:
+            debug_log("AutonomousRun", f"{mode} runs={','.join(cancelled)} reason={self._clamp(reason_summary)}")
+        return cancelled
 
     def _execute_autonomous_run_step(
         self,
@@ -2179,26 +2244,15 @@ class ServiceAutonomousRunMixin:
         runs = self.store.list_autonomous_runs(
             memory_set_id=state["selected_memory_set_id"],
             statuses=sorted(AUTONOMOUS_RUN_ACTIVE_STATUSES),
-            limit=50,
+            limit=None,
         )
-        cancelled: list[str] = []
-        for run in runs:
-            updated = self._terminal_autonomous_run(
-                run=run,
-                current_time=current_time,
-                status="cancelled",
-                reason_summary="conversation API の autonomous_run_action=cancel_all により cancel した。",
-            )
-            self.store.upsert_autonomous_run(autonomous_run=updated)
-            updated = self._finalize_autonomous_run_commitments(
-                state=state,
-                run=updated,
-                terminal_status="cancelled",
-                current_time=current_time,
-                evidence_events=[],
-            )
-            cancelled.append(str(run.get("run_id") or ""))
-        return [run_id for run_id in cancelled if run_id]
+        return self._cancel_existing_autonomous_runs(
+            state=state,
+            target_runs=runs,
+            current_time=current_time,
+            reason_summary="conversation API の autonomous_run_action=cancel_all により cancel した。",
+            mode="cancel_existing",
+        )
 
     def _link_autonomous_run_source_commitments(
         self,

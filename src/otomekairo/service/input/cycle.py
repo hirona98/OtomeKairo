@@ -141,6 +141,19 @@ class ServiceInputCycleMixin:
             self._end_user_response_cycle()
             raise
         try:
+            if not cancel_autonomous_runs:
+                self._apply_autonomous_run_intervention(
+                    state=state,
+                    current_input=self._build_current_input(
+                        input_text=input_text,
+                        trigger_kind="user_message",
+                        interaction_context=interaction_context,
+                        capability_request_summary=None,
+                    ),
+                    recent_turns=recent_turns,
+                    cycle_id=cycle_id,
+                    current_time=self._now_iso(),
+                )
             # 会話ごとに感覚を更新してから、入力解釈と行動判断へ進む。
             current_client_context = self._run_wake_policy_observations(
                 state=state,

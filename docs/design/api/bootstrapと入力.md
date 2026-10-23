@@ -150,7 +150,7 @@ request:
 - `message_id` は必須で `chat_message:` から始まる送信ごとに一意な値とする
 - `text` は必須の文字列
 - `autonomous_run_action` は任意とし、全自律実行を明示的に停止する場合だけ `{"kind":"cancel_all"}` を渡す
-- server は入力文から自律実行の停止意図を推定しない
+- 自然文からの作業取消は [autonomous_run.md](../runtime/autonomous_run.md#ユーザー割り込み) の LLM 判断と状態更新に従う
 - `interaction_context` は必須の object
 - `interaction_context.interaction_ref` は空でない安定参照
 - `interaction_context.speaker_ref` は `person:` で始まり、`participants` に含まれる値

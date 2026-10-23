@@ -249,7 +249,9 @@ def _autonomous_run_evidence_instruction() -> str:
     return (
         "autonomous_run_summaries は現在の非終端 run の実行状態です。予定の有無と取消の完了は、会話での了解や過去の返答ではなく、この現在状態に照らして説明します。"
         "active / waiting_timer / waiting_result / paused の run は終了していません。paused_by_user_interaction は会話中の一時停止であり、返答後に再開する予定です。"
-        "取消は特定 run の取消操作、または会話 API の autonomous_run_action.kind=cancel_all で行われます。本文で取消を望んだだけの場合は、現在残る予定と必要な取消操作を率直に伝えます。\n"
+        "人物発話による停止・撤回や依頼の取り違えの訂正は、会話入口の autonomous_run_intervention で対象の取消を保存してから、この判断に渡されます。"
+        "cancelled の run は取り消された作業として説明します。残っている run は現在の目的と状態に沿って説明します。"
+        "取消 API と会話 API の autonomous_run_action.kind=cancel_all も使えます。\n"
     )
 
 

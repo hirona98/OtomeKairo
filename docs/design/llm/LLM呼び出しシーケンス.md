@@ -39,6 +39,18 @@ sequenceDiagram
         end
     end
 
+    opt 非終端 run があり、明示的な cancel_all ではない
+        C->>L: 会話による既存作業の取消対象を選別<br>（autonomous_run_intervention）
+        L-->>C: 取消対象と判断理由
+        loop 取消対象の作業ごと
+            C->>D: 作業の取消を保存（autonomous_runs）
+            D-->>C: 保存完了
+            Note over C,D: 図 4 の終端処理で約束と記憶を更新
+        end
+        C->>D: 取消判断の監査を保存（events）
+        D-->>C: 保存完了
+    end
+
     Note over C,D: 1. 今回の観測と入力解釈
     loop 有効な思考前観測で画像を取得できた対象ごと
         C->>L: 画像を解釈<br>（visual_observation）

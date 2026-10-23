@@ -1042,6 +1042,12 @@ class LLMClient:
             operation="autonomous_activity_alignment_review",
         )
 
+    def generate_autonomous_run_intervention(
+        self, *, model_config: dict, persona_context: PersonaContext, context: dict[str, Any],
+    ) -> dict[str, Any]:
+        from otomekairo.llm.autonomous_run_intervention import generate_intervention
+        return generate_intervention(self, model_config=model_config, persona_context=persona_context, context=context)
+
     def generate_commitment_lifecycle_summaries(self, *, model_config: dict, context: dict[str, Any]) -> dict[str, Any]:
         from otomekairo.llm.commitment import generate_summaries
         return generate_summaries(self, model_config=model_config, context=context)

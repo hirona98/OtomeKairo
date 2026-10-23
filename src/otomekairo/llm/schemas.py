@@ -137,6 +137,12 @@ def input_interpretation_response_format() -> dict[str, Any]:
     )
 
 
+def autonomous_run_intervention_response_format() -> dict[str, Any]:
+    return structured_response_format("autonomous_run_intervention", closed_object({
+        "cancel_run_ids": string_array(), "reason_summary": {"type": "string"},
+    }))
+
+
 def decision_response_format(*, comparison_scope: str = "full") -> dict[str, Any]:
     if comparison_scope not in DECISION_COMPARISON_SCOPE_KINDS:
         raise ValueError(f"unsupported comparison_scope: {comparison_scope}")
@@ -531,6 +537,7 @@ def all_response_formats() -> dict[str, dict[str, Any]]:
         "agent_skill_selection": agent_skill_selection_response_format(),
         "agent_skill_material_selection": agent_skill_material_selection_response_format(),
         "input_interpretation": input_interpretation_response_format(),
+        "autonomous_run_intervention": autonomous_run_intervention_response_format(),
         "decision": decision_response_format(comparison_scope="full"),
         "decision_self_activity": decision_response_format(comparison_scope="self_activity"),
         "decision_outward_speech": decision_response_format(comparison_scope="outward_speech"),

@@ -78,12 +78,13 @@ MCP tool の連鎖も、他の capability や skill と同じく通常の run st
 ## run 調整
 
 `decision_generation` は active / waiting_timer / waiting_result / paused の既存 `autonomous_run` 要約を受け取り、新しい依頼と既存 run の関係を判断する。
-`decision.autonomous_run.coordination.mode` は `create_new`、`replace_existing` のいずれかである。
+新しい目的を開始する `kind=autonomous_run` の `coordination.mode` は `create_new`、`replace_existing` のいずれかである。
 
 既存 run に目的が含まれ、結果待ちやタイマー待機を維持する場合、通常判断は `noop` を選ぶ。`noop` でも既存 run は存続し、結果到着や時刻到来時に server が再開する。
 
 `create_new` は既存 run と独立した目的を開始する。
 `replace_existing` は `target_run_ids` の run を `cancelled` にしてから新しい run を開始する。
+通常会話からの取消判断は下記「ユーザー割り込み」を正とする。
 置換時の活動 ID の継承は [定期思考トピック.md](定期思考トピック.md#due) を正とする。
 追加の依頼、タイマー、通知、リマインド、既存 run と並行する一時タスクは `create_new` とする。
 既存 run の目的は作成後に変更しない。目的を変える場合は `replace_existing` で新しい run を開始する。
@@ -218,9 +219,9 @@ server は orphan を timeout と同じ再評価可能状態へ戻し、未完�
 run は必要に応じて `vision.capture`、`camera.ptz`、`wait_until`、`speech` を組み合わせる。
 次の観測時刻、継続、完了、中断は `autonomous_step_generation` が目的、履歴、現在時刻、能力可否、直近 result から判断する。
 server は特定語句の文字列一致で監視間隔や終了時刻へ変換しない。
-特定 run は cancel API、会話からの全run停止は `autonomous_run_action.kind=cancel_all` で `cancelled` に遷移する。
-判断と表現は、現在の全非終端 run と、直近の完了・取消 run 最大5件を `autonomous_run_summaries` として参照する。作業IDと起点、保存済み状態を照合し、終端済みの作業は完了・取消の実績として扱う。人物発話による一時停止は取消ではなく、返答後の再開を伴う。会話中の了解や過去の返答だけで取消完了を説明せず、本文だけで取消を望んだ場合には、残っている予定と必要な取消操作を現在状態に沿って伝える。
-server は会話本文から停止意図を推定しない。
+取消の入力経路と状態遷移は下記「ユーザー割り込み」を正とする。
+判断と表現は、現在の全非終端 run と、直近の完了・取消 run 最大5件を `autonomous_run_summaries` として参照する。作業IDと起点、保存済み状態を照合し、終端済みの作業は完了・取消の実績として扱う。人物発話による一時停止は取消ではなく、返答後の再開を伴う。取消完了の根拠は保存済みの実行状態とし、会話中の了解や過去の返答とは区別する。
+取消を伴う発話は、今回の判断で保存した取消結果を根拠にする。
 
 ## ユーザー割り込み
 
@@ -229,7 +230,12 @@ in-flight capability result は受け取る。
 ユーザー応答中は、ユーザー起点で開始した最初の step を除き、run の次 step を進めない。
 ユーザー応答中に background / capability result 起点の step が完了しても、assistant_message と capability request は送信しない。
 ユーザー応答後、`paused_by_user_interaction` の run は再開する。
-特定 run の cancel API または `autonomous_run_action.kind=cancel_all` を受けた run は `cancelled` に遷移する。
+特定 run の cancel API、`autonomous_run_action.kind=cancel_all`、または会話入口の `autonomous_run_intervention` による取消判断を受けた run は `cancelled` に遷移する。
+自然文からの取消は、非終端 run がある人物発話でだけ `autonomous_run_intervention` を1回呼び、停止・撤回・保留の希望、依頼として受け取った前提の訂正を、現在発話・直近会話・各 run の目的と起点から LLM が判断する。全作業の停止なら全件、特定作業なら対象だけを選ぶ。状態の質問、継続希望、別件の相談や対象が曖昧な場合は既存作業を維持する。自発的な関心が残る場合も、取り違えた依頼の実行責務とは分けて次の自己評価で判断する。
+入力は `current_input`、`recent_turns`、`time_context`、全非終端 run の `autonomous_runs` と人格文脈とする。出力は `cancel_run_ids` と `reason_summary` の2キーに固定する。対象は提示された run ID の重複しない配列であり、維持する場合は空配列とする。`reason_summary` は現在発話と対象の起点・目的の対応、または対象が未確定である理由を示す。server は自然文を文字列一致で分類しない。
+会話の取消判断では、現在の人物発話を起点とすること、全対象の存在・記憶集合・非終端状態を検証してから、run ごとの実行 lock 内で状態を再読込し、取消を保存して紐付く commitment の終端処理を行う。その後に通常の入力解釈と判断へ進み、取消後の run 要約を渡して返答を作る。LLM 判断や検証に失敗した場合は、取消完了の発話を返さずサイクルの明示的な失敗とする。
+`autonomous_run_intervention` イベントに取消対象 ID と判断理由を保存する。明示的な `cancel_all` ではこの LLM 判断を省略し、全非終端 run を同じ取消処理へ渡す。
+取消済みの run は会話終了時にも再開せず、到着済み・遅着の capability result から次 step を進めない。既に外へ送信した能力実行の作用は、その実行結果として区別する。
 
 ## 実行直列化
 

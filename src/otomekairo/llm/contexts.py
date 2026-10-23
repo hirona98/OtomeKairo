@@ -26,6 +26,7 @@ PERSONA_CONTEXT_USE_POLICY = (
 PERSONA_CONTEXT_ROLES = frozenset({
     "decision_generation",
     "autonomous_step_generation",
+    "autonomous_run_intervention",
     "pending_intent_selection",
     "initiative_entry_check",
     "input_interpretation",

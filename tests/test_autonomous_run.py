@@ -8,13 +8,161 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from otomekairo.llm.contexts import CurrentInput
-from otomekairo.llm.contracts import LLMError
+from otomekairo.llm.contracts import LLMError, build_decision_target_stances_for_kind, validate_decision_contract
 from otomekairo.service.app import OtomeKairoService
 from otomekairo.service.autonomous_run import AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK
 from otomekairo.service.capability import PreSendCheckWithheldError
 
 
 class AutonomousRunRecoveryTests(unittest.TestCase):
+    def _correction_reply(self) -> dict:
+        return {
+            "kind": "speech", "reason_code": "user_correction",
+            "reason_summary": "依頼として受け取ったことが訂正されたため、対象作業を取り消す。",
+            "requires_confirmation": False, "speech_text": "読み取り作業を取り消しました。",
+            "pending_intent": None, "capability_request": None,
+            "autonomous_run": None,
+            "foreground_selection": {
+                "primary_factor_ref": None, "supporting_factor_refs": [],
+                "suppressed_factors": [], "summary_text": "人物の訂正を反映する。",
+            },
+            "target_stances": build_decision_target_stances_for_kind(
+                "speech", required_targets=("outward_speech", "self_activity"), reason_summary="訂正に応じる。",
+            ),
+        }
+
+    def _conversation_payload(self) -> dict:
+        return {
+            "message_id": "chat_message:correction", "text": "センサ読み取りは指示じゃないよ",
+            "interaction_context": {
+                "interaction_ref": "interaction:test", "speaker_ref": "person:test",
+                "participants": [{"person_ref": "person:test", "display_name": "テスト人物"}],
+            },
+        }
+
+    def test_conversation_cancels_selected_runs_and_commitment_before_reply(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = self._use_mock_model(service, service.store.read_state())
+            state["console_access_token"] = "test-token"
+            state["memory_sets"][state["selected_memory_set_id"]]["embedding"]["model"] = "mock"
+            service.store.write_state(state)
+            memory_set_id = state["selected_memory_set_id"]
+            commitment = self._persist_commitment(
+                service=service, memory_set_id=memory_set_id, memory_unit_id="memory_unit:sensor",
+            )
+            target_ids = []
+            for status in ("active", "waiting_timer", "waiting_result", "paused"):
+                run = self._commitment_run_record(memory_set_id=memory_set_id, status=status)
+                run.update(run_id=f"autonomous_run:{status}", objective_summary="センサを継続して読み取る。")
+                if status == "waiting_result":
+                    run["waiting_request_id"] = "vision_capture_request:pending"
+                if status == "active":
+                    run["source_commitment_memory_unit_ids"] = [commitment["memory_unit_id"]]
+                service.store.upsert_autonomous_run(autonomous_run=run)
+                target_ids.append(run["run_id"])
+            unrelated = self._commitment_run_record(memory_set_id=memory_set_id, status="waiting_timer")
+            unrelated.update(run_id="autonomous_run:unrelated", next_run_at="2099-01-01T00:00:00+09:00")
+            service.store.upsert_autonomous_run(autonomous_run=unrelated)
+            decision = self._correction_reply()
+            validate_decision_contract(decision)
+            delivered = []
+
+            def deliver(event_type, _event):
+                if event_type == "assistant_message":
+                    delivered.append(event_type)
+                    for run_id in target_ids:
+                        self.assertEqual(service.store.get_autonomous_run(run_id=run_id)["status"], "cancelled")
+                    unit = service.store.list_memory_units_by_id(
+                        memory_set_id=memory_set_id, memory_unit_ids=[commitment["memory_unit_id"]],
+                    )[0]
+                    self.assertEqual(unit["commitment_state"], "cancelled")
+                return 1
+
+            with patch.object(type(service.llm), "generate_autonomous_run_intervention", return_value={
+                "cancel_run_ids": target_ids, "reason_summary": "対象作業が依頼ではなかったと訂正された。",
+            }), patch.object(type(service.llm), "generate_decision", return_value=decision) as generate, patch.object(
+                type(service.memory.llm), "generate_commitment_lifecycle_summaries", return_value={"summaries": [{
+                    "memory_unit_id": commitment["memory_unit_id"], "summary_text": "読み取り依頼は取り消された。",
+                }]},
+            ), patch.object(service._event_stream_registry, "send_to_subscribers", side_effect=deliver):
+                result = service.handle_conversation("test-token", self._conversation_payload())
+            self.assertEqual(result["result_kind"], "speech")
+            seen_runs = {run["run_id"]: run for run in generate.call_args.kwargs["context"].autonomous_run_summaries}
+            for run_id in target_ids:
+                self.assertEqual(seen_runs[run_id]["status"], "cancelled")
+            self.assertEqual(delivered, ["assistant_message"])
+            self.assertEqual(service.store.get_autonomous_run(run_id=unrelated["run_id"])["status"], "waiting_timer")
+            self.assertEqual(len(service.store.list_autonomous_runs(memory_set_id=memory_set_id)), 5)
+            unit = service.store.list_memory_units_by_id(
+                memory_set_id=memory_set_id, memory_unit_ids=[commitment["memory_unit_id"]],
+            )[0]
+            self.assertEqual(unit["commitment_state"], "cancelled")
+            for run_id in target_ids:
+                run = service.store.get_autonomous_run(run_id=run_id)
+                self.assertEqual(run["status"], "cancelled")
+                self.assertIsNone(run["waiting_request_id"])
+                self.assertIsNone(run["next_run_at"])
+
+    def test_invalid_cancellation_targets_fail_before_cancelling_or_replying(self) -> None:
+        for invalid in ("missing", "other_memory_set", "terminal"):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as temp_dir:
+                service = OtomeKairoService(Path(temp_dir))
+                state = self._use_mock_model(service, service.store.read_state())
+                state["console_access_token"] = "test-token"
+                state["memory_sets"][state["selected_memory_set_id"]]["embedding"]["model"] = "mock"
+                service.store.write_state(state)
+                run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"], status="waiting_timer")
+                service.store.upsert_autonomous_run(autonomous_run=run)
+                if invalid != "missing":
+                    target = {**run, "run_id": "autonomous_run:invalid"}
+                    target.update({"memory_set_id": "memory_set:other"} if invalid == "other_memory_set" else {"status": "completed"})
+                    service.store.upsert_autonomous_run(autonomous_run=target)
+                with patch.object(type(service.llm), "generate_autonomous_run_intervention", return_value={
+                    "cancel_run_ids": [run["run_id"], "autonomous_run:invalid"],
+                    "reason_summary": "取消対象を指定した。",
+                }) as interpret, patch.object(type(service.llm), "generate_decision") as generate:
+                    result = service.handle_conversation("test-token", self._conversation_payload())
+                interpret.assert_called_once()
+                generate.assert_not_called()
+                self.assertEqual(result["result_kind"], "internal_failure")
+                self.assertIsNone(result["speech"])
+                self.assertEqual(service.store.get_autonomous_run(run_id=run["run_id"])["status"], "waiting_timer")
+
+    def test_plain_speech_does_not_cancel_from_its_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = self._use_mock_model(service, service.store.read_state())
+            state["console_access_token"] = "test-token"
+            state["memory_sets"][state["selected_memory_set_id"]]["embedding"]["model"] = "mock"
+            service.store.write_state(state)
+            run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"], status="waiting_timer")
+            service.store.upsert_autonomous_run(autonomous_run=run)
+            decision = self._correction_reply()
+            with patch.object(type(service.llm), "generate_autonomous_run_intervention", return_value={
+                "cancel_run_ids": [], "reason_summary": "この回の解釈では既存作業を維持する。",
+            }), patch.object(type(service.llm), "generate_decision", return_value=decision):
+                result = service.handle_conversation("test-token", self._conversation_payload())
+            self.assertEqual(result["result_kind"], "speech")
+            self.assertEqual(service.store.get_autonomous_run(run_id=run["run_id"])["status"], "waiting_timer")
+
+    def test_explicit_cancel_all_reaches_every_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            for index in range(51):
+                run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"], status="waiting_timer")
+                run["run_id"] = f"autonomous_run:{index}"
+                service.store.upsert_autonomous_run(autonomous_run=run)
+            service._finalize_autonomous_run_commitments = Mock(side_effect=lambda **kwargs: kwargs["run"])
+            cancelled = service._cancel_autonomous_runs_for_user_request(
+                state=state, current_time="2026-06-20T12:00:00+09:00",
+            )
+            self.assertEqual(len(cancelled), 51)
+            self.assertEqual(service.store.list_autonomous_runs(
+                memory_set_id=state["selected_memory_set_id"], statuses=["active", "waiting_timer", "waiting_result", "paused"],
+            ), [])
+
     def test_scheduled_step_and_delivery_share_saved_origin(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))

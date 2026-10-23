@@ -225,8 +225,7 @@ visual capture の source、result、保存、inspection の詳細は [../capabi
 ユーザー入力開始時、server は active / due `autonomous_run` を `paused_by_user_interaction` として pause する。
 in-flight capability result は受け取るが、ユーザー向け応答中は run の次 step を進めない。
 ユーザー応答後、pause 理由が `paused_by_user_interaction` の run を再開する。
-特定 run は cancel API、会話からの全run停止は `autonomous_run_action.kind=cancel_all` で cancel する。
-server は会話本文から停止意図を推定しない。
+会話と API による取消は [autonomous_run.md](autonomous_run.md#ユーザー割り込み) を正とする。
 `background_thinking` の観測中に `conversation_input` または `speech` が新しく増えた場合、server は観測前の直近会話 snapshot を使って外向き発話だけを止める。自身の活動の比較と実行は続ける。ユーザー応答中の定期思考も同じである。
 直近会話の取得境界は [../foundation/人物と相互作用.md](../foundation/人物と相互作用.md) を正とする。相手を持たない自己評価でも、同じ取得範囲で観測中の会話追加を検出する。
 外向き伝達の判断では、LLM が `recent_interactions` の場ごとの会話から話題の継続、未解決の問い、相手の返答を待つ間合いを読み、今発話する意味と観測の新規性を比較する。
