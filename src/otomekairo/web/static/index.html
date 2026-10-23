@@ -671,6 +671,13 @@
                 <input id="current-wake-desktop-observation" type="checkbox">
               </label>
               <div class="setting-row">
+                <label for="desktop-capture-target">取得範囲:</label>
+                <select id="desktop-capture-target" class="field-width-medium">
+                  <option value="active_window">アクティブウィンドウ</option>
+                  <option value="primary_screen">メイン画面（プライマリ全体）</option>
+                </select>
+              </div>
+              <div class="setting-row">
                 <label for="desktop-capture-idle-timeout">アイドル時スキップ:</label>
                 <div class="inline-suffix-control">
                   <input class="field-width-short" id="desktop-capture-idle-timeout" type="number" min="0">
