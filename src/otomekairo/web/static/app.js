@@ -2866,6 +2866,9 @@ function renderConsoleClientSettings() {
     ? state.consoleClient.settings.desktop_capture
     : state.desktopCaptureDefaults;
   if (desktop) {
+    element("desktop-capture-target").value = desktop.capture_active_window_only === false
+      ? "primary_screen"
+      : "active_window";
     element("desktop-capture-idle-timeout").value = desktop.idle_timeout_minutes;
     element("desktop-capture-exclude-patterns").value = (desktop.exclude_patterns || []).join(
       "\n",
@@ -2874,14 +2877,26 @@ function renderConsoleClientSettings() {
   renderAvatarPresentation();
 }
 
+function captureActiveWindowOnlyValue() {
+  const value = textValue("desktop-capture-target");
+  if (value === "active_window") {
+    return true;
+  }
+  if (value === "primary_screen") {
+    return false;
+  }
+  throw new Error("取得範囲が不正です。");
+}
+
 function syncConsoleClientSettings() {
   const idleTimeout = intValue("desktop-capture-idle-timeout", 10);
   const excludePatterns = parseLines(textValue("desktop-capture-exclude-patterns"));
+  const captureActiveWindowOnly = captureActiveWindowOnlyValue();
   if (state.consoleClient) {
     const settings = state.consoleClient.settings;
-    // CocoroConsoleに表示しない取得方式の設定値は変更せず保持する。
     settings.desktop_capture = {
       ...settings.desktop_capture,
+      capture_active_window_only: captureActiveWindowOnly,
       idle_timeout_minutes: idleTimeout,
       exclude_patterns: excludePatterns,
     };
@@ -2891,7 +2906,7 @@ function syncConsoleClientSettings() {
   if (!state.desktopCaptureDefaults) {
     state.desktopCaptureDefaults = {
       enabled: false,
-      capture_active_window_only: true,
+      capture_active_window_only: captureActiveWindowOnly,
       idle_timeout_minutes: idleTimeout,
       exclude_patterns: excludePatterns,
     };
@@ -2899,6 +2914,7 @@ function syncConsoleClientSettings() {
   }
   state.desktopCaptureDefaults = {
     ...state.desktopCaptureDefaults,
+    capture_active_window_only: captureActiveWindowOnly,
     idle_timeout_minutes: idleTimeout,
     exclude_patterns: excludePatterns,
   };
