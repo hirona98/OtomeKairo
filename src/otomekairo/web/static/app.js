@@ -3437,7 +3437,7 @@ function preSendCheckModelPreset() {
     PRE_SEND_CHECK_MODEL_PRESET_ID,
   );
   if (!preset) {
-    throw new Error("送信前チェック用モデルがありません。");
+    throw new Error("プライバシーチェック用モデルがありません。");
   }
   return preset;
 }
@@ -3967,7 +3967,7 @@ function syncMcp() {
     mcp.client_id = "mcp-client-connector-main";
   }
   mcp.enabled = boolValue("mcp-enabled");
-  // pre_send_check_enabled は送信前チェック専用タブが正とする。
+  // pre_send_check_enabled はプライバシーチェック専用タブが正とする。
   if (typeof mcp.pre_send_check_enabled !== "boolean") {
     mcp.pre_send_check_enabled = true;
   }
@@ -4288,7 +4288,7 @@ function addModel() {
 
 function duplicateModel() {
   if (state.selectedModelPresetId === PRE_SEND_CHECK_MODEL_PRESET_ID) {
-    showNotice("送信前チェック用モデルはモデルタブから複製できません。", true);
+    showNotice("プライバシーチェック用モデルはモデルタブから複製できません。", true);
     return;
   }
   duplicateClonedCollectionItem({
@@ -4306,7 +4306,7 @@ function duplicateModel() {
 
 function deleteModel() {
   if (state.selectedModelPresetId === PRE_SEND_CHECK_MODEL_PRESET_ID) {
-    showNotice("送信前チェック用モデルは削除できません。", true);
+    showNotice("プライバシーチェック用モデルは削除できません。", true);
     return;
   }
   if (generationModelPresets().length <= 1) {
@@ -4317,7 +4317,7 @@ function deleteModel() {
     items: state.editor.model_presets,
     idKey: "model_preset_id",
     selectedId: state.selectedModelPresetId,
-    // 送信前チェック専用定義を含む配列なので、生成用が 1 件残るまで許す。
+    // プライバシーチェック専用定義を含む配列なので、生成用が 1 件残るまで許す。
     minCount: 2,
     setSelectedId: (id) => {
       const nextId =

@@ -637,7 +637,7 @@ class ServiceConfigResourcesMixin:
             should_clear_runtime_layers = should_clear_runtime_layers or model_preset_id != state["selected_model_preset_id"]
             state["selected_model_preset_id"] = model_preset_id
 
-        # 送信前チェックは専用固定プリセットのみを使う。
+        # プライバシーチェックは専用固定プリセットのみを使う。
         if "pre_send_check_model_preset_id" in payload:
             review_model_preset_id = payload["pre_send_check_model_preset_id"]
             if review_model_preset_id != PRE_SEND_CHECK_MODEL_PRESET_ID:
@@ -1198,7 +1198,7 @@ class ServiceConfigResourcesMixin:
         selected_persona_id = current.get("selected_persona_id")
         selected_memory_set_id = current.get("selected_memory_set_id")
         selected_model_preset_id = current.get("selected_model_preset_id")
-        # 送信前チェック用は専用固定プリセットのみ。UI からの付け替えは受け付けない。
+        # プライバシーチェック用は専用固定プリセットのみ。UI からの付け替えは受け付けない。
         pre_send_check_model_preset_id = PRE_SEND_CHECK_MODEL_PRESET_ID
         thinking_speech_level = current.get("thinking_speech_level")
         if selected_persona_id not in personas:
@@ -1713,7 +1713,7 @@ class ServiceConfigResourcesMixin:
         return deepcopy(definition)
 
     def _mcp_server_definition_for_connector(self, definition: dict[str, Any]) -> dict[str, Any]:
-        # connector は接続定義だけを受け取る。送信前チェック要否は渡さない。
+        # connector は接続定義だけを受け取る。プライバシーチェック要否は渡さない。
         transport = definition.get("transport")
         connector_definition = {
             "mcp_server_id": definition.get("mcp_server_id"),

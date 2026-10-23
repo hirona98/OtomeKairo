@@ -75,7 +75,7 @@ PERSON_SCOPE_FIELDS = {
     "focus_scope_key",
 }
 PRE_SEND_CHECK_RETRY_FEEDBACK = (
-    "前の MCP request は送信前チェックで見送られた。"
+    "前の MCP request はプライバシーチェックで見送られた。"
     "同じ目的の安全な別案または noop を選ぶ。"
 )
 PRE_SEND_CHECK_WITHHELD_NOTICE = (
@@ -583,7 +583,7 @@ class ServiceInputPipelineMixin:
         return {
             "kind": "noop",
             "reason_code": reason_code,
-            "reason_summary": "送信前チェックの結果、外部送信を行わず終了した。",
+            "reason_summary": "プライバシーチェックの結果、外部送信を行わず終了した。",
             "requires_confirmation": False,
             "pending_intent": None,
             "capability_request": None,

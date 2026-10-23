@@ -30,7 +30,7 @@ AUTONOMOUS_RUN_COOLDOWN_SECONDS = 5 * 60
 AUTONOMOUS_RUN_ACTIVE_STATUSES = {"active", "waiting_timer", "waiting_result", "paused"}
 AUTONOMOUS_RUN_TERMINAL_STATUSES = {"completed", "cancelled"}
 AUTONOMOUS_PRE_SEND_CHECK_RETRY_FEEDBACK = (
-    "前の MCP request は送信前チェックで見送られた。"
+    "前の MCP request はプライバシーチェックで見送られた。"
     "同じ目的の安全な capability_request または action.kind=none を選ぶ。"
 )
 AUTONOMOUS_PRE_SEND_CHECK_WITHHELD_NOTICE = (
@@ -1060,7 +1060,7 @@ class ServiceAutonomousRunMixin:
                 run=run,
                 current_time=current_time,
                 status="cancelled",
-                reason_summary="送信前チェックの結果、外部送信を行わず autonomous_run を終了した。",
+                reason_summary="プライバシーチェックの結果、外部送信を行わず autonomous_run を終了した。",
             )
             self.store.upsert_autonomous_run(autonomous_run=updated_run)
             updated_run = self._finalize_autonomous_run_commitments(
@@ -1088,7 +1088,7 @@ class ServiceAutonomousRunMixin:
                     current_time=current_time,
                     terminal_kind="interrupted",
                     reason_code=reason_code,
-                    terminal_reason="送信前チェックのため autonomous_run を終了した。",
+                    terminal_reason="プライバシーチェックのため autonomous_run を終了した。",
                     final_step_summary="外部送信を行わず終了した。",
                     transition_source="autonomous_run_step",
                     decision_kind="autonomous_step:none",

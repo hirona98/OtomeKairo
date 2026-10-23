@@ -1,4 +1,4 @@
-# 送信前チェック
+# プライバシーチェック
 
 ## 目的
 
@@ -104,7 +104,7 @@ mock 実行は暗黙の `allow` にせず、test double から結果を明示注
 
 最初の candidate が `withhold` になった場合、候補本文と `reason_summary` を渡さず、次の固定 feedback で同一 cycle の判断を 1 回だけ再生成する。
 
-> 前の MCP request は送信前チェックで見送られた。同じ目的の安全な別案または noop を選ぶ。
+> 前の MCP request はプライバシーチェックで見送られた。同じ目的の安全な別案または noop を選ぶ。
 
 再判断結果が MCP request なら再度チェックする。
 2 回目も `withhold`、または再判断が `noop` の場合は外部送信なしで終了する。

@@ -8,11 +8,11 @@
 
 ## 図の読み方
 
-- 時間は上から下へ進む。参加者は、処理、生成 API、Embedding API、記憶 DB を基本とし、必要な図だけ送信前チェック API を加える。
+- 時間は上から下へ進む。参加者は、処理、生成 API、Embedding API、記憶 DB を基本とし、必要な図だけプライバシーチェック API を加える。
 - API への実線の矢印 1 本は、通常成功時の API 呼び出し 1 回を表す。ラベルは日本語の用途と実装上の `operation` 名である。内部関数の呼び出しや、API 内での推論過程は表さない。
 - API の戻り矢印は受信結果を表す。その結果をコード側で検証・正規化し、採用できる場合に後続処理へ進む。再送・修復が起きる位置は図 7 を参照する。
 - DB への「保存」と、その戻りの「保存完了」が永続化の位置である。同一トランザクションの対象はまとめ、別の保存処理は矢印を分ける。複数の保存を一括で取り消すトランザクションは表していない。
-- DB は共通の記憶 DB（`memory.db`）。生成 API は選択中の `selected_model_preset_id`、送信前チェック API は `pre_send_check_model_preset_id`、Embedding API は選択中の記憶集合の `embedding` 設定を使う。
+- DB は共通の記憶 DB（`memory.db`）。生成 API は選択中の `selected_model_preset_id`、プライバシーチェック API は `pre_send_check_model_preset_id`、Embedding API は選択中の記憶集合の `embedding` 設定を使う。
 - 参照だけの DB アクセスは必要な箇所へ集約する。状態取得に伴う有効期限の整理や補助登録は、その段階の注記にまとめる。参照欠損の修復は DB 更新として示す。
 - `opt` は条件付き処理、`alt` は分岐、`loop` は対象ごと・試行ごとの繰り返しを表す。別図の参照区間や、配送、時刻到来、結果返却などの境目は `Note` に記す。
 
@@ -165,22 +165,22 @@ sequenceDiagram
 実装: [会話入口](../../../src/otomekairo/service/input/cycle.py)、[入力パイプライン](../../../src/otomekairo/service/input/pipeline.py)、[サイクル保存](../../../src/otomekairo/service/input/trace_persist.py)、[記憶統合](../../../src/otomekairo/memory/consolidator.py)、[記憶処理の確定](../../../src/otomekairo/service/memory.py)。
 契約: [想起と判断](../memory/想起と判断.md)、[世界状態](../runtime/world_state.md)、[活動状態](../runtime/activity_state.md)、[視覚入力のパイプライン統合](../capability/vision_capture画像意味理解.md#パイプライン統合)、[記憶更新と再整理](../memory/記憶更新と再整理.md)。
 
-## 図 2: 能力実行 — 送信前チェックと結果到着後
+## 図 2: 能力実行 — プライバシーチェックと結果到着後
 
 入口は判断または自律 step が返した `capability_request`。
-**送信前チェックを通った後、実行目的・使用能力・結果待ち状態を `ongoing_actions` に保存してから要求を配送する。**
+**プライバシーチェックを通った後、実行目的・使用能力・結果待ち状態を `ongoing_actions` に保存してから要求を配送する。**
 要求そのものの受付待ちはメモリ上に保持する。サイクルの要求要約・監査情報は、呼び出し元の記録保存時に残る。
 
 ```mermaid
 sequenceDiagram
     participant C as OtomeKairo の処理
     participant L as 生成 API
-    participant P as 送信前チェック API
+    participant P as プライバシーチェック API
     participant D as 記憶 DB
 
     Note over C,D: 能力定義・権限・接続・入力形式を検証
     loop 初回候補と、見送り後に別案を実行する場合（最大2候補）
-        opt MCP かつ送信前チェックが有効
+        opt MCP かつプライバシーチェックが有効
             alt 既知の秘密値に一致
                 Note over C,P: API を呼ばず送信を見送る（withhold）
             else LLM で確認する
@@ -238,7 +238,7 @@ sequenceDiagram
 思考前観測はその場で取得結果を待ち、得られた観測を図 1 の入力解釈と判断へ直接引き継ぐ。
 
 実装: [能力実行](../../../src/otomekairo/service/capability.py)、[通常の結果サイクル](../../../src/otomekairo/service/spontaneous/capability_cycle.py)、[自律作業の結果処理](../../../src/otomekairo/service/autonomous_run.py)。
-契約: [送信前チェック](pre_send_check.md)、[状態モデル](../runtime/状態モデル.md)、[自律作業](../runtime/autonomous_run.md)。
+契約: [プライバシーチェック](pre_send_check.md)、[状態モデル](../runtime/状態モデル.md)、[自律作業](../runtime/autonomous_run.md)。
 
 ## 図 3: 自律判断 — 入口判定と分離判断
 
@@ -342,7 +342,7 @@ sequenceDiagram
         L-->>C: action・transition・発話する場合の本文
         Note over C,D: 出力契約と作業の実行可能状態をコードで検証
         alt 能力実行を選んだ
-            Note over C,D: 図 2 の送信前チェック・進行中の行動保存・配送を実行
+            Note over C,D: 図 2 のプライバシーチェック・進行中の行動保存・配送を実行
         else 発話を選んだ
             Note over C,D: 発話を配送。開始元サイクルに本文を返す場合もある
             opt この step で発話イベントを記録する
@@ -522,7 +522,7 @@ sequenceDiagram
 
 ## 図 7: 共通 — 追加の再送・出力修復と処理の失敗確定
 
-図 1〜6 の生成 API・送信前チェック API の矢印は、通常成功時の 1 回を示す。
+図 1〜6 の生成 API・プライバシーチェック API の矢印は、通常成功時の 1 回を示す。
 **同じ位置で API 呼び出しが追加される場合**を下図に示す。
 生成途中の provider エラーによる同一要求の再送と、受信した JSON の契約違反による修復は別の処理である。
 一時的な API エラーや修復の試行は運用ログへ記録する。呼び出し元のサイクル・記憶統合などの失敗が確定した時点で、その処理結果を DB に保存する。

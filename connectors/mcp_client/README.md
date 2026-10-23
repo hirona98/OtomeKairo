@@ -10,7 +10,7 @@
 - Streamable HTTP は TLS 検証を有効にし、設定 header を request に付与して redirect へ追従しない
 - token、header、env、tool arguments を通常ログや result summary に出さない
 
-tool の意味判断、送信前チェック、有限セッションの実行上限は OtomeKairo server が担当する。
+tool の意味判断、プライバシーチェック、有限セッションの実行上限は OtomeKairo server が担当する。
 
 ## セットアップ
 

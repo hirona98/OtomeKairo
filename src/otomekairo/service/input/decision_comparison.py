@@ -845,7 +845,7 @@ class ServiceInputDecisionComparisonMixin:
         *,
         attempts: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        reason_summary = "送信前チェックの結果、外部送信を行わず終了した。"
+        reason_summary = "プライバシーチェックの結果、外部送信を行わず終了した。"
         outward_decision = self._execution_outward_decision(decision)
         self_hold = {
             "kind": "noop", "speech_text": None,

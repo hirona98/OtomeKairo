@@ -64,7 +64,7 @@ skill が Human の明示依頼、trusted host policy、trusted workflow を求�
 
 起点の分類は `sender_kind`、`response_target_refs`、`trigger_kind`、`source_kind`、`run.origin_kind` の閉じた値だけで行う。人物からの入力であることだけで、明示依頼や外部実行の許可があるとは確定しない。発話の意味と実行範囲は LLM が判断する。
 
-`current_individual_decision` は、skill が求める trusted host policy / trusted workflow である。Human の明示依頼が無いことだけを理由に公開や送信を見送らない。送信前チェック、catalog、host の出力契約、秘密情報の境界は上書きしない。公開は今この判断の範囲で一度だけ行う。
+`current_individual_decision` は、skill が求める trusted host policy / trusted workflow である。Human の明示依頼が無いことだけを理由に公開や送信を見送らない。プライバシーチェック、catalog、host の出力契約、秘密情報の境界は上書きしない。公開は今この判断の範囲で一度だけ行う。
 
 ## source の信頼境界
 

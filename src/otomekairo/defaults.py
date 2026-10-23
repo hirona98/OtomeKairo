@@ -9,7 +9,7 @@ from importlib import resources
 DEFAULT_PERSONA_ID = "persona:default"
 DEFAULT_MEMORY_SET_ID = "memory_set:default"
 DEFAULT_MODEL_PRESET_ID = "model_preset:default"
-# 送信前チェック専用。生成用の selected_model_preset とは別定義として持つ。
+# プライバシーチェック専用。生成用の selected_model_preset とは別定義として持つ。
 PRE_SEND_CHECK_MODEL_PRESET_ID = "model_preset:pre_send_check"
 DEFAULT_AVATAR_ID = "avatar:default"
 API_VERSION = "0.10.0"
@@ -370,10 +370,10 @@ def build_default_model_preset() -> dict:
 
 
 def build_default_pre_send_check_model_preset() -> dict:
-    # 送信前チェック専用。会話窓や Web 検索は使わない。
+    # プライバシーチェック専用。会話窓や Web 検索は使わない。
     return {
         "model_preset_id": PRE_SEND_CHECK_MODEL_PRESET_ID,
-        "display_name": "送信前チェック",
+        "display_name": "プライバシーチェック",
         "prompt_window": {
             "recent_turn_limit": DEFAULT_PROMPT_WINDOW_RECENT_TURN_LIMIT,
             "recent_turn_minutes": DEFAULT_PROMPT_WINDOW_RECENT_TURN_MINUTES,
