@@ -1349,11 +1349,20 @@ class LLMClient:
             return {"groups": [{"observation_ids": [r["visual_observation_id"]],
                                 "summary_text": r["detailed_summary_text"],
                                 "reason_summary": "機械的mockの独立記録。"} for r in records]}
-        context = {"persona_context": persona_context.to_prompt_payload(), "records": records}
+        records_by_source: dict[str, list[dict[str, Any]]] = {}
+        for record in records:
+            records_by_source.setdefault(record["source_key"], []).append(record)
+        context = {
+            "persona_context": persona_context.to_prompt_payload(),
+            "source_sequences": [
+                {"source_key": source_key, "records": sequence}
+                for source_key, sequence in records_by_source.items()
+            ],
+        }
         return self._generate_structured_payload(
             model_config=model_config, messages=grouping_messages(context),
             validator=lambda payload: validate_grouping(payload, records),
-            repair_prompt_builder=lambda error: "全観測IDを順序通り一度ずつ参照するgroupsを返してください。\n" + error,
+            repair_prompt_builder=lambda error: "各sourceの全観測IDを、そのsource内の順序通り一度ずつ参照するgroupsを返してください。\n" + error,
             failure_message="視覚の日次整理に失敗しました。", wrap_validation_error=True,
             response_format=visual_daily_grouping_response_format(), operation="visual_daily_grouping")
 

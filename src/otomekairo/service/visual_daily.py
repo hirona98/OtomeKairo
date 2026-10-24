@@ -161,8 +161,11 @@ class ServiceVisualDailyMixin:
             model_config=state["model_presets"][state["selected_model_preset_id"]],
             persona_context=persona, records=inputs)
         by_id = {r["visual_observation_id"]: r for r in records}
+        record_order = {ref: index for index, ref in enumerate(by_id)}
+        ordered_groups = sorted(
+            review["groups"], key=lambda item: record_order[item["observation_ids"][0]])
         groups: list[dict[str, Any]] = []
-        for item in review["groups"]:
+        for item in ordered_groups:
             group_records = [by_id[ref] for ref in item["observation_ids"]]
             groups.append({"duplicate_group_id": self._visual_daily_group_id(
                 memory_set_id=memory_set_id, local_date=local_date, index=len(groups) + 1),

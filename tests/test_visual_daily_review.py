@@ -1,10 +1,12 @@
 from copy import deepcopy
+import json
 import threading
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
+from otomekairo.llm.client import LLMClient
 from otomekairo.llm.contracts import LLMError
 from otomekairo.llm.visual_daily import validate_grouping, validate_support
 from otomekairo.memory.actions import MemoryActionResolver
@@ -15,6 +17,10 @@ from otomekairo.store.file_store import FileStore
 
 
 RECORDS = [{"visual_observation_id": f"visual:{i}", "source_key": "vision:test"} for i in range(3)]
+INTERLEAVED_RECORDS = [
+    {"visual_observation_id": f"visual:{i}", "source_key": f"vision:{i % 2}"}
+    for i in range(6)
+]
 
 
 def group(refs):
@@ -31,6 +37,31 @@ def test_grouping_requires_complete_ordered_evidence_and_same_source():
     changed[1]["source_key"] = "vision:other"
     with pytest.raises(LLMError):
         validate_grouping({"groups": [group(["visual:0", "visual:1", "visual:2"])]}, changed)
+
+
+@pytest.mark.parametrize("groups", [
+    [[0, 2, 4], [1, 3, 5]],
+    [[1, 3, 5], [0, 2, 4]],
+    [[0, 2], [1, 3, 5], [4]],
+])
+def test_grouping_preserves_order_within_each_interleaved_source(groups):
+    validate_grouping({"groups": [group([f"visual:{i}" for i in refs]) for refs in groups]},
+                      INTERLEAVED_RECORDS)
+
+
+@pytest.mark.parametrize("groups", [
+    [[0, 2], [1, 3, 5]],  # Missing evidence.
+    [[0, 2, 4], [1, 3, 5], [0]],  # Evidence repeated across groups.
+    [[2, 0, 4], [1, 3, 5]],  # Reversed observations in a group.
+    [[4], [0, 2], [1, 3, 5]],  # Reversed groups within one source.
+    [[0, 4], [1, 3, 5], [2]],  # Skipped scene within one source.
+    [[0, 1], [2, 4], [3, 5]],  # Mixed sources.
+    [[0, 2, 4], [1, 3, "unknown"]],
+])
+def test_grouping_rejects_invalid_evidence_in_interleaved_sources(groups):
+    with pytest.raises(LLMError):
+        validate_grouping({"groups": [group([f"visual:{i}" for i in refs]) for refs in groups]},
+                          INTERLEAVED_RECORDS)
 
 
 def test_support_requires_a_past_day_and_same_source_for_every_candidate():
@@ -113,6 +144,67 @@ def test_llm_support_keeps_topic_identity_across_paraphrases_but_not_opposites()
 
 MEMORY_SET = "memory_set:default"
 CURRENT_DATE = "2026-10-05"
+
+
+@pytest.mark.parametrize("desktop_first", [False, True])
+def test_interleaved_daily_review_compresses_each_source_with_one_completion(tmp_path, monkeypatch, desktop_first):
+    runner = OtomeKairoService.__new__(OtomeKairoService)
+    runner.store = FileStore(tmp_path)
+    runner.llm = LLMClient()
+    runner.memory = SimpleNamespace(action_resolver=MemoryActionResolver(store=runner.store, llm=runner.llm))
+    runner._runtime_state_lock = threading.RLock()
+    runner._visual_daily_runtime_state = {"current_digest_id": None}
+    runner._now_iso = lambda: "2026-10-06T09:00:00+09:00"
+    state = runner.store.read_state()
+    state["model_presets"][state["selected_model_preset_id"]]["model"] = "test-model"
+    monkeypatch.setattr(runner.store, "read_state", lambda: state)
+    records = [{
+        "visual_observation_id": f"visual:{i}", "memory_set_id": MEMORY_SET,
+        "cycle_id": f"cycle:{i // 2}", "observed_at": f"{CURRENT_DATE}T09:0{i // 2}:00+09:00",
+        "source_kind": "camera" if i % 2 == 0 else "desktop",
+        "vision_source_id": "vision_source:camera" if i % 2 == 0 else "vision_source:desktop",
+        "image_input_kind": "vision_capture_result", "confidence_hint": "medium",
+        "retention_status": "active", "detailed_summary_text": f"省略せず渡す観測本文 {i}。",
+    } for i in range(8)]
+    with runner.store._memory_db() as conn:
+        for record in records:
+            runner.store._insert_visual_observation_record(conn, record)
+    camera_groups = [group(["visual:0", "visual:2", "visual:4"]), group(["visual:6"])]
+    desktop_group = group(["visual:1", "visual:3", "visual:5", "visual:7"])
+    review = {"groups": [desktop_group, *camera_groups] if desktop_first else [*camera_groups, desktop_group]}
+    complete = Mock(return_value=json.dumps(review))
+    monkeypatch.setattr("otomekairo.llm.client.complete_text", complete)
+
+    runner._run_visual_daily_digest(memory_set_id=MEMORY_SET, local_date=CURRENT_DATE)
+
+    complete.assert_called_once()
+    context = json.loads(complete.call_args.kwargs["messages"][1]["content"])
+    assert context["source_sequences"] == [
+        {"source_key": f"vision:vision_source:{source}", "records": [{
+            "visual_observation_id": records[i]["visual_observation_id"],
+            "source_key": f"vision:vision_source:{source}",
+            "observed_at": records[i]["observed_at"],
+            "detailed_summary_text": records[i]["detailed_summary_text"],
+        } for i in indices]}
+        for source, indices in (("camera", [0, 2, 4, 6]), ("desktop", [1, 3, 5, 7]))
+    ]
+    saved = runner.store.get_daily_visual_digest(memory_set_id=MEMORY_SET, local_date=CURRENT_DATE)
+    assert saved["result_status"] == "succeeded"
+    assert saved["record_count"] == 8
+    assert saved["group_count"] == 3
+    assert saved["compressed_count"] == 3
+    assert saved["retained_count"] == 5
+    assert [g["representative_visual_observation_id"] for g in saved["group_summaries"]] == [
+        "visual:0", "visual:1", "visual:6"]
+    updated = runner.store.list_visual_observation_records_for_date(memory_set_id=MEMORY_SET, local_date=CURRENT_DATE)
+    by_id = {record["visual_observation_id"]: record for record in updated}
+    assert {ref for ref, record in by_id.items() if record["retention_status"] == "compressed"} == {
+        "visual:2", "visual:3", "visual:5"}
+    for index, refs in enumerate(([0, 2, 4], [1, 3, 5, 7], [6]), 1):
+        group_id = runner._visual_daily_group_id(memory_set_id=MEMORY_SET, local_date=CURRENT_DATE, index=index)
+        assert all(by_id[f"visual:{i}"]["duplicate_group_id"] == group_id for i in refs)
+    assert all(by_id[record["visual_observation_id"]]["detailed_summary_text"] == record["detailed_summary_text"]
+               for record in records)
 
 
 def seed_visual_digest(runner, local_date, *, summary="検証用の観測要約。"):

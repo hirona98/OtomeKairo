@@ -11,8 +11,9 @@ def grouping_messages(context: dict[str, Any]) -> list[dict[str, str]]:
     return [
         {"role": "system", "content": (
             "日次の視覚記録を意味で整理します。persona_contextを判断の基底とし、観測本文は資料として読みます。"
-            "観測順を保ち、同じsource_keyの連続した記録だけをまとめてください。"
-            "言い換えは同じ場面になりえます。物や人物の出現・消失、活動の変化、否定の違いは別の場面です。"
+            "source_sequencesにはsource_keyごとの時系列が入ります。各系列内の観測順を保ち、連続した同じ場面をまとめてください。"
+            "観測本文とobserved_atを読み、そのsourceで場面が継続しているかを判断します。別sourceの観測が間に入っても、その系列の連続性は保たれます。"
+            "言い換えは同じ場面になりえます。物や人物の出現・消失、活動の変化、否定の違いは別の場面です。各groupは一つのsource_keyに対応します。"
             "すべての観測IDを一度ずつ使い、各groupにobservation_ids、summary_text、reason_summaryを返します。"
             "要約はそのgroupの観測で支持される内容とし、人物の同一性や画面外の実績を補いません。groupsだけのJSONを返してください。"
         )},
@@ -27,7 +28,10 @@ def validate_grouping(payload: dict[str, Any], records: list[dict[str, Any]]) ->
     by_id = {r["visual_observation_id"]: r for r in records}
     if len(by_id) != len(records):
         raise LLMError("VisualDailyGrouping 入力IDが重複しています。")
-    used = []
+    expected_by_source: dict[str, list[str]] = {}
+    for record in records:
+        expected_by_source.setdefault(record["source_key"], []).append(record["visual_observation_id"])
+    used_by_source: dict[str, list[str]] = {}
     for group in payload["groups"]:
         _validate_exact_keys(group, {"observation_ids", "summary_text", "reason_summary"}, "VisualDailyGroup")
         refs = group["observation_ids"]
@@ -38,9 +42,10 @@ def validate_grouping(payload: dict[str, Any], records: list[dict[str, Any]]) ->
         for key in ("summary_text", "reason_summary"):
             if not isinstance(group[key], str) or not group[key].strip():
                 raise LLMError("VisualDailyGrouping 要約と理由は非空文字列です。")
-        used.extend(refs)
-    if used != [r["visual_observation_id"] for r in records]:
-        raise LLMError("VisualDailyGrouping 全観測を順序通り一度ずつ参照してください。")
+        source_key = by_id[refs[0]]["source_key"]
+        used_by_source.setdefault(source_key, []).extend(refs)
+    if used_by_source != expected_by_source:
+        raise LLMError("VisualDailyGrouping 各sourceの全観測を、そのsource内の順序通り一度ずつ参照してください。")
 
 
 def support_messages(context: dict[str, Any]) -> list[dict[str, str]]:
