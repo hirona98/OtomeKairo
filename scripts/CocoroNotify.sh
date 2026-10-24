@@ -5,13 +5,13 @@ set +x
 
 usage() {
   printf '%s\n' \
-    'Usage: otomekairo-notify [--config FILE] [--] FROM MESSAGE' \
-    'Example: otomekairo-notify Codex "修正が終了したと伝えてほしい。"' \
+    'Usage: CocoroNotify.sh [--config FILE] [--] FROM MESSAGE' \
+    'Example: ~/CocoroNotify.sh Codex "修正が終了したと伝えてほしい。"' \
     'Requires: Bash and curl (Python / jq are not used).'
 }
 
 fail() {
-  printf 'otomekairo-notify: %s\n' "$1" >&2
+  printf 'CocoroNotify.sh: %s\n' "$1" >&2
   exit 1
 }
 
@@ -50,7 +50,7 @@ notify_message="$2"
 [[ -r "$config_file" ]] || fail "設定ファイルを読めません: $config_file"
 command -v curl >/dev/null 2>&1 || fail 'curl が見つかりません。'
 
-OTOMEKAIRO_URL=''
+OTOMEKAIRO_URL='https://cocoro-box:55601'
 OTOMEKAIRO_TOKEN=''
 OTOMEKAIRO_TLS_VERIFY=true
 OTOMEKAIRO_CA_FILE=''
@@ -93,7 +93,7 @@ if response=$(printf 'Authorization: Bearer %s\n' "$OTOMEKAIRO_TOKEN" \
 else
   curl_status=$?
   [[ -z "$response" ]] || printf '%s\n' "$response" >&2
-  printf 'otomekairo-notify: HTTP送信に失敗しました (curl=%s)。自動再送は行いません。\n' "$curl_status" >&2
+  printf 'CocoroNotify.sh: HTTP送信に失敗しました (curl=%s)。自動再送は行いません。\n' "$curl_status" >&2
   exit "$curl_status"
 fi
 

@@ -5,7 +5,7 @@ import subprocess
 import pytest
 
 
-COMMAND = Path(__file__).resolve().parents[1] / "scripts" / "otomekairo-notify"
+COMMAND = Path(__file__).resolve().parents[1] / "scripts" / "CocoroNotify.sh"
 
 
 @pytest.fixture
@@ -24,15 +24,13 @@ def notify(tmp_path):
     )
     curl.chmod(0o755)
     config = tmp_path / "notify.conf"
-    base_config = (
-        "OTOMEKAIRO_URL='https://otomekairo.test:55601/'\n"
-        "OTOMEKAIRO_TOKEN='test-notification-token'\n"
-    )
+    token_config = "OTOMEKAIRO_TOKEN='test-notification-token'\n"
+    base_config = "OTOMEKAIRO_URL='https://otomekairo.test:55601/'\n" + token_config
     args_file = tmp_path / "curl-args"
 
     def run(message="終了したと伝えてほしい。", *, source="Codex", result="noop", response=None,
-            curl_status=0, settings="", missing_config=False):
-        config.write_text(base_config + settings, encoding="utf-8")
+            curl_status=0, settings="", missing_config=False, use_default_url=False):
+        config.write_text((token_config if use_default_url else base_config) + settings, encoding="utf-8")
         if missing_config:
             config.unlink()
         args_file.unlink(missing_ok=True)
@@ -74,6 +72,12 @@ def test_notify_preserves_unicode_and_every_json_control_character(notify):
 def test_notify_accepts_normal_judgment_outcomes(notify, result):
     process, _ = notify(result=result)
     assert process.returncode == 0
+
+
+def test_notify_defaults_to_cocoro_box_when_url_is_omitted(notify):
+    process, arguments = notify(use_default_url=True)
+    assert process.returncode == 0, process.stderr
+    assert arguments[arguments.index("--url") + 1] == "https://cocoro-box:55601/api/wake"
 
 
 @pytest.mark.parametrize("response", [

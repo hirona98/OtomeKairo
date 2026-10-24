@@ -121,15 +121,15 @@ connector と watcher を有効にする前に、ブラウザ UI、CocoroConsole
 
 ## 現在の個への伝言依頼
 
-`scripts/otomekairo-notify` は Bash と curl 7.76 以降だけで動作する送信コマンドである。Python、jq、本体の checkout は送信端末に不要である。
+`scripts/CocoroNotify.sh` は Bash と curl 7.76 以降だけで動作する送信スクリプトである。Python、jq、本体の checkout は送信端末に不要である。
 人が直接送る場合もソフトウェアから送る場合も、送信元ラベルと本文で現在の個へ依頼できる。
 API の正本は [API起床](docs/design/api/bootstrapと入力.md#post-apiwake)、依頼の意味は [現在の個への依頼](docs/design/runtime/自律initiative_loop.md#現在の個への依頼) を参照する。
 
-任意のプロジェクトから呼べるよう、送信端末でコマンドと利用者自身の設定ファイルを配置する。
+任意のプロジェクトからホームディレクトリのスクリプトを呼べるよう、送信端末でスクリプトと利用者自身の設定ファイルを配置する。
 
 ```bash
-mkdir -p ~/.local/bin ~/.config/otomekairo
-install -m 0755 scripts/otomekairo-notify ~/.local/bin/otomekairo-notify
+mkdir -p ~/.config/otomekairo
+install -m 0755 scripts/CocoroNotify.sh ~/CocoroNotify.sh
 touch ~/.config/otomekairo/notify.conf
 chmod 600 ~/.config/otomekairo/notify.conf
 ```
@@ -137,21 +137,22 @@ chmod 600 ~/.config/otomekairo/notify.conf
 `~/.config/otomekairo/notify.conf` には次の Bash 変数を設定する。URL と token は接続先に合わせる。token は既存の bootstrap で取得した資格を使う。
 
 ```bash
-OTOMEKAIRO_URL='https://<OtomeKairoのホスト>:55601'
+OTOMEKAIRO_URL='https://cocoro-box:55601'
 OTOMEKAIRO_TOKEN='<console_access_token>'
 OTOMEKAIRO_TLS_VERIFY=true
 OTOMEKAIRO_CA_FILE=''
 OTOMEKAIRO_TIMEOUT_SECONDS=300
 ```
 
+`OTOMEKAIRO_URL` を省略した場合の既定の接続先は `https://cocoro-box:55601` とする。
 TLS 検証は既定で有効であり、独自CAを使うときは `OTOMEKAIRO_CA_FILE` に証明書ファイルを指定する。
 既存の自己署名証明書を検証せずに使うLAN・VPN内の構成では、`OTOMEKAIRO_TLS_VERIFY=false` を明示し、`OTOMEKAIRO_CA_FILE` は空にする。証明書エラーでの自動切替は行わない。
 設定は Bash として読み込むため、利用者自身が管理するファイルを使う。
 
 ```bash
-~/.local/bin/otomekairo-notify Codex '修正が終了したと伝えてほしい。'
-~/.local/bin/otomekairo-notify Codex '確認の返答を待っていると伝えてほしい。'
-~/.local/bin/otomekairo-notify '田中さん' '準備ができたと伝えてほしい。'
+~/CocoroNotify.sh Codex '修正が終了したと伝えてほしい。'
+~/CocoroNotify.sh Codex '確認の返答を待っていると伝えてほしい。'
+~/CocoroNotify.sh '田中さん' '準備ができたと伝えてほしい。'
 ```
 
 別PCへはスクリプトだけをコピーし、そのPCの設定ファイルにLAN・VPN内のURLと資格を設定する。別の設定ファイルを使うときは `--config FILE` を指定する。

@@ -17,7 +17,7 @@ POST /api/wake は、OtomeKairo に「いま自律判断してよい」という
 
 POST {BASE_URL}/api/wake
 
-BASE_URL は https://<OtomeKairoのホスト>:55601 とする。
+BASE_URL の既定値は https://cocoro-box:55601 とする。
 同じPCでは https://127.0.0.1:55601、別PCではLAN・VPN内のサーバのホスト名やIPアドレスを指定する。
 リクエスト body は Content-Type: application/json; charset=utf-8 で送る。
 
@@ -229,32 +229,33 @@ speech 以外の結果では speech は null になる。発話しなくても A
 Bash送信コマンド
 ----------------
 
-otomekairo-notify はBashとcurl 7.76以降だけで動作する。Python・jqは不要である。
-配布された otomekairo-notify を送信端末の ~/.local/bin/ に配置し、実行権限を付ける。
+CocoroNotify.sh はBashとcurl 7.76以降だけで動作する。Python・jqは不要である。
+配布された CocoroNotify.sh を送信端末のホームディレクトリに配置し、実行権限を付ける。
 
-mkdir -p ~/.local/bin ~/.config/otomekairo
-chmod 755 ~/.local/bin/otomekairo-notify
+mkdir -p ~/.config/otomekairo
+chmod 755 ~/CocoroNotify.sh
 touch ~/.config/otomekairo/notify.conf
 chmod 600 ~/.config/otomekairo/notify.conf
 
 ~/.config/otomekairo/notify.conf に次のBash変数を設定する。
 URLは接続先に合わせ、TOKENには取得済みの console_access_token を入れる。
 
-OTOMEKAIRO_URL='https://<OtomeKairoのホスト>:55601'
+OTOMEKAIRO_URL='https://cocoro-box:55601'
 OTOMEKAIRO_TOKEN='<TOKEN>'
 OTOMEKAIRO_TLS_VERIFY=true
 OTOMEKAIRO_CA_FILE=''
 OTOMEKAIRO_TIMEOUT_SECONDS=300
 
+OTOMEKAIRO_URL を省略した場合の既定の接続先は https://cocoro-box:55601 とする。
 TLS検証は既定で有効である。独自CAを使うときは OTOMEKAIRO_CA_FILE に証明書ファイルを指定する。
 LAN・VPN内で既存の自己署名証明書を検証せずに使う構成では、OTOMEKAIRO_TLS_VERIFY=false を明示し、OTOMEKAIRO_CA_FILE は空にする。
 設定ファイルはBashとして読み込むため、利用者自身が管理するファイルを使う。
 
 送信例:
 
-~/.local/bin/otomekairo-notify Codex '修正が終了したと伝えてほしい。'
-~/.local/bin/otomekairo-notify Codex '確認の返答を待っていると伝えてほしい。'
-~/.local/bin/otomekairo-notify '田中さん' '準備ができたと伝えてほしい。'
+~/CocoroNotify.sh Codex '修正が終了したと伝えてほしい。'
+~/CocoroNotify.sh Codex '確認の返答を待っていると伝えてほしい。'
+~/CocoroNotify.sh '田中さん' '準備ができたと伝えてほしい。'
 
 別の設定ファイルを使うときは --config FILE を送信元の前に指定する。
 別PCでも同じスクリプトを使い、そのPCの設定ファイルに接続先とtokenを設定する。
