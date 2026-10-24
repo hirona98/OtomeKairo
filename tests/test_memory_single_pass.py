@@ -191,6 +191,13 @@ def test_generated_correction_selection_reaches_postprocess_and_checks_offered_i
     assert completion.call_count == 1
     context = job["correction_reconciliation"]
     assert context["selection"]["selected_targets"] == payload["selected_targets"]
+    prompt = json.loads(completion.call_args.kwargs["messages"][1]["content"].splitlines()[1])
+    candidate = next(item for item in prompt["target_candidates"] if item["revision_id"] == revision_id)
+    snapshot = prompt["correction_context"]["snapshots"][candidate["after_snapshot_ref"]]
+    saved_target = next(item for item in context["targets"] if item["revision"]["revision_id"] == revision_id)
+    assert snapshot["summary_text"] == saved_target["revision"]["after_snapshot"]["summary_text"]
+    assert "after_snapshot_ref" not in saved_target
+    assert "source_evidence_events" in saved_target
     actions, trace = consolidator._run_correction_reconciliation(job=job, finished_at=event["created_at"])
     if offered_revision:
         assert trace["selected_target_count"] == 1
