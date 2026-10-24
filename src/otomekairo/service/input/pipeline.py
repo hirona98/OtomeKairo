@@ -131,6 +131,7 @@ class ServiceInputPipelineMixin:
             trigger_kind=trigger_kind,
             workspace_context=workspace_context,
             initiative_context=initiative_context,
+            is_api_request=current_input.is_api_request,
         ):
             isolated_input = self._self_activity_current_input(current_input, workspace_context)
             isolated_recall = self._build_pipeline_recall_inputs(
@@ -209,6 +210,7 @@ class ServiceInputPipelineMixin:
         assistant_message_target_client_id: str | None = None,
         reference_context: dict[str, Any] | None = None,
         recent_interactions: list[dict[str, Any]] | None = None,
+        is_api_request: bool = False,
     ) -> dict[str, Any]:
         cycle_label = self._debug_cycle_label(cycle_id)
         current_client_context = client_context or {}
@@ -217,6 +219,7 @@ class ServiceInputPipelineMixin:
             trigger_kind=trigger_kind,
             interaction_context=interaction_context,
             capability_request_summary=capability_request_summary,
+            is_api_request=is_api_request,
         )
         if trigger_kind == "capability_result" and current_input.sender_kind == "person":
             input_text = current_input.text
@@ -526,8 +529,11 @@ class ServiceInputPipelineMixin:
         trigger_kind: str,
         interaction_context: InteractionContext | None,
         capability_request_summary: dict[str, Any] | None = None,
+        is_api_request: bool = False,
     ) -> CurrentInput:
         normalized_trigger = trigger_kind.strip() or "user_message"
+        if is_api_request and normalized_trigger != "wake":
+            raise ValueError("An API request requires trigger_kind=wake.")
         if normalized_trigger == "user_message":
             if interaction_context is None or interaction_context.speaker_ref is None:
                 raise ValueError("user_message requires interaction_context with speaker_ref.")
@@ -563,6 +569,7 @@ class ServiceInputPipelineMixin:
             response_target_refs=tuple(response_target_refs),
             interaction_context=interaction_context,
             text=input_text,
+            is_api_request=is_api_request,
         )
 
     def _empty_pipeline_output_result(self) -> dict[str, Any]:
@@ -2250,6 +2257,7 @@ class ServiceInputPipelineMixin:
             trigger_kind=trigger_kind,
             workspace_context=workspace_context,
             initiative_context=initiative_context,
+            is_api_request=current_input.is_api_request,
         ):
             return self._run_separated_activity_decisions(
                 disclosure_context=disclosure_context,

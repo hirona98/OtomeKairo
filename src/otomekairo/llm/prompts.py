@@ -348,9 +348,8 @@ def _outward_speech_suppression_boundary_instruction() -> str:
         "自発的な説明の重複抑制と、相手から新しく届いた質問への応答を分けて判断します。\n"
         "noop の理由は、会話の返答待ち、明示された希望、直近重複、進行中コミットメント、観測不足、構造化済み抑制根拠、今新たに働きかける意味の乏しさのような根拠名で書きます。\n"
         "観測可能な活動事実は前景の説明です。自己申告された注意状態はユーザー発話の内容として扱います。\n"
-        "wake に現在の個への依頼が届いた場合は、人やソフトウェアなどの依頼元と用件に沿って、対応、伝言、保留、見送りを人格・記憶・現在文脈から比較します。"
         "伝言では依頼元と用件、本文に示された出来事の主体を保って伝えます。人物参照がなくても周囲へ伝言できます。"
-        "それ以外で response_target_refs が空の speech は、相手の反応を前提にしない短い独り言です。"
+        "is_api_request=false で response_target_refs が空の speech は、相手の反応を前提にしない短い独り言です。"
         "自発的な独り言は、観測事実に基づく一文の状況認識として表現します。"
         "自発的な助言、依頼、支援提案、休息促し、身体注意、画面への一般コメントは speech ではなく控える理由として比較します。"
     )
@@ -433,6 +432,7 @@ def build_decision_messages(
             "role": "user",
             "content": _build_decision_context_prompt(
                 persona_context=persona_context,
+                is_api_request=context.current_input.is_api_request,
                 recent_turns=context.recent_turns,
                 recent_interactions=context.recent_interactions,
                 time_context=context.time_context,
@@ -1634,6 +1634,7 @@ def _decision_output_contract_section(comparison_scope: str) -> str:
 def _build_decision_context_prompt(
     *,
     persona_context: PersonaContext,
+    is_api_request: bool,
     recent_turns: list[dict],
     time_context: dict[str, Any],
     affect_context: dict[str, Any],
@@ -1695,6 +1696,7 @@ def _build_decision_context_prompt(
         initiative_context=initiative_context,
         capability_result_context=capability_result_context,
         comparison_scope=comparison_scope,
+        is_api_request=is_api_request,
     )
     if trigger_policy:
         payload["trigger_policy"] = trigger_policy
@@ -1847,7 +1849,15 @@ def _build_decision_trigger_policy(
     initiative_context: InitiativeContext | None,
     capability_result_context: dict[str, Any] | None,
     comparison_scope: str = "full",
+    is_api_request: bool = False,
 ) -> list[str]:
+    if is_api_request:
+        return [
+            "今回は API 経由で現在の個へ明示的に届いた依頼です。current_input.text の依頼全文と送信元を保ち、依頼への対応を最優先に判断します。",
+            "伝言依頼には、依頼元と用件、出来事の主体を保った speech で応えます。人物・会話の指定がない場合は周囲への伝言として届けます。単発の能力利用は capability_request、複合・未来・継続実行は autonomous_run を選びます。",
+            "今回の依頼は今対応する根拠です。発話頻度、会話の区切り、間合い、自発的な新しい話題の乏しさによる抑制は、自発発話の判断に適用します。同じ内容でも改めて届いた依頼として扱います。",
+            "人格に沿った表現と共有条件、権限、実行条件を守って対応します。保留・見送りは、明示された停止希望、共有条件、権限、必要情報の不足、同じ依頼の実行中など、対応を妨げる具体的な根拠がある場合に選び、その根拠を reason_summary に記録します。",
+        ]
     if comparison_scope == "self_activity":
         return _self_activity_trigger_policies(initiative_context)
     if comparison_scope == "outward_speech":

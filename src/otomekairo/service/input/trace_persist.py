@@ -28,6 +28,7 @@ class ServiceInputTracePersistMixin:
         observation_summary: dict[str, Any] | None = None,
         capability_request_summary: dict[str, Any] | None = None,
         ongoing_action_transition_summary: dict[str, Any] | None = None,
+        is_api_request: bool = False,
     ) -> dict[str, Any]:
         # 結果選択
         decision = pipeline["decision"]
@@ -60,6 +61,7 @@ class ServiceInputTracePersistMixin:
 
         # 永続化
         events = self._persist_cycle_success(
+            is_api_request=is_api_request,
             configured_activity_topics=pipeline.get("configured_activity_topics"),
             recent_interaction_summary=pipeline.get("recent_interaction_summary"),
             cycle_id=cycle_id,
@@ -229,6 +231,7 @@ class ServiceInputTracePersistMixin:
         system_notice: dict[str, Any] | None = None,
         recent_interaction_summary: list[dict[str, Any]] | None = None,
         configured_activity_topics: list[dict[str, str]] | None = None,
+        is_api_request: bool = False,
     ) -> list[dict[str, Any]]:
         memory_set_id = state["selected_memory_set_id"]
         events = self._build_cycle_events(
@@ -285,6 +288,7 @@ class ServiceInputTracePersistMixin:
             ),
         )
         cycle_trace = self._build_cycle_trace(
+            is_api_request=is_api_request,
             cycle_id=cycle_id,
             cycle_summary=cycle_summary,
             input_text=input_text,
@@ -322,6 +326,7 @@ class ServiceInputTracePersistMixin:
             world_state_trace=world_state_trace,
             activity_trace=activity_trace,
             result_trace=self._build_success_result_trace(
+                is_api_request=is_api_request,
                 trigger_kind=trigger_kind,
                 input_text=input_text,
                 interaction_context=interaction_context,
@@ -416,6 +421,7 @@ class ServiceInputTracePersistMixin:
         followup_capability_request_summary: dict[str, Any] | None = None,
         ongoing_action_transition_summary: dict[str, Any] | None = None,
         system_notice: dict[str, Any] | None = None,
+        is_api_request: bool = False,
     ) -> None:
         memory_set_id = state["selected_memory_set_id"]
         events = self._build_cycle_events(
@@ -456,6 +462,7 @@ class ServiceInputTracePersistMixin:
             ),
         )
         cycle_trace = self._build_cycle_trace(
+            is_api_request=is_api_request,
             cycle_id=cycle_id,
             cycle_summary=cycle_summary,
             input_text=input_text,
@@ -477,6 +484,7 @@ class ServiceInputTracePersistMixin:
             ),
             world_state_trace=None,
             result_trace=self._build_failure_result_trace(
+                is_api_request=is_api_request,
                 trigger_kind=trigger_kind,
                 input_text=input_text,
                 interaction_context=interaction_context,

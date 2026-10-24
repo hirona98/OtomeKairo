@@ -457,10 +457,12 @@ class ServiceInputTraceBuildMixin:
         capability_request_summary: dict[str, Any] | None = None,
         ongoing_action_summary: dict[str, Any] | None = None,
         initiative_context: InitiativeContext | None = None,
+        is_api_request: bool = False,
     ) -> dict[str, Any]:
         input_trace = {
             "trigger_kind": cycle_summary["trigger_kind"],
             "current_input": self._build_current_input(
+                is_api_request=is_api_request,
                 input_text=input_text,
                 trigger_kind=cycle_summary["trigger_kind"],
                 interaction_context=interaction_context,
@@ -865,6 +867,7 @@ class ServiceInputTraceBuildMixin:
         capability_request_summary: dict[str, Any] | None = None,
         followup_capability_request_summary: dict[str, Any] | None = None,
         ongoing_action_transition_summary: dict[str, Any] | None = None,
+        is_api_request: bool = False,
     ) -> dict[str, Any]:
         trace = {
             "result_kind": result_kind,
@@ -886,6 +889,7 @@ class ServiceInputTraceBuildMixin:
         if isinstance(ongoing_action_transition_summary, dict):
             trace["ongoing_action_transition_summary"] = ongoing_action_transition_summary
         trace["trigger_compact_summary"] = self._build_trigger_compact_summary(
+            is_api_request=is_api_request,
             trigger_kind=trigger_kind,
             input_text=input_text,
             interaction_context=interaction_context,
@@ -939,6 +943,7 @@ class ServiceInputTraceBuildMixin:
         capability_request_summary: dict[str, Any] | None = None,
         followup_capability_request_summary: dict[str, Any] | None = None,
         ongoing_action_transition_summary: dict[str, Any] | None = None,
+        is_api_request: bool = False,
     ) -> dict[str, Any]:
         trace = {
             "result_kind": "internal_failure",
@@ -953,6 +958,7 @@ class ServiceInputTraceBuildMixin:
         if isinstance(ongoing_action_transition_summary, dict):
             trace["ongoing_action_transition_summary"] = ongoing_action_transition_summary
         trace["trigger_compact_summary"] = self._build_trigger_compact_summary(
+            is_api_request=is_api_request,
             trigger_kind=trigger_kind,
             input_text=input_text,
             interaction_context=interaction_context,

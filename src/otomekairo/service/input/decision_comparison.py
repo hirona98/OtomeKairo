@@ -29,7 +29,10 @@ class ServiceInputDecisionComparisonMixin:
         trigger_kind: str,
         workspace_context: dict[str, Any] | None,
         initiative_context: InitiativeContext | None,
+        is_api_request: bool = False,
     ) -> bool:
+        if is_api_request:
+            return False
         if trigger_kind not in {"wake", "background_thinking"}:
             return False
         return (

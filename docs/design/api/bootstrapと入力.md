@@ -315,8 +315,8 @@ TTS の配送先が接続されていない場合と queue が満杯の場合も
 - 認証: 必要
 - 役割: 外部接点から API起床要求を受け、即時に wake 1 サイクルを実行する
 
-この endpoint は会話入力ではない。発話命令でもない。
-server に自律判断の機会だけを与え、判断結果として `speech / noop / capability_request` などが返りうる。
+この endpoint は、`message` がある場合は明示的な依頼、ない場合は自律判断の機会を受け付ける。
+判断結果として `speech / noop / capability_request` などが返りうる。
 定期思考（`wake_policy`）とは別経路であり、間隔 due 判定も思考前観測も使わない。
 
 request の field はすべて任意である。空 object `{}` でも受理する。

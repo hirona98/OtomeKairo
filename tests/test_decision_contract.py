@@ -1092,6 +1092,42 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("target_stances は outward_speech を 1 件だけ持ちます", outward_repair)
         self.assertNotIn("今見に行く自然さがあれば capability_request", outward_repair)
 
+    def test_api_request_uses_own_policy_even_at_lowest_speech_frequency(self) -> None:
+        current_input = CurrentInput(
+            sender_kind="system", sender_ref=None, source_kind="wake",
+            response_target_refs=(), interaction_context=None,
+            text="Codex からの依頼。修正が終了したと伝えてほしい。",
+            is_api_request=True,
+        )
+        initiative = InitiativeContext(
+            trigger_kind="wake", opportunity_summary="API起床。",
+            initiative_entry_summary=None, time_context_summary={},
+            foreground_signal_summary={}, activity_context=None, persona_context_summary={},
+            runtime_state_summary={}, recent_turn_summary=[], drive_summaries=[],
+            pending_intent_summaries=[], world_state_summary=[], ongoing_action_summary=None,
+            capability_summary={}, candidate_families=[], selected_candidate_family=None,
+            speech_timing_state={}, suppression_summary={}, speech_timing_summary="",
+            speech_frequency_level=1,
+        )
+        context = replace(
+            _decision_context([]), current_input=current_input,
+            input_text=current_input.text, trigger_kind="wake", initiative_context=initiative,
+        )
+        with patch("otomekairo.llm.prompts._speech_frequency_policy", side_effect=AssertionError("frequency")):
+            messages = build_decision_messages(persona_context=_persona_context(), context=context)
+        request_policy = _build_decision_trigger_policy(
+            initiative_context=initiative, capability_result_context=None, is_api_request=True,
+        )
+        self.assertTrue(all(policy in messages[-2]["content"] for policy in request_policy))
+        self.assertIn('"is_api_request":true', messages[-1]["content"])
+        self.assertIn(current_input.text, messages[-1]["content"])
+        with patch("otomekairo.llm.prompts._speech_frequency_policy", return_value="frequency policy") as frequency:
+            policies = _build_decision_trigger_policy(
+                initiative_context=initiative, capability_result_context=None, is_api_request=False,
+            )
+        frequency.assert_called_once_with(1)
+        self.assertIn("frequency policy", policies)
+
     def test_trigger_policy_splits_initiative_question(self) -> None:
         from otomekairo.llm.contexts import InitiativeContext
 

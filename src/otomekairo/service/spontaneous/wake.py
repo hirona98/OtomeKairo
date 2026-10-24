@@ -166,6 +166,7 @@ class ServiceSpontaneousWakeMixin:
                             reason_summary=due["reason_summary"],
                         )
                         return self._complete_input_success(
+                            is_api_request=wake_message is not None,
                             cycle_id=cycle_id,
                             started_at=started_at,
                             state=state,
@@ -221,6 +222,7 @@ class ServiceSpontaneousWakeMixin:
 
                 # 成功
                 response = self._complete_input_success(
+                    is_api_request=wake_message is not None,
                     cycle_id=cycle_id,
                     started_at=started_at,
                     state=state,
@@ -277,6 +279,7 @@ class ServiceSpontaneousWakeMixin:
                     level="ERROR",
                 )
                 return self._finalize_cycle_failure(
+                    is_api_request=wake_message is not None,
                     cycle_id=cycle_id,
                     started_at=started_at,
                     state=state,
@@ -305,6 +308,7 @@ class ServiceSpontaneousWakeMixin:
                     level="ERROR",
                 )
                 return self._finalize_cycle_failure(
+                    is_api_request=wake_message is not None,
                     cycle_id=cycle_id,
                     started_at=started_at,
                     state=state,
@@ -350,6 +354,7 @@ class ServiceSpontaneousWakeMixin:
                     else None
                 )
                 response = self._finalize_cycle_failure(
+                    is_api_request=wake_message is not None,
                     cycle_id=cycle_id,
                     started_at=started_at,
                     state=state,

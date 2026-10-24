@@ -338,9 +338,11 @@ class ServiceInputCycleMixin:
         capability_request_summary: dict[str, Any] | None = None,
         ongoing_action_transition_summary: dict[str, Any] | None = None,
         system_notice: dict[str, Any] | None = None,
+        is_api_request: bool = False,
     ) -> dict[str, Any]:
         finished_at = self._now_iso()
         persist_kwargs: dict[str, Any] = {
+            "is_api_request": is_api_request,
             "cycle_id": cycle_id,
             "started_at": started_at,
             "finished_at": finished_at,

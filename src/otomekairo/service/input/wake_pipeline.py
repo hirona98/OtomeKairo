@@ -202,6 +202,7 @@ class ServiceInputWakePipelineMixin:
             pending_intent_selection=pending_intent_selection,
             observation_summary=observation_summary,
             reference_context=reference_context,
+            is_api_request=wake_message is not None,
         )
         return pipeline, input_text, client_context
 

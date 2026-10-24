@@ -111,6 +111,7 @@ class CurrentInput:
     response_target_refs: tuple[str, ...]
     interaction_context: InteractionContext | None
     text: str
+    is_api_request: bool = False
 
     @property
     def interaction_ref(self) -> str | None:
@@ -131,6 +132,7 @@ class CurrentInput:
             "source_kind": self.source_kind,
             "response_target_refs": list(self.response_target_refs),
             "text": self.text,
+            "is_api_request": self.is_api_request,
         }
         if self.interaction_context is not None:
             payload["interaction_context"] = self.interaction_context.to_prompt_payload()

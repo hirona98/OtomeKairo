@@ -25,6 +25,7 @@ class ServiceInputTraceCompactMixin:
         initiative_context: InitiativeContext | None,
         ongoing_action_transition_summary: dict[str, Any] | None,
         failure_reason: str | None = None,
+        is_api_request: bool = False,
     ) -> dict[str, Any]:
         dispatch_request_summary = (
             followup_capability_request_summary
@@ -35,6 +36,7 @@ class ServiceInputTraceCompactMixin:
             "trigger_kind": trigger_kind,
             "trigger_family": self._trigger_compact_family(trigger_kind),
             "current_input_summary": self._build_current_input(
+                is_api_request=is_api_request,
                 input_text=input_text,
                 trigger_kind=trigger_kind,
                 interaction_context=interaction_context,
