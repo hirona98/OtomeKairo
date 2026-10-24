@@ -162,9 +162,14 @@ server -> client の代表例（capability request 1 件と通知系）:
     "capability_id": "vision.capture",
     "vision_source_id": "vision_source:main_display",
     "source_kind": "desktop",
-    "source_label": "メイン画面",
+    "source_label": "デスクトップ",
     "mode": "still",
-    "timeout_ms": 45000
+    "timeout_ms": 45000,
+    "desktop_capture": {
+      "capture_target": "primary_screen",
+      "idle_timeout_minutes": 10,
+      "exclude_patterns": []
+    }
   }
 }
 ```

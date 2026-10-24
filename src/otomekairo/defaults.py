@@ -91,10 +91,9 @@ def build_default_console_motion() -> dict:
 
 
 def build_default_desktop_capture() -> dict:
-    # 端末未作成時の取得方針と、新規 console client の初期 desktop_capture。
+    # すべての CocoroConsole に要求するデスクトップ取得方針。
     return {
-        "enabled": False,
-        "capture_active_window_only": True,
+        "capture_target": "primary_screen",
         "idle_timeout_minutes": 10,
         "exclude_patterns": [
             ".*CocoroAI.*",
@@ -113,17 +112,8 @@ def build_default_desktop_capture() -> dict:
     }
 
 
-def build_default_console_client_settings(
-    client_id: str,
-    *,
-    desktop_capture: dict | None = None,
-) -> dict:
+def build_default_console_client_settings(client_id: str) -> dict:
     # CocoroConsole 端末で実行する表示・入力・観測の既定値。
-    capture = (
-        dict(desktop_capture)
-        if isinstance(desktop_capture, dict)
-        else build_default_desktop_capture()
-    )
     return {
         "client_id": client_id,
         "process": {
@@ -161,12 +151,7 @@ def build_default_console_client_settings(
             "window_placements": {},
         },
         "desktop_capture": {
-            "enabled": bool(capture.get("enabled", False)),
-            "capture_active_window_only": bool(
-                capture.get("capture_active_window_only", True)
-            ),
-            "idle_timeout_minutes": int(capture.get("idle_timeout_minutes", 10)),
-            "exclude_patterns": list(capture.get("exclude_patterns") or []),
+            "enabled": False,
         },
         "avatar_presentations": [
             {
@@ -255,8 +240,7 @@ def build_default_state() -> dict:
         "agent_skill_sources": {
             DEFAULT_ELYTH_AGENT_SKILL_SOURCE_ID: build_default_elyth_agent_skill_source(),
         },
-        # 一度も connect していない間の desktop 取得方針。初回 connect で端末設定へ渡す。
-        "desktop_capture_defaults": build_default_desktop_capture(),
+        "desktop_capture_settings": build_default_desktop_capture(),
 
         "console_client_settings": {},
     }

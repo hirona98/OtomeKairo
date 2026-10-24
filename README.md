@@ -131,6 +131,7 @@ connector と watcher を有効にする前に、ブラウザ UI、CocoroConsole
 設定定義の意味は `docs/` を正とする。
 API key は設定値として扱い、コード、ログ、サンプルへ書かない。
 
+デスクトップ取得方針を共通設定へ分離した設定DB形式は version 20 とする。
 現行形式と異なる `config.db` と `memory.db` は起動時に拒否する。旧DBは別名で保管し、新しいDBを初期化する。設定は新しい `config.db` へ設定し直す。
 
 ## 検証

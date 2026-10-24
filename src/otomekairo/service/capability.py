@@ -216,6 +216,14 @@ class ServiceCapabilityMixin:
             raise
         target_client_id = target["target_client_id"]
         vision_source = target.get("vision_source")
+        desktop_capture = None
+        if (
+            capability_id == "vision.capture"
+            and isinstance(vision_source, dict)
+            and vision_source.get("kind") == "desktop"
+        ):
+            desktop_capture = self.store.read_state()["desktop_capture_settings"]
+            self._validate_desktop_capture_settings(desktop_capture)
         mcp_server = target.get("mcp_server")
         mcp_tool = target.get("mcp_tool")
         timeout_ms = int(manifest.get("timeout_ms") or 0)
@@ -262,6 +270,7 @@ class ServiceCapabilityMixin:
             action_seed=action_seed,
             wait_for_response=wait_for_response,
             vision_source=vision_source if isinstance(vision_source, dict) else None,
+            desktop_capture=desktop_capture,
             mcp_server=mcp_server if isinstance(mcp_server, dict) else None,
             mcp_tool=mcp_tool if isinstance(mcp_tool, dict) else None,
             source_current_input=source_current_input,
@@ -1121,6 +1130,7 @@ class ServiceCapabilityMixin:
         action_seed: dict[str, Any] | None,
         wait_for_response: bool,
         vision_source: dict[str, Any] | None = None,
+        desktop_capture: dict[str, Any] | None = None,
         mcp_server: dict[str, Any] | None = None,
         mcp_tool: dict[str, Any] | None = None,
         source_current_input: dict[str, Any] | None = None,
@@ -1196,6 +1206,10 @@ class ServiceCapabilityMixin:
             if isinstance(source_label, str) and source_label.strip():
                 record["source_label"] = source_label.strip()
             record["vision_source"] = deepcopy(vision_source)
+            if capability_id == "vision.capture" and source_kind == "desktop":
+                if desktop_capture is None:
+                    raise ValueError("Desktop capture settings are required for desktop requests.")
+                record["desktop_capture"] = deepcopy(desktop_capture)
         if capability_id == "mcp.call_tool":
             mcp_server_id = input_payload.get("mcp_server_id")
             tool_name = input_payload.get("tool_name")
@@ -1221,6 +1235,8 @@ class ServiceCapabilityMixin:
         input_payload = request_record.get("input")
         if isinstance(input_payload, dict):
             payload.update(deepcopy(input_payload))
+        if "desktop_capture" in request_record:
+            payload["desktop_capture"] = deepcopy(request_record["desktop_capture"])
         if request_record.get("capability_id") in {"vision.capture", "camera.ptz"}:
             for source_key in ("source_kind", "source_owner", "source_label"):
                 value = request_record.get(source_key)

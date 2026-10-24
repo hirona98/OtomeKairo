@@ -213,27 +213,32 @@ class ServiceConfigValidationMixin:
     def _validate_console_desktop_capture_settings(self, definition: Any) -> None:
         if not isinstance(definition, dict):
             raise ServiceError(400, "invalid_console_desktop_capture_settings", "desktop_capture must be an object.")
+        self._validate_exact_fields(definition, {"enabled"}, "console_desktop_capture_settings")
+        if not isinstance(definition["enabled"], bool):
+            raise ServiceError(400, "invalid_console_desktop_capture_settings", "enabled must be a boolean.")
+
+    def _validate_desktop_capture_settings(self, definition: Any) -> None:
+        if not isinstance(definition, dict):
+            raise ServiceError(400, "invalid_desktop_capture_settings", "desktop_capture must be an object.")
         self._validate_exact_fields(
             definition,
-            {"enabled", "capture_active_window_only", "idle_timeout_minutes", "exclude_patterns"},
-            "console_desktop_capture_settings",
+            {"capture_target", "idle_timeout_minutes", "exclude_patterns"},
+            "desktop_capture_settings",
         )
-        if not isinstance(definition.get("enabled"), bool) or not isinstance(
-            definition.get("capture_active_window_only"), bool
-        ):
-            raise ServiceError(400, "invalid_console_desktop_capture_settings", "desktop capture flags are invalid.")
+        if definition["capture_target"] not in ("active_window", "primary_screen"):
+            raise ServiceError(400, "invalid_desktop_capture_settings", "capture_target must be active_window or primary_screen.")
         idle_timeout = definition.get("idle_timeout_minutes")
         if not isinstance(idle_timeout, int) or isinstance(idle_timeout, bool) or idle_timeout < 0:
             raise ServiceError(
                 400,
-                "invalid_console_desktop_capture_settings",
+                "invalid_desktop_capture_settings",
                 "desktop_capture.idle_timeout_minutes must be an integer >= 0.",
             )
         patterns = definition.get("exclude_patterns")
         if not isinstance(patterns, list) or any(not isinstance(pattern, str) for pattern in patterns):
             raise ServiceError(
                 400,
-                "invalid_console_desktop_capture_settings",
+                "invalid_desktop_capture_settings",
                 "desktop_capture.exclude_patterns must be an array of strings.",
             )
 

@@ -7,8 +7,8 @@ const state = {
   editor: null,
   avatarSpeech: null,
   consoleClient: null,
-  // 一度も connect していない間の desktop_capture 編集用。
-  desktopCaptureDefaults: null,
+  // 全端末共通のデスクトップ取得方針。
+  desktopCaptureSettings: null,
   camera: null,
   mcp: null,
   agentSkills: null,
@@ -2474,15 +2474,15 @@ async function loadSettingsDrafts() {
         throw error;
       }
     }
-    // 端末が無くても取得方針は編集できるよう既定を常に読む。
-    const desktopCaptureDefaults = await apiRequest(
-      "/ui/api/config/desktop-capture-defaults",
+    // 端末の接続有無にかかわらず共通の取得方針を読む。
+    const desktopCaptureSettings = await apiRequest(
+      "/ui/api/config/desktop-capture",
     );
     state.editor = clone(editor);
     state.avatarSpeech = clone(avatarSpeech);
     state.consoleClient = consoleClient ? clone(consoleClient) : null;
-    state.desktopCaptureDefaults = clone(
-      desktopCaptureDefaults?.desktop_capture || desktopCaptureDefaults,
+    state.desktopCaptureSettings = clone(
+      desktopCaptureSettings.desktop_capture,
     );
     state.camera = clone(camera);
     state.mcp = clone(mcp);
@@ -2597,7 +2597,6 @@ async function saveSettings({ closeAfterSave = false } = {}) {
       // アバター複製で増やした VRM 表示設定を、音声設定保存後に端末設定へ反映する。
       const consoleSettingsPatch = {
         process: consoleClient.settings.process,
-        desktop_capture: consoleClient.settings.desktop_capture,
         avatar_presentations: consoleClient.settings.avatar_presentations,
       };
       consoleClient = await apiRequest(
@@ -2607,19 +2606,15 @@ async function saveSettings({ closeAfterSave = false } = {}) {
           body: JSON.stringify(consoleSettingsPatch),
         },
       );
-    } else if (state.desktopCaptureDefaults) {
-      // 未接続時は取得方針既定だけを永続化し、初回 connect で端末へ渡す。
-      const defaultsResponse = await apiRequest(
-        "/ui/api/config/desktop-capture-defaults",
-        {
-          method: "PUT",
-          body: JSON.stringify({ desktop_capture: state.desktopCaptureDefaults }),
-        },
-      );
-      state.desktopCaptureDefaults = clone(
-        defaultsResponse?.desktop_capture || defaultsResponse,
-      );
     }
+    const desktopCaptureSettings = await apiRequest(
+      "/ui/api/config/desktop-capture",
+      {
+        method: "PUT",
+        body: JSON.stringify({ desktop_capture: state.desktopCaptureSettings }),
+      },
+    );
+    state.desktopCaptureSettings = clone(desktopCaptureSettings.desktop_capture);
     state.editor = clone(editor);
     state.avatarSpeech = clone(avatarSpeech);
     state.camera = clone(camera);
@@ -2627,9 +2622,6 @@ async function saveSettings({ closeAfterSave = false } = {}) {
     state.agentSkills = clone(agentSkills);
     state.agentSkillInspection = clone(await apiRequest("/ui/api/agent-skills"));
     state.consoleClient = consoleClient ? clone(consoleClient) : null;
-    if (consoleClient?.settings?.desktop_capture) {
-      state.desktopCaptureDefaults = clone(consoleClient.settings.desktop_capture);
-    }
     resetMemoryDraftMeta(state.editor.memory_sets);
     const selectedDisplayName = arrayById(
       state.conversationDisplayNames,
@@ -2862,61 +2854,22 @@ function renderConsoleClientSettings() {
   // 思考前デスクトップ観測は server 側 wake_policy なので常に編集可。
   element("current-wake-desktop-observation").disabled = false;
 
-  const desktop = hasConsoleClient
-    ? state.consoleClient.settings.desktop_capture
-    : state.desktopCaptureDefaults;
-  if (desktop) {
-    element("desktop-capture-target").value = desktop.capture_active_window_only === false
-      ? "primary_screen"
-      : "active_window";
-    element("desktop-capture-idle-timeout").value = desktop.idle_timeout_minutes;
-    element("desktop-capture-exclude-patterns").value = (desktop.exclude_patterns || []).join(
-      "\n",
-    );
-  }
+  const desktop = state.desktopCaptureSettings;
+  element("desktop-capture-target").value = desktop.capture_target;
+  element("desktop-capture-idle-timeout").value = desktop.idle_timeout_minutes;
+  element("desktop-capture-exclude-patterns").value = desktop.exclude_patterns.join("\n");
   renderAvatarPresentation();
 }
 
-function captureActiveWindowOnlyValue() {
-  const value = textValue("desktop-capture-target");
-  if (value === "active_window") {
-    return true;
+function syncDesktopCaptureSettings() {
+  const captureTarget = textValue("desktop-capture-target");
+  if (captureTarget !== "active_window" && captureTarget !== "primary_screen") {
+    throw new Error("取得範囲が不正です。");
   }
-  if (value === "primary_screen") {
-    return false;
-  }
-  throw new Error("取得範囲が不正です。");
-}
-
-function syncConsoleClientSettings() {
-  const idleTimeout = intValue("desktop-capture-idle-timeout", 10);
-  const excludePatterns = parseLines(textValue("desktop-capture-exclude-patterns"));
-  const captureActiveWindowOnly = captureActiveWindowOnlyValue();
-  if (state.consoleClient) {
-    const settings = state.consoleClient.settings;
-    settings.desktop_capture = {
-      ...settings.desktop_capture,
-      capture_active_window_only: captureActiveWindowOnly,
-      idle_timeout_minutes: idleTimeout,
-      exclude_patterns: excludePatterns,
-    };
-    state.desktopCaptureDefaults = clone(settings.desktop_capture);
-    return;
-  }
-  if (!state.desktopCaptureDefaults) {
-    state.desktopCaptureDefaults = {
-      enabled: false,
-      capture_active_window_only: captureActiveWindowOnly,
-      idle_timeout_minutes: idleTimeout,
-      exclude_patterns: excludePatterns,
-    };
-    return;
-  }
-  state.desktopCaptureDefaults = {
-    ...state.desktopCaptureDefaults,
-    capture_active_window_only: captureActiveWindowOnly,
-    idle_timeout_minutes: idleTimeout,
-    exclude_patterns: excludePatterns,
+  state.desktopCaptureSettings = {
+    capture_target: captureTarget,
+    idle_timeout_minutes: intValue("desktop-capture-idle-timeout", 10),
+    exclude_patterns: parseLines(textValue("desktop-capture-exclude-patterns")),
   };
 }
 
@@ -4056,7 +4009,7 @@ function syncAgentSkills() {
 function syncAllForms() {
   syncAvatar();
   syncMicrophoneSettings();
-  syncConsoleClientSettings();
+  syncDesktopCaptureSettings();
   syncCurrent();
   syncPeriodicThoughtTopics();
   syncPersona();

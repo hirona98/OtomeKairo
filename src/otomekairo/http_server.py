@@ -293,10 +293,10 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                     self.server.service.get_last_connected_console_client_editor_state(token),
                 )
                 return
-            if method == "GET" and parsed.path == "/api/config/desktop-capture-defaults":
+            if method == "GET" and parsed.path == "/api/config/desktop-capture":
                 self._write_success(
                     HTTPStatus.OK,
-                    self.server.service.get_desktop_capture_defaults(token),
+                    self.server.service.get_desktop_capture_settings(token),
                 )
                 return
             if (
@@ -649,11 +649,11 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                     self.server.service.reload_agent_skill_sources(token),
                 )
                 return
-            if method == "PUT" and parsed.path == "/api/config/desktop-capture-defaults":
+            if method == "PUT" and parsed.path == "/api/config/desktop-capture":
                 payload = self._read_json_body()
                 self._write_success(
                     HTTPStatus.OK,
-                    self.server.service.replace_desktop_capture_defaults(token, payload),
+                    self.server.service.replace_desktop_capture_settings(token, payload),
                 )
                 return
             if (
@@ -1454,17 +1454,17 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 self.server.service.get_last_connected_console_client_editor_state(token),
             )
             return
-        if method == "GET" and path == "/ui/api/config/desktop-capture-defaults":
+        if method == "GET" and path == "/ui/api/config/desktop-capture":
             self._write_success(
                 HTTPStatus.OK,
-                self.server.service.get_desktop_capture_defaults(token),
+                self.server.service.get_desktop_capture_settings(token),
             )
             return
-        if method == "PUT" and path == "/ui/api/config/desktop-capture-defaults":
+        if method == "PUT" and path == "/ui/api/config/desktop-capture":
             payload = self._read_json_body()
             self._write_success(
                 HTTPStatus.OK,
-                self.server.service.replace_desktop_capture_defaults(token, payload),
+                self.server.service.replace_desktop_capture_settings(token, payload),
             )
             return
         if (
