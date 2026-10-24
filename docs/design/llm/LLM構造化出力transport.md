@@ -48,7 +48,9 @@ schema が担う範囲は次である。
 - 内部識別子禁止、改行禁止、正規化順のような意味規則
 
 schema は request ごとの動的 enum を持たない。
-例外は `decision.kind` だけで、`comparison_scope` に応じた許可集合へ絞る。
+`decision.kind` と `decision.target_stances[].target` は、`comparison_scope` に応じた固定の許可集合へ絞る。
+
+`decision.target_stances` の `minItems` は、生成前の文脈で必須と判定した対象の件数、`maxItems` はその比較で許可する対象の件数にする。必須対象の意味規則は [判断と行動](../runtime/判断と行動.md#decision_generation-の出力契約) を正とする。対象の重複と、生成結果の `kind` に応じた追加要件は validator で検証する。
 
 schema 内の object はすべて `additionalProperties: false` とし、その object の全 property を `required` にする。
 任意に見える欄もキーは常に出し、値を `null` または空配列にする。

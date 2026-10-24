@@ -8,6 +8,7 @@ from otomekairo.llm.contexts import (
     AutonomousStepContext,
     CurrentInput,
     DecisionContext,
+    InitiativeCandidateFamily,
     InitiativeContext,
     PersonaContext,
 )
@@ -15,6 +16,7 @@ from otomekairo.service.input.trace_compact import ServiceInputTraceCompactMixin
 from otomekairo.llm.contracts import (
     LLMError,
     build_decision_target_stances_for_kind,
+    required_decision_targets,
     validate_autonomous_activity_alignment_review_contract,
     validate_decision_contract,
 )
@@ -114,6 +116,20 @@ def _wire_response(payload: dict) -> str:
     return json.dumps(wire)
 
 
+def _initiative_context(family: str, *, available: bool = True) -> InitiativeContext:
+    return InitiativeContext(
+        trigger_kind="background_thinking", opportunity_summary="定期思考。",
+        initiative_entry_summary=None, time_context_summary={}, foreground_signal_summary={},
+        activity_context=None, persona_context_summary={}, runtime_state_summary={},
+        recent_turn_summary=[], drive_summaries=[], pending_intent_summaries=[],
+        world_state_summary=[], ongoing_action_summary=None, capability_summary={},
+        candidate_families=[InitiativeCandidateFamily(
+            family=family, available=available, selected=False, priority_score=0.0,
+        )], selected_candidate_family=None, speech_timing_state={}, suppression_summary={},
+        speech_timing_summary="",
+    )
+
+
 def _capability_decision(capability_id: str, input_payload: dict) -> dict:
     return {"speech_text": None,
         "kind": "capability_request",
@@ -141,6 +157,87 @@ def _capability_decision(capability_id: str, input_payload: dict) -> dict:
 
 
 class DecisionContractTests(unittest.TestCase):
+    def test_context_targets_reach_schema_and_prompt_in_one_completion(self) -> None:
+        cases = [("full", None, None, ("outward_speech",))]
+        for kind in ("periodic_thought_topic", "ongoing_action", "autonomous_run"):
+            cases.append(("full", {"workspace_candidates": [{
+                "kind": kind, "factor_ref": "activity:test", "summary_text": "活動候補。",
+            }]}, None, ("outward_speech", "self_activity")))
+        for family in ("autonomous", "ongoing_action"):
+            for available in (True, False):
+                targets = ("outward_speech", "self_activity") if available else ("outward_speech",)
+                cases.append(("full", None, _initiative_context(family, available=available), targets))
+        for scope in ("self_activity", "outward_speech"):
+            cases.append((scope, None, _initiative_context("autonomous"), (scope,)))
+
+        for scope, workspace, initiative, targets in cases:
+            with self.subTest(scope=scope, workspace=workspace, initiative=initiative):
+                context = replace(_decision_context([]), comparison_scope=scope,
+                                  workspace_context=workspace, initiative_context=initiative)
+                candidate = _capability_decision("mcp.call_tool", {})
+                candidate.update(kind="noop", capability_request=None)
+                if workspace is not None:
+                    candidate["foreground_selection"]["primary_factor_ref"] = "activity:test"
+                candidate["target_stances"] = build_decision_target_stances_for_kind(
+                    "noop", required_targets=targets, reason_summary="今回は見送る。",
+                )
+                with patch("otomekairo.llm.client.complete_text", return_value=_wire_response(candidate)) as complete:
+                    result = LLMClient().generate_decision(
+                        model_config={"model": "real-test"}, persona_context=_persona_context(), context=context,
+                    )
+                self.assertEqual(result, candidate)
+                complete.assert_called_once()
+                request = complete.call_args.kwargs
+                stances = request["response_format"]["json_schema"]["schema"]["properties"]["target_stances"]
+                self.assertEqual(stances["minItems"], len(targets))
+                expected = f"今回の文脈で必須の target_stances.target は {json.dumps(list(targets))} です。"
+                self.assertIn(expected, request["messages"][0]["content"])
+
+    def test_missing_context_target_repairs_with_same_schema_and_required_targets(self) -> None:
+        context = replace(_decision_context([]), initiative_context=_initiative_context("autonomous"))
+        valid = _capability_decision("mcp.call_tool", {})
+        valid.update(kind="speech", speech_text="確認が終了しました。", capability_request=None)
+        valid["target_stances"] = build_decision_target_stances_for_kind(
+            "speech", required_targets=("outward_speech", "self_activity"), reason_summary="結果を伝える。",
+        )
+        missing = json.loads(json.dumps(valid))
+        missing["target_stances"] = missing["target_stances"][:1]
+        with patch("otomekairo.llm.client.complete_text", side_effect=[_wire_response(missing), _wire_response(valid)]) as complete:
+            result = LLMClient().generate_decision(
+                model_config={"model": "real-test"}, persona_context=_persona_context(), context=context,
+            )
+        self.assertEqual(result, valid)
+        self.assertEqual(complete.call_count, 2)
+        first, second = [call.kwargs for call in complete.call_args_list]
+        self.assertEqual(first["response_format"], second["response_format"])
+        self.assertEqual(first["response_format"]["json_schema"]["schema"]["properties"]["target_stances"]["minItems"], 2)
+        expected = '今回の文脈で必須の target_stances.target は ["outward_speech", "self_activity"] です。'
+        self.assertIn(expected, first["messages"][0]["content"])
+        self.assertIn(expected, second["messages"][-1]["content"])
+        self.assertIn("missing=self_activity", second["messages"][-1]["content"])
+
+    def test_kind_specific_required_targets_are_preserved_after_generation(self) -> None:
+        self.assertEqual(required_decision_targets(), ("outward_speech",))
+        for kind in ("capability_request", "autonomous_run", "pending_intent"):
+            with self.subTest(kind=kind):
+                self.assertEqual(required_decision_targets(kind=kind), ("outward_speech", "self_activity"))
+        missing = _capability_decision("mcp.call_tool", {})
+        missing["target_stances"] = missing["target_stances"][:1]
+        with self.assertRaisesRegex(LLMError, "missing=self_activity"):
+            validate_decision_contract(missing)
+
+    def test_scoped_comparison_rejects_extra_or_duplicate_targets(self) -> None:
+        for scope in ("self_activity", "outward_speech"):
+            for extra in ("self_activity", "outward_speech"):
+                with self.subTest(scope=scope, extra=extra):
+                    payload = _capability_decision("mcp.call_tool", {})
+                    payload.update(kind="noop", capability_request=None)
+                    payload["target_stances"] = build_decision_target_stances_for_kind(
+                        "noop", required_targets=(scope, extra), reason_summary="今回は見送る。",
+                    )
+                    with self.assertRaises(LLMError):
+                        validate_decision_contract(payload, comparison_scope=scope)
+
     def test_unknown_factor_repair_receives_actual_workspace_ids(self) -> None:
         context = replace(_decision_context([]), comparison_scope="outward_speech", workspace_context={
             "workspace_candidates": [{"factor_ref": "current_input:user_message"},

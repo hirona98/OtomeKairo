@@ -21,6 +21,7 @@ from otomekairo.llm.contracts import (
     normalize_answer_contract_payload,
     normalize_recall_hint_payload,
     build_decision_target_stances_for_kind,
+    required_decision_targets,
     validate_activity_state_contract,
     validate_world_state_source_selection_contract,
     validate_answer_contract_contract,
@@ -394,6 +395,11 @@ class LLMClient:
                 return payload
 
             # プロンプト構築
+            required_targets = required_decision_targets(
+                workspace_context=context.workspace_context,
+                initiative_context=context.initiative_context,
+                comparison_scope=context.comparison_scope,
+            )
             messages = build_decision_messages(
                 persona_context=persona_context,
                 context=context,
@@ -409,9 +415,13 @@ class LLMClient:
                 repair_prompt_builder=lambda error: build_decision_repair_prompt(
                     error,
                     context.comparison_scope,
+                    required_targets=required_targets,
                 ),
                 failure_message="Decision の生成に失敗しました。解析可能な応答が得られませんでした。",
-                response_format=decision_response_format(comparison_scope=context.comparison_scope),
+                response_format=decision_response_format(
+                    comparison_scope=context.comparison_scope,
+                    required_targets=required_targets,
+                ),
                 operation=operation,
             )
         except Exception as exc:

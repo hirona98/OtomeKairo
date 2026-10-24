@@ -125,6 +125,35 @@ class LLMSchemaTests(unittest.TestCase):
                 schema = _root_schema(decision_response_format(comparison_scope=scope))
                 self.assertEqual(set(schema["properties"]["kind"]["enum"]), set(kinds))
 
+    def test_decision_target_stances_follow_scope_and_required_targets(self) -> None:
+        for scope, required, minimum, maximum, targets in (
+            ("full", None, 1, 2, {"outward_speech", "self_activity"}),
+            ("full", ("outward_speech", "self_activity"), 2, 2, {"outward_speech", "self_activity"}),
+            ("self_activity", None, 1, 1, {"self_activity"}),
+            ("outward_speech", None, 1, 1, {"outward_speech"}),
+        ):
+            with self.subTest(scope=scope, required=required):
+                schema = _root_schema(decision_response_format(
+                    comparison_scope=scope, required_targets=required,
+                ))
+                stances = schema["properties"]["target_stances"]
+                self.assertEqual((stances["minItems"], stances["maxItems"]), (minimum, maximum))
+                self.assertEqual(set(stances["items"]["properties"]["target"]["enum"]), targets)
+                self._assert_dialect(schema, path="decision")
+                self._assert_closed_objects(schema, path="decision")
+
+    def test_decision_schema_rejects_inconsistent_required_targets(self) -> None:
+        for scope, required in (
+            ("full", ()),
+            ("full", ("self_activity",)),
+            ("full", ("outward_speech", "outward_speech")),
+            ("full", ("outward_speech", "unknown")),
+            ("self_activity", ("outward_speech", "self_activity")),
+            ("outward_speech", ("self_activity",)),
+        ):
+            with self.subTest(scope=scope, required=required), self.assertRaises(ValueError):
+                decision_response_format(comparison_scope=scope, required_targets=required)
+
     def _assert_dialect(self, node: Any, *, path: str) -> None:
         if isinstance(node, list):
             for index, item in enumerate(node):

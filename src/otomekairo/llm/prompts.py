@@ -30,6 +30,7 @@ from otomekairo.llm.contracts import (
     TIME_REFERENCE_VALUES,
     WORLD_STATE_HINT_VALUES,
     WORLD_STATE_TTL_HINT_VALUES,
+    required_decision_targets,
 )
 from otomekairo.memory.event_references import event_reference_context
 from otomekairo.memory.utils import MEMORY_OBJECT_REF_PREFIXES, llm_local_time_text, localize_timestamp_fields, memory_claim_context
@@ -412,12 +413,19 @@ def build_decision_messages(
     persona_context: PersonaContext,
     context: DecisionContext,
 ) -> list[dict[str, str]]:
+    required_targets = required_decision_targets(
+        workspace_context=context.workspace_context,
+        initiative_context=context.initiative_context,
+        comparison_scope=context.comparison_scope,
+    )
+    system_prompt = _build_decision_system_prompt(comparison_scope=context.comparison_scope)
+    system_prompt += "\n" + _decision_required_targets_instruction(required_targets)
+    if context.comparison_scope != "self_activity":
+        system_prompt += "\n" + _speech_generation_instruction()
     messages = [
         {
             "role": "system",
-            "content": _build_decision_system_prompt(
-                comparison_scope=context.comparison_scope,
-            ) + ("\n" + _speech_generation_instruction() if context.comparison_scope != "self_activity" else ""),
+            "content": system_prompt,
         },
     ]
     messages.extend(_build_agent_skill_messages(context.agent_skill_context))
@@ -932,7 +940,22 @@ def build_memory_reflection_summary_repair_prompt(validation_error: str) -> str:
     )
 
 
-def build_decision_repair_prompt(validation_error: str, comparison_scope: str = "full") -> str:
+def _decision_required_targets_instruction(required_targets: tuple[str, ...]) -> str:
+    return (
+        "今回の文脈で必須の target_stances.target は "
+        + json.dumps(list(required_targets), ensure_ascii=False)
+        + " です。各対象を1件ずつ含めてください。\n"
+    )
+
+
+def build_decision_repair_prompt(
+    validation_error: str,
+    comparison_scope: str = "full",
+    *,
+    required_targets: tuple[str, ...] | None = None,
+) -> str:
+    if required_targets is None:
+        required_targets = required_decision_targets(comparison_scope=comparison_scope)
     parts = [
         "前回の出力は decision_generation 契約を満たしていませんでした。\n",
         f"validator_error: {validation_error}\n",
@@ -948,6 +971,7 @@ def build_decision_repair_prompt(validation_error: str, comparison_scope: str = 
         parts.append("\n")
     parts.append(_decision_output_contract_section(comparison_scope))
     parts.append("\n")
+    parts.append(_decision_required_targets_instruction(required_targets))
     if comparison_scope != "self_activity":
         parts.append(
             "validator_error が同じ vision_source_id の新鮮な visual_context を示す場合は、"
@@ -1624,6 +1648,7 @@ def _decision_output_contract_section(comparison_scope: str) -> str:
         shared
         + "target は outward_speech または self_activity です。\n"
         "outward_speech は毎回必須です。periodic_thought_topic、ongoing_action、autonomous_run、または available な autonomous family があるときは self_activity も必須です。\n"
+        "kind=capability_request、autonomous_run、pending_intent を選ぶときも self_activity が必須です。\n"
         "kind=speech では outward_speech=advance、載っている self_activity は hold です。対話の継続は outward_speech です。\n"
         "kind=capability_request または autonomous_run では self_activity=advance、outward_speech は hold です。\n"
         "kind=noop は載っている対象をすべて hold したときだけです。外向きだけ控える判断を noop にしないでください。\n"

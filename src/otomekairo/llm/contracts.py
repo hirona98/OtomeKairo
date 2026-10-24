@@ -715,11 +715,12 @@ def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
 
 def required_decision_targets(
     *,
-    kind: str,
+    kind: str | None = None,
     workspace_context: dict[str, Any] | None = None,
     initiative_context: Any = None,
     comparison_scope: str = "full",
 ) -> tuple[str, ...]:
+    """kind 未決定の生成前は文脈由来の必須対象だけを返す。"""
     if comparison_scope == "self_activity":
         return ("self_activity",)
     if comparison_scope == "outward_speech":
@@ -927,6 +928,13 @@ def validate_decision_contract(
         kind=str(payload.get("kind") or ""),
         required_targets=required_targets,
     )
+    if comparison_scope != "full" and {
+        item["target"] for item in payload["target_stances"]
+    } != {comparison_scope}:
+        raise LLMError(
+            f"Decision comparison_scope={comparison_scope} の target_stances は、"
+            f"{comparison_scope} 1 件だけにしてください。"
+        )
 
 
 def _validate_decision_foreground_selection(value: Any) -> None:

@@ -29,6 +29,7 @@ from otomekairo.llm.contracts import (
     WORLD_STATE_HINT_VALUES,
     WORLD_STATE_TTL_HINT_VALUES,
     USER_WORLD_REPORT_TYPES,
+    required_decision_targets,
 )
 
 
@@ -143,10 +144,24 @@ def autonomous_run_intervention_response_format() -> dict[str, Any]:
     }))
 
 
-def decision_response_format(*, comparison_scope: str = "full") -> dict[str, Any]:
+def decision_response_format(
+    *,
+    comparison_scope: str = "full",
+    required_targets: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
     if comparison_scope not in DECISION_COMPARISON_SCOPE_KINDS:
         raise ValueError(f"unsupported comparison_scope: {comparison_scope}")
     kind_values = DECISION_COMPARISON_SCOPE_KINDS[comparison_scope]
+    scope_targets = required_decision_targets(comparison_scope=comparison_scope)
+    if required_targets is None:
+        required_targets = scope_targets
+    allowed_targets = DECISION_TARGET_VALUES if comparison_scope == "full" else set(scope_targets)
+    if (
+        len(required_targets) != len(set(required_targets))
+        or not set(scope_targets).issubset(required_targets)
+        or not set(required_targets).issubset(allowed_targets)
+    ):
+        raise ValueError(f"invalid required_targets for comparison_scope={comparison_scope}: {required_targets}")
     capability_request = nullable(
         closed_object(
             {
@@ -210,11 +225,11 @@ def decision_response_format(*, comparison_scope: str = "full") -> dict[str, Any
                 ),
                 "target_stances": {
                     "type": "array",
-                    "minItems": 1,
-                    "maxItems": 2,
+                    "minItems": len(required_targets),
+                    "maxItems": len(allowed_targets),
                     "items": closed_object(
                         {
-                            "target": string_enum(DECISION_TARGET_VALUES),
+                            "target": string_enum(allowed_targets),
                             "stance": string_enum(DECISION_TARGET_STANCE_VALUES),
                             "reason_summary": {"type": "string"},
                         }
