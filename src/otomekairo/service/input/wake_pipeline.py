@@ -25,12 +25,14 @@ class ServiceInputWakePipelineMixin:
         reference_context: dict[str, Any] | None = None,
         recent_interactions: list[dict[str, Any]] | None = None,
         bypass_schedule: bool = False,
+        wake_message: str | None = None,
     ) -> tuple[dict[str, Any], str, dict[str, Any]]:
         cycle_label = self._debug_cycle_label(cycle_id)
         # 入力テキスト
         input_text = self._build_wake_input_text(
             client_context=client_context,
             selected_candidate=selected_candidate,
+            wake_message=wake_message,
         )
         # 判断機会ポリシー
         if trigger_kind == "background_thinking":
@@ -75,6 +77,7 @@ class ServiceInputWakePipelineMixin:
             input_text = self._build_wake_input_text(
                 client_context=client_context,
                 selected_candidate=selected_candidate,
+                wake_message=wake_message,
             )
         if trigger_kind == "background_thinking" and (
             self._user_response_cycle_active()
@@ -94,7 +97,7 @@ class ServiceInputWakePipelineMixin:
             debug_log("Wake", f"{cycle_label} suppress outward speech user_response_changed")
 
         # 候補
-        if selected_candidate is None:
+        if selected_candidate is None and wake_message is None:
             client_context = self._run_autonomous_initiative_entry_check(
                 state=state,
                 current_time=started_at,
@@ -106,6 +109,7 @@ class ServiceInputWakePipelineMixin:
             input_text = self._build_wake_input_text(
                 client_context=client_context,
                 selected_candidate=selected_candidate,
+                wake_message=wake_message,
             )
             if not self._has_autonomous_initiative_context(
                 state=state,

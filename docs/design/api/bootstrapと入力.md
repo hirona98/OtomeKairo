@@ -320,6 +320,20 @@ server に自律判断の機会だけを与え、判断結果として `speech /
 定期思考（`wake_policy`）とは別経路であり、間隔 due 判定も思考前観測も使わない。
 
 request の field はすべて任意である。空 object `{}` でも受理する。
+依頼本文の意味境界は [現在の個への依頼](../runtime/自律initiative_loop.md#現在の個への依頼) を正とする。
+
+#### request サンプル: 現在の個への伝言依頼
+
+依頼元は人でもソフトウェアでもよい。`client_context.source` には人の名前やソフト名などの送信元ラベルを入れる。
+
+```json
+{
+  "message": "修正が終了したと伝えてほしい。",
+  "client_context": {
+    "source": "Codex"
+  }
+}
+```
 
 #### request サンプル1: 簡易起床
 
@@ -358,7 +372,7 @@ snapshot 本体は body に埋め込まず、`reference.uri` で渡す。
 }
 ```
 
-対象人物と会話が確定している場合だけ、どちらのサンプルにも `interaction_context` を追加できる。
+対象人物と会話が確定している場合だけ、各サンプルに `interaction_context` を追加できる。
 
 ```json
 {
@@ -381,6 +395,9 @@ snapshot 本体は body に埋め込まず、`reference.uri` で渡す。
 
 #### request field
 
+- `message` は任意の文字列とし、指定時は空白だけでない本文を必須とする。`null`、空文字列、文字列以外は `400 invalid_wake_message` とする
+- `message` は文字数で切らず全文を扱う。本文の受信上限は [共通ルール](共通ルール.md#http受信境界) に従う
+- `message` の送信元は `client_context.source` で渡す。`reference` と併用する場合は本文と参照を同じサイクルの判断材料にする
 - `client_context` は object とする。値がないときは省略する
 - wake でも `client_context` の `source / active_app / window_title / locale` を起床入力の整形に使う
 - wake でも `client_context` の `social_context_summary / environment_summary / location_summary / external_service_summary / body_state_summary / device_state_summary / schedule_summary` があれば、`world_state` source pack の補助文脈へ使う
@@ -470,6 +487,7 @@ server 内の定期思考スケジューラも、同じ wake 1 サイクルを�
 
 | HTTP | `error.code` | 意味 |
 |------|--------------|------|
+| `400` | `invalid_wake_message` | 指定した `message` が空白だけ、空、`null`、または文字列以外 |
 | `400` | `invalid_client_context` | `client_context` が object ではない |
 | `400` | `invalid_interaction_context` | `interaction_context` が object でない、または未対応fieldを含む |
 | `400` | `invalid_interaction_ref` | `interaction_ref` が空または文字列でない |

@@ -29,6 +29,10 @@ class ServiceSpontaneousMixin(
         # 認可
         state = self._require_token(token)
 
+        wake_message = payload.get("message")
+        if "message" in payload and (not isinstance(wake_message, str) or not wake_message.strip()):
+            raise ServiceError(400, "invalid_wake_message", "message must be a non-empty string.")
+
         # クライアントコンテキスト
         client_context = payload.get("client_context", {})
         if not isinstance(client_context, dict):
@@ -47,6 +51,7 @@ class ServiceSpontaneousMixin(
             client_context=client_context,
             interaction_context=interaction_context,
             trigger_kind="wake",
+            wake_message=wake_message,
             reference_payload=reference_payload,
         )
 

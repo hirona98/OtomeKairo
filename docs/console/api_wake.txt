@@ -17,15 +17,35 @@ POST /api/wake は、OtomeKairo に「いま自律判断してよい」という
 
 POST {BASE_URL}/api/wake
 
+BASE_URL は https://<OtomeKairoのホスト>:55601 とする。
+同じPCでは https://127.0.0.1:55601、別PCではLAN・VPN内のサーバのホスト名やIPアドレスを指定する。
+リクエスト body は Content-Type: application/json; charset=utf-8 で送る。
+
 認証
 ----
 
 Authorization: Bearer <TOKEN>
 
+TOKEN には console_access_token を指定する。
+取得するときは、POST {BASE_URL}/api/bootstrap/acquire-console-access-token へ空のJSON object {} を送る。
+この取得APIは認証不要であり、成功時の data.console_access_token を以後の呼び出しに使う。
+すでに発行されている場合は既存のtokenが返る。
+
 リクエスト
 ----------
 
 リクエスト body のフィールドはすべて任意である。空の object {} でも呼べる。
+
+message（任意）
+  現在の個への依頼本文。人が直接送る場合も、ソフトウェアから送る場合も使える。
+  例: 「修正が終了したと伝えてほしい。」「確認の返答を待っていると伝えてほしい。」
+  指定するときは空白だけでない文字列を入れる。null、空文字列、文字列以外は受理しない。
+  client_context.source には、人の名前やソフト名などの送信元ラベルを入れる。
+  本文は文字数で切らず、入力解釈、想起、行動判断へ全文を渡す。
+  リクエスト body 全体の上限は64 MiBである。
+  人格、記憶、現在の状況から、伝えるかどうか・どう伝えるかをOtomeKairoが判断する。
+  人物や会話先の指定は必須ではなく、指定がなければ既存のチャット表示と設定済み音声出力へ周囲への伝言として届ける。
+  reference と併用すると、依頼本文と参照先を同じサイクルの判断材料にする。
 
 client_context（任意）
   呼び出し元の短い状況。source、client_id、active_app、window_title、locale などを置ける。
@@ -44,7 +64,15 @@ reference（任意）
   label は参照の短い名前。reason_summary は wake した理由の短い要約。
   content_hint は auto / image / text。省略時は auto。
   画像（PNG / JPEG / GIF / WebP）は visual observation として判断へ渡す。
-  テキストは当該サイクルの判断入力へ一時的に渡す。画像本体や raw text を wake body に埋め込まない。
+  テキストは当該サイクルの判断入力へ一時的に渡す。
+  参照先の画像・テキスト本体は reference に埋め込まず、uri で渡す。依頼本文は message に入れる。
+  ローカルパスはOtomeKairoサーバ上のパスとして読む。別PCのファイルはサーバから取得できるHTTP(S) URLで渡す。
+  uri は最大2048文字、label と reason_summary はそれぞれ最大512文字である。
+  取得結果は最大5 MiB、UTF-8テキストの場合は最大64 KiBである。
+
+以下の cURL 例はWindowsのコマンドプロンプト用であり、^ は改行の継続を表す。
+-k は自己署名証明書などのTLS証明書を検証せずに接続する指定である。
+証明書を検証して接続できる環境では -k を外す。
 
 サンプル1: 簡易起床
 ------------------
@@ -111,11 +139,48 @@ Invoke-RestMethod -Method Post `
   -ContentType "application/json; charset=utf-8" `
   -Body '{"client_context":{"source":"tapo_c220_watcher","client_id":"watcher-C220","locale":"ja-JP"},"reference":{"uri":"/tmp/otomekairo-watch/camera/latest.jpg","label":"部屋カメラの変化","reason_summary":"軽量CVが前回との差分を検出した。","content_hint":"image"}}'
 
+サンプル3: 現在の個への伝言依頼
+----------------------------------
+
+現在の個へ、送信元からの伝言を依頼する。依頼元は人でもソフトウェアでもよく、人物・会話IDを用意せずに使える。
+ソフトウェアから依頼する例:
+
+{
+  "message": "修正が終了したと伝えてほしい。",
+  "client_context": {
+    "source": "Codex"
+  }
+}
+
+人が直接依頼する例:
+
+{
+  "message": "準備ができたと伝えてほしい。",
+  "client_context": {
+    "source": "田中さん"
+  }
+}
+
+cURL:
+
+curl.exe -k -X POST {BASE_URL}/api/wake ^
+  -H "Authorization: Bearer <TOKEN>" ^
+  -H "Content-Type: application/json; charset=utf-8" ^
+  -d "{\"message\":\"修正が終了したと伝えてほしい。\",\"client_context\":{\"source\":\"Codex\"}}"
+
+PowerShell:
+
+Invoke-RestMethod -Method Post `
+  -Uri "{BASE_URL}/api/wake" `
+  -Headers @{ Authorization = "Bearer <TOKEN>" } `
+  -ContentType "application/json; charset=utf-8" `
+  -Body '{"message":"修正が終了したと伝えてほしい。","client_context":{"source":"Codex"}}'
+
 対象人物が決まっているとき
 --------------------------
 
 interaction_context を付けると、応答と非同期処理がその interaction_ref / participants を引き継ぐ。
-サンプル1・2のいずれにも追加できる。
+各サンプルに追加できる。
 
 {
   "interaction_context": {
@@ -151,17 +216,64 @@ interaction_context を付けると、応答と非同期処理がその interact
 }
 
 result_kind は speech、capability_request、noop、internal_failure のいずれかである。
-外向き発話がない wake では result_kind は noop になり、speech は null になる。
-発話しなくても API 呼び出し自体は成功しうる。
+
+- speech: 発話を選んだ。speech.text に本文が入り、既存のチャット表示・音声配送へ進む。
+- capability_request: 能力実行を開始した。capability_request に実行要求の要約が入る。
+- noop: 今回は外向きの発話や能力実行を選ばなかった。依頼の見送りや内部での保留も含む。
+- internal_failure: 判断処理に失敗した。HTTP 200かつ ok=true でも、この値は判断の失敗を表す。
+
+speech 以外の結果では speech は null になる。発話しなくても API 呼び出し自体は成功しうる。
+人物・会話先を指定しなかった場合は、interaction_ref は null、recipient_person_refs は空配列になる。
+発話本文と音声配送の結果は別であり、音声が無効・配送失敗の場合も発話本文は表示される。
+
+Bash送信コマンド
+----------------
+
+otomekairo-notify はBashとcurl 7.76以降だけで動作する。Python・jqは不要である。
+配布された otomekairo-notify を送信端末の ~/.local/bin/ に配置し、実行権限を付ける。
+
+mkdir -p ~/.local/bin ~/.config/otomekairo
+chmod 755 ~/.local/bin/otomekairo-notify
+touch ~/.config/otomekairo/notify.conf
+chmod 600 ~/.config/otomekairo/notify.conf
+
+~/.config/otomekairo/notify.conf に次のBash変数を設定する。
+URLは接続先に合わせ、TOKENには取得済みの console_access_token を入れる。
+
+OTOMEKAIRO_URL='https://<OtomeKairoのホスト>:55601'
+OTOMEKAIRO_TOKEN='<TOKEN>'
+OTOMEKAIRO_TLS_VERIFY=true
+OTOMEKAIRO_CA_FILE=''
+OTOMEKAIRO_TIMEOUT_SECONDS=300
+
+TLS検証は既定で有効である。独自CAを使うときは OTOMEKAIRO_CA_FILE に証明書ファイルを指定する。
+LAN・VPN内で既存の自己署名証明書を検証せずに使う構成では、OTOMEKAIRO_TLS_VERIFY=false を明示し、OTOMEKAIRO_CA_FILE は空にする。
+設定ファイルはBashとして読み込むため、利用者自身が管理するファイルを使う。
+
+送信例:
+
+~/.local/bin/otomekairo-notify Codex '修正が終了したと伝えてほしい。'
+~/.local/bin/otomekairo-notify Codex '確認の返答を待っていると伝えてほしい。'
+~/.local/bin/otomekairo-notify '田中さん' '準備ができたと伝えてほしい。'
+
+別の設定ファイルを使うときは --config FILE を送信元の前に指定する。
+別PCでも同じスクリプトを使い、そのPCの設定ファイルに接続先とtokenを設定する。
+応答はJSONのまま表示される。正常な noop は終了コード0、通信・HTTP・内部判断の失敗は非ゼロで終了する。
+コマンドは自動再送しない。
 
 主な失敗
 --------
 
+400 invalid_wake_message: 指定した message が空白だけ、空、null、または文字列以外である。
+400 invalid_client_context: client_context が object ではない。
 400 invalid_interaction_context: interaction_context の形式が不正である。
 400 invalid_interaction_participants: participants または人物参照が不正である。
 400 invalid_person_display_name: participants[].display_name が無い、空、または文字列ではない。
 400 unsupported_group_interaction: participants が1件ではない。
 400 invalid_wake_reference: reference の形式が不正である。
+401 bootstrap_required: console_access_token が未発行である。
+401 invalid_token: token が無い、または不正である。
+413 request_too_large: リクエスト body 全体が64 MiBを超えた。
 413 wake_reference_too_large: reference の取得結果が大きすぎる。
 415 unsupported_wake_reference_content: reference の内容が画像または UTF-8 テキストとして扱えない。
 502 wake_reference_unavailable: reference.uri を読み取れない。

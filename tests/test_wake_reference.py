@@ -32,8 +32,9 @@ class DummyImmediateWakePipeline(ServiceInputWakePipelineMixin):
         *,
         client_context: dict,
         selected_candidate: dict | None,
+        wake_message: str | None = None,
     ) -> str:
-        _ = client_context, selected_candidate
+        _ = client_context, selected_candidate, wake_message
         return "wake input"
 
     def _wake_is_due(self, *, state: dict, current_time: str) -> dict:

@@ -70,6 +70,7 @@ class ServiceSpontaneousWakeMixin:
         client_context: dict[str, Any],
         interaction_context: InteractionContext | None = None,
         trigger_kind: str,
+        wake_message: str | None = None,
         reference_payload: Any = None,
         bypass_schedule: bool = False,
     ) -> dict[str, Any]:
@@ -98,6 +99,7 @@ class ServiceSpontaneousWakeMixin:
                 client_context=client_context,
                 interaction_context=interaction_context,
                 trigger_kind=trigger_kind,
+                wake_message=wake_message,
                 reference_payload=reference_payload,
                 bypass_schedule=bypass_schedule,
             )
@@ -114,6 +116,7 @@ class ServiceSpontaneousWakeMixin:
         client_context: dict[str, Any],
         interaction_context: InteractionContext | None = None,
         trigger_kind: str,
+        wake_message: str | None = None,
         reference_payload: Any = None,
         bypass_schedule: bool = False,
     ) -> dict[str, Any]:
@@ -131,6 +134,7 @@ class ServiceSpontaneousWakeMixin:
             input_text = self._build_wake_input_text(
                 client_context=client_context,
                 selected_candidate=None,
+                wake_message=wake_message,
             )
             try:
                 if trigger_kind == "wake":
@@ -144,6 +148,7 @@ class ServiceSpontaneousWakeMixin:
                     input_text = self._build_wake_input_text(
                         client_context=client_context,
                         selected_candidate=None,
+                        wake_message=wake_message,
                     )
                 # due 判定
                 if trigger_kind == "background_thinking":
@@ -177,15 +182,17 @@ class ServiceSpontaneousWakeMixin:
                             observation_summary=observation_summary,
                         )
                 # パイプライン
-                selection_result = self._select_due_pending_intent_candidate(
-                    state=state,
-                    trigger_kind=trigger_kind,
-                    client_context=client_context,
-                    recent_turns=recent_turns,
-                    current_time=started_at,
-                )
-                selected_candidate = selection_result["selected_candidate"]
-                pending_intent_selection = selection_result["pending_intent_selection"]
+                selected_candidate = None
+                if wake_message is None:
+                    selection_result = self._select_due_pending_intent_candidate(
+                        state=state,
+                        trigger_kind=trigger_kind,
+                        client_context=client_context,
+                        recent_turns=recent_turns,
+                        current_time=started_at,
+                    )
+                    selected_candidate = selection_result["selected_candidate"]
+                    pending_intent_selection = selection_result["pending_intent_selection"]
                 debug_log(
                     "Wake",
                     (
@@ -208,6 +215,7 @@ class ServiceSpontaneousWakeMixin:
                     cycle_id=cycle_id,
                     observation_summary=observation_summary,
                     reference_context=reference_context,
+                    wake_message=wake_message,
                     bypass_schedule=bypass_schedule,
                 )
 
@@ -621,9 +629,10 @@ class ServiceSpontaneousWakeMixin:
         *,
         client_context: dict[str, Any],
         selected_candidate: dict[str, Any] | None,
+        wake_message: str | None = None,
     ) -> str:
         # プレフィックス
-        parts = ["定期思考。"]
+        parts = ["API経由で届いた現在の個への依頼。" if wake_message is not None else "定期思考。"]
         parts.extend(
             self._client_context_input_parts(
                 client_context=client_context,
@@ -631,7 +640,9 @@ class ServiceSpontaneousWakeMixin:
                 include_capture=False,
             )
         )
-        if selected_candidate is not None:
+        if wake_message is not None:
+            parts.append("依頼本文:\n" + wake_message)
+        elif selected_candidate is not None:
             parts.append(self._wake_input_text(selected_candidate))
             parts.append("いま保留中の会話候補を再評価したい。")
         else:
