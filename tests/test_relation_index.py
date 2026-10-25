@@ -84,7 +84,7 @@ class RelationIndexTests(unittest.TestCase):
                         "evidence_revision_id": "revision:trust_inferred",
                         "created_at": NOW,
                         "updated_at": NOW,
-                        "operation": "new",
+                        "operation": "create",
                         "reason": "test contradiction",
                     },
                 )
@@ -317,7 +317,7 @@ class RelationIndexTests(unittest.TestCase):
     def _persist_units(self, store: FileStore, units: list[dict]) -> None:
         actions = [
             {
-                "operation": "new",
+                "operation": "create",
                 "revision_id": f"revision:{unit['memory_unit_id'].split(':', 1)[1]}",
                 "memory_set_id": unit["memory_set_id"],
                 "memory_unit_id": unit["memory_unit_id"],

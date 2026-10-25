@@ -1571,7 +1571,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             },
         }
         action = service.memory.action_resolver.build_memory_action(
-            operation="new",
+            operation="create",
             memory_set_id=memory_set_id,
             finished_at="2026-06-20T11:00:00+09:00",
             memory_unit=unit,
