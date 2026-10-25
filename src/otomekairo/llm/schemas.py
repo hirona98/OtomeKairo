@@ -584,10 +584,35 @@ def visual_daily_grouping_response_format() -> dict[str, Any]:
 
 
 def visual_daily_support_response_format() -> dict[str, Any]:
+    from otomekairo.llm.visual_daily import SUPPORT_RELATION_VALUES, SUPPORT_STATUS_VALUES
     return structured_response_format("visual_daily_support", closed_object({
         "decisions": {"type": "array", "items": closed_object({
-            "candidate_index": {"type": "integer"},
-            "support_refs": string_array(),
+            "candidate_indexes": {"type": "array", "items": {"type": "integer", "minimum": 0}, "minItems": 1},
+            "support_status": {**string_enum(SUPPORT_STATUS_VALUES),
+                               "description": "当日と過去日が同じ主張を支持するときだけsupported。今日だけの新活動はinsufficient。"},
+            "past_support_refs": {**string_array(), "description": "過去日のevidence_refだけを指定する。当日current参照はsource_claimsへ記録。"},
+            "source_claims": {"type": "array", "items": closed_object({
+                "group_ref": {"type": "string"}, "claim_text": {"type": "string"},
+            }), "description": "supportedではcandidate_indexesの全当日group_refとpast_support_refsの全参照を一度ずつ含める。"},
+            "shared_summary_text": nullable({"type": "string", "description": "選んだ各日の観測が単独でも全体を支持する主張。観測時点と条件に限定して記述し、支持不足ならnull。"}),
+            "target_memory_ref": nullable({"type": "string", "description": "same/refine/parallel/conflictでは比較したmemory_refを必ず指定。new/uncertainのみnull。"}),
+            "memory_comparison": nullable(closed_object({
+                "existing_claims": {"type": "array", "items": closed_object({
+                    "claim_text": {"type": "string"},
+                    "entailed_by_shared": {"type": "boolean", "description": "共通主張だけが正しいと分かった時、この旧主張の全内容も必ず正しいと言える。矛盾しないだけではtrueにしない。"},
+                    "unconfirmed_existing_parts": string_array(),
+                }), "minItems": 1},
+                "shared_claims": {"type": "array", "items": closed_object({
+                    "claim_text": {"type": "string"},
+                    "entailed_by_existing": {"type": "boolean", "description": "旧記憶だけが正しいと分かった時、この共通主張の全内容も必ず正しいと言える。"},
+                    "unconfirmed_shared_parts": string_array(),
+                }), "minItems": 1},
+                "existing_conditions": {"type": "string"},
+                "shared_conditions": {"type": "string"},
+                "same_conditions_confirmed": {"type": "boolean"},
+                "incompatible": {"type": "boolean"},
+            })),
+            "relation": {**string_enum(SUPPORT_RELATION_VALUES), "description": "memory_comparisonの保持・追加・条件の判断と整合する関係。支持不足ならuncertain。"},
             "reason_summary": {"type": "string"},
         })},
     }))

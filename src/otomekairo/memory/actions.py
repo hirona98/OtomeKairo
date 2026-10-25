@@ -85,6 +85,70 @@ class MemoryActionResolver:
         self.store = store
         self.llm = llm
 
+    def resolve_visual_daily_memory_actions(
+        self, *, memory_set_id: str, finished_at: str, reviewed_candidates: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Build only the action and target explicitly selected by semantic review."""
+        actions = []
+        updated_targets: set[str] = set()
+        for reviewed in reviewed_candidates:
+            relation, existing = reviewed["relation"], reviewed["existing_memory"]
+            if relation not in {"same", "refine", "parallel", "conflict", "new"}:
+                raise ValueError("保存できない視覚記憶の関係判定です。")
+            if (relation == "new") != (existing is None):
+                raise ValueError("視覚記憶の関係判定と対象正本が一致しません。")
+            candidate = self._normalized_candidate(reviewed["candidate"], finished_at=finished_at)
+            if (candidate["memory_type"] != "interpretation" or candidate["scope_type"] != "topic"
+                    or candidate["predicate"] != "visual_daily_pattern" or candidate["status"] != "inferred"
+                    or candidate["object_ref_or_value"] is not None):
+                raise ValueError("視覚記憶の候補契約が不正です。")
+            if existing is not None:
+                if (existing["memory_set_id"] != memory_set_id or existing["memory_type"] != "interpretation"
+                        or existing["scope_type"] != "topic" or existing["predicate"] != "visual_daily_pattern"
+                        or existing["status"] not in REVIVABLE_MEMORY_STATUSES):
+                    raise ValueError("視覚記憶の対象正本が不正です。")
+            if relation in {"same", "refine"}:
+                target = existing["memory_unit_id"]
+                if target in updated_targets or candidate["scope_key"] != existing["scope_key"]:
+                    raise ValueError("視覚記憶の対象正本が重複または不一致です。")
+                updated_targets.add(target)
+                # 観測根拠は本文の更新とは独立に蓄積する。
+                qualifiers = candidate["qualifiers"]
+                qualifiers["support_group_refs"] = list(dict.fromkeys([
+                    *existing["qualifiers"].get("support_group_refs", []),
+                    existing["qualifiers"]["duplicate_group_id"], *qualifiers["support_group_refs"],
+                ]))
+                evidence = {}
+                for group in [*existing["qualifiers"].get("visual_evidence", []), *qualifiers["visual_evidence"]]:
+                    ref = group["duplicate_group_id"]
+                    if ref in evidence and evidence[ref] != group:
+                        raise ValueError("視覚記憶の同じ根拠IDに異なる観測情報があります。")
+                    evidence[ref] = group
+                qualifiers["visual_evidence"] = list(evidence.values())
+                builder = self.build_reinforced_memory_unit if relation == "same" else self.build_refined_memory_unit
+                unit = builder(existing=existing, candidate=candidate, finished_at=finished_at, event_ids=[], cycle_ids=[])
+                operation = "reinforce" if relation == "same" else "refine"
+            else:
+                unit = self.build_new_memory_unit(
+                    memory_set_id=memory_set_id, finished_at=finished_at, event_ids=[], cycle_ids=[], candidate=candidate)
+                operation = "create"
+            # 弱い視覚推定の反復で重みを増幅せず、既存の確認済みの重みも落とさない。
+            for key, cap in (("confidence", 0.55), ("salience", 0.45)):
+                previous = float(existing[key]) if relation in {"same", "refine"} else 0.0
+                unit[key] = max(previous, min(float(unit[key]), cap))
+            action = self.build_memory_action(
+                operation=operation, memory_set_id=memory_set_id, finished_at=finished_at,
+                memory_unit=unit,
+                related_memory_unit_ids=[existing["memory_unit_id"]] if relation in {"parallel", "conflict"} else [],
+                before_snapshot=existing if relation in {"same", "refine"} else None,
+                after_snapshot=unit, reason=candidate["reason"], event_ids=[])
+            action["visual_daily_review"] = {
+                "relation": relation, "target_memory_unit_id": existing["memory_unit_id"] if existing else None,
+                "candidate_indexes": reviewed["candidate_indexes"],
+            }
+            actions.append(action)
+        return actions
+
     def resolve_memory_actions(
         self,
         *,

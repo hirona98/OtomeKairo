@@ -8,6 +8,7 @@ import pytest
 
 from otomekairo.llm.client import LLMClient
 from otomekairo.llm.contracts import LLMError
+from otomekairo.llm.contexts import build_persona_context
 from otomekairo.llm.visual_daily import validate_grouping, validate_support
 from otomekairo.memory.actions import MemoryActionResolver
 from otomekairo.memory.vector import MemoryVectorIndexer
@@ -25,6 +26,36 @@ INTERLEAVED_RECORDS = [
 
 def group(refs):
     return {"observation_ids": refs, "summary_text": "観測の要約。", "reason_summary": "根拠の説明。"}
+
+
+def support_decision(*, indexes=None, status="supported", relation="new", refs=None,
+                     shared="複数日の観測でPC机に作業者が見える。", refined=None):
+    supported = status == "supported"
+    indexes = [0] if indexes is None else indexes
+    refs = ["past:0"] if refs is None else refs
+    if refined is not None:
+        shared = refined
+    comparison = None
+    if supported and relation in {"same", "refine", "parallel", "conflict"}:
+        comparison = {
+            "existing_claims": [{"claim_text": "既存の主張。", "entailed_by_shared": relation in {"same", "refine"},
+                                 "unconfirmed_existing_parts": [] if relation in {"same", "refine"} else ["共通主張だけでは確認できない内容。"]}],
+            "shared_claims": [{"claim_text": "共通の主張。", "entailed_by_existing": relation in {"same", "parallel"},
+                               "unconfirmed_shared_parts": [] if relation in {"same", "parallel"} else ["旧記憶だけでは確認できない内容。"]}],
+            "existing_conditions": "比較する対象・時点・条件。", "shared_conditions": "比較する対象・時点・条件。",
+            "same_conditions_confirmed": True, "incompatible": relation == "conflict",
+        }
+    return {
+        "source_claims": [{"group_ref": ref, "claim_text": shared}
+                              for ref in [*(f"current:{index}" for index in indexes), *refs]] if supported else [],
+        "candidate_indexes": indexes,
+        "support_status": status, "shared_summary_text": shared if supported else None,
+        "past_support_refs": refs if supported else [],
+        "relation": relation if supported else "uncertain",
+        "target_memory_ref": "memory:0" if supported and relation in {"same", "refine", "parallel", "conflict"} else None,
+        "memory_comparison": comparison,
+        "reason_summary": "観測根拠と正本の関係を審査した。",
+    }
 
 
 def test_grouping_requires_complete_ordered_evidence_and_same_source():
@@ -66,8 +97,9 @@ def test_grouping_rejects_invalid_evidence_in_interleaved_sources(groups):
 
 def test_support_requires_a_past_day_and_same_source_for_every_candidate():
     context = {"local_date": "2026-10-05", "candidates": [{"source_key": "vision:test"}],
-               "evidence": [{"evidence_ref": "group:old", "source_key": "vision:test", "local_date": "2026-10-04"}]}
-    payload = {"decisions": [{"candidate_index": 0, "support_refs": ["group:old"], "reason_summary": "別日の根拠。"}]}
+               "evidence": [{"evidence_ref": "past:0", "source_key": "vision:test", "local_date": "2026-10-04"}],
+               "existing_memories": []}
+    payload = {"decisions": [support_decision()]}
     validate_support(payload, context)
     for key, value in (("local_date", "2026-10-05"), ("source_key", "vision:other")):
         invalid = deepcopy(context)
@@ -75,7 +107,7 @@ def test_support_requires_a_past_day_and_same_source_for_every_candidate():
         with pytest.raises(LLMError):
             validate_support(payload, invalid)
     for decisions in ([], [payload["decisions"][0], payload["decisions"][0]],
-                      [{"candidate_index": 0, "support_refs": ["unknown"], "reason_summary": "理由。"}]):
+                      [support_decision(refs=["unknown"])], [support_decision(indexes=[True])]):
         with pytest.raises(LLMError):
             validate_support({"decisions": decisions}, context)
 
@@ -104,42 +136,36 @@ def test_failed_semantic_grouping_keeps_original_observations_and_records_failur
 def test_failed_cross_day_review_does_not_create_memory_actions():
     runner = ServiceVisualDailyMixin()
     runner.store = SimpleNamespace(upsert_daily_visual_digest=Mock())
-    runner.memory = SimpleNamespace(action_resolver=SimpleNamespace(resolve_memory_actions_batch=Mock()))
+    runner.memory = SimpleNamespace(action_resolver=SimpleNamespace(resolve_visual_daily_memory_actions=Mock()))
     runner._now_iso = lambda: "2026-10-05T09:00:00+09:00"
     runner._visual_daily_repeated_support = Mock(side_effect=LLMError("semantic review unavailable"))
     digest = {"digest_id": "digest:test", "memory_set_id": "memory:test", "memory_candidate_summaries": [
         {"summary_text": "観測要約。", "source_key": "vision:test"}]}
     with pytest.raises(LLMError):
         runner._promote_visual_daily_digest_memory_candidates(digest=digest, state={})
-    runner.memory.action_resolver.resolve_memory_actions_batch.assert_not_called()
+    runner.memory.action_resolver.resolve_visual_daily_memory_actions.assert_not_called()
     saved = runner.store.upsert_daily_visual_digest.call_args.kwargs
     assert saved["updated_records"] == []
     assert saved["digest"]["memory_promotion"]["result_status"] == "failed"
     assert saved["digest"]["memory_promotion"]["failure_reason"] == "visual_daily_support_failed"
 
 
-def test_llm_support_keeps_topic_identity_across_paraphrases_but_not_opposites():
-    runner = ServiceVisualDailyMixin()
-    runner.store = SimpleNamespace(list_daily_visual_digests=lambda **kwargs: [{
-        "digest_id": "digest:old", "local_date": "2026-10-04", "result_status": "succeeded",
-        "memory_candidate_summaries": [{"duplicate_group_id": "group:old", "source_key": "vision:test",
-                                       "summary_text": "机にはノートPCとカップがある。", "topic_ref": "topic:existing"}]}])
-    runner.llm = SimpleNamespace(generate_visual_daily_support=Mock(return_value={"decisions": [
-        {"candidate_index": 0, "support_refs": ["group:old"], "reason_summary": "同じ場面の言い換え。"},
-        {"candidate_index": 1, "support_refs": [], "reason_summary": "カップの有無が異なる。"}]}))
-    state = {"selected_model_preset_id": "model:test", "model_presets": {"model:test": {"model": "mock"}},
-             "selected_persona_id": "persona:test", "personas": {"persona:test": {
-                 "persona_id": "persona:test", "display_name": "試験人格", "persona_prompt": "観測根拠に沿って考える。"}}}
-    candidates = [
-        {"summary_text": "卓上にカップとラップトップが置かれている。", "source_key": "vision:test", "topic_ref": "topic:new-positive"},
-        {"summary_text": "机にノートPCはあるがカップはない。", "source_key": "vision:test", "topic_ref": "topic:new-negative"},
-    ]
-    digest = {"memory_set_id": "memory:test", "local_date": "2026-10-05"}
-    support = runner._visual_daily_repeated_support(digest=digest, candidates=candidates, state=state)
-    assert support == {0: ["group:old"], 1: []}
-    assert candidates[0]["topic_ref"] == "topic:existing"
-    assert candidates[1]["topic_ref"] == "topic:new-negative"
-    assert digest["support_review"]["decisions"][0]["support_refs"] == ["group:old"]
+def test_review_includes_canonical_memory_without_changing_observation_topics(promotion_runner):
+    runner = promotion_runner
+    first = run_promotion(runner, "pending_digest")
+    unit_id, = first["memory_promotion"]["promoted_memory_unit_ids"]
+    digest = seed_visual_digest(runner, "2026-10-06", summary="今日だけの詳細を含む観測。")
+    candidates = digest["memory_candidate_summaries"]
+    before = deepcopy(candidates)
+    runner.llm.generate_visual_daily_support.return_value = {"decisions": [support_decision(relation="same")]}
+    support = runner._visual_daily_repeated_support(digest=digest, candidates=candidates, state=runner.store.read_state())
+    context = runner.llm.generate_visual_daily_support.call_args.kwargs["context"]
+    assert candidates == before
+    assert context["existing_memories"][0]["summary_text"] == support_decision()["shared_summary_text"]
+    assert unit_id not in json.dumps(context)
+    assert "topic_ref" not in json.dumps(context)
+    assert support["memories"]["memory:0"]["memory_unit"]["memory_unit_id"] == unit_id
+    assert digest["support_review"]["references"]["memory_unit_ids"] == {"memory:0": unit_id}
 
 
 MEMORY_SET = "memory_set:default"
@@ -226,6 +252,8 @@ def seed_visual_digest(runner, local_date, *, summary="検証用の観測要約�
             "summary_text": summary, "reason_summary": "検証用の整理根拠。",
         }],
     )
+    record["duplicate_group_id"] = digest["group_summaries"][0]["duplicate_group_id"]
+    record["daily_digest_id"] = digest["digest_id"]
     runner.store.upsert_daily_visual_digest(digest=digest, updated_records=[record])
     return digest
 
@@ -252,11 +280,7 @@ def promotion_runner(tmp_path):
     seed_visual_digest(runner, CURRENT_DATE)
     runner.llm.generate_visual_daily_grouping.return_value = {
         "groups": [group([f"visual:{CURRENT_DATE}"])]}
-    runner.llm.generate_visual_daily_support.return_value = {"decisions": [{
-        "candidate_index": 0,
-        "support_refs": [previous["memory_candidate_summaries"][0]["duplicate_group_id"]],
-        "reason_summary": "別日の観測による支持。",
-    }]}
+    runner.llm.generate_visual_daily_support.return_value = {"decisions": [support_decision()]}
     return runner
 
 
@@ -280,7 +304,8 @@ def test_supported_visual_candidate_is_persisted_with_no_synthetic_object(promot
     previous = runner.store.get_daily_visual_digest(memory_set_id=MEMORY_SET, local_date="2026-10-04")
     topic_ref = previous["memory_candidate_summaries"][0]["topic_ref"]
     assert unit["scope_type"] == "topic"
-    assert unit["scope_key"] == unit["subject_ref"] == topic_ref
+    assert unit["scope_key"] == unit["subject_ref"] != topic_ref
+    assert unit["summary_text"] == support_decision()["shared_summary_text"]
     assert unit["object_ref_or_value"] is None
     assert unit["qualifiers"]["object_kind"] == "none"
     assert unit["status"] == "inferred"
@@ -290,6 +315,10 @@ def test_supported_visual_candidate_is_persisted_with_no_synthetic_object(promot
     assert unit["qualifiers"]["representative_visual_observation_id"] == f"visual:{CURRENT_DATE}"
     assert unit["qualifiers"]["duplicate_group_id"] == saved["group_summaries"][0]["duplicate_group_id"]
     assert unit["qualifiers"]["support_group_refs"] == [previous["group_summaries"][0]["duplicate_group_id"]]
+    assert {item["local_date"] for item in unit["qualifiers"]["visual_evidence"]} == {"2026-10-04", CURRENT_DATE}
+    runner.llm.generate_visual_daily_support.assert_called_once()
+    # Only the saved memory's vector is embedded, with no comparison embedding.
+    runner.llm.generate_embeddings.assert_called_once()
     assert runner.store.list_vector_index_metadata(
         memory_set_id=MEMORY_SET, sources=[("memory_unit", unit["memory_unit_id"])])
 
@@ -297,7 +326,7 @@ def test_supported_visual_candidate_is_persisted_with_no_synthetic_object(promot
 @pytest.mark.parametrize("entrypoint", ["new_digest", "pending_digest"])
 def test_unsupported_visual_candidate_creates_no_memory(promotion_runner, monkeypatch, entrypoint):
     runner = promotion_runner
-    runner.llm.generate_visual_daily_support.return_value["decisions"][0]["support_refs"] = []
+    runner.llm.generate_visual_daily_support.return_value = {"decisions": [support_decision(status="insufficient")]}
     persist = Mock(wraps=runner.store.persist_memory_actions)
     monkeypatch.setattr(runner.store, "persist_memory_actions", persist)
     result = run_promotion(runner, entrypoint)
@@ -308,11 +337,15 @@ def test_unsupported_visual_candidate_creates_no_memory(promotion_runner, monkey
     runner.llm.generate_embeddings.assert_not_called()
 
 
-def test_later_supported_visual_candidate_updates_existing_memory(promotion_runner, monkeypatch):
+@pytest.mark.parametrize("relation", ["same", "refine"])
+def test_later_supported_visual_candidate_updates_only_reviewed_memory(promotion_runner, monkeypatch, relation):
     runner = promotion_runner
     first = run_promotion(runner, "pending_digest")
     original_ids = first["memory_promotion"]["promoted_memory_unit_ids"]
+    original, = runner.store.list_memory_units_by_id(memory_set_id=MEMORY_SET, memory_unit_ids=original_ids)
     seed_visual_digest(runner, "2026-10-06", summary="後日の検証用観測要約。")
+    refined = "元の主張を保持した根拠のある補足。" if relation == "refine" else None
+    runner.llm.generate_visual_daily_support.return_value = {"decisions": [support_decision(relation=relation, refined=refined)]}
     persist = Mock(wraps=runner.store.persist_memory_actions)
     monkeypatch.setattr(runner.store, "persist_memory_actions", persist)
     runner._run_due_visual_daily_promotions(memory_set_id=MEMORY_SET)
@@ -320,7 +353,7 @@ def test_later_supported_visual_candidate_updates_existing_memory(promotion_runn
     assert later["memory_promotion"]["result_status"] == "succeeded"
     assert later["memory_promotion"]["promoted_memory_unit_ids"] == original_ids
     action, = persist.call_args.kwargs["memory_actions"]
-    assert action["operation"] == "refine"
+    assert action["operation"] == ("refine" if relation == "refine" else "reinforce")
     assert action["memory_unit_id"] == original_ids[0]
     unit, = runner.store.find_memory_units_for_compare(
         memory_set_id=MEMORY_SET, memory_type="interpretation", scope_type="topic",
@@ -328,6 +361,9 @@ def test_later_supported_visual_candidate_updates_existing_memory(promotion_runn
         predicate="visual_daily_pattern")
     assert unit["memory_unit_id"] == original_ids[0]
     assert unit["qualifiers"]["digest_id"] == later["digest_id"]
+    assert unit["formed_at"] == original["formed_at"]
+    assert unit["summary_text"] == (refined if relation == "refine" else original["summary_text"])
+    assert {item["local_date"] for item in unit["qualifiers"]["visual_evidence"]} == {"2026-10-04", CURRENT_DATE, "2026-10-06"}
 
 
 @pytest.mark.parametrize("entrypoint", ["new_digest", "pending_digest"])
@@ -342,7 +378,7 @@ def test_promotion_preparation_failure_is_saved_without_replacing_reason(
     elif stage == "candidate":
         monkeypatch.setattr(runner, "_visual_daily_memory_candidate", Mock(side_effect=error))
     else:
-        monkeypatch.setattr(runner.memory.action_resolver, "resolve_memory_actions_batch", Mock(side_effect=error))
+        monkeypatch.setattr(runner.memory.action_resolver, "resolve_visual_daily_memory_actions", Mock(side_effect=error))
     persist = Mock(wraps=runner.store.persist_memory_actions)
     monkeypatch.setattr(runner.store, "persist_memory_actions", persist)
     with pytest.raises(LLMError, match=f"{stage} unavailable"):
@@ -354,7 +390,7 @@ def test_promotion_preparation_failure_is_saved_without_replacing_reason(
         "visual_daily_support_failed" if stage == "support" else "visual_daily_promotion_failed")
     assert saved["memory_promotion"]["promoted_memory_unit_ids"] == []
     if stage != "support":
-        assert saved["support_review"]["decisions"][0]["support_refs"]
+        assert saved["support_review"]["decisions"][0]["past_support_refs"]
     record, = runner.store.list_visual_observation_records_for_date(
         memory_set_id=MEMORY_SET, local_date=CURRENT_DATE)
     assert record["detailed_summary_text"] == "検証用の観測要約。"
@@ -396,3 +432,272 @@ def test_promotion_status_changes_only_after_it_is_saved(promotion_runner, monke
             digest=digest, result_status="failed", promoted_memory_unit_ids=[],
             skipped_candidate_count=0, failure_reason="visual_daily_support_failed", relation_index_sync=None)
     assert digest == original
+
+
+@pytest.mark.parametrize("field,value", [
+    ("support_status", "unknown"), ("relation", "replace"), ("shared_summary_text", " "),
+    ("past_support_refs", []), ("past_support_refs", ["past:0", "past:0"]),
+    ("target_memory_ref", "memory:unknown"), ("refined_summary_text", "未審査の統合本文"),
+    ("candidate_indexes", []), ("candidate_indexes", [0, 0]), ("candidate_indexes", [1]),
+    ("source_claims", []), ("source_claims", [{"group_ref": "unknown", "claim_text": "主張。"}]),
+])
+def test_support_rejects_inconsistent_closed_contract(field, value):
+    context = {"local_date": CURRENT_DATE, "candidates": [{"source_key": "vision:test"}],
+               "evidence": [{"evidence_ref": "past:0", "local_date": "2026-10-04", "source_key": "vision:test"}],
+               "existing_memories": []}
+    decision = support_decision()
+    decision[field] = value
+    with pytest.raises(LLMError):
+        validate_support({"decisions": [decision]}, context)
+
+
+def test_support_requires_known_same_source_target_and_unique_update():
+    context = {"local_date": CURRENT_DATE, "candidates": [{"source_key": "vision:test"}] * 2,
+               "evidence": [{"evidence_ref": "past:0", "local_date": "2026-10-04", "source_key": "vision:test"}],
+               "existing_memories": [{"memory_ref": "memory:0", "source_key": "vision:test"}]}
+    validate_support({"decisions": [support_decision(indexes=[0, 1], relation="same")]}, context)
+    for decisions in (
+        [support_decision(indexes=[0], relation="same"), support_decision(indexes=[1], relation="same")],
+    ):
+        with pytest.raises(LLMError):
+            validate_support({"decisions": decisions}, context)
+    context["existing_memories"][0]["source_key"] = "vision:other"
+    with pytest.raises(LLMError):
+        validate_support({"decisions": [support_decision(indexes=[0, 1], relation="same")]}, context)
+    context["candidates"][1] = {"source_key": "vision:other"}
+    with pytest.raises(LLMError):
+        validate_support({"decisions": [support_decision(indexes=[0, 1])]}, context)
+
+
+@pytest.mark.parametrize("relation,label", [("parallel", "about_same_scope"), ("conflict", "contradicts"), ("new", None)])
+def test_distinct_claim_keeps_old_canonical_and_only_explicit_relation(promotion_runner, relation, label):
+    runner = promotion_runner
+    first = run_promotion(runner, "pending_digest")
+    original_ids = first["memory_promotion"]["promoted_memory_unit_ids"]
+    original, = runner.store.list_memory_units_by_id(memory_set_id=MEMORY_SET, memory_unit_ids=original_ids)
+    seed_visual_digest(runner, "2026-10-06", summary="別の主張を支持する後日の観測。")
+    runner.llm.generate_visual_daily_support.return_value = {"decisions": [support_decision(
+        relation=relation, shared="原観測の一部に絞った別の主張。") ]}
+    runner._run_due_visual_daily_promotions(memory_set_id=MEMORY_SET)
+    later = runner.store.get_daily_visual_digest(memory_set_id=MEMORY_SET, local_date="2026-10-06")
+    assert later["memory_promotion"]["result_status"] == "succeeded"
+    new_id, = later["memory_promotion"]["promoted_memory_unit_ids"]
+    assert new_id not in original_ids
+    unchanged, = runner.store.list_memory_units_by_id(memory_set_id=MEMORY_SET, memory_unit_ids=original_ids)
+    assert unchanged == original
+    created, = runner.store.list_memory_units_by_id(memory_set_id=MEMORY_SET, memory_unit_ids=[new_id])
+    assert created["scope_key"] != original["scope_key"]
+    assert created["summary_text"] == "原観測の一部に絞った別の主張。"
+    links = runner.store.list_memory_links_for_recall(memory_set_id=MEMORY_SET, memory_unit_ids=[new_id])
+    assert {link["label"] for link in links} == ({label} if label else set())
+    assert all(link["source_memory_unit_id"] == new_id and link["target_memory_unit_id"] == original_ids[0] for link in links)
+
+
+def table_counts(store):
+    with store._memory_db() as conn:
+        return {name: conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
+                for name in ("memory_units", "revisions", "memory_links")}
+
+
+@pytest.mark.parametrize("change", ["update", "delete"])
+def test_canonical_changed_during_llm_review_is_not_overwritten(promotion_runner, change):
+    runner = promotion_runner
+    first = run_promotion(runner, "pending_digest")
+    original_id, = first["memory_promotion"]["promoted_memory_unit_ids"]
+    seed_visual_digest(runner, "2026-10-06")
+    after_concurrent_write = {}
+
+    def review(**kwargs):
+        with runner.store._memory_db() as conn:
+            if change == "update":
+                row = conn.execute("SELECT payload_json FROM memory_units WHERE memory_unit_id = ?", (original_id,)).fetchone()
+                updated = json.loads(row[0])
+                updated["summary_text"] = "別の処理が確定させた現在の正本。"
+                runner.store._upsert_memory_unit(conn, updated)
+            else:
+                conn.execute("DELETE FROM memory_units WHERE memory_unit_id = ?", (original_id,))
+        after_concurrent_write.update(table_counts(runner.store))
+        return {"decisions": [support_decision(relation="same")]}
+
+    runner.llm.generate_visual_daily_support.side_effect = review
+    runner._run_due_visual_daily_promotions(memory_set_id=MEMORY_SET)
+    result = runner.store.get_daily_visual_digest(memory_set_id=MEMORY_SET, local_date="2026-10-06")
+    assert result["result_status"] == "succeeded"
+    assert result["memory_promotion"]["result_status"] == "failed"
+    assert "正本が変更または削除" in result["memory_promotion"]["failure_reason"]
+    assert result["memory_promotion"]["promoted_memory_unit_ids"] == []
+    assert table_counts(runner.store) == after_concurrent_write
+    units = runner.store.list_memory_units_by_id(memory_set_id=MEMORY_SET, memory_unit_ids=[original_id])
+    assert (units[0]["summary_text"] == "別の処理が確定させた現在の正本。") if change == "update" else units == []
+
+
+def test_link_write_failure_rolls_back_memory_and_revision(promotion_runner, monkeypatch):
+    runner = promotion_runner
+    run_promotion(runner, "pending_digest")
+    seed_visual_digest(runner, "2026-10-06")
+    runner.llm.generate_visual_daily_support.return_value = {"decisions": [support_decision(relation="conflict")]}
+    before = table_counts(runner.store)
+    monkeypatch.setattr(runner.store.memory_store, "_upsert_memory_link", Mock(side_effect=RuntimeError("link write failed")))
+    runner._run_due_visual_daily_promotions(memory_set_id=MEMORY_SET)
+    result = runner.store.get_daily_visual_digest(memory_set_id=MEMORY_SET, local_date="2026-10-06")
+    assert result["memory_promotion"]["result_status"] == "failed"
+    assert table_counts(runner.store) == before
+
+
+def test_duplicate_current_claims_are_merged_before_persisting(promotion_runner):
+    runner = promotion_runner
+    digest = runner.store.get_daily_visual_digest(memory_set_id=MEMORY_SET, local_date=CURRENT_DATE)
+    record, = runner.store.list_visual_observation_records_for_date(memory_set_id=MEMORY_SET, local_date=CURRENT_DATE)
+    group_id = runner._visual_daily_group_id(memory_set_id=MEMORY_SET, local_date=CURRENT_DATE, index=2)
+    record.update(visual_observation_id="visual:second", duplicate_group_id=group_id,
+                  observed_at=f"{CURRENT_DATE}T10:00:00+09:00")
+    digest["group_summaries"].append({**digest["group_summaries"][0], "duplicate_group_id": group_id,
+                                     "representative_visual_observation_id": "visual:second"})
+    digest["memory_candidate_summaries"] = runner._visual_daily_memory_candidate_summaries(digest["group_summaries"])
+    runner.store.upsert_daily_visual_digest(digest=digest, updated_records=[record])
+    runner.llm.generate_visual_daily_support.return_value = {"decisions": [support_decision(indexes=[0, 1])]}
+    result = run_promotion(runner, "pending_digest")
+    assert result["memory_promotion"]["result_status"] == "succeeded"
+    assert table_counts(runner.store) == {"memory_units": 1, "revisions": 1, "memory_links": 0}
+    runner.llm.generate_visual_daily_support.assert_called_once()
+    unit, = runner.store.list_memory_units_by_id(
+        memory_set_id=MEMORY_SET, memory_unit_ids=result["memory_promotion"]["promoted_memory_unit_ids"])
+    assert len(unit["qualifiers"]["visual_evidence"]) == 3
+
+
+@pytest.mark.parametrize("status,relation", [("insufficient", "uncertain"), ("unsuitable", "uncertain"), ("supported", "uncertain")])
+def test_normal_skips_do_not_generate_or_embed_memory(promotion_runner, status, relation):
+    runner = promotion_runner
+    runner.llm.generate_visual_daily_support.return_value = {"decisions": [support_decision(status=status, relation=relation)]}
+    result = run_promotion(runner, "pending_digest")
+    assert result["memory_promotion"]["result_status"] == "skipped"
+    assert table_counts(runner.store) == {"memory_units": 0, "revisions": 0, "memory_links": 0}
+    runner.llm.generate_visual_daily_support.assert_called_once()
+    runner.llm.generate_embeddings.assert_not_called()
+
+
+def test_missing_referenced_canonical_fails_before_generation(promotion_runner):
+    runner = promotion_runner
+    previous = runner.store.get_daily_visual_digest(memory_set_id=MEMORY_SET, local_date="2026-10-04")
+    previous["memory_promotion"]["promoted_memory_unit_ids"] = ["memory_unit:missing"]
+    runner.store.upsert_daily_visual_digest(digest=previous, updated_records=[])
+    with pytest.raises(ValueError, match="正本がありません"):
+        run_promotion(runner, "pending_digest")
+    runner.llm.generate_visual_daily_support.assert_not_called()
+    assert table_counts(runner.store) == {"memory_units": 0, "revisions": 0, "memory_links": 0}
+
+
+@pytest.mark.parametrize("tamper", ["missing_review", "operation", "target", "same_text", "duplicate", "missing_snapshots"])
+def test_store_rejects_actions_outside_review_atomically(promotion_runner, monkeypatch, tamper):
+    runner = promotion_runner
+    first = run_promotion(runner, "pending_digest")
+    original, = runner.store.list_memory_units_by_id(memory_set_id=MEMORY_SET, memory_unit_ids=first["memory_promotion"]["promoted_memory_unit_ids"])
+    seed_visual_digest(runner, "2026-10-06")
+    runner.llm.generate_visual_daily_support.return_value = {"decisions": [support_decision(relation="same")]}
+    captured = {}
+
+    def capture(**kwargs):
+        captured.update(deepcopy(kwargs))
+        raise RuntimeError("capture without write")
+
+    persist = runner.store.persist_memory_actions
+    monkeypatch.setattr(runner.store, "persist_memory_actions", capture)
+    runner._run_due_visual_daily_promotions(memory_set_id=MEMORY_SET)
+    action = captured["memory_actions"][0]
+    if tamper == "missing_review":
+        del action["visual_daily_review"]
+    elif tamper == "operation":
+        action["operation"] = "revoke"
+    elif tamper == "target":
+        action["visual_daily_review"]["target_memory_unit_id"] = "memory_unit:unknown"
+    elif tamper == "same_text":
+        action["memory_unit"]["summary_text"] = "別の意味に変えた本文。"
+    elif tamper == "duplicate":
+        captured["memory_actions"].append(deepcopy(action))
+    else:
+        del captured["expected_memory_units"]
+    before = table_counts(runner.store)
+    with pytest.raises(ValueError):
+        persist(**captured)
+    assert table_counts(runner.store) == before
+    unchanged, = runner.store.list_memory_units_by_id(memory_set_id=MEMORY_SET, memory_unit_ids=[original["memory_unit_id"]])
+    assert unchanged == original
+
+
+def test_support_client_completes_once_with_shared_canonical_context(promotion_runner, monkeypatch):
+    runner = promotion_runner
+    state = runner.store.read_state()
+    model = {**state["model_presets"][state["selected_model_preset_id"]], "model": "test-model"}
+    persona = build_persona_context(state["personas"][state["selected_persona_id"]], role="visual_daily_support")
+    context = {"local_date": CURRENT_DATE, "candidates": [{"candidate_index": 0, "group_ref": "current:0", "source_key": "vision:test", "summary_text": "当日の観測。"}],
+               "evidence": [{"evidence_ref": "past:0", "local_date": "2026-10-04", "source_key": "vision:test", "summary_text": "過去の観測。"}],
+               "existing_memories": []}
+    complete = Mock(return_value=json.dumps({"decisions": [support_decision()]}))
+    monkeypatch.setattr("otomekairo.llm.client.complete_text", complete)
+    result = LLMClient().generate_visual_daily_support(model_config=model, persona_context=persona, context=context)
+    assert result["decisions"][0]["relation"] == "new"
+    complete.assert_called_once()
+    assert json.loads(complete.call_args.kwargs["messages"][1]["content"])["evidence"] == context["evidence"]
+    sent = json.loads(complete.call_args.kwargs["messages"][1]["content"])
+    assert sent["candidates"][0]["allowed_past_refs"] == ["past:0"]
+    assert sent["candidates"][0]["allowed_memory_refs"] == []
+    assert "allowed_past_refs" not in context["candidates"][0]
+
+
+@pytest.mark.parametrize("relation,comparison_update,expected", [
+    ("refine", {"existing_claims": [{"claim_text": "保持される内容。", "entailed_by_shared": True, "unconfirmed_existing_parts": []},
+                                   {"claim_text": "共通主張に収まらない内容。", "entailed_by_shared": False,
+                                    "unconfirmed_existing_parts": ["共通主張に収まらない内容。"]}]}, "parallel"),
+    ("conflict", {"same_conditions_confirmed": False}, "parallel"),
+    ("same", {"shared_claims": [{"claim_text": "共通主張が加える新しい情報。", "entailed_by_existing": False,
+                                "unconfirmed_shared_parts": ["共通主張が加える新しい情報。"]}]}, "refine"),
+    ("refine", {"shared_claims": [{"claim_text": "同義の情報。", "entailed_by_existing": True, "unconfirmed_shared_parts": []}]}, "same"),
+])
+def test_relation_must_agree_with_explicit_semantic_comparison(relation, comparison_update, expected):
+    context = {"local_date": CURRENT_DATE, "candidates": [{"source_key": "vision:test"}],
+               "evidence": [{"evidence_ref": "past:0", "local_date": "2026-10-04", "source_key": "vision:test"}],
+               "existing_memories": [{"memory_ref": "memory:0", "source_key": "vision:test"}]}
+    decision = support_decision(relation=relation)
+    decision["memory_comparison"].update(comparison_update)
+    with pytest.raises(LLMError, match=f"relationは{expected}"):
+        validate_support({"decisions": [decision]}, context)
+
+
+def test_inconsistent_partial_update_is_rejected_before_memory_write(promotion_runner):
+    runner = promotion_runner
+    first = run_promotion(runner, "pending_digest")
+    original, = runner.store.list_memory_units_by_id(memory_set_id=MEMORY_SET, memory_unit_ids=first["memory_promotion"]["promoted_memory_unit_ids"])
+    seed_visual_digest(runner, "2026-10-06")
+    decision = support_decision(relation="refine")
+    decision["memory_comparison"]["existing_claims"].append({"claim_text": "今回再確認できない旧理解。", "entailed_by_shared": False,
+                                                          "unconfirmed_existing_parts": ["今回再確認できない旧理解。"]})
+    runner.llm.generate_visual_daily_support.return_value = {"decisions": [decision]}
+    before = table_counts(runner.store)
+    with pytest.raises(LLMError, match="relationはparallel"):
+        runner._run_due_visual_daily_promotions(memory_set_id=MEMORY_SET)
+    assert table_counts(runner.store) == before
+    unchanged, = runner.store.list_memory_units_by_id(memory_set_id=MEMORY_SET, memory_unit_ids=[original["memory_unit_id"]])
+    assert unchanged == original
+
+
+@pytest.mark.parametrize("status", ["compressed", "excluded", "missing"])
+def test_unavailable_or_unretained_representative_cannot_ground_promotion(promotion_runner, status):
+    runner = promotion_runner
+    record, = runner.store.list_visual_observation_records_for_date(memory_set_id=MEMORY_SET, local_date=CURRENT_DATE)
+    with runner.store._memory_db() as conn:
+        if status == "missing":
+            conn.execute("DELETE FROM visual_observation_records WHERE visual_observation_id = ?", (record["visual_observation_id"],))
+        else:
+            record["retention_status"] = status
+            runner.store._insert_visual_observation_record(conn, record)
+    result = run_promotion(runner, "pending_digest")
+    assert result["result_status"] == "succeeded"
+    assert result["memory_promotion"]["result_status"] == "failed"
+    assert table_counts(runner.store) == {"memory_units": 0, "revisions": 0, "memory_links": 0}
+
+
+def test_observation_evidence_is_provenance_not_embedding_content():
+    from otomekairo.memory.utils import build_memory_unit_semantic_text
+    content = {"summary_text": "複数日の観測でPC作業が見られた。", "predicate": "visual_daily_pattern", "qualifiers": {}}
+    assert build_memory_unit_semantic_text(content) == build_memory_unit_semantic_text({
+        **content, "qualifiers": {"visual_evidence": [{"duplicate_group_id": "group:trace", "local_date": "2026-10-04"}]}})

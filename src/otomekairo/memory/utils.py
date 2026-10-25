@@ -257,6 +257,7 @@ def display_scope_key(scope_key: str) -> str:
 
 
 NON_SEMANTIC_QUALIFIER_KEYS = {
+    "visual_evidence",
     "object_kind",
     "allow_parallel",
     "negates_previous",

@@ -1369,16 +1369,18 @@ class LLMClient:
     def generate_visual_daily_support(self, *, model_config: dict, persona_context: PersonaContext,
                                      context: dict[str, Any]) -> dict[str, Any]:
         from otomekairo.llm.schemas import visual_daily_support_response_format
-        from otomekairo.llm.visual_daily import support_messages, validate_support
+        from otomekairo.llm.visual_daily import support_messages, support_reference_constraints, validate_support
         if self._is_mock_model_config(model_config):
-            return {"decisions": [{"candidate_index": i, "support_refs": [],
+            return {"decisions": [{"source_claims": [], "candidate_indexes": [i], "support_status": "insufficient",
+                                   "shared_summary_text": None, "past_support_refs": [], "relation": "uncertain",
+                                   "target_memory_ref": None, "memory_comparison": None,
                                    "reason_summary": "機械的mockでは意味を評価しない。"}
                                   for i in range(len(context["candidates"]))]}
-        context = {**context, "persona_context": persona_context.to_prompt_payload()}
+        context = {**support_reference_constraints(context), "persona_context": persona_context.to_prompt_payload()}
         return self._generate_structured_payload(
             model_config=model_config, messages=support_messages(context),
             validator=lambda payload: validate_support(payload, context),
-            repair_prompt_builder=lambda error: "全候補のcandidate_index、support_refs、reason_summaryをdecisionsに返してください。\n" + error,
+            repair_prompt_builder=lambda error: "全候補をcandidate_indexesで一度ずつ扱い、共通主張・支持・正本との関係をdecisionsに返してください。\n" + error,
             failure_message="視覚の反復根拠審査に失敗しました。", wrap_validation_error=True,
             response_format=visual_daily_support_response_format(), operation="visual_daily_support")
 

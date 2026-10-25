@@ -13,7 +13,10 @@ INACTIVE_MEMORY_LINK_TARGET_STATUSES = {"revoked", "superseded"}
 
 
 class StoreMemoryLinksMixin:
-    def persist_memory_actions(self, *, memory_actions: list[dict[str, Any]]) -> dict[str, Any]:
+    def persist_memory_actions(
+        self, *, memory_actions: list[dict[str, Any]],
+        expected_memory_units: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         # 空
         if not memory_actions:
             return self._memory_link_update_summary([])
@@ -21,6 +24,12 @@ class StoreMemoryLinksMixin:
         # トランザクション
         memory_link_records: list[dict[str, Any]] = []
         with self._memory_db() as conn:
+            if any("visual_daily_review" in action or (
+                isinstance(action.get("memory_unit"), dict)
+                and action["memory_unit"].get("predicate") == "visual_daily_pattern"
+                and action["memory_unit"].get("qualifiers", {}).get("source") == "daily_visual_digest"
+            ) for action in memory_actions):
+                self._validate_visual_daily_actions(conn, memory_actions, expected_memory_units)
             for action in memory_actions:
                 memory_link_records.extend(self._apply_memory_action(conn, action))
 
@@ -44,6 +53,94 @@ class StoreMemoryLinksMixin:
 
         # 結果
         return self._memory_link_update_summary(memory_link_records)
+
+    def _validate_visual_daily_actions(
+        self, conn: sqlite3.Connection, actions: list[dict[str, Any]],
+        expected: list[dict[str, Any]] | None,
+    ) -> None:
+        if expected is None:
+            raise ValueError("視覚記憶の保存には審査した正本snapshotが必要です。")
+        snapshots = {unit["memory_unit_id"]: unit for unit in expected}
+        if len(snapshots) != len(expected):
+            raise ValueError("視覚記憶の審査snapshotが重複しています。")
+        memory_set_id = actions[0]["memory_set_id"]
+        for snapshot in expected:
+            row = conn.execute(
+                "SELECT payload_json FROM memory_units WHERE memory_set_id = ? AND memory_unit_id = ?",
+                (memory_set_id, snapshot["memory_unit_id"])).fetchone()
+            if row is None or json.loads(row["payload_json"]) != snapshot:
+                raise ValueError("視覚記憶の審査後に比較正本が変更または削除されました。")
+        written_ids, created_keys = set(), set()
+        for action in actions:
+            review = action.get("visual_daily_review")
+            if not isinstance(review, dict) or action["memory_set_id"] != memory_set_id:
+                raise ValueError("審査済み視覚action以外を同時に保存できません。")
+            relation, target = review["relation"], review["target_memory_unit_id"]
+            expected_operation = {"same": "reinforce", "refine": "refine", "new": "create",
+                                  "parallel": "create", "conflict": "create"}.get(relation)
+            if expected_operation is None or action["operation"] != expected_operation:
+                raise ValueError("視覚記憶の関係判定と保存操作が一致しません。")
+            if (relation == "new" and target is not None) or (relation != "new" and target not in snapshots):
+                raise ValueError("視覚記憶の対象正本が審査対象にありません。")
+            unit = action["memory_unit"]
+            if (unit["memory_unit_id"] in written_ids or unit["memory_unit_id"] != action["memory_unit_id"]
+                    or unit["memory_set_id"] != memory_set_id
+                    or unit["memory_type"] != "interpretation" or unit["scope_type"] != "topic"
+                    or unit["predicate"] != "visual_daily_pattern"
+                    or unit["qualifiers"].get("source") != "daily_visual_digest"
+                    or action["after_snapshot"] != unit):
+                raise ValueError("視覚記憶の保存対象またはsnapshotが不正です。")
+            written_ids.add(unit["memory_unit_id"])
+            self._validate_visual_daily_evidence(conn, memory_set_id, unit["qualifiers"])
+            if relation in {"same", "refine"}:
+                before = snapshots[target]
+                if action["before_snapshot"] != before or unit["memory_unit_id"] != target:
+                    raise ValueError("視覚記憶の更新先が審査対象と一致しません。")
+                for key in ("formed_at", "memory_type", "scope_type", "scope_key", "subject_ref", "predicate", "object_ref_or_value"):
+                    if unit.get(key) != before.get(key):
+                        raise ValueError("視覚記憶の更新で対象や形成時刻を変えられません。")
+                if relation == "same" and unit["summary_text"] != before["summary_text"]:
+                    raise ValueError("同じ主張の補強では既存本文を保持してください。")
+            else:
+                key = tuple(unit[field] for field in ("memory_type", "scope_type", "scope_key", "subject_ref", "predicate"))
+                if key in created_keys or action["before_snapshot"] is not None or unit["status"] != "inferred":
+                    raise ValueError("視覚記憶の新規作成先が重複または不正です。")
+                created_keys.add(key)
+                row = conn.execute(
+                    "SELECT 1 FROM memory_units WHERE memory_set_id = ? AND (memory_unit_id = ? OR "
+                    "(memory_type = ? AND scope_type = ? AND scope_key = ? AND subject_ref = ? AND predicate = ?))",
+                    (memory_set_id, unit["memory_unit_id"], *key)).fetchone()
+                if row is not None:
+                    raise ValueError("視覚記憶の新規作成先が既に存在します。")
+            related = [target] if relation in {"parallel", "conflict"} else []
+            if action["related_memory_unit_ids"] != related:
+                raise ValueError("視覚記憶の意味関係が審査結果と一致しません。")
+
+    def _validate_visual_daily_evidence(
+        self, conn: sqlite3.Connection, memory_set_id: str, qualifiers: dict[str, Any],
+    ) -> None:
+        evidence = qualifiers["visual_evidence"]
+        dates = {group["local_date"] for group in evidence}
+        if (qualifiers["local_date"] not in dates or not any(day < qualifiers["local_date"] for day in dates)
+                or len({group["source_key"] for group in evidence}) != 1):
+            raise ValueError("視覚記憶には同一sourceの当日と過去日の観測根拠が必要です。")
+        for group in evidence:
+            row = conn.execute(
+                "SELECT d.local_date, g.value FROM daily_visual_digests d, "
+                "json_each(d.payload_json, '$.group_summaries') g WHERE d.memory_set_id = ? "
+                "AND d.digest_id = ? AND json_extract(g.value, '$.duplicate_group_id') = ?",
+                (memory_set_id, group["digest_id"], group["duplicate_group_id"])).fetchone()
+            observed = conn.execute(
+                "SELECT payload_json FROM visual_observation_records WHERE memory_set_id = ? AND visual_observation_id = ?",
+                (memory_set_id, group["representative_visual_observation_id"])).fetchone()
+            if row is None or observed is None:
+                raise ValueError("視覚記憶のgroupまたは代表観測がありません。")
+            stored_group, record = json.loads(row["value"]), json.loads(observed["payload_json"])
+            if (row["local_date"] != group["local_date"] or stored_group["source_key"] != group["source_key"]
+                    or stored_group["representative_visual_observation_id"] != group["representative_visual_observation_id"]
+                    or record.get("duplicate_group_id") != group["duplicate_group_id"]
+                    or record.get("daily_digest_id") != group["digest_id"] or record["retention_status"] != "active"):
+                raise ValueError("視覚記憶の根拠参照が不一致、または代表観測が保持対象ではありません。")
 
     def _memory_actions_memory_set_id(self, memory_actions: list[dict[str, Any]]) -> str | None:
         # 対象 memory_set
@@ -285,6 +382,8 @@ class StoreMemoryLinksMixin:
             "reason": action["reason"],
             "evidence_event_ids": action.get("evidence_event_ids", []),
         }
+        if "visual_daily_review" in action:
+            revision["visual_daily_review"] = action["visual_daily_review"]
         if isinstance(correction, dict):
             revision["corrects_revision_id"] = correction.get("corrects_revision_id")
             revision["correction_group_id"] = correction.get("correction_group_id")
@@ -390,6 +489,14 @@ class StoreMemoryLinksMixin:
             memory_unit_id=target_memory_unit_id,
         )
         target_status = target_unit.get("status") if isinstance(target_unit, dict) else None
+
+        if "visual_daily_review" in action:
+            relation = action["visual_daily_review"]["relation"]
+            if relation not in {"parallel", "conflict"}:
+                raise ValueError("視覚記憶の関係リンクに対応する判定がありません。")
+            return [self._memory_link_spec(
+                source_memory_unit_id=source_memory_unit_id, target_memory_unit_id=target_memory_unit_id,
+                label="contradicts" if relation == "conflict" else "about_same_scope", confidence=0.55)]
 
         specs: list[dict[str, Any]] = []
         if operation == "create":

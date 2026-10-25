@@ -7,6 +7,53 @@ from typing import Any
 
 
 class StoreVisualMixin:
+    def load_visual_daily_comparison_memories(
+        self, *, memory_set_id: str, topic_refs: list[str], memory_unit_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """Load canonical units and their observation source, without semantic search."""
+        topics, ids = list(dict.fromkeys(topic_refs)), list(dict.fromkeys(memory_unit_ids))
+        if not topics and not ids:
+            return []
+        clauses, params = [], [memory_set_id]
+        for column, values in (("scope_key", topics), ("memory_unit_id", ids)):
+            if values:
+                clauses.append(f"{column} IN ({','.join('?' for _ in values)})")
+                params.extend(values)
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                "SELECT payload_json FROM memory_units WHERE memory_set_id = ? AND ("
+                + " OR ".join(clauses) + ") ORDER BY memory_unit_id", params).fetchall()
+            units = [json.loads(row["payload_json"]) for row in rows]
+            if not set(ids).issubset({unit["memory_unit_id"] for unit in units}):
+                raise ValueError("視覚記憶の昇格履歴が参照する正本がありません。")
+            groups: dict[str, dict[str, Any]] = {}
+            group_ids = list(dict.fromkeys(unit["qualifiers"].get("duplicate_group_id") for unit in units))
+            if group_ids:
+                group_rows = conn.execute(
+                    "SELECT d.digest_id, d.local_date, g.value FROM daily_visual_digests d, "
+                    "json_each(d.payload_json, '$.group_summaries') g WHERE d.memory_set_id = ? "
+                    "AND json_extract(g.value, '$.duplicate_group_id') IN ("
+                    + ",".join("?" for _ in group_ids) + ")", [memory_set_id, *group_ids]).fetchall()
+                for row in group_rows:
+                    group = json.loads(row["value"])
+                    ref = group["duplicate_group_id"]
+                    if ref in groups:
+                        raise ValueError("視覚記憶の根拠groupが重複しています。")
+                    groups[ref] = {**group, "local_date": row["local_date"], "digest_id": row["digest_id"]}
+        result = []
+        for unit in units:
+            if (unit["memory_type"] != "interpretation" or unit["scope_type"] != "topic"
+                    or unit["predicate"] != "visual_daily_pattern"
+                    or unit["qualifiers"].get("source") != "daily_visual_digest"):
+                raise ValueError("視覚記憶の比較参照が別の種類の記憶を指しています。")
+            group_id = unit["qualifiers"].get("duplicate_group_id")
+            if group_id not in groups:
+                raise ValueError("視覚記憶の正本に対応する観測groupがありません。")
+            if unit["status"] in {"inferred", "confirmed", "dormant"}:
+                result.append({"memory_unit": unit, "source_key": groups[group_id]["source_key"],
+                               "observed_date": groups[group_id]["local_date"], "observation_group": groups[group_id]})
+        return result
+
     def ensure_visual_observation_search_index(self, *, memory_set_id: str | None = None) -> None:
         # 派生検索 index が欠けている視覚記録だけ補完する。
         clauses = ["i.visual_observation_id IS NULL"]

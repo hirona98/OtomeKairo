@@ -497,17 +497,13 @@ sequenceDiagram
     C->>D: 日次要約と各観測の整理結果を保存<br>（daily_visual_digests・visual_observation_records）
     D-->>C: 保存完了
     opt 昇格候補と過去日の比較材料がある
-        C->>L: 別日の観測による支持を審査<br>（visual_daily_support）
-        L-->>C: 候補ごとの支持根拠
-    end
-    opt 支持された候補がある
-        loop 支持された候補群で必要な意味比較の入力バッチごと
-            C->>E: 候補と未キャッシュの比較対象を埋め込み
-            E-->>C: 比較用ベクトル
-        end
+        C->>D: 比較範囲のtopic・昇格先IDから現在の正本を取得
+        D-->>C: 正本snapshotと観測source
+        C->>L: 共通主張・反復支持・正本との関係を一括審査<br>（visual_daily_support、1回）
+        L-->>C: 集約した主張・支持根拠・対象正本と意味関係
     end
     alt 保存する更新操作がある
-        C->>D: 推定記憶・根拠・revision・記憶間リンクを保存
+        C->>D: 審査snapshotを照合し、推定記憶・根拠・revision・明示した意味関係を同時保存
         D-->>C: 保存完了
         opt 昇格記憶の索引更新がある
             opt 更新本文の埋め込みが必要

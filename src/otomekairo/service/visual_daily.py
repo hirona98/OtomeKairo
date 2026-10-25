@@ -6,6 +6,7 @@ from typing import Any
 
 from otomekairo.memory.utils import local_now
 from otomekairo.llm.contexts import build_persona_context
+from otomekairo.llm.visual_daily import validate_support
 from otomekairo.service.common import debug_log, format_debug_log_text
 
 
@@ -349,27 +350,27 @@ class ServiceVisualDailyMixin:
         # 昇格
         memory_set_id = digest["memory_set_id"]
         finished_at = self._now_iso()
-        memory_candidates: list[dict[str, Any]] = []
+        reviewed_candidates: list[dict[str, Any]] = []
         skipped_count = 0
         candidates = candidates[:VISUAL_DAILY_PROMOTION_LIMIT_PER_DIGEST]
         failure_reason = "visual_daily_support_failed"
         try:
             support = self._visual_daily_repeated_support(digest=digest, candidates=candidates, state=state)
             failure_reason = "visual_daily_promotion_failed"
-            for index, candidate in enumerate(candidates):
-                if not support[index]:
-                    skipped_count += 1
+            for decision in support["review"]["decisions"]:
+                if decision["support_status"] != "supported" or decision["relation"] == "uncertain":
+                    skipped_count += len(decision["candidate_indexes"])
                     continue
-                memory_candidate = self._visual_daily_memory_candidate(digest=digest, candidate=candidate)
-                memory_candidate["qualifiers_hint"]["support_group_refs"] = support[index]
-                memory_candidates.append(memory_candidate)
-            actions = self._cap_visual_daily_memory_action_scores(
-                self.memory.action_resolver.resolve_memory_actions_batch(
-                    memory_set_id=memory_set_id, finished_at=finished_at,
-                    event_ids=[], cycle_ids=[], candidates=memory_candidates,
-                    embedding_definition=state["memory_sets"][memory_set_id]["embedding"],
-                )
-            )
+                target = support["memories"].get(decision["target_memory_ref"])
+                memory_candidate = self._visual_daily_memory_candidate(
+                    digest=digest, candidates=candidates, decision=decision, support=support)
+                reviewed_candidates.append({
+                    "candidate": memory_candidate, "relation": decision["relation"],
+                    "existing_memory": target["memory_unit"] if target else None,
+                    "candidate_indexes": decision["candidate_indexes"],
+                })
+            actions = self.memory.action_resolver.resolve_visual_daily_memory_actions(
+                memory_set_id=memory_set_id, finished_at=finished_at, reviewed_candidates=reviewed_candidates)
         except Exception:
             self._store_visual_daily_promotion_result(
                 digest=digest, result_status="failed", promoted_memory_unit_ids=[],
@@ -388,7 +389,9 @@ class ServiceVisualDailyMixin:
             return
 
         try:
-            self.store.persist_memory_actions(memory_actions=actions)
+            self.store.persist_memory_actions(
+                memory_actions=actions,
+                expected_memory_units=[item["memory_unit"] for item in support["memories"].values()])
         except Exception as exc:  # noqa: BLE001
             self._store_visual_daily_promotion_result(
                 digest=digest,
@@ -450,41 +453,97 @@ class ServiceVisualDailyMixin:
             f"promotion done digest={digest['digest_id']} promoted={len(promoted_ids)} skipped={skipped_count}",
         )
 
-    def _visual_daily_repeated_support(self, *, digest: dict[str, Any], candidates: list[dict[str, Any]], state: dict[str, Any]) -> dict[int, list[str]]:
+    def _visual_daily_repeated_support(self, *, digest: dict[str, Any], candidates: list[dict[str, Any]], state: dict[str, Any]) -> dict[str, Any]:
         previous_digests = self.store.list_daily_visual_digests(
             memory_set_id=digest["memory_set_id"],
             before_local_date=digest["local_date"],
             limit=VISUAL_DAILY_PROMOTION_LOOKBACK_LIMIT,
         )
-        evidence = []
+        evidence: dict[str, dict[str, Any]] = {}
+        topic_refs, promoted_ids = [], []
         for previous_digest in previous_digests:
             if previous_digest["result_status"] != "succeeded":
                 continue
             for previous_candidate in previous_digest.get("memory_candidate_summaries", []):
-                evidence.append({"evidence_ref": previous_candidate["duplicate_group_id"],
-                                 "digest_id": previous_digest["digest_id"], "local_date": previous_digest["local_date"],
-                                 "source_key": previous_candidate["source_key"], "summary_text": previous_candidate["summary_text"],
-                                 "topic_ref": previous_candidate["topic_ref"]})
+                evidence[f"past:{len(evidence)}"] = {
+                    **previous_candidate, "digest_id": previous_digest["digest_id"],
+                    "local_date": previous_digest["local_date"],
+                }
+                topic_refs.append(previous_candidate["topic_ref"])
+            promoted_ids.extend(previous_digest["memory_promotion"]["promoted_memory_unit_ids"])
+        memories = {}
+        if evidence:
+            comparison = self.store.load_visual_daily_comparison_memories(
+                memory_set_id=digest["memory_set_id"], topic_refs=topic_refs, memory_unit_ids=promoted_ids)
+            sources = {candidate["source_key"] for candidate in candidates}
+            memories = {f"memory:{index}": item for index, item in enumerate(
+                item for item in comparison if item["source_key"] in sources)}
+        context = {
+            "local_date": digest["local_date"],
+            "candidates": [{"candidate_index": index, "group_ref": f"current:{index}",
+                            "source_key": item["source_key"], "summary_text": item["summary_text"]}
+                           for index, item in enumerate(candidates)],
+            "evidence": [{"evidence_ref": ref, "local_date": item["local_date"],
+                          "source_key": item["source_key"], "summary_text": item["summary_text"]}
+                         for ref, item in evidence.items()],
+            "existing_memories": [{
+                "memory_ref": ref, "summary_text": item["memory_unit"]["summary_text"],
+                "status": item["memory_unit"]["status"], "scope_type": item["memory_unit"]["scope_type"],
+                "formed_at": item["memory_unit"]["formed_at"], "source_key": item["source_key"],
+                "observed_date": item["observed_date"],
+                "observed_dates": sorted({item["observed_date"], *(
+                    group["local_date"] for group in item["memory_unit"]["qualifiers"].get("visual_evidence", []))}),
+                "valid_from": item["memory_unit"].get("valid_from"), "valid_to": item["memory_unit"].get("valid_to"),
+                "evidence_refs": [evidence_ref for evidence_ref, group in evidence.items()
+                                  if group["duplicate_group_id"] in {
+                                      item["memory_unit"]["qualifiers"]["duplicate_group_id"],
+                                      *item["memory_unit"]["qualifiers"].get("support_group_refs", []),
+                                  }],
+            } for ref, item in memories.items()],
+        }
         if not evidence:
-            return {i: [] for i in range(len(candidates))}
-        context = {"local_date": digest["local_date"], "candidates": candidates, "evidence": evidence}
-        review = self.llm.generate_visual_daily_support(
-            model_config=state["model_presets"][state["selected_model_preset_id"]],
-            persona_context=build_persona_context(state["personas"][state["selected_persona_id"]], role="visual_daily_support"),
-            context=context)
-        digest["support_review"] = review
-        by_ref = {item["evidence_ref"]: item for item in evidence}
-        for decision in review["decisions"]:
-            if decision["support_refs"]:
-                anchor = min((by_ref[ref] for ref in decision["support_refs"]),
-                             key=lambda item: (item["local_date"], item["evidence_ref"]))
-                candidates[decision["candidate_index"]]["topic_ref"] = anchor["topic_ref"]
-        return {item["candidate_index"]: item["support_refs"] for item in review["decisions"]}
+            review = {"decisions": [{
+                "source_claims": [], "candidate_indexes": [index], "support_status": "insufficient", "shared_summary_text": None,
+                "past_support_refs": [], "relation": "uncertain", "target_memory_ref": None,
+                "memory_comparison": None, "reason_summary": "過去日の比較材料がありません。",
+            } for index in range(len(candidates))]}
+        else:
+            review = self.llm.generate_visual_daily_support(
+                model_config=state["model_presets"][state["selected_model_preset_id"]],
+                persona_context=build_persona_context(state["personas"][state["selected_persona_id"]], role="visual_daily_support"),
+                context=context)
+        validate_support(review, context)
+        digest["support_review"] = {**review, "references": {
+            "candidate_groups": {str(index): item["duplicate_group_id"] for index, item in enumerate(candidates)},
+            "evidence_groups": {ref: item["duplicate_group_id"] for ref, item in evidence.items()},
+            "memory_unit_ids": {ref: item["memory_unit"]["memory_unit_id"] for ref, item in memories.items()},
+        }}
+        return {"review": review, "evidence": evidence, "memories": memories}
 
-    def _visual_daily_memory_candidate(self, *, digest: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
-        # 日次視覚整理由来の候補は弱い inferred 記憶に固定する。
-        summary_text = str(candidate.get("summary_text", "")).strip()
-        topic_hint = candidate["topic_ref"]
+    def _visual_daily_memory_candidate(
+        self, *, digest: dict[str, Any], candidates: list[dict[str, Any]],
+        decision: dict[str, Any], support: dict[str, Any],
+    ) -> dict[str, Any]:
+        indexes = sorted(decision["candidate_indexes"])
+        candidate = candidates[indexes[0]]
+        relation = decision["relation"]
+        if relation in {"same", "refine"}:
+            topic_hint = support["memories"][decision["target_memory_ref"]]["memory_unit"]["scope_key"]
+        else:
+            topic_hint = self._visual_daily_topic_ref(f"{digest['digest_id']}:claim:{','.join(map(str, indexes))}")
+        summary_text = decision["shared_summary_text"]
+        groups = [{**candidates[index], "digest_id": digest["digest_id"], "local_date": digest["local_date"]}
+                  for index in indexes]
+        groups.extend(support["evidence"][ref] for ref in decision["past_support_refs"])
+        if relation in {"same", "refine"}:
+            groups.append(support["memories"][decision["target_memory_ref"]]["observation_group"])
+        evidence = {}
+        for group in groups:
+            record = {key: group[key] for key in (
+                "duplicate_group_id", "digest_id", "local_date", "source_key", "representative_visual_observation_id")}
+            if not record["representative_visual_observation_id"]:
+                raise ValueError("視覚記憶の根拠には代表観測が必要です。")
+            evidence[record["duplicate_group_id"]] = record
         return {
             "memory_type": "interpretation",
             "scope": "topic",
@@ -497,35 +556,18 @@ class ServiceVisualDailyMixin:
                 "source": "daily_visual_digest",
                 "digest_id": digest["digest_id"],
                 "local_date": digest["local_date"],
-                "duplicate_group_id": candidate.get("duplicate_group_id"),
-                "representative_visual_observation_id": candidate.get("representative_visual_observation_id"),
+                "duplicate_group_id": candidate["duplicate_group_id"],
+                "representative_visual_observation_id": candidate["representative_visual_observation_id"],
+                "support_group_refs": [support["evidence"][ref]["duplicate_group_id"] for ref in decision["past_support_refs"]],
+                "visual_evidence": list(evidence.values()),
             },
-            "evidence_text": f"{digest['local_date']} の視覚日次整理で反復または保持対象として整理された。",
+            "evidence_text": decision["reason_summary"],
         }
 
     def _visual_daily_topic_ref(self, duplicate_group_id: str) -> str:
-        # 意味の同一性は support review で確定し、IDだけをコードで作る。
+        # 観測候補または新規主張の処理参照からIDだけを作る。
         key = hashlib.sha256(duplicate_group_id.encode("utf-8")).hexdigest()[:24]
         return f"topic:visual_daily_{key}"
-
-    def _cap_visual_daily_memory_action_scores(self, actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        # 日次視覚由来の記憶は控えめな重みに固定する。
-        capped: list[dict[str, Any]] = []
-        for action in actions:
-            memory_unit = action.get("memory_unit")
-            if isinstance(memory_unit, dict) and action.get("operation") in {"create", "reinforce", "refine"}:
-                memory_unit = {
-                    **memory_unit,
-                    "confidence": min(float(memory_unit.get("confidence", 0.0) or 0.0), 0.55),
-                    "salience": min(float(memory_unit.get("salience", 0.0) or 0.0), 0.45),
-                }
-                action = {
-                    **action,
-                    "memory_unit": memory_unit,
-                    "after_snapshot": memory_unit,
-                }
-            capped.append(action)
-        return capped
 
     def _store_visual_daily_promotion_result(
         self,
