@@ -771,6 +771,26 @@ def build_memory_reflection_summary_messages(
     ]
 
 
+def build_memory_reflection_summary_review_messages(
+    *, persona_context: PersonaContext, source_pack: dict[str, Any],
+) -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": (
+            "内部処理 role `memory_reflection_summary_review` として内省要約の保存前の照合を担当します。\n"
+            "summary_candidates の各本文を scopes と source_events に照合し、各 scope_ref について supported、scope_supported、短い reason_summary を返してください。\n"
+            "supported は本文の主張が元の根拠に裏付けられるか、scope_supported はその本文を scope_key が示す対象に帰属する記憶として保存できるかを、それぞれ独立に判定します。内容が事実でも人物を同定できなければ scope_supported=false としてください。\n"
+            "候補本文の主張が誰についてのものかを、元の発言の話者・対象、記憶の subject_ref と条件へ対応させます。本人の説明、第三者への言及、現在の個の発言や解釈を区別してください。\n"
+            "候補は scope_key が示す対象に帰属する記憶として保存されます。本文に対象名がなくても、その scope の対象についての理解として裏付けられるかを照合してください。人物未特定の観測を一般的に言い換えただけの本文も、特定人物の scope に保存する根拠にはならないため supported=false としてください。\n"
+            "候補本文が現在の個の方針・感情を別人の性質として読ませる場合、本文自体で主語が曖昧な場合、人物不明の観測を対象人物に帰属させる場合は supported=false とします。scope_key と subject_ref は整理先として読み、元の発言や観測から人物との対応を確認してください。\n"
+            "推測は推測のまま、時点や不確実性を保っているかも照合します。裏付けが成立する本文だけ supported=true としてください。人格・気分・感情は本人の発言の裏付けに用いません。\n"
+            "候補を修正せず照合結果だけをJSONで返します。トップレベルは reviews、各要素は scope_ref、reason_summary、supported、scope_supported だけを持ち、候補の全 scope_ref をそれぞれちょうど1件ずつ返してください。"
+        )},
+        {"role": "user", "content": _format_named_json_prompt_payload(
+            "SOURCE_PACK", _with_persona_context(source_pack, persona_context),
+        )},
+    ]
+
+
 def build_recall_pack_selection_messages(
     *,
     persona_context: PersonaContext,
@@ -935,7 +955,7 @@ def build_memory_reflection_summary_repair_prompt(validation_error: str) -> str:
         "同じ source pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
         "トップレベルキーは summaries だけです。\n"
         "summaries の各要素は scope_ref と summary_text だけを持ちます。\n"
-        "scope_ref は source pack にある値だけを使ってください。\n"
+        "source pack にある各 scope_ref に対応する項目を、それぞれちょうど 1 件ずつ返してください。\n"
         f"summary_text は簡潔に、{MAX_MEMORY_REFLECTION_SUMMARY_LENGTH} 文字以内、改行なしで返してください。\n"
         "新しい事実の追加、内部識別子、Markdown、コードフェンス、説明文は禁止です。"
     )
@@ -2109,15 +2129,20 @@ def _build_memory_reflection_summary_system_prompt() -> str:
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "返すトップレベルキーは summaries だけです。\n"
         "summaries の各要素は scope_ref と summary_text だけを持ちます。\n"
-        "scope_ref は source pack にある値だけを使い、scope をまたいで事実を混ぜないでください。\n"
+        "複数の主体を本文へ含める場合は、どの状態・方針が誰に属するかを本文自体で明確にしてください。\n"
+        "source pack にある各 scope_ref に対応する項目を、それぞれちょうど 1 件ずつ返してください。各項目は対応する scope の根拠から要約してください。\n"
         f"summary_text は簡潔に、{MAX_MEMORY_REFLECTION_SUMMARY_LENGTH} 文字以内、改行なしで返してください。\n"
         "渡された evidence pack の外を推測で埋めないでください。\n"
         "単発出来事の説明ではなく、反復して見えている傾向として要約してください。\n"
         "summary_status_candidate=inferred のときは断定しすぎず、confirmed のときも過剰な人格断定は避けてください。\n"
         "persona_context の人格全体に基づき、この role の問いと出力契約に従って処理してください。episodes と memory_units を根拠の中心にしてください。\n"
+        "memory_units の subject_ref、scope、qualifiers を主張の対象と条件として読み、source_event_refs で共有表 source_events の元イベントへ対応させてください。episodes の primary_scope と source_participant_refs は整理対象と参加者であり、各発言の話者は元イベントの speaker_ref と role で確かめてください。\n"
+        "entity の要約は scope_key が示す対象について裏付けられる理解に絞ってください。異なる subject_ref の記憶と別の話者の発言は、その対象との対応を確認する補助として読みます。relationship の要約では、現在の個の方針・感情・行動は『こちら』のものとして、相手の状態・行動と区別して表してください。\n"
+        "元イベントの本文から、本人の説明、第三者についての説明、現在の個の発言や解釈を区別し、誰について何が裏付けられるかを要約してください。発言の話者と主張の対象をそれぞれ照合し、現在の個の方針・感情・推測は現在の個に帰属する理解として表してください。\n"
+        "source_event_refs が空、または元イベントに話者や本文がない場合は、その情報の限界を保って記憶の対象・種別・出典に沿って要約してください。推測は推測として表し、本人の発言が裏付ける主張だけを本人の自己説明として扱ってください。人格・気分・感情の補助情報は、本人の発言の裏付けとは分けて扱ってください。\n"
         "memory_units の status、有効開始・終了時刻、確認時刻を現在の理解の根拠にし、episodes はその時期の経験として時系列へ対応させてください。\n"
         "以前は正しく後から変わった内容、当時から誤りとして取り消された説明、現在の理解をそれぞれの時期と状態に沿って要約してください。\n"
-        "existing_summary_text は更新前の生成済み要約です。現在有効な memory_units と新しい episodes に照らして文面を組み直してください。過去の episode や更新前の要約の内容を現在の主張として並べず、時間的変化として整合する経緯は変化として表してください。\n"
+        "現在有効な memory_units と新しい episodes に照らして文面を組み立ててください。過去の episode の内容はその時期の経験として扱い、現在の主張との時間的変化として整合する経緯は変化として表してください。\n"
         + _person_reference_instruction()
         + "\n"
         "mood_state や affect_state は、episodes と memory_units に整合する範囲だけで補助的に使ってください。\n"

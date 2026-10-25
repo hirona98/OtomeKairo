@@ -51,6 +51,10 @@ class MemorySummaryRefreshTests(unittest.TestCase):
     def test_correction_refreshes_existing_summary_below_new_summary_evidence_floor(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             llm = Mock()
+            llm.review_memory_reflection_summaries.side_effect = lambda **kw: {"reviews": [
+                {"scope_ref": row["scope_ref"], "scope_supported": True, "supported": True, "reason_summary": "照合済み。"}
+                for row in kw["source_pack"]["summary_candidates"]
+            ]}
             llm.generate_memory_reflection_summary.return_value = {"summaries": [
                 {"scope_ref": "scope:0", "summary_text": "本人の訂正後の好みはほうじ茶。"},
             ]}

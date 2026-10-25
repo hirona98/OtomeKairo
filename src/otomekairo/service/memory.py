@@ -85,6 +85,7 @@ class ServiceMemoryMixin:
                     "requested_scope_count": 0,
                     "succeeded_scope_count": 0,
                     "failed_scopes": [],
+                    "response_errors": [],
                     "dirty_scope_count": 0,
                     "dirty_reasons": [],
                     "llm_call_count": 0,
@@ -198,6 +199,7 @@ class ServiceMemoryMixin:
                         "requested_scope_count": 0,
                         "succeeded_scope_count": 0,
                         "failed_scopes": [],
+                        "response_errors": [],
                         "dirty_scope_count": 0,
                         "dirty_reasons": [],
                         "llm_call_count": 0,
@@ -394,6 +396,7 @@ class ServiceMemoryMixin:
                         "requested_scope_count": 0,
                         "succeeded_scope_count": 0,
                         "failed_scopes": [],
+                        "response_errors": [],
                         "dirty_scope_count": 0,
                         "dirty_reasons": [],
                         "llm_call_count": 0,
@@ -513,6 +516,7 @@ class ServiceMemoryMixin:
                     "requested_scope_count": 0,
                     "succeeded_scope_count": 0,
                     "failed_scopes": [],
+                    "response_errors": [],
                     "dirty_scope_count": 0,
                     "dirty_reasons": [],
                     "llm_call_count": 0,
@@ -558,6 +562,7 @@ class ServiceMemoryMixin:
                     "requested_scope_count": 0,
                     "succeeded_scope_count": 0,
                     "failed_scopes": [],
+                    "response_errors": [],
                     "dirty_scope_count": 0,
                     "dirty_reasons": [],
                     "llm_call_count": 0,
@@ -659,7 +664,8 @@ class ServiceMemoryMixin:
         reflective_trace = memory_trace.get("reflective_consolidation", {})
         summary_generation = reflective_trace.get("summary_generation", {})
         failed_scopes = summary_generation.get("failed_scopes", [])
-        if not isinstance(failed_scopes, list) or not failed_scopes:
+        response_errors = summary_generation.get("response_errors", [])
+        if not failed_scopes and not response_errors:
             return
 
         # 監査
@@ -680,6 +686,21 @@ class ServiceMemoryMixin:
                 )
                 for failure in failed_scopes
                 if isinstance(failure, dict)
+            ]
+            + [
+                self._build_memory_audit_event(
+                    cycle_id=cycle_id,
+                    memory_set_id=memory_set_id,
+                    kind="reflective_summary_response_contract_failure",
+                    created_at=created_at,
+                    payload={
+                        "batch_scope_refs": failure["batch_scope_refs"],
+                        "item_index": failure["item_index"],
+                        "failure_stage": failure["failure_stage"],
+                        "failure_reason": failure["failure_reason"],
+                    },
+                )
+                for failure in response_errors
             ]
         )
 
@@ -714,6 +735,7 @@ class ServiceMemoryMixin:
                     "requested_scope_count": 0,
                     "succeeded_scope_count": 0,
                     "failed_scopes": [],
+                    "response_errors": [],
                     "dirty_scope_count": 0,
                     "dirty_reasons": [],
                     "llm_call_count": 0,

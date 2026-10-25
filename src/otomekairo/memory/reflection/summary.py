@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from collections.abc import Callable
+from copy import deepcopy
 from typing import Any
 
 from otomekairo.llm.contexts import build_persona_context
-from otomekairo.llm.contracts import validate_memory_reflection_summary_item
+from otomekairo.llm.contracts import (
+    LLMError,
+    validate_memory_reflection_summary_contract,
+    validate_memory_reflection_summary_item,
+    validate_memory_reflection_summary_review_contract,
+    validate_memory_reflection_summary_review_item,
+)
+from otomekairo.memory.reflection.evidence import build_summary_source_pack, source_event_ids, summary_event_ids
 from otomekairo.memory.reflection.constants import (
     ACTIVE_MEMORY_STATUSES,
     REFLECTION_CONFIRMED_SUMMARY_EPISODES,
@@ -42,6 +51,7 @@ class MemoryReflectionSummaryMixin:
             "requested_scope_count": 0,
             "succeeded_scope_count": 0,
             "failed_scopes": [],
+            "response_errors": [],
             "dirty_scope_count": 0,
             "dirty_reasons": [],
             "llm_call_count": 0,
@@ -228,7 +238,6 @@ class MemoryReflectionSummaryMixin:
                     scope_key=scope_key,
                     scope_episodes=scope_episodes,
                     scope_units=scope_units,
-                    existing_summary_units=existing_summaries,
                     scope_support=scope_support_index.get((scope_type, scope_key)),
                 )
             except Exception as exc:  # noqa: BLE001
@@ -245,8 +254,8 @@ class MemoryReflectionSummaryMixin:
                     "scope_ref": scope_ref,
                     "scope_type": scope_type,
                     "scope_key": scope_key,
-                    "scope_episodes": scope_episodes,
-                    "scope_units": scope_units,
+                    "scope_episodes": scope_episodes[:REFLECTION_SUMMARY_PACK_EPISODE_LIMIT],
+                    "scope_units": self._summary_pack_memory_units(scope_units),
                     "evidence_pack": {
                         "scope_ref": scope_ref,
                         **evidence_pack,
@@ -255,6 +264,7 @@ class MemoryReflectionSummaryMixin:
             )
 
         generated_texts = self._generate_reflective_summary_texts(
+            memory_set_id=memory_set_id,
             prepared_scopes=prepared_scopes,
             persona_context=persona_context,
             reflection_summary_model_config=reflection_summary_model_config,
@@ -262,22 +272,9 @@ class MemoryReflectionSummaryMixin:
         )
 
         actions: list[dict[str, Any]] = []
-        failed_scope_keys = {
-            (item.get("scope_type"), item.get("scope_key"))
-            for item in summary_generation["failed_scopes"]
-        }
         for prepared in prepared_scopes:
             summary_text = generated_texts.get(prepared["scope_ref"])
-            scope_identity = (prepared["scope_type"], prepared["scope_key"])
-            if not isinstance(summary_text, str) or not summary_text.strip():
-                if scope_identity not in failed_scope_keys:
-                    self._append_summary_generation_failure(
-                        summary_generation=summary_generation,
-                        scope_type=prepared["scope_type"],
-                        scope_key=prepared["scope_key"],
-                        failure_stage="generate_summary_text",
-                        failure_reason="summary_text was not returned for dirty scope.",
-                    )
+            if summary_text is None:
                 continue
             candidate = self._build_reflective_summary_candidate(
                 scope_type=prepared["scope_type"],
@@ -285,11 +282,7 @@ class MemoryReflectionSummaryMixin:
                 summary_text=summary_text,
                 evidence_pack=prepared["evidence_pack"],
             )
-            evidence_event_ids = self._reflective_event_ids(
-                scope_episodes=prepared["scope_episodes"],
-                scope_units=prepared["scope_units"],
-                limit=12,
-            )
+            evidence_event_ids = summary_event_ids(prepared["evidence_pack"])
             summary_actions = self.action_resolver.resolve_memory_actions(
                 memory_set_id=memory_set_id,
                 finished_at=finished_at,
@@ -370,6 +363,7 @@ class MemoryReflectionSummaryMixin:
     def _generate_reflective_summary_texts(
         self,
         *,
+        memory_set_id: str,
         prepared_scopes: list[dict[str, Any]],
         persona_context: Any,
         reflection_summary_model_config: dict[str, Any],
@@ -380,9 +374,39 @@ class MemoryReflectionSummaryMixin:
             return generated
         for offset in range(0, len(prepared_scopes), REFLECTION_SUMMARY_BATCH_LIMIT):
             batch = prepared_scopes[offset : offset + REFLECTION_SUMMARY_BATCH_LIMIT]
-            source_pack = {
-                "scopes": [item["evidence_pack"] for item in batch],
-            }
+            try:
+                event_ids = list(dict.fromkeys(
+                    event_id for item in batch for event_id in summary_event_ids(item["evidence_pack"])
+                ))
+                events = self.store.load_events_for_evidence(
+                    memory_set_id=memory_set_id, event_ids=event_ids, limit=len(event_ids),
+                ) if event_ids else []
+                events_by_id = {event["event_id"]: event for event in events}
+                ready_scopes = []
+                for item in batch:
+                    if set(summary_event_ids(item["evidence_pack"])) - events_by_id.keys():
+                        self._append_summary_generation_failure(
+                            summary_generation=summary_generation,
+                            scope_type=item["scope_type"], scope_key=item["scope_key"],
+                            failure_stage="load_source_events",
+                            failure_reason="内省要約の根拠イベントを取得できません。",
+                        )
+                    else:
+                        ready_scopes.append(item)
+                batch = ready_scopes
+                if not batch:
+                    continue
+                source_pack = build_summary_source_pack(
+                    evidence_packs=[item["evidence_pack"] for item in batch], events_by_id=events_by_id,
+                )
+            except Exception as exc:  # noqa: BLE001
+                for item in batch:
+                    self._append_summary_generation_failure(
+                        summary_generation=summary_generation,
+                        scope_type=item["scope_type"], scope_key=item["scope_key"],
+                        failure_stage="load_source_events", failure_reason=str(exc),
+                    )
+                continue
             try:
                 payload = self.llm.generate_memory_reflection_summary(
                     model_config=reflection_summary_model_config,
@@ -401,40 +425,112 @@ class MemoryReflectionSummaryMixin:
                         failure_reason=str(exc),
                     )
                 continue
-            summaries = payload.get("summaries")
-            if not isinstance(summaries, list):
+            try:
+                validate_memory_reflection_summary_contract(payload)
+            except Exception as exc:  # noqa: BLE001
                 for item in batch:
                     self._append_summary_generation_failure(
                         summary_generation=summary_generation,
                         scope_type=item["scope_type"],
                         scope_key=item["scope_key"],
-                        failure_stage="generate_summary_text",
-                        failure_reason="summaries is not an array.",
-                    )
-                continue
-            allowed_refs = {item["scope_ref"] for item in batch}
-            prepared_by_ref = {item["scope_ref"]: item for item in batch}
-            seen_refs: set[str] = set()
-            for item in summaries:
-                scope_ref = item.get("scope_ref") if isinstance(item, dict) else None
-                if scope_ref not in allowed_refs:
-                    continue
-                if scope_ref in seen_refs:
-                    continue
-                seen_refs.add(scope_ref)
-                prepared = prepared_by_ref[scope_ref]
-                try:
-                    validate_memory_reflection_summary_item(item)
-                    generated[scope_ref] = str(item["summary_text"]).strip()
-                except Exception as exc:  # noqa: BLE001
-                    self._append_summary_generation_failure(
-                        summary_generation=summary_generation,
-                        scope_type=prepared["scope_type"],
-                        scope_key=prepared["scope_key"],
                         failure_stage="contract_validation",
                         failure_reason=str(exc),
                     )
+                continue
+            drafts = self._validated_summary_response_items(
+                items=payload["summaries"], batch=batch, summary_generation=summary_generation,
+                validator=validate_memory_reflection_summary_item, failure_stage="contract_validation",
+            )
+            review_batch = [item for item in batch if item["scope_ref"] in drafts]
+            if not review_batch:
+                continue
+            review_pack = build_summary_source_pack(
+                evidence_packs=[item["evidence_pack"] for item in review_batch], events_by_id=events_by_id,
+            )
+            review_pack["summary_candidates"] = [
+                {"scope_ref": item["scope_ref"], "summary_text": drafts[item["scope_ref"]]["summary_text"].strip()}
+                for item in review_batch
+            ]
+            summary_generation["llm_call_count"] += 1
+            try:
+                review = self.llm.review_memory_reflection_summaries(
+                    model_config=reflection_summary_model_config, persona_context=persona_context,
+                    source_pack=review_pack,
+                )
+                validate_memory_reflection_summary_review_contract(review)
+            except Exception as exc:  # noqa: BLE001
+                for item in review_batch:
+                    self._append_summary_generation_failure(
+                        summary_generation=summary_generation,
+                        scope_type=item["scope_type"], scope_key=item["scope_key"],
+                        failure_stage="verify_summary_attribution", failure_reason=str(exc),
+                    )
+                continue
+            reviewed = self._validated_summary_response_items(
+                items=review["reviews"], batch=review_batch, summary_generation=summary_generation,
+                validator=validate_memory_reflection_summary_review_item,
+                failure_stage="verify_summary_attribution",
+            )
+            for scope_ref in reviewed:
+                generated[scope_ref] = drafts[scope_ref]["summary_text"].strip()
         return generated
+
+    def _validated_summary_response_items(
+        self, *, items: list[Any], batch: list[dict[str, Any]], summary_generation: dict[str, Any],
+        validator: Callable[[Any], str], failure_stage: str,
+    ) -> dict[str, dict[str, Any]]:
+        validated: dict[str, dict[str, Any]] = {}
+        batch_scope_refs = [item["scope_ref"] for item in batch]
+        allowed_refs = set(batch_scope_refs)
+        items_by_ref: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for item_index, item in enumerate(items):
+            scope_ref = item.get("scope_ref") if isinstance(item, dict) else None
+            if not isinstance(scope_ref, str) or scope_ref not in allowed_refs:
+                summary_generation["response_errors"].append(
+                    {
+                        "batch_scope_refs": batch_scope_refs,
+                        "item_index": item_index,
+                        "failure_stage": failure_stage,
+                        "failure_reason": (
+                            "scope_ref is not a string."
+                            if not isinstance(scope_ref, str)
+                            else "scope_ref was not requested in this batch."
+                        ),
+                    }
+                )
+                continue
+            items_by_ref[scope_ref].append(item)
+
+        # 全項目の対応を確定してから、各 scope の一意な項目だけを採用する。
+        for prepared in batch:
+            scope_ref = prepared["scope_ref"]
+            items = items_by_ref[scope_ref]
+            if len(items) != 1:
+                self._append_summary_generation_failure(
+                    summary_generation=summary_generation,
+                    scope_type=prepared["scope_type"],
+                    scope_key=prepared["scope_key"],
+                    failure_stage=failure_stage,
+                    failure_reason=(
+                        "scope_ref was not returned for dirty scope."
+                        if not items
+                        else "scope_ref was returned more than once."
+                    ),
+                )
+                continue
+            item = items[0]
+            try:
+                validator(item)
+                validated[scope_ref] = item
+            except Exception as exc:  # noqa: BLE001
+                self._append_summary_generation_failure(
+                    summary_generation=summary_generation,
+                    scope_type=prepared["scope_type"],
+                    scope_key=prepared["scope_key"],
+                    failure_stage=failure_stage,
+                    failure_reason=str(exc),
+                )
+        return validated
 
     def _attach_reflective_summary_related_units(
         self,
@@ -868,7 +964,6 @@ class MemoryReflectionSummaryMixin:
         scope_key: str,
         scope_units: list[dict[str, Any]],
         scope_episodes: list[dict[str, Any]],
-        existing_summary_units: list[dict[str, Any]],
         scope_support: dict[str, Any] | None,
     ) -> dict[str, Any]:
         # counts
@@ -898,7 +993,6 @@ class MemoryReflectionSummaryMixin:
                 "support_cycles": support_cycle_count,
                 "open_loops": open_loop_count,
             },
-            "existing_summary_text": self._existing_summary_text(existing_summary_units),
             "episodes": [
                 self._summary_pack_episode_item(item)
                 for item in scope_episodes[:REFLECTION_SUMMARY_PACK_EPISODE_LIMIT]
@@ -927,14 +1021,6 @@ class MemoryReflectionSummaryMixin:
             payload["affect_state"] = affect_context
         return payload
 
-    def _existing_summary_text(self, existing_summary_units: list[dict[str, Any]]) -> str | None:
-        # 既存 summary の先頭だけを使う。
-        for unit in existing_summary_units:
-            summary_text = unit.get("summary_text")
-            if isinstance(summary_text, str) and summary_text.strip():
-                return summary_text.strip()
-        return None
-
     def _summary_pack_memory_units(self, scope_units: list[dict[str, Any]]) -> list[dict[str, Any]]:
         # salience / confidence 優先で上位を使う。
         ordered_units = sorted(
@@ -955,6 +1041,12 @@ class MemoryReflectionSummaryMixin:
 
     def _summary_pack_episode_item(self, episode: dict[str, Any]) -> dict[str, Any]:
         return {
+            "episode_type": episode.get("episode_type"),
+            "primary_scope_type": episode.get("primary_scope_type"),
+            "primary_scope_key": episode.get("primary_scope_key"),
+            "source_interaction_refs": deepcopy(episode.get("source_interaction_refs", [])),
+            "source_participant_refs": deepcopy(episode.get("source_participant_refs", [])),
+            "source_event_ids": source_event_ids(episode, "linked_event_ids"),
             "formed_time_label": self._reflective_time_label(episode.get("formed_at")),
             "summary_text": episode.get("summary_text"),
             "outcome_text": episode.get("outcome_text"),
@@ -965,6 +1057,11 @@ class MemoryReflectionSummaryMixin:
     def _summary_pack_memory_item(self, unit: dict[str, Any]) -> dict[str, Any]:
         return {
             "memory_type": unit.get("memory_type"),
+            "scope_type": unit.get("scope_type"),
+            "scope_key": unit.get("scope_key"),
+            "subject_ref": unit.get("subject_ref"),
+            "qualifiers": deepcopy(unit.get("qualifiers", {})),
+            "source_event_ids": source_event_ids(unit, "evidence_event_ids"),
             "predicate": unit.get("predicate"),
             "object_ref_or_value": unit.get("object_ref_or_value"),
             "summary_text": unit.get("summary_text"),
@@ -1137,35 +1234,6 @@ class MemoryReflectionSummaryMixin:
             + (0.03 if open_loop_count > 0 else 0.0)
             - (0.08 if status != "confirmed" else 0.0),
         )
-
-    def _reflective_event_ids(
-        self,
-        *,
-        scope_episodes: list[dict[str, Any]],
-        scope_units: list[dict[str, Any]],
-        limit: int,
-    ) -> list[str]:
-        # シード
-        merged: list[str] = []
-        for episode in scope_episodes:
-            linked_event_ids = episode.get("linked_event_ids", [])
-            for event_id in linked_event_ids:
-                if not isinstance(event_id, str) or event_id in merged:
-                    continue
-                merged.append(event_id)
-                if len(merged) >= limit:
-                    return merged[:limit]
-        for unit in scope_units:
-            evidence_event_ids = unit.get("evidence_event_ids", [])
-            for event_id in evidence_event_ids:
-                if not isinstance(event_id, str) or event_id in merged:
-                    continue
-                merged.append(event_id)
-                if len(merged) >= limit:
-                    return merged[:limit]
-
-        # 結果
-        return merged[:limit]
 
     def _reflective_cycle_ids(
         self,

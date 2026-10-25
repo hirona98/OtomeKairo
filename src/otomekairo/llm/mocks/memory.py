@@ -136,6 +136,13 @@ class LLMMockMemoryMixin:
         validate_memory_reflection_summary_contract(payload)
         return payload
 
+    def review_memory_reflection_summaries(self, model_config: dict, source_pack: dict[str, Any]) -> dict[str, Any]:
+        self._assert_mock_model(model_config)
+        return {"reviews": [
+            {"scope_ref": item["scope_ref"], "supported": True, "scope_supported": True, "reason_summary": "モック照合で対象を確認した。"}
+            for item in source_pack["summary_candidates"]
+        ]}
+
     def _mock_episode_type(self, primary_recall_focus: str) -> str:
         # マッピング
         if primary_recall_focus in {"person", "state"}:

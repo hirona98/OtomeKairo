@@ -17,6 +17,7 @@
 - `recall_pack_selection`
 - `memory_interpretation`
 - `memory_reflection_summary`
+- `memory_reflection_summary_review`（[内省要約の保存前照合](../memory/内省要約のLLM生成.md#保存前の独立照合)）
 - `pre_send_check`
 - `world_state` 候補抽出
 - `activity_state` 候補抽出

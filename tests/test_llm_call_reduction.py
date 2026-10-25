@@ -24,6 +24,10 @@ from otomekairo.store.file_store import FileStore
 class _DirtyScopeHarness(MemoryReflectionSummaryMixin):
     def __init__(self) -> None:
         self.llm = Mock()
+        self.llm.review_memory_reflection_summaries.side_effect = lambda **kw: {"reviews": [
+            {"scope_ref": row["scope_ref"], "scope_supported": True, "supported": True, "reason_summary": "照合済み。"}
+            for row in kw["source_pack"]["summary_candidates"]
+        ]}
         self.action_resolver = Mock()
         self.action_resolver.resolve_memory_actions.return_value = []
 
@@ -128,24 +132,25 @@ class LlmCallReductionTests(unittest.TestCase):
                 "scope_ref": "scope:0",
                 "scope_type": "relationship",
                 "scope_key": "self|person:a",
-                "evidence_pack": {"scope_ref": "scope:0", "scope_type": "relationship"},
+                "evidence_pack": {"scope_ref": "scope:0", "scope_type": "relationship", "episodes": [], "memory_units": []},
             },
             {
                 "scope_ref": "scope:1",
                 "scope_type": "self",
                 "scope_key": "self",
-                "evidence_pack": {"scope_ref": "scope:1", "scope_type": "self"},
+                "evidence_pack": {"scope_ref": "scope:1", "scope_type": "self", "episodes": [], "memory_units": []},
             },
         ]
         summary_generation = harness._empty_summary_generation()
         texts = harness._generate_reflective_summary_texts(
+            memory_set_id="memory_set:test",
             prepared_scopes=prepared,
             persona_context=object(),
             reflection_summary_model_config={"model": "mock"},
             summary_generation=summary_generation,
         )
         self.assertEqual(harness.llm.generate_memory_reflection_summary.call_count, 1)
-        self.assertEqual(summary_generation["llm_call_count"], 1)
+        self.assertEqual(summary_generation["llm_call_count"], 2)
         self.assertEqual(set(texts), {"scope:0", "scope:1"})
 
     def test_reflection_batch_contract_is_envelope_only(self) -> None:
@@ -171,17 +176,18 @@ class LlmCallReductionTests(unittest.TestCase):
                 "scope_ref": "scope:0",
                 "scope_type": "relationship",
                 "scope_key": "self|person:a",
-                "evidence_pack": {"scope_ref": "scope:0"},
+                "evidence_pack": {"scope_ref": "scope:0", "episodes": [], "memory_units": []},
             },
             {
                 "scope_ref": "scope:1",
                 "scope_type": "self",
                 "scope_key": "self",
-                "evidence_pack": {"scope_ref": "scope:1"},
+                "evidence_pack": {"scope_ref": "scope:1", "episodes": [], "memory_units": []},
             },
         ]
         summary_generation = harness._empty_summary_generation()
         texts = harness._generate_reflective_summary_texts(
+            memory_set_id="memory_set:test",
             prepared_scopes=prepared,
             persona_context=object(),
             reflection_summary_model_config={"model": "mock"},

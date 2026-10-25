@@ -1355,6 +1355,27 @@ def validate_memory_reflection_summary_contract(payload: dict[str, Any]) -> None
         raise LLMError("MemoryReflectionSummary summaries は配列である必要があります。")
 
 
+def validate_memory_reflection_summary_review_contract(payload: dict[str, Any]) -> None:
+    _validate_exact_keys(payload, {"reviews"}, "MemoryReflectionSummaryReview")
+    if not isinstance(payload["reviews"], list):
+        raise LLMError("MemoryReflectionSummaryReview reviews は配列である必要があります。")
+
+
+def validate_memory_reflection_summary_review_item(item: Any) -> str:
+    _validate_exact_keys(item, {"scope_ref", "supported", "scope_supported", "reason_summary"}, "MemoryReflectionSummaryReview item")
+    if not isinstance(item["scope_ref"], str) or not item["scope_ref"].startswith("scope:"):
+        raise LLMError("MemoryReflectionSummaryReview scope_ref が不正です。")
+    if not isinstance(item["supported"], bool):
+        raise LLMError("MemoryReflectionSummaryReview supported は boolean である必要があります。")
+    if not isinstance(item["scope_supported"], bool):
+        raise LLMError("MemoryReflectionSummaryReview scope_supported は boolean である必要があります。")
+    if not isinstance(item["reason_summary"], str) or not item["reason_summary"].strip():
+        raise LLMError("MemoryReflectionSummaryReview reason_summary は空でない文字列である必要があります。")
+    if not item["supported"] or not item["scope_supported"]:
+        raise LLMError("内省要約の帰属・根拠照合が成立しません。")
+    return item["scope_ref"]
+
+
 def _validate_memory_correction_selection(payload: dict[str, Any], *, label: str) -> None:
     if payload["correction_status"] not in MEMORY_CORRECTION_STATUS_VALUES:
         raise LLMError(f"{label} correction_status が不正です。")

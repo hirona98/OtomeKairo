@@ -34,6 +34,7 @@ PERSONA_CONTEXT_ROLES = frozenset({
     "memory_interpretation",
     "commitment_lifecycle_summary",
     "memory_reflection_summary",
+    "memory_reflection_summary_review",
     "world_state",
     "activity_state",
     "visual_observation",

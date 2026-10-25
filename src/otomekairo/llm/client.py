@@ -33,6 +33,7 @@ from otomekairo.llm.contracts import (
     known_person_refs_from_context,
     validate_known_person_references,
     validate_memory_reflection_summary_contract,
+    validate_memory_reflection_summary_review_contract,
     validate_pre_send_check_contract,
     validate_pending_intent_selection_contract,
     validate_recall_pack_selection_contract,
@@ -54,6 +55,7 @@ from otomekairo.llm.schemas import (
     input_interpretation_response_format,
     memory_interpretation_response_format,
     memory_reflection_summary_response_format,
+    memory_reflection_summary_review_response_format,
     materialize_provider_open_maps,
     pending_intent_selection_response_format,
     pre_send_check_response_format,
@@ -84,6 +86,7 @@ from otomekairo.llm.prompts import (
     build_memory_interpretation_repair_prompt,
     build_memory_reflection_summary_messages,
     build_memory_reflection_summary_repair_prompt,
+    build_memory_reflection_summary_review_messages,
     build_pre_send_check_messages,
     build_pre_send_check_repair_prompt,
     build_pending_intent_selection_messages,
@@ -1149,6 +1152,28 @@ class LLMClient:
             failure_message="MemoryReflectionSummary の生成に失敗しました。解析可能な応答が得られませんでした。",
             response_format=memory_reflection_summary_response_format(),
             operation=operation,
+        )
+
+    def review_memory_reflection_summaries(
+        self, *, model_config: dict, persona_context: PersonaContext, source_pack: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._is_mock_model_config(model_config):
+            return self.mock_client.review_memory_reflection_summaries(
+                model_config, self._source_pack_with_persona_context(source_pack, persona_context),
+            )
+        return self._generate_structured_payload(
+            model_config=model_config,
+            messages=build_memory_reflection_summary_review_messages(
+                persona_context=persona_context, source_pack=source_pack,
+            ),
+            validator=validate_memory_reflection_summary_review_contract,
+            repair_prompt_builder=lambda error: (
+                "同じ候補と根拠について reviews 配列のJSONを返してください。各項目は scope_ref、supported、scope_supported、reason_summary を持ちます。\n"
+                f"validator_error: {error}"
+            ),
+            failure_message="内省要約の帰属・根拠照合に失敗しました。",
+            response_format=memory_reflection_summary_review_response_format(),
+            operation="memory_reflection_summary_review",
         )
 
     def generate_recall_pack_selection(

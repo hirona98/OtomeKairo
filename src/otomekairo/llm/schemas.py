@@ -414,6 +414,18 @@ def memory_reflection_summary_response_format() -> dict[str, Any]:
     )
 
 
+def memory_reflection_summary_review_response_format() -> dict[str, Any]:
+    return structured_response_format(
+        "memory_reflection_summary_review",
+        closed_object({"reviews": {"type": "array", "items": closed_object({
+            "scope_ref": {"type": "string"},
+            "reason_summary": {"type": "string"},
+            "supported": {"type": "boolean"},
+            "scope_supported": {"type": "boolean"},
+        })}}),
+    )
+
+
 def recall_pack_selection_response_format() -> dict[str, Any]:
     return structured_response_format(
         "recall_pack_selection",
