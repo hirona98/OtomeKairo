@@ -70,14 +70,12 @@ class ServiceVisualDailyMixin:
         state = self.store.read_state()
         today = local_now().date().isoformat()
         for memory_set_id in state["memory_sets"].keys():
-            local_dates = self.store.list_visual_observation_local_dates(
+            local_dates = self.store.list_pending_visual_daily_dates(
                 memory_set_id=memory_set_id,
                 before_local_date=today,
                 limit=VISUAL_DAILY_RUN_DATE_LIMIT,
             )
             for local_date in local_dates:
-                if self.store.get_daily_visual_digest(memory_set_id=memory_set_id, local_date=local_date) is not None:
-                    continue
                 self._run_visual_daily_digest(memory_set_id=memory_set_id, local_date=local_date)
             self._run_due_visual_daily_promotions(memory_set_id=memory_set_id)
 
@@ -309,16 +307,12 @@ class ServiceVisualDailyMixin:
 
     def _run_due_visual_daily_promotions(self, *, memory_set_id: str) -> None:
         # 未昇格 digest を少数だけ処理する。
-        digests = self.store.list_daily_visual_digests(
+        digests = self.store.list_pending_visual_daily_promotions(
             memory_set_id=memory_set_id,
-            query_text=None,
             limit=VISUAL_DAILY_RUN_DATE_LIMIT,
         )
         state = self.store.read_state()
-        for digest in reversed(digests):
-            promotion = digest.get("memory_promotion")
-            if isinstance(promotion, dict) and promotion.get("result_status") in {"succeeded", "skipped", "failed"}:
-                continue
+        for digest in digests:
             self._promote_visual_daily_digest_memory_candidates(
                 digest=digest,
                 state=self._visual_daily_state_for_memory_set(state=state, memory_set_id=memory_set_id),

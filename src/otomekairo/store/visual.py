@@ -173,7 +173,26 @@ class StoreVisualMixin:
         # 結果
         return [json.loads(row["payload_json"]) for row in rows]
 
-    def list_visual_observation_local_dates(
+    def list_pending_visual_daily_promotions(
+        self, *, memory_set_id: str, limit: int,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload_json
+                FROM daily_visual_digests
+                WHERE memory_set_id = ? AND result_status = 'succeeded'
+                  AND json_extract(payload_json, '$.memory_promotion.result_status') = 'not_started'
+                ORDER BY local_date ASC, finished_at ASC, rowid ASC
+                LIMIT ?
+                """,
+                (memory_set_id, limit),
+            ).fetchall()
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def list_pending_visual_daily_dates(
         self,
         *,
         memory_set_id: str,
@@ -188,10 +207,15 @@ class StoreVisualMixin:
         with self._memory_db() as conn:
             rows = conn.execute(
                 """
-                SELECT DISTINCT substr(observed_at, 1, 10) AS local_date
-                FROM visual_observation_records
-                WHERE memory_set_id = ?
-                  AND substr(observed_at, 1, 10) < ?
+                SELECT DISTINCT substr(r.observed_at, 1, 10) AS local_date
+                FROM visual_observation_records AS r
+                WHERE r.memory_set_id = ?
+                  AND substr(r.observed_at, 1, 10) < ?
+                  AND NOT EXISTS (
+                      SELECT 1 FROM daily_visual_digests AS d
+                      WHERE d.memory_set_id = r.memory_set_id
+                        AND d.local_date = substr(r.observed_at, 1, 10)
+                  )
                 ORDER BY local_date ASC
                 LIMIT ?
                 """,
