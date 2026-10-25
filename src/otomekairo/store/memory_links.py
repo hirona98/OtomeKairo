@@ -12,6 +12,10 @@ from otomekairo.service.common import debug_log, format_debug_log_text
 INACTIVE_MEMORY_LINK_TARGET_STATUSES = {"revoked", "superseded"}
 
 
+class MemoryWriteConflictError(ValueError):
+    """判断時の正本と保存時の正本が一致しない。"""
+
+
 class StoreMemoryLinksMixin:
     def persist_memory_actions(
         self, *, memory_actions: list[dict[str, Any]],
@@ -302,6 +306,8 @@ class StoreMemoryLinksMixin:
         if operation == "noop":
             return []
 
+        self._validate_memory_action_snapshot(conn, action)
+
         # memory unit upsert実行
         if memory_unit is not None:
             stored_unit = self._upsert_memory_unit(conn, memory_unit)
@@ -312,6 +318,28 @@ class StoreMemoryLinksMixin:
 
         # 関係追加
         return self._upsert_memory_links_from_action(conn, action)
+
+    def _validate_memory_action_snapshot(self, conn: sqlite3.Connection, action: dict[str, Any]) -> None:
+        unit = action["memory_unit"]
+        memory_unit_id = action["memory_unit_id"]
+        memory_set_id = action["memory_set_id"]
+        if (unit["memory_unit_id"] != memory_unit_id or unit["memory_set_id"] != memory_set_id
+                or action["after_snapshot"] != unit):
+            raise ValueError("記憶actionの保存対象とsnapshotが一致しません。")
+        row = conn.execute(
+            "SELECT payload_json FROM memory_units WHERE memory_unit_id = ?",
+            (memory_unit_id,),
+        ).fetchone()
+        before = action["before_snapshot"]
+        if action["operation"] == "create":
+            if before is not None:
+                raise ValueError("記憶の新規作成に更新前snapshotを指定できません。")
+            if row is not None:
+                raise MemoryWriteConflictError("記憶の新規作成先が既に存在します。")
+        elif before is None or row is None or json.loads(row["payload_json"]) != before:
+            raise MemoryWriteConflictError("記憶の判断後に更新対象の正本が変更または削除されました。")
+        elif before["memory_set_id"] != memory_set_id:
+            raise ValueError("記憶actionと更新前snapshotの記憶集合が一致しません。")
 
     def _upsert_memory_unit(self, conn: sqlite3.Connection, record: dict[str, Any]) -> dict[str, Any]:
         record = self._preserve_stored_event_reference_integrity(conn, source_kind="memory_unit", record=record)

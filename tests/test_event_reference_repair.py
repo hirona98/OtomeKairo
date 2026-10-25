@@ -13,6 +13,7 @@ from otomekairo.llm.prompts import _compact_recall_pack
 from otomekairo.recall.builder import RecallBuilder
 from otomekairo.service.input.pipeline import ServiceInputPipelineMixin
 from otomekairo.store.file_store import SQLiteMemoryStore
+from otomekairo.store.memory_links import MemoryWriteConflictError
 from test_decision_contract import _current_input, _decision_context, _persona_context, _wire_response
 
 
@@ -256,6 +257,11 @@ def test_old_updates_cannot_restore_repaired_references_and_clone_preserves_inte
         "memory_unit_id": "memory:test", "occurred_at": STAMP, "reason": "記憶を再確認した。",
         "memory_unit": _unit(), "before_snapshot": _unit(), "after_snapshot": _unit(), "evidence_event_ids": [VALID],
     }
+    with pytest.raises(MemoryWriteConflictError):
+        store.persist_memory_actions(memory_actions=[action])
+    action["before_snapshot"] = store.list_memory_units_by_id(
+        memory_set_id=MEMORY_SET, memory_unit_ids=["memory:test"],
+    )[0]
     store.persist_memory_actions(memory_actions=[action])
     with store._memory_db() as conn:
         store._insert_episode(conn, _episode())
