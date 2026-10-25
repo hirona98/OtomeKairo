@@ -17,6 +17,7 @@ from otomekairo.defaults import (
     build_default_console_client_settings,
 )
 from otomekairo.service.common import ServiceError
+from otomekairo.service.config.locking import serialize_config_update
 from otomekairo.service.config.constants import (
     MCP_CONNECTOR_KINDS,
     MCP_DEFAULT_CLIENT_ID,
@@ -47,18 +48,19 @@ class ServiceConfigResourcesMixin:
             "console_access_token_issued": state["console_access_token"] is not None,
         }
 
+    @serialize_config_update
     def acquire_console_access_token(self) -> dict[str, Any]:
         # 同時要求でも全クライアントへ同じ token を返すため、取得と初回発行を直列化する。
-        with self._runtime_state_lock:
-            state = self.store.read_state()
-            if state["console_access_token"] is None:
-                state["console_access_token"] = self._new_console_token()
-                self.store.write_state(state)
+        state = self.store.read_state()
+        if state["console_access_token"] is None:
+            state["console_access_token"] = self._new_console_token()
+            self.store.write_state(state)
 
-            return {
-                "console_access_token": state["console_access_token"],
-            }
+        return {
+            "console_access_token": state["console_access_token"],
+        }
 
+    @serialize_config_update
     def reissue_console_access_token(self, token: str | None) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
@@ -103,6 +105,7 @@ class ServiceConfigResourcesMixin:
             "conversation_display_names": self.store.list_conversation_display_names()
         }
 
+    @serialize_config_update
     def create_conversation_display_name(
         self,
         token: str | None,
@@ -124,6 +127,7 @@ class ServiceConfigResourcesMixin:
                 ) from exc
             raise
 
+    @serialize_config_update
     def update_conversation_display_name(
         self,
         token: str | None,
@@ -153,6 +157,7 @@ class ServiceConfigResourcesMixin:
             )
         return definition
 
+    @serialize_config_update
     def delete_conversation_display_name(
         self,
         token: str | None,
@@ -247,6 +252,7 @@ class ServiceConfigResourcesMixin:
             "selected_avatar_id": selected_avatar_id,
         }
 
+    @serialize_config_update
     def replace_stt_enabled(
         self,
         token: str | None,
@@ -288,6 +294,7 @@ class ServiceConfigResourcesMixin:
             "selected_avatar_id": selected_avatar_id,
         }
 
+    @serialize_config_update
     def replace_tts_enabled(
         self,
         token: str | None,
@@ -321,6 +328,7 @@ class ServiceConfigResourcesMixin:
             "selected_avatar_id": selected_avatar_id,
         }
 
+    @serialize_config_update
     def replace_avatar_speech_editor_state(
         self,
         token: str | None,
@@ -400,6 +408,7 @@ class ServiceConfigResourcesMixin:
             "model_presets": self._catalog_entries(state["model_presets"], "model_preset_id"),
         }
 
+    @serialize_config_update
     def connect_console_client(self, token: str | None, client_id: str) -> dict[str, Any]:
         # 端末設定の取得と最終接続端末の更新を一つの接続操作にする。
         state = self._require_token(token)
@@ -452,6 +461,7 @@ class ServiceConfigResourcesMixin:
         )
         return self._build_console_client_editor_state(client_id, entry)
 
+    @serialize_config_update
     def replace_console_client_editor_state(
         self,
         token: str | None,
@@ -475,6 +485,7 @@ class ServiceConfigResourcesMixin:
         self.store.write_state(state)
         return self._build_console_client_editor_state(normalized_client_id, entry)
 
+    @serialize_config_update
     def patch_console_client_settings(
         self,
         token: str | None,
@@ -521,6 +532,7 @@ class ServiceConfigResourcesMixin:
         self._validate_desktop_capture_settings(settings)
         return {"desktop_capture": deepcopy(settings)}
 
+    @serialize_config_update
     def replace_desktop_capture_settings(
         self,
         token: str | None,
@@ -566,6 +578,7 @@ class ServiceConfigResourcesMixin:
             "settings": deepcopy(entry["settings"]),
         }
 
+    @serialize_config_update
     def patch_current(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:
         # 状態
         state = self._require_token(token)
@@ -715,6 +728,7 @@ class ServiceConfigResourcesMixin:
             not_found_message="The requested persona_id does not exist.",
         )
 
+    @serialize_config_update
     def replace_persona(self, token: str | None, persona_id: str, definition: dict[str, Any]) -> dict[str, Any]:
         return self._replace_resource_entry(
             token=token,
@@ -727,6 +741,7 @@ class ServiceConfigResourcesMixin:
             normalizer=self._normalize_persona_definition,
         )
 
+    @serialize_config_update
     def delete_persona(self, token: str | None, persona_id: str) -> dict[str, Any]:
         return self._delete_resource_entry(
             token=token,
@@ -749,6 +764,7 @@ class ServiceConfigResourcesMixin:
             public_builder=self._public_memory_set,
         )
 
+    @serialize_config_update
     def replace_memory_set(self, token: str | None, memory_set_id: str, definition: dict[str, Any]) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
@@ -774,6 +790,7 @@ class ServiceConfigResourcesMixin:
             "memory_set": self._public_memory_set(state["memory_sets"][memory_set_id]),
         }
 
+    @serialize_config_update
     def clone_memory_set(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
@@ -810,6 +827,7 @@ class ServiceConfigResourcesMixin:
             "memory_set": self._public_memory_set(cloned_definition),
         }
 
+    @serialize_config_update
     def delete_memory_set(self, token: str | None, memory_set_id: str) -> dict[str, Any]:
         return self._delete_resource_entry(
             token=token,
@@ -833,6 +851,7 @@ class ServiceConfigResourcesMixin:
             public_builder=self._public_model_preset,
         )
 
+    @serialize_config_update
     def replace_model_preset(self, token: str | None, model_preset_id: str, definition: dict[str, Any]) -> dict[str, Any]:
         return self._replace_resource_entry(
             token=token,
@@ -846,6 +865,7 @@ class ServiceConfigResourcesMixin:
             public_builder=self._public_model_preset,
         )
 
+    @serialize_config_update
     def delete_model_preset(self, token: str | None, model_preset_id: str) -> dict[str, Any]:
         state = self._require_token(token)
         if model_preset_id == PRE_SEND_CHECK_MODEL_PRESET_ID:
@@ -894,6 +914,7 @@ class ServiceConfigResourcesMixin:
             "camera_source": self._public_camera_source(camera_source),
         }
 
+    @serialize_config_update
     def delete_camera_source(self, token: str | None, vision_source_id: str) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
@@ -913,6 +934,7 @@ class ServiceConfigResourcesMixin:
         state = self._require_token(token)
         return self._build_camera_sources_editor_state(state)
 
+    @serialize_config_update
     def replace_camera_sources_editor_state(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
@@ -952,6 +974,7 @@ class ServiceConfigResourcesMixin:
             "mcp_server": self._public_mcp_server(mcp_server),
         }
 
+    @serialize_config_update
     def replace_mcp_server(
         self,
         token: str | None,
@@ -973,6 +996,7 @@ class ServiceConfigResourcesMixin:
             "mcp_server": self._public_mcp_server(stored_definition),
         }
 
+    @serialize_config_update
     def delete_mcp_server(self, token: str | None, mcp_server_id: str) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
@@ -992,6 +1016,7 @@ class ServiceConfigResourcesMixin:
         state = self._require_token(token)
         return self._build_mcp_servers_editor_state(state)
 
+    @serialize_config_update
     def replace_mcp_servers_editor_state(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
@@ -1013,6 +1038,7 @@ class ServiceConfigResourcesMixin:
         state = self._require_token(token)
         return self._build_agent_skill_sources_editor_state(state)
 
+    @serialize_config_update
     def replace_agent_skill_sources_editor_state(
         self,
         token: str | None,
@@ -1039,6 +1065,7 @@ class ServiceConfigResourcesMixin:
             self._agent_skill_registry = prospective_registry
         return self._build_agent_skill_sources_editor_state(state)
 
+    @serialize_config_update
     def reload_agent_skill_sources(self, token: str | None) -> dict[str, Any]:
         state = self._require_token(token)
         try:
@@ -1120,6 +1147,7 @@ class ServiceConfigResourcesMixin:
             "snapshot_dir": str(self._watcher_snapshot_dir(normalized_watcher_id)),
         }
 
+    @serialize_config_update
     def replace_editor_state(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)

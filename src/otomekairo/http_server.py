@@ -1544,17 +1544,8 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         return min(max(value, 1), 100)
 
     def _web_ui_console_token(self) -> str:
-        # 初回画面が複数の UI API を並行取得しても token 発行を一度に固定する。
-        with self.server.service._runtime_state_lock:
-            state = self.server.service.store.read_state()
-            token = state.get("console_access_token")
-            if isinstance(token, str) and token:
-                return token
-
-            state["console_access_token"] = self.server.service._new_console_token()
-            self.server.service.store.write_state(state)
-            debug_log("Auth", "web_ui console token initialized")
-            return state["console_access_token"]
+        # bootstrapと同じ発行境界を使い、設定更新とも直列化する。
+        return self.server.service.acquire_console_access_token()["console_access_token"]
 
     # レスポンス補助
     def _write_success(self, status: int, data: dict) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import unittest
 from copy import deepcopy
 
@@ -26,6 +27,7 @@ class DummyStore:
 
 class DummyService(ServiceConfigMixin):
     def __init__(self) -> None:
+        self._config_update_lock = threading.RLock()
         self.store = DummyStore()
         self.now = "2026-07-27T12:00:00.000001+09:00"
 

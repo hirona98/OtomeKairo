@@ -1,3 +1,4 @@
+import threading
 import unittest
 from copy import deepcopy
 
@@ -24,6 +25,7 @@ class DummyStore:
 
 class DummyService(ServiceConfigMixin):
     def __init__(self) -> None:
+        self._config_update_lock = threading.RLock()
         self.store = DummyStore()
 
     def _now_iso(self) -> str:
