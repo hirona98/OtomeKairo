@@ -26,6 +26,16 @@ def source_text_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def visual_daily_digest_id(*, memory_set_id: str, local_date: str) -> str:
+    key = source_text_hash(f"{memory_set_id}:{local_date}")[:24]
+    return f"daily_visual_digest:{key}"
+
+
+def visual_daily_group_id(*, memory_set_id: str, local_date: str, index: int) -> str:
+    key = source_text_hash(f"{memory_set_id}:{local_date}:{index}")[:24]
+    return f"visual_duplicate_group:{key}"
+
+
 def memory_claim_context(record: dict[str, Any]) -> dict[str, Any]:
     """判断に必要な主張の対象、時点、出所を内部記憶IDなしで保つ。"""
     context = {

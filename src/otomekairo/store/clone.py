@@ -5,6 +5,8 @@ import sqlite3
 import uuid
 from typing import Any
 
+from otomekairo.store.clone_visual import build_visual_clone_reference_map, clone_visual_references
+
 
 class MemorySetInUseError(ValueError):
     """実行中の記憶後処理がある集合は削除できない。"""
@@ -58,6 +60,10 @@ class StoreCloneMixin:
     ) -> None:
         # トランザクション
         with self._memory_db() as conn:
+            visual_records = self._load_payload_rows(conn, "visual_observation_records", source_memory_set_id)
+            visual_digests = self._load_payload_rows(conn, "daily_visual_digests", source_memory_set_id)
+            visual_references = build_visual_clone_reference_map(
+                observations=visual_records, digests=visual_digests, target_memory_set_id=target_memory_set_id)
             cycle_id_map, event_id_map = self._clone_event_records(
                 conn,
                 source_memory_set_id=source_memory_set_id,
@@ -75,6 +81,7 @@ class StoreCloneMixin:
                 source_memory_set_id=source_memory_set_id,
                 target_memory_set_id=target_memory_set_id,
                 event_id_map=event_id_map,
+                visual_references=visual_references,
             )
             revision_id_map = self._clone_revision_records(
                 conn,
@@ -82,6 +89,7 @@ class StoreCloneMixin:
                 target_memory_set_id=target_memory_set_id,
                 event_id_map=event_id_map,
                 memory_unit_id_map=memory_unit_id_map,
+                visual_references=visual_references,
             )
             self._clone_memory_link_records(
                 conn,
@@ -127,10 +135,15 @@ class StoreCloneMixin:
             )
             self._clone_visual_observation_records(
                 conn,
-                source_memory_set_id=source_memory_set_id,
+                source_records=visual_records,
                 target_memory_set_id=target_memory_set_id,
                 cycle_id_map=cycle_id_map,
+                visual_references=visual_references,
             )
+            for digest in visual_digests:
+                cloned_digest = clone_visual_references(digest, visual_references)
+                cloned_digest["memory_set_id"] = target_memory_set_id
+                self._insert_daily_visual_digest(conn, cloned_digest)
             self._clone_vector_index_entries(
                 conn,
                 source_memory_set_id=source_memory_set_id,
@@ -209,18 +222,22 @@ class StoreCloneMixin:
         source_memory_set_id: str,
         target_memory_set_id: str,
         event_id_map: dict[str, str],
+        visual_references: dict[str, str],
     ) -> dict[str, str]:
-        memory_unit_id_map: dict[str, str] = {}
         source_memory_units = self._load_payload_rows(conn, "memory_units", source_memory_set_id)
+        memory_unit_id_map = {
+            record["memory_unit_id"]: f"memory_unit:{uuid.uuid4().hex}" for record in source_memory_units
+        }
+        visual_references.update(memory_unit_id_map)
         for record in source_memory_units:
             old_memory_unit_id = record["memory_unit_id"]
-            memory_unit_id_map[old_memory_unit_id] = f"memory_unit:{uuid.uuid4().hex}"
             self._upsert_memory_unit(
                 conn,
                 {
                     **record,
                     "memory_unit_id": memory_unit_id_map[old_memory_unit_id],
                     "memory_set_id": target_memory_set_id,
+                    "qualifiers": clone_visual_references(record.get("qualifiers", {}), visual_references),
                     "evidence_event_ids": [
                         event_id_map.get(event_id, event_id)
                         for event_id in record.get("evidence_event_ids", [])
@@ -237,16 +254,22 @@ class StoreCloneMixin:
         target_memory_set_id: str,
         event_id_map: dict[str, str],
         memory_unit_id_map: dict[str, str],
+        visual_references: dict[str, str],
     ) -> dict[str, str]:
         revision_id_map: dict[str, str] = {}
         source_revisions = self._load_payload_rows(conn, "revisions", source_memory_set_id)
         for record in source_revisions:
             old_revision_id = record["revision_id"]
             revision_id_map[old_revision_id] = f"revision:{uuid.uuid4().hex}"
+            review = (
+                {"visual_daily_review": clone_visual_references(record["visual_daily_review"], visual_references)}
+                if "visual_daily_review" in record else {}
+            )
             self._insert_revision(
                 conn,
                 {
                     **record,
+                    **review,
                     "revision_id": revision_id_map[old_revision_id],
                     "memory_set_id": target_memory_set_id,
                     "memory_unit_id": memory_unit_id_map.get(record["memory_unit_id"], record["memory_unit_id"]),
@@ -259,12 +282,14 @@ class StoreCloneMixin:
                         target_memory_set_id=target_memory_set_id,
                         event_id_map=event_id_map,
                         memory_unit_id_map=memory_unit_id_map,
+                        visual_references=visual_references,
                     ),
                     "after_snapshot": self._clone_memory_unit_snapshot(
                         record.get("after_snapshot"),
                         target_memory_set_id=target_memory_set_id,
                         event_id_map=event_id_map,
                         memory_unit_id_map=memory_unit_id_map,
+                        visual_references=visual_references,
                     ),
                     "evidence_event_ids": [
                         event_id_map.get(event_id, event_id)
@@ -401,27 +426,23 @@ class StoreCloneMixin:
         self,
         conn: sqlite3.Connection,
         *,
-        source_memory_set_id: str,
+        source_records: list[dict[str, Any]],
         target_memory_set_id: str,
         cycle_id_map: dict[str, str],
+        visual_references: dict[str, str],
     ) -> None:
-        source_records = self._load_payload_rows(conn, "visual_observation_records", source_memory_set_id)
         for record in source_records:
-            visual_observation_id = f"visual_observation:{uuid.uuid4().hex}"
+            cycle_id_map.setdefault(record["cycle_id"], f"cycle:{uuid.uuid4().hex}")
+            related_cycle_id = record.get("related_cycle_id")
+            if related_cycle_id is not None:
+                cycle_id_map.setdefault(related_cycle_id, f"cycle:{uuid.uuid4().hex}")
             self._insert_visual_observation_record(
                 conn,
                 {
-                    **record,
-                    "visual_observation_id": visual_observation_id,
+                    **clone_visual_references(record, visual_references),
                     "memory_set_id": target_memory_set_id,
-                    "cycle_id": cycle_id_map.get(record["cycle_id"], record["cycle_id"]),
-                    "retention_status": "active",
-                    "duplicate_group_id": None,
-                    "daily_digest_id": None,
-                    "related_cycle_id": cycle_id_map.get(
-                        record.get("related_cycle_id"),
-                        record.get("related_cycle_id"),
-                    ),
+                    "cycle_id": cycle_id_map[record["cycle_id"]],
+                    "related_cycle_id": cycle_id_map[related_cycle_id] if related_cycle_id is not None else None,
                 },
             )
 
@@ -477,6 +498,7 @@ class StoreCloneMixin:
         target_memory_set_id: str,
         event_id_map: dict[str, str],
         memory_unit_id_map: dict[str, str],
+        visual_references: dict[str, str],
     ) -> dict[str, Any] | None:
         if snapshot is None:
             return None
@@ -484,6 +506,7 @@ class StoreCloneMixin:
             **snapshot,
             "memory_set_id": target_memory_set_id,
             "memory_unit_id": memory_unit_id_map.get(snapshot["memory_unit_id"], snapshot["memory_unit_id"]),
+            "qualifiers": clone_visual_references(snapshot.get("qualifiers", {}), visual_references),
             "evidence_event_ids": [
                 event_id_map.get(event_id, event_id)
                 for event_id in snapshot.get("evidence_event_ids", [])

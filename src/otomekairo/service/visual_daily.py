@@ -4,7 +4,7 @@ import hashlib
 import threading
 from typing import Any
 
-from otomekairo.memory.utils import local_now
+from otomekairo.memory.utils import local_now, visual_daily_digest_id, visual_daily_group_id
 from otomekairo.llm.contexts import build_persona_context
 from otomekairo.llm.visual_daily import validate_support
 from otomekairo.service.common import debug_log, format_debug_log_text
@@ -299,13 +299,11 @@ class ServiceVisualDailyMixin:
 
     def _visual_daily_digest_id(self, *, memory_set_id: str, local_date: str) -> str:
         # 安定ID
-        digest_key = hashlib.sha256(f"{memory_set_id}:{local_date}".encode("utf-8")).hexdigest()[:24]
-        return f"daily_visual_digest:{digest_key}"
+        return visual_daily_digest_id(memory_set_id=memory_set_id, local_date=local_date)
 
     def _visual_daily_group_id(self, *, memory_set_id: str, local_date: str, index: int) -> str:
         # 安定ID
-        group_key = hashlib.sha256(f"{memory_set_id}:{local_date}:{index}".encode("utf-8")).hexdigest()[:24]
-        return f"visual_duplicate_group:{group_key}"
+        return visual_daily_group_id(memory_set_id=memory_set_id, local_date=local_date, index=index)
 
     @guard_memory_set_work
     def _run_due_visual_daily_promotions(self, *, memory_set_id: str) -> None:

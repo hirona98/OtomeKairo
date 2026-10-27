@@ -86,30 +86,33 @@ class StoreVisualMixin:
         with self._memory_db() as conn:
             for record in updated_records:
                 self._insert_visual_observation_record(conn, record)
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO daily_visual_digests (
-                    digest_id,
-                    memory_set_id,
-                    local_date,
-                    started_at,
-                    finished_at,
-                    result_status,
-                    record_count,
-                    payload_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    digest["digest_id"],
-                    digest["memory_set_id"],
-                    digest["local_date"],
-                    digest["started_at"],
-                    digest["finished_at"],
-                    digest["result_status"],
-                    int(digest["record_count"]),
-                    self._to_json(digest),
-                ),
-            )
+            self._insert_daily_visual_digest(conn, digest)
+
+    def _insert_daily_visual_digest(self, conn: sqlite3.Connection, digest: dict[str, Any]) -> None:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO daily_visual_digests (
+                digest_id,
+                memory_set_id,
+                local_date,
+                started_at,
+                finished_at,
+                result_status,
+                record_count,
+                payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                digest["digest_id"],
+                digest["memory_set_id"],
+                digest["local_date"],
+                digest["started_at"],
+                digest["finished_at"],
+                digest["result_status"],
+                int(digest["record_count"]),
+                self._to_json(digest),
+            ),
+        )
 
     def get_daily_visual_digest(self, *, memory_set_id: str, local_date: str) -> dict[str, Any] | None:
         # クエリ
