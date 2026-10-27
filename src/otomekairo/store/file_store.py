@@ -58,6 +58,25 @@ class SQLiteMemoryStore(
         with self._memory_db() as conn:
             self._insert_memory_postprocess_job(conn, job)
 
+    def claim_memory_postprocess_job(self, *, cycle_id: str, started_at: str) -> dict[str, Any] | None:
+        # 集合削除と同じトランザクション境界で、待機中のjobを実行中へ移す。
+        with self._memory_db() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM memory_postprocess_jobs "
+                "WHERE cycle_id = ? AND result_status = 'queued'",
+                (cycle_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            started_job = {
+                **json.loads(row["payload_json"]),
+                "started_at": started_at,
+                "finished_at": None,
+                "result_status": "running",
+            }
+            self._insert_memory_postprocess_job(conn, started_job)
+            return started_job
+
     def list_memory_postprocess_jobs(
         self,
         *,

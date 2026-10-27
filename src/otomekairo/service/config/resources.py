@@ -24,6 +24,7 @@ from otomekairo.service.config.constants import (
     MCP_DEFAULT_CONNECTOR_KIND,
     MCP_TRANSPORTS,
 )
+from otomekairo.store.clone import MemorySetInUseError
 
 
 class ServiceConfigResourcesMixin:
@@ -829,16 +830,19 @@ class ServiceConfigResourcesMixin:
 
     @serialize_config_update
     def delete_memory_set(self, token: str | None, memory_set_id: str) -> dict[str, Any]:
-        return self._delete_resource_entry(
-            token=token,
-            entries_key="memory_sets",
-            selected_id_key="selected_memory_set_id",
-            entry_id=memory_set_id,
-            not_found_code="memory_set_not_found",
-            in_use_code="selected_memory_set_delete_forbidden",
-            deleted_key="deleted_memory_set_id",
-            after_delete=self.store.delete_memory_set_records,
-        )
+        try:
+            return self._delete_resource_entry(
+                token=token,
+                entries_key="memory_sets",
+                selected_id_key="selected_memory_set_id",
+                entry_id=memory_set_id,
+                not_found_code="memory_set_not_found",
+                in_use_code="selected_memory_set_delete_forbidden",
+                deleted_key="deleted_memory_set_id",
+                after_delete=self.store.delete_memory_set_records,
+            )
+        except MemorySetInUseError as exc:
+            raise ServiceError(409, "memory_set_in_use", str(exc)) from exc
 
     def get_model_preset(self, token: str | None, model_preset_id: str) -> dict[str, Any]:
         return self._get_resource_entry(

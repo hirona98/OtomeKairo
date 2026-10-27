@@ -6,10 +6,22 @@ import uuid
 from typing import Any
 
 
+class MemorySetInUseError(ValueError):
+    """実行中の記憶後処理がある集合は削除できない。"""
+
+
 class StoreCloneMixin:
     def delete_memory_set_records(self, memory_set_id: str) -> None:
         # トランザクション
         with self._memory_db() as conn:
+            running_job = conn.execute(
+                "SELECT 1 FROM memory_postprocess_jobs "
+                "WHERE memory_set_id = ? AND result_status = 'running' LIMIT 1",
+                (memory_set_id,),
+            ).fetchone()
+            if running_job is not None:
+                raise MemorySetInUseError("The memory set has a running postprocess job.")
+
             # ベクトル削除
             self._delete_vector_index_entries(conn, memory_set_id)
 
@@ -244,11 +256,13 @@ class StoreCloneMixin:
                     ],
                     "before_snapshot": self._clone_memory_unit_snapshot(
                         record.get("before_snapshot"),
+                        target_memory_set_id=target_memory_set_id,
                         event_id_map=event_id_map,
                         memory_unit_id_map=memory_unit_id_map,
                     ),
                     "after_snapshot": self._clone_memory_unit_snapshot(
                         record.get("after_snapshot"),
+                        target_memory_set_id=target_memory_set_id,
                         event_id_map=event_id_map,
                         memory_unit_id_map=memory_unit_id_map,
                     ),
@@ -460,6 +474,7 @@ class StoreCloneMixin:
         self,
         snapshot: dict[str, Any] | None,
         *,
+        target_memory_set_id: str,
         event_id_map: dict[str, str],
         memory_unit_id_map: dict[str, str],
     ) -> dict[str, Any] | None:
@@ -467,6 +482,7 @@ class StoreCloneMixin:
             return None
         cloned_snapshot = {
             **snapshot,
+            "memory_set_id": target_memory_set_id,
             "memory_unit_id": memory_unit_id_map.get(snapshot["memory_unit_id"], snapshot["memory_unit_id"]),
             "evidence_event_ids": [
                 event_id_map.get(event_id, event_id)

@@ -118,19 +118,15 @@ class ServiceMemoryMixin:
             self._run_memory_postprocess_job(job)
 
     def _run_memory_postprocess_job(self, job: dict[str, Any]) -> None:
-        # 削除済み job は走らせない。
-        persisted_job = self.store.get_memory_postprocess_job(job["cycle_id"])
-        if persisted_job is None:
+        # 削除済み・実行中・完了済みのjobは開始しない。
+        started_job = self.store.claim_memory_postprocess_job(
+            cycle_id=job["cycle_id"],
+            started_at=self._now_iso(),
+        )
+        if started_job is None:
             return
 
         # job開始
-        started_job = {
-            **persisted_job,
-            "started_at": self._now_iso(),
-            "finished_at": None,
-            "result_status": "running",
-        }
-        self.store.upsert_memory_postprocess_job(job=started_job)
         with self._runtime_state_lock:
             self._memory_postprocess_runtime_state["current_cycle_id"] = started_job["cycle_id"]
 

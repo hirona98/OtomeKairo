@@ -254,9 +254,18 @@ class StoreVectorMixin:
               ON meta.vector_entry_id = memory_unit_vec.id
             JOIN memory_units AS unit
               ON unit.memory_unit_id = meta.source_id
+             AND unit.memory_set_id = meta.memory_set_id
             WHERE memory_unit_vec.embedding MATCH ?
               AND k = ?
-              AND {" AND ".join(clauses)}
+              AND memory_unit_vec.id IN (
+                  SELECT meta.vector_entry_id
+                  FROM vector_index_entries AS meta
+                  JOIN memory_units AS unit
+                    ON unit.memory_unit_id = meta.source_id
+                   AND unit.memory_set_id = meta.memory_set_id
+                  WHERE meta.source_kind = 'memory_unit'
+                    AND {" AND ".join(clauses)}
+              )
             ORDER BY memory_unit_vec.distance ASC, meta.salience DESC
             LIMIT ?
         """
@@ -318,9 +327,18 @@ class StoreVectorMixin:
               ON meta.vector_entry_id = episode_vec.id
             JOIN episodes AS episode
               ON episode.episode_id = meta.source_id
+             AND episode.memory_set_id = meta.memory_set_id
             WHERE episode_vec.embedding MATCH ?
               AND k = ?
-              AND {" AND ".join(clauses)}
+              AND episode_vec.id IN (
+                  SELECT meta.vector_entry_id
+                  FROM vector_index_entries AS meta
+                  JOIN episodes AS episode
+                    ON episode.episode_id = meta.source_id
+                   AND episode.memory_set_id = meta.memory_set_id
+                  WHERE meta.source_kind = 'episode'
+                    AND {" AND ".join(clauses)}
+              )
             ORDER BY episode_vec.distance ASC, meta.has_open_loops DESC, meta.salience DESC
             LIMIT ?
         """
