@@ -47,6 +47,7 @@ class OtomeKairoService(
     def __init__(self, root_dir: Path) -> None:
         # 依存関係
         self._config_update_lock = threading.RLock()
+        self._memory_set_work_counts: dict[str, int] = {}
         self._log_stream_registry = LogStreamRegistry()
         configure_debug_log_stream_sink(self._append_debug_log_stream_record)
         self.store = FileStore(root_dir)

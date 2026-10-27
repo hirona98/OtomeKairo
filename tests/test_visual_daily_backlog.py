@@ -17,6 +17,8 @@ STAMP = "2026-10-25T10:00:00+09:00"
 def runner(tmp_path, monkeypatch):
     instance = OtomeKairoService.__new__(OtomeKairoService)
     instance.store = FileStore(tmp_path)
+    instance._config_update_lock = threading.RLock()
+    instance._memory_set_work_counts = {}
     instance._runtime_state_lock = threading.RLock()
     instance._visual_daily_runtime_state = {"current_digest_id": None}
     instance._now_iso = lambda: STAMP

@@ -117,8 +117,11 @@ def test_failed_semantic_grouping_keeps_original_observations_and_records_failur
     records = [{"visual_observation_id": f"visual:{i}", "retention_status": "active"}
                for i in range(3)]
     runner.store = SimpleNamespace(
+        read_state=lambda: {"memory_sets": {"memory:test": {}}},
         list_visual_observation_records_for_date=lambda **kwargs: records,
         upsert_daily_visual_digest=Mock())
+    runner._config_update_lock = threading.RLock()
+    runner._memory_set_work_counts = {}
     runner._runtime_state_lock = threading.RLock()
     runner._visual_daily_runtime_state = {"current_digest_id": None}
     runner._now_iso = lambda: "2026-10-05T09:00:00+09:00"
@@ -175,6 +178,8 @@ CURRENT_DATE = "2026-10-05"
 @pytest.mark.parametrize("desktop_first", [False, True])
 def test_interleaved_daily_review_compresses_each_source_with_one_completion(tmp_path, monkeypatch, desktop_first):
     runner = OtomeKairoService.__new__(OtomeKairoService)
+    runner._config_update_lock = threading.RLock()
+    runner._memory_set_work_counts = {}
     runner.store = FileStore(tmp_path)
     runner.llm = LLMClient()
     runner.memory = SimpleNamespace(action_resolver=MemoryActionResolver(store=runner.store, llm=runner.llm))
@@ -261,6 +266,8 @@ def seed_visual_digest(runner, local_date, *, summary="検証用の観測要約�
 @pytest.fixture
 def promotion_runner(tmp_path):
     runner = OtomeKairoService.__new__(OtomeKairoService)
+    runner._config_update_lock = threading.RLock()
+    runner._memory_set_work_counts = {}
     runner.store = FileStore(tmp_path)
     runner._runtime_state_lock = threading.RLock()
     runner._visual_daily_runtime_state = {"current_digest_id": None}

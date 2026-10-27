@@ -8,6 +8,7 @@ from otomekairo.memory.utils import local_now
 from otomekairo.llm.contexts import build_persona_context
 from otomekairo.llm.visual_daily import validate_support
 from otomekairo.service.common import debug_log, format_debug_log_text
+from otomekairo.service.config.locking import guard_memory_set_work
 
 
 VISUAL_DAILY_CHECK_INTERVAL_SECONDS = 3600.0
@@ -79,6 +80,7 @@ class ServiceVisualDailyMixin:
                 self._run_visual_daily_digest(memory_set_id=memory_set_id, local_date=local_date)
             self._run_due_visual_daily_promotions(memory_set_id=memory_set_id)
 
+    @guard_memory_set_work
     def _run_visual_daily_digest(self, *, memory_set_id: str, local_date: str) -> dict[str, Any] | None:
         # 対象記録
         records = self.store.list_visual_observation_records_for_date(
@@ -305,6 +307,7 @@ class ServiceVisualDailyMixin:
         group_key = hashlib.sha256(f"{memory_set_id}:{local_date}:{index}".encode("utf-8")).hexdigest()[:24]
         return f"visual_duplicate_group:{group_key}"
 
+    @guard_memory_set_work
     def _run_due_visual_daily_promotions(self, *, memory_set_id: str) -> None:
         # 未昇格 digest を少数だけ処理する。
         digests = self.store.list_pending_visual_daily_promotions(

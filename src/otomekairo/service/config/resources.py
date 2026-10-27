@@ -1491,6 +1491,8 @@ class ServiceConfigResourcesMixin:
     ) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
+        if entries_key == "memory_sets" and self._memory_set_work_counts.get(entry_id, 0):
+            raise ServiceError(409, "memory_set_in_use", "The memory set has running background work.")
         self._delete_resource(
             entries=state[entries_key],
             entry_id=entry_id,
