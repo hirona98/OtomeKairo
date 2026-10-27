@@ -33,6 +33,8 @@ class ConfigStore:
     def read_state(self) -> dict[str, Any]:
         # 設定DBから既存 service shape の state を組み立てる。
         with self._config_db() as conn:
+            # 全SELECTを同じsnapshotに固定し、選択値と定義の世代を揃える。
+            conn.execute("BEGIN")
             identity = conn.execute(
                 """
                 SELECT server_id, server_display_name, api_version, console_access_token

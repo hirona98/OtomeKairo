@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from otomekairo.store.file_store import FileStore
+from otomekairo.store.config import ConfigStore
 
 
 class ConfigStoreTests(unittest.TestCase):
@@ -129,6 +130,34 @@ class ConfigStoreTests(unittest.TestCase):
                 ],
                 "2026-07-27T12:00:00+09:00",
             )
+
+
+def test_config_read_keeps_selection_and_definitions_in_one_snapshot(tmp_path, monkeypatch):
+    reader = ConfigStore(tmp_path)
+    writer = ConfigStore(tmp_path)
+    before = writer.read_state()
+    after = writer.read_state()
+    after["server_display_name"] = "更新後の検証用サーバ"
+    for collection, selected, id_key, replacement in (
+        ("personas", "selected_persona_id", "persona_id", "persona:replacement"),
+        ("memory_sets", "selected_memory_set_id", "memory_set_id", "memory_set:replacement"),
+        ("model_presets", "selected_model_preset_id", "model_preset_id", "model_preset:replacement"),
+    ):
+        definition = after[collection].pop(after[selected])
+        after[collection][replacement] = {**definition, id_key: replacement}
+        after[selected] = replacement
+
+    original = reader._read_conversation_display_names
+
+    def update_between_selection_and_definitions(conn):
+        # 別接続の更新を確定させても、進行中の読み取りは元の全体を保つ。
+        writer.write_state(after)
+        return original(conn)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(reader, "_read_conversation_display_names", update_between_selection_and_definitions)
+        assert reader.read_state() == before
+    assert reader.read_state() == after
 
 
 if __name__ == "__main__":
