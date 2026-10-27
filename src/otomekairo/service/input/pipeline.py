@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from copy import deepcopy
 from typing import Any
 
@@ -323,6 +324,7 @@ class ServiceInputPipelineMixin:
             prediction_error_context=pipeline_contexts["prediction_error_context"],
             default_mode_context=pipeline_contexts["default_mode_context"],
             workspace_context=pipeline_contexts["workspace_context"],
+            workspace_candidate_pool=pipeline_contexts["workspace_candidate_pool"],
             recall_hint=recall_hint,
             recall_pack=recall_pack,
             self_activity_current_input=pipeline_contexts.get("self_activity_current_input"),
@@ -397,6 +399,7 @@ class ServiceInputPipelineMixin:
                 prediction_error_context=pipeline_contexts["prediction_error_context"],
                 default_mode_context=pipeline_contexts["default_mode_context"],
                 workspace_context=pipeline_contexts["workspace_context"],
+                workspace_candidate_pool=pipeline_contexts["workspace_candidate_pool"],
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
                 self_activity_current_input=pipeline_contexts.get("self_activity_current_input"),
@@ -968,7 +971,7 @@ class ServiceInputPipelineMixin:
             recall_pack=recall_pack,
             affect_context=affect_context,
         )
-        workspace_context = self._build_workspace_context(
+        workspace_candidate_pool = self._collect_workspace_candidates(
             recent_interactions=recent_interactions,
             current_input=current_input,
             due_periodic_thought_topics=due_periodic_thought_topics,
@@ -988,6 +991,7 @@ class ServiceInputPipelineMixin:
             default_mode_context=default_mode_context,
             affect_context=affect_context,
         )
+        workspace_context = self._finalize_workspace_context(workspace_candidate_pool)
         skill_materials = self._build_pipeline_skill_and_self_activity_materials(
             state=state,
             cycle_id=cycle_id,
@@ -1001,7 +1005,7 @@ class ServiceInputPipelineMixin:
             ongoing_action_summary=ongoing_action_summary,
             capability_decision_view=capability_decision_view,
             initiative_context=initiative_context,
-            workspace_context=workspace_context,
+            workspace_context={"workspace_candidates": workspace_candidate_pool},
             model_config=model_config,
             cycle_label=cycle_label,
         )
@@ -1029,6 +1033,7 @@ class ServiceInputPipelineMixin:
             "prediction_error_context": prediction_error_context,
             "default_mode_context": default_mode_context,
             "workspace_context": workspace_context,
+            "workspace_candidate_pool": workspace_candidate_pool,
         }
 
     def _build_self_state_context(
@@ -1408,6 +1413,11 @@ class ServiceInputPipelineMixin:
         }
 
     def _build_workspace_context(
+        self, **kwargs: Any,
+    ) -> dict[str, Any]:
+        return self._finalize_workspace_context(self._collect_workspace_candidates(**kwargs))
+
+    def _collect_workspace_candidates(
         self,
         *,
         current_input: CurrentInput,
@@ -1428,7 +1438,7 @@ class ServiceInputPipelineMixin:
         default_mode_context: dict[str, Any] | None,
         affect_context: dict[str, Any] | None = None,
         recent_interactions: list[dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
+    ) -> list[dict[str, Any]]:
         candidates: list[dict[str, Any]] = []
         used_refs: set[str] = set()
         source_counts: dict[str, int] = {}
@@ -1630,6 +1640,9 @@ class ServiceInputPipelineMixin:
             source_counts=source_counts,
             recall_pack=recall_pack,
         )
+        return candidates
+
+    def _finalize_workspace_context(self, candidates: list[dict[str, Any]]) -> dict[str, Any]:
         limited_candidates = self._limit_workspace_candidates(candidates)
         return {
             "workspace_candidates": limited_candidates,
@@ -1642,7 +1655,7 @@ class ServiceInputPipelineMixin:
             "candidate_count": len(limited_candidates),
             "total_candidate_count": len(candidates),
             "dropped_candidate_count": max(0, len(candidates) - len(limited_candidates)),
-            "source_counts": source_counts,
+            "source_counts": dict(Counter(candidate["source"] for candidate in candidates)),
             "state_boundary": "workspace_context は判断用の派生 view であり、events / episodes / memory_units / affect などの正本を更新しない。",
         }
 
@@ -2236,6 +2249,7 @@ class ServiceInputPipelineMixin:
         prediction_error_context: dict[str, Any] | None,
         default_mode_context: dict[str, Any] | None,
         workspace_context: dict[str, Any] | None,
+        workspace_candidate_pool: list[dict[str, Any]],
         current_visual_observations: list[dict[str, Any]],
         reference_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
@@ -2255,7 +2269,7 @@ class ServiceInputPipelineMixin:
         # decision生成
         if self._should_compare_self_activity_separately(
             trigger_kind=trigger_kind,
-            workspace_context=workspace_context,
+            workspace_context={"workspace_candidates": workspace_candidate_pool},
             initiative_context=initiative_context,
             is_api_request=current_input.is_api_request,
         ):
@@ -2285,6 +2299,7 @@ class ServiceInputPipelineMixin:
                 prediction_error_context=prediction_error_context,
                 default_mode_context=default_mode_context,
                 workspace_context=workspace_context,
+                workspace_candidate_pool=workspace_candidate_pool,
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
                 self_activity_current_input=self_activity_current_input,

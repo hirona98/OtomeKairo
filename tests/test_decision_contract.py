@@ -1124,7 +1124,6 @@ class DecisionPromptScopeTests(unittest.TestCase):
         self.assertIn("capability_request.input の自然文は、その能力の先の場へ向けた現在の個の表現です", system)
         self.assertIn("capability_request.input は required_input と readiness.input_keys に対応する JSON object を 1 個の JSON 文字列として書いてください。", system)
         self.assertIn("使わない排他キーもキーとして残し、値は null にします", system)
-        self.assertIn("kind が capability_request のとき capability_request は object、pending_intent と autonomous_run は null です", system)
         self.assertIn("その活動に関われる手段が CapabilityDecisionView に available=true であるときだけ", system)
         self.assertIn("手段が無いときは今は関わらない", system)
         self.assertIn("target_stances は self_activity を 1 件だけ持ちます", system)

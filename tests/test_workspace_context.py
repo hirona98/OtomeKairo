@@ -1,4 +1,6 @@
 import unittest
+from copy import deepcopy
+from collections import Counter
 
 from otomekairo.llm.contexts import CurrentInput
 from otomekairo.llm.prompts import (
@@ -9,6 +11,7 @@ from otomekairo.service.input.pipeline import (
     WORKSPACE_CANDIDATE_LIMIT,
     ServiceInputPipelineMixin,
 )
+from otomekairo.service.input.mixin import ServiceInputMixin
 
 
 class WorkspaceContextTests(unittest.TestCase):
@@ -500,6 +503,71 @@ class WorkspaceContextTests(unittest.TestCase):
             payload["resurfacing_candidates"][0]["resurfacing_policy"],
             "即発話せず、workspace の前景化候補として扱う。",
         )
+
+
+class WorkspaceProjectionTests(unittest.TestCase):
+    def test_scope_filtering_precedes_limit_and_counts_only_eligible_sources(self) -> None:
+        service = ServiceInputMixin()
+        for scope in ("self_activity", "outward_speech"):
+            with self.subTest(scope=scope):
+                excluded_kind = "visual_observation" if scope == "self_activity" else "capability"
+                included_kind = "capability" if scope == "self_activity" else "visual_observation"
+                excluded = [
+                    {"factor_ref": f"excluded:{i}", "kind": excluded_kind, "source": "excluded"}
+                    for i in range(WORKSPACE_CANDIDATE_LIMIT + 1)
+                ]
+                eligible = [
+                    {"factor_ref": f"included:{i}", "kind": included_kind, "source": "included"}
+                    for i in range(WORKSPACE_CANDIDATE_LIMIT + 2)
+                ]
+                retained = {"factor_ref": "affect:last", "kind": "affect", "source": "affect_context"}
+                pool = excluded + eligible + [retained]
+                original = deepcopy(pool)
+                complete = service._finalize_workspace_context(pool)
+                self.assertNotIn(eligible[0], complete["workspace_candidates"])
+
+                project = service._self_activity_workspace if scope == "self_activity" else service._outward_speech_workspace
+                projected = project(pool)
+                self.assertEqual(projected["workspace_candidates"], eligible[:WORKSPACE_CANDIDATE_LIMIT] + [retained])
+                self.assertEqual(projected["candidate_count"], WORKSPACE_CANDIDATE_LIMIT + 1)
+                self.assertEqual(projected["total_candidate_count"], len(eligible) + 1)
+                self.assertEqual(projected["dropped_candidate_count"], 2)
+                self.assertEqual(projected["source_counts"], {"included": len(eligible), "affect_context": 1})
+                self.assertEqual(pool, original)
+
+    def test_empty_scope_has_zero_counts(self) -> None:
+        service = ServiceInputMixin()
+        for project, kind in (
+            (service._self_activity_workspace, "visual_observation"),
+            (service._outward_speech_workspace, "capability"),
+        ):
+            for pool in ([], [{"factor_ref": "excluded", "kind": kind, "source": "excluded"}]):
+                with self.subTest(project=project.__name__, pool=pool):
+                    projected = project(pool)
+                    self.assertEqual(projected["workspace_candidates"], [])
+                    self.assertEqual(projected["candidate_count"], 0)
+                    self.assertEqual(projected["total_candidate_count"], 0)
+                    self.assertEqual(projected["dropped_candidate_count"], 0)
+                    self.assertEqual(projected["source_counts"], {})
+
+    def test_rewriting_current_input_preserves_sources_and_original_pool(self) -> None:
+        service = ServiceInputMixin()
+        pool = [
+            {"factor_ref": "current_input:background_thinking", "kind": "current_input", "source": "current_input", "summary_text": "定期思考。"},
+            {"factor_ref": "periodic_thought_topic:test", "kind": "periodic_thought_topic", "source": "periodic_thought_topics"},
+            {"factor_ref": "visual_observation:current", "kind": "visual_observation", "source": "observation"},
+        ]
+        original = deepcopy(pool)
+        for project in (service._self_activity_workspace, service._outward_speech_workspace):
+            with self.subTest(project=project.__name__):
+                projected = project(pool, current_input_text="今回の自己評価。")
+                candidates = projected["workspace_candidates"]
+                self.assertEqual(candidates[0]["summary_text"], "今回の自己評価。")
+                self.assertEqual(projected["candidate_count"], 2)
+                self.assertEqual(projected["total_candidate_count"], 2)
+                self.assertEqual(projected["dropped_candidate_count"], 0)
+                self.assertEqual(projected["source_counts"], dict(Counter(item["source"] for item in candidates)))
+                self.assertEqual(pool, original)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,26 @@ from test_decision_contract import _decision_context
 
 
 class ConfiguredActivityContextTests(unittest.TestCase):
+    def test_self_activity_receives_candidates_without_setting_or_disclosure_blocks(self) -> None:
+        candidate = {"factor_ref": "periodic_thought_topic:due", "kind": "periodic_thought_topic",
+                     "source": "periodic_thought_topics", "summary_text": "外部の交流に関わる。"}
+        context = replace(
+            _decision_context([]), comparison_scope="self_activity",
+            configured_activity_topics=[{"topic_id": "topic:not_due", "topic_summary": "設定説明用の別活動。"}],
+            disclosure_context={"other_person_sources": [{"person_ref": "person:other"}]},
+            workspace_context={"workspace_candidates": [candidate]},
+        )
+        persona = PersonaContext("Test", "テスト人格。", None, "判断の基底。")
+        messages = build_decision_messages(persona_context=persona, context=context)
+        self.assertEqual(len(messages), 3)
+        self.assertEqual([message["role"] for message in messages], ["system", "user", "user"])
+        self.assertTrue(messages[1]["content"].startswith("<<<OTOMEKAIRO_INTERNAL_CONTEXT>>>"))
+        self.assertTrue(messages[2]["content"].startswith("<<<OTOMEKAIRO_CURRENT_INPUT>>>"))
+        payload = json.loads(messages[1]["content"].splitlines()[1])
+        self.assertEqual(payload["internal_context"]["workspace_context"]["workspace_candidates"], [candidate])
+        self.assertNotIn("configured_activity_topics", payload)
+        self.assertNotIn("disclosure_context", payload)
+
     def test_expression_addon_reaches_text_generation_and_is_excluded_from_self_activity(self) -> None:
         persona = PersonaContext(display_name="Test", persona_prompt_text="テスト人格。",
                                  expression_addon="発話の表記補助。", use_policy="判断の基底。")

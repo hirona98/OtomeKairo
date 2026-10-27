@@ -180,7 +180,7 @@ def decision_response_format(
                 "reason_code": {"type": "string"},
                 "reason_summary": {"type": "string"},
                 "requires_confirmation": {"type": "boolean"},
-                "speech_text": nullable({"type": "string"}),
+                "speech_text": {"type": "null"} if comparison_scope == "self_activity" else nullable({"type": "string"}),
                 "pending_intent": nullable(
                     closed_object(
                         {
@@ -190,8 +190,8 @@ def decision_response_format(
                         }
                     )
                 ),
-                "capability_request": capability_request,
-                "autonomous_run": nullable(
+                "capability_request": {"type": "null"} if comparison_scope == "outward_speech" else capability_request,
+                "autonomous_run": {"type": "null"} if comparison_scope == "outward_speech" else nullable(
                     closed_object(
                         {
                             "objective_summary": {"type": "string"},

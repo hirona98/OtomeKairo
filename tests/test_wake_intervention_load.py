@@ -321,6 +321,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         workspace = {
             "workspace_candidates": [
                 {
+                    "source": "test",
                     "factor_ref": "periodic_thought_topic:elyth",
                     "kind": "periodic_thought_topic",
                     "summary_text": "ELYTH。",
@@ -343,30 +344,33 @@ class WakeInterventionLoadTests(unittest.TestCase):
             )
         )
         isolated = service._self_activity_workspace(
-            {
-                "workspace_candidates": [
-                    {
-                        "factor_ref": "periodic_thought_topic:elyth",
-                        "kind": "periodic_thought_topic",
-                    },
-                    {
-                        "factor_ref": "visual_observation_signal:camera",
-                        "kind": "visual_observation",
-                    },
-                    {
-                        "factor_ref": "capability:vision.capture",
-                        "kind": "capability",
-                    },
-                    {
-                        "factor_ref": "capability:mcp.call_tool",
-                        "kind": "capability",
-                    },
-                    {
-                        "factor_ref": "affect_context:recent_episode_affects:0",
-                        "kind": "affect",
-                    },
-                ]
-            }
+            [
+                {
+                    "source": "test",
+                    "factor_ref": "periodic_thought_topic:elyth",
+                    "kind": "periodic_thought_topic",
+                },
+                {
+                    "source": "test",
+                    "factor_ref": "visual_observation_signal:camera",
+                    "kind": "visual_observation",
+                },
+                {
+                    "source": "test",
+                    "factor_ref": "capability:vision.capture",
+                    "kind": "capability",
+                },
+                {
+                    "source": "test",
+                    "factor_ref": "capability:mcp.call_tool",
+                    "kind": "capability",
+                },
+                {
+                    "source": "test",
+                    "factor_ref": "affect_context:recent_episode_affects:0",
+                    "kind": "affect",
+                },
+            ]
         )
         refs = {item["factor_ref"] for item in isolated["workspace_candidates"]}
         self.assertEqual(
@@ -408,14 +412,13 @@ class WakeInterventionLoadTests(unittest.TestCase):
             relationship_context=None,
             prediction_error_context=None,
             default_mode_context=None,
-            workspace_context={
-                "workspace_candidates": [
-                    {
-                        "factor_ref": "periodic_thought_topic:elyth",
-                        "kind": "periodic_thought_topic",
-                    }
-                ]
-            },
+            workspace_candidate_pool=[
+                {
+                    "source": "test",
+                    "factor_ref": "periodic_thought_topic:elyth",
+                    "kind": "periodic_thought_topic",
+                }
+            ],
             recall_hint={},
             recall_pack={},
             reference_context=None,
@@ -441,7 +444,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
             relationship_context=None,
             prediction_error_context=None,
             default_mode_context=None,
-            workspace_context={"workspace_candidates": []},
+            workspace_candidate_pool=[],
             recall_hint={},
             recall_pack={},
             reference_context=None,
@@ -497,11 +500,13 @@ class WakeInterventionLoadTests(unittest.TestCase):
         workspace = {
             "workspace_candidates": [
                 {
+                    "source": "test",
                     "factor_ref": "periodic_thought_topic:elyth",
                     "kind": "periodic_thought_topic",
                     "summary_text": DEFAULT_ELYTH_PERIODIC_THOUGHT_TOPIC_SUMMARY,
                 },
                 {
+                    "source": "test",
                     "factor_ref": "initiative:autonomous",
                     "kind": "initiative_candidate",
                     "summary_text": "定期思考トピック 1 件 / available capability 2 件 が自律判断の材料にある。",
@@ -513,10 +518,12 @@ class WakeInterventionLoadTests(unittest.TestCase):
                     },
                 },
                 {
+                    "source": "test",
                     "factor_ref": "capability:vision.capture",
                     "kind": "capability",
                 },
                 {
+                    "source": "test",
                     "factor_ref": "capability:mcp.call_tool",
                     "kind": "capability",
                 },
@@ -529,7 +536,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         )
         family = isolated.selected_family_entry()
         isolated_workspace = service._self_activity_workspace(
-            workspace,
+            workspace["workspace_candidates"],
             initiative_context=isolated,
         )
         initiative_candidate = next(
@@ -567,9 +574,9 @@ class WakeInterventionLoadTests(unittest.TestCase):
             )],
         )
         workspace = {"workspace_candidates": [
-            {"factor_ref": "periodic_thought_topic:elyth", "kind": "periodic_thought_topic",
+            {"source": "test", "factor_ref": "periodic_thought_topic:elyth", "kind": "periodic_thought_topic",
              "summary_text": "ELYTH での活動。"},
-            {"factor_ref": "drive_state:other", "kind": "drive_state",
+            {"source": "test", "factor_ref": "drive_state:other", "kind": "drive_state",
              "summary_text": drive["summary_text"]},
         ]}
         with_topic = service._self_activity_initiative_context(initiative, workspace_context=workspace)
@@ -616,35 +623,39 @@ class WakeInterventionLoadTests(unittest.TestCase):
     def test_outward_speech_workspace_drops_self_activity_means(self) -> None:
         service = DummyInputService()
         isolated = service._outward_speech_workspace(
-            {
-                "workspace_candidates": [
-                    {
-                        "factor_ref": "periodic_thought_topic:elyth",
-                        "kind": "periodic_thought_topic",
-                    },
-                    {
-                        "factor_ref": "visual_observation_signal:camera",
-                        "kind": "visual_observation",
-                    },
-                    {
-                        "factor_ref": "capability:mcp.call_tool",
-                        "kind": "capability",
-                    },
-                    {
-                        "factor_ref": "initiative:autonomous",
-                        "kind": "initiative_candidate",
-                    },
-                    {
-                        "factor_ref": "suppression:visual_repetition",
-                        "kind": "suppression",
-                    },
-                    {
-                        "factor_ref": "current_input:background_thinking",
-                        "kind": "current_input",
-                        "summary_text": "関わる、能力を使うのどれが自然かを見る。",
-                    },
-                ]
-            },
+            [
+                {
+                    "source": "test",
+                    "factor_ref": "periodic_thought_topic:elyth",
+                    "kind": "periodic_thought_topic",
+                },
+                {
+                    "source": "test",
+                    "factor_ref": "visual_observation_signal:camera",
+                    "kind": "visual_observation",
+                },
+                {
+                    "source": "test",
+                    "factor_ref": "capability:mcp.call_tool",
+                    "kind": "capability",
+                },
+                {
+                    "source": "test",
+                    "factor_ref": "initiative:autonomous",
+                    "kind": "initiative_candidate",
+                },
+                {
+                    "source": "test",
+                    "factor_ref": "suppression:visual_repetition",
+                    "kind": "suppression",
+                },
+                {
+                    "source": "test",
+                    "factor_ref": "current_input:background_thinking",
+                    "kind": "current_input",
+                    "summary_text": "関わる、能力を使うのどれが自然かを見る。",
+                },
+            ],
             current_input_text="自己評価。いま短い見方として外へ出るかを見る。",
         )
         refs = {item["factor_ref"] for item in isolated["workspace_candidates"]}
@@ -721,12 +732,10 @@ class WakeInterventionLoadTests(unittest.TestCase):
             relationship_context=None,
             prediction_error_context=None,
             default_mode_context=None,
-            workspace_context={
-                "workspace_candidates": [
-                    {"factor_ref": "periodic_thought_topic:elyth", "kind": "periodic_thought_topic"},
-                    {"factor_ref": "visual_observation:current", "kind": "visual_observation"},
-                ]
-            },
+            workspace_candidate_pool=[
+                {"source": "test", "factor_ref": "periodic_thought_topic:elyth", "kind": "periodic_thought_topic"},
+                {"source": "test", "factor_ref": "visual_observation:current", "kind": "visual_observation"},
+            ],
             recall_hint={},
             recall_pack={},
             reference_context=None,
@@ -745,7 +754,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertEqual(refs, {"visual_observation:current"})
         self.assertEqual(
             context.initiative_context.opportunity_summary,
-            "外界の観測と直近文脈があり、短い見方として外へ出るかを見る。",
+            "今回の判断材料から、短い見方として外へ出るかを見る。",
         )
         self.assertEqual(context.initiative_context.selected_candidate_family, None)
         self.assertFalse(context.initiative_context.candidate_families[0].available)
@@ -958,6 +967,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                     comparison_scope="self_activity",
                     capability_decision_view=[],
                     workspace_context={"workspace_candidates": [{
+                        "source": "test",
                         "factor_ref": "periodic_thought_topic:elyth",
                         "kind": "periodic_thought_topic",
                         "summary_text": "ELYTH に関わる。",
@@ -1041,14 +1051,13 @@ class WakeInterventionLoadTests(unittest.TestCase):
             relationship_context=None,
             prediction_error_context=None,
             default_mode_context=None,
-            workspace_context={
-                "workspace_candidates": [
-                    {
-                        "factor_ref": "periodic_thought_topic:elyth",
-                        "kind": "periodic_thought_topic",
-                    }
-                ]
-            },
+            workspace_candidate_pool=[
+                {
+                    "source": "test",
+                    "factor_ref": "periodic_thought_topic:elyth",
+                    "kind": "periodic_thought_topic",
+                }
+            ],
             recall_hint={"primary_recall_focus": "state"},
             recall_pack={"visual_observations": [{"summary_text": "S評価"}]},
             self_activity_recall_hint={"primary_recall_focus": "topic"},
@@ -1095,7 +1104,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
             relationship_context=None,
             prediction_error_context=None,
             default_mode_context=None,
-            workspace_context={"workspace_candidates": []},
+            workspace_candidate_pool=[],
             recall_hint={},
             recall_pack={},
             reference_context=None,
@@ -1185,6 +1194,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
             workspace_context={
                 "workspace_candidates": [
                     {
+                        "source": "test",
                         "factor_ref": "periodic_thought_topic:elyth",
                         "kind": "periodic_thought_topic",
                     }
@@ -1278,11 +1288,13 @@ class WakeInterventionLoadTests(unittest.TestCase):
             workspace_context={
                 "workspace_candidates": [
                     {
+                        "source": "test",
                         "factor_ref": "current_input:current",
                         "kind": "current_input",
                         "summary_text": current_input.text,
                     },
                     {
+                        "source": "test",
                         "factor_ref": "periodic_thought_topic:elyth",
                         "kind": "periodic_thought_topic",
                     }

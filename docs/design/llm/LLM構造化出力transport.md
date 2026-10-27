@@ -49,6 +49,7 @@ schema が担う範囲は次である。
 
 schema は request ごとの動的 enum を持たない。
 `decision.kind` と `decision.target_stances[].target` は、`comparison_scope` に応じた固定の許可集合へ絞る。
+10 キーの形を維持したまま、`self_activity` の `speech_text`、`outward_speech` の `capability_request` と `autonomous_run` は provider schema でも `null` 型に固定する。`full` は既存の各 payload 型を持つ。初回生成と repair で同じ schema を使う。
 
 `decision.target_stances` の `minItems` は、生成前の文脈で必須と判定した対象の件数、`maxItems` はその比較で許可する対象の件数にする。必須対象の意味規則は [判断と行動](../runtime/判断と行動.md#decision_generation-の出力契約) を正とする。対象の重複と、生成結果の `kind` に応じた追加要件は validator で検証する。
 

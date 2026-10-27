@@ -190,7 +190,7 @@ class ServiceInputDecisionComparisonMixin:
 
     def _build_self_activity_decision_context(self, **kwargs: Any) -> DecisionContext:
         current_input = kwargs["current_input"]
-        source_workspace = kwargs.get("workspace_context")
+        source_workspace = {"workspace_candidates": kwargs["workspace_candidate_pool"]}
         isolated_input = kwargs.get("self_activity_current_input")
         if not isinstance(isolated_input, CurrentInput):
             isolated_input = self._self_activity_current_input(current_input, source_workspace)
@@ -232,7 +232,7 @@ class ServiceInputDecisionComparisonMixin:
             prediction_error_context=None,
             default_mode_context=None,
             workspace_context=self._self_activity_workspace(
-                source_workspace,
+                kwargs["workspace_candidate_pool"],
                 current_input_text=isolated_input.text,
                 initiative_context=initiative_context,
             ),
@@ -270,16 +270,11 @@ class ServiceInputDecisionComparisonMixin:
 
     def _self_activity_workspace(
         self,
-        workspace_context: dict[str, Any] | None,
+        candidates: list[dict[str, Any]],
         *,
         current_input_text: str | None = None,
         initiative_context: InitiativeContext | None = None,
-    ) -> dict[str, Any] | None:
-        if not isinstance(workspace_context, dict):
-            return None
-        candidates = workspace_context.get("workspace_candidates")
-        if not isinstance(candidates, list):
-            return workspace_context
+    ) -> dict[str, Any]:
         kept = []
         for candidate in candidates:
             if not isinstance(candidate, dict):
@@ -314,10 +309,7 @@ class ServiceInputDecisionComparisonMixin:
                         initiative_context=initiative_context,
                     )
                 )
-        return {
-            **workspace_context,
-            "workspace_candidates": kept,
-        }
+        return self._finalize_workspace_context(kept)
 
     def _build_outward_speech_decision_context(self, **kwargs: Any) -> DecisionContext:
         current_input = kwargs["current_input"]
@@ -355,7 +347,7 @@ class ServiceInputDecisionComparisonMixin:
             prediction_error_context=kwargs.get("prediction_error_context"),
             default_mode_context=kwargs.get("default_mode_context"),
             workspace_context=self._outward_speech_workspace(
-                kwargs.get("workspace_context"),
+                kwargs["workspace_candidate_pool"],
                 current_input_text=isolated_input.text,
             ),
             recall_hint=kwargs.get("recall_hint") or {},
@@ -367,15 +359,10 @@ class ServiceInputDecisionComparisonMixin:
 
     def _outward_speech_workspace(
         self,
-        workspace_context: dict[str, Any] | None,
+        candidates: list[dict[str, Any]],
         *,
         current_input_text: str | None = None,
-    ) -> dict[str, Any] | None:
-        if not isinstance(workspace_context, dict):
-            return None
-        candidates = workspace_context.get("workspace_candidates")
-        if not isinstance(candidates, list):
-            return workspace_context
+    ) -> dict[str, Any]:
         dropped_kinds = {
             "periodic_thought_topic",
             "ongoing_action",
@@ -404,10 +391,7 @@ class ServiceInputDecisionComparisonMixin:
                 kept.append(rewritten)
                 continue
             kept.append(candidate)
-        return {
-            **workspace_context,
-            "workspace_candidates": kept,
-        }
+        return self._finalize_workspace_context(kept)
 
     def _outward_speech_initiative_context(
         self,
@@ -426,7 +410,7 @@ class ServiceInputDecisionComparisonMixin:
                 selected_family = family.family
         return replace(
             initiative_context,
-            opportunity_summary="外界の観測と直近文脈があり、短い見方として外へ出るかを見る。",
+            opportunity_summary="今回の判断材料から、短い見方として外へ出るかを見る。",
             ongoing_action_summary=None,
             capability_summary={},
             candidate_families=families,

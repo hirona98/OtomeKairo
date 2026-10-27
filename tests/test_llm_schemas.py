@@ -66,7 +66,7 @@ class LLMSchemaTests(unittest.TestCase):
         self.assertNotIn("additionalProperties", qualifiers_hint)
 
     def test_capability_input_is_json_object_text(self) -> None:
-        for scope in ("full", "self_activity", "outward_speech"):
+        for scope in ("full", "self_activity"):
             with self.subTest(scope=scope):
                 schema = _root_schema(decision_response_format(comparison_scope=scope))
                 capability_input = schema["properties"]["capability_request"]["properties"]["input"]
@@ -124,6 +124,20 @@ class LLMSchemaTests(unittest.TestCase):
             with self.subTest(scope=scope):
                 schema = _root_schema(decision_response_format(comparison_scope=scope))
                 self.assertEqual(set(schema["properties"]["kind"]["enum"]), set(kinds))
+
+    def test_decision_schema_keeps_keys_and_closes_inactive_payloads(self) -> None:
+        keys = set(_root_schema(decision_response_format())["properties"])
+        for scope, inactive in (
+            ("full", ()),
+            ("self_activity", ("speech_text",)),
+            ("outward_speech", ("capability_request", "autonomous_run")),
+        ):
+            with self.subTest(scope=scope):
+                schema = _root_schema(decision_response_format(comparison_scope=scope))
+                self.assertEqual(set(schema["properties"]), keys)
+                self.assertEqual(set(schema["required"]), keys)
+                for field in inactive:
+                    self.assertEqual(schema["properties"][field], {"type": "null"})
 
     def test_decision_target_stances_follow_scope_and_required_targets(self) -> None:
         for scope, required, minimum, maximum, targets in (

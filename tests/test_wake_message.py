@@ -147,6 +147,9 @@ def test_api_request_keeps_full_decision_with_self_activity_candidates(kind):
         workspace_context={"workspace_candidates": [
             {"factor_ref": "periodic_thought_topic:test", "kind": "periodic_thought_topic"},
         ]},
+        workspace_candidate_pool=[
+            {"factor_ref": "periodic_thought_topic:test", "kind": "periodic_thought_topic"},
+        ],
         recall_hint={}, recall_pack={}, reference_context=reference,
         model_config={}, persona_context=None, cycle_label="cycle:test",
     )

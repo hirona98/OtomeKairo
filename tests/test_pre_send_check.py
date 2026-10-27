@@ -94,6 +94,7 @@ class _PipelineService(ServiceInputDecisionComparisonMixin, ServiceInputPipeline
                 "prediction_error_context": None,
                 "default_mode_context": None,
                 "workspace_context": None,
+                "workspace_candidate_pool": [],
                 "world_state_trace": None,
             }
         )
