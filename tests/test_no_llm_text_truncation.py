@@ -20,7 +20,7 @@ class TextTruncationTests(unittest.TestCase):
             time_context_summary={},
             foreground_signal_summary={
                 "reason_summary": text,
-                "visual_observations": [{"summary_text": text}],
+                "observations": [{"summary_text": text}],
             },
             activity_context=None,
             persona_context_summary={},
@@ -45,7 +45,7 @@ class TextTruncationTests(unittest.TestCase):
         self.assertEqual(payload["initiative_entry_summary"]["reason_summary"], text)
         self.assertEqual(payload["foreground_signal_summary"]["reason_summary"], text)
         self.assertEqual(
-            payload["foreground_signal_summary"]["visual_observations"][0]["summary_text"],
+            payload["foreground_signal_summary"]["observations"][0]["summary_text"],
             text,
         )
 

@@ -163,6 +163,10 @@ class ServiceInputTracePersistMixin:
             )
 
         # 応答
+        if speech_payload is not None:
+            self._record_observation_speech(memory_set_id=state["selected_memory_set_id"],
+                client_context=client_context, speech_text=speech_payload["speech_text"], spoken_at=finished_at,
+                decision=decision, current_visual_observations=pipeline.get("current_visual_observations"))
         return {
             "cycle_id": cycle_id,
             "interaction_ref": interaction_context.interaction_ref if interaction_context is not None else None,
@@ -350,19 +354,11 @@ class ServiceInputTracePersistMixin:
             ongoing_action_summary=ongoing_action_summary,
             initiative_context=initiative_context,
         )
-        visual_observation_records = self._build_visual_observation_records(
-            cycle_id=cycle_id,
-            memory_set_id=memory_set_id,
-            observed_at=started_at,
-            client_context=client_context,
-            observation_summary=observation_summary,
-        )
         self.store.persist_cycle_records(
             events=events,
             retrieval_run=retrieval_run,
             cycle_summary=cycle_summary,
             cycle_trace=cycle_trace,
-            visual_observation_records=visual_observation_records,
         )
         self._register_interaction_participants(
             memory_set_id=memory_set_id,
@@ -505,19 +501,11 @@ class ServiceInputTracePersistMixin:
             ongoing_action_summary=ongoing_action_summary,
             initiative_context=initiative_context,
         )
-        visual_observation_records = self._build_visual_observation_records(
-            cycle_id=cycle_id,
-            memory_set_id=memory_set_id,
-            observed_at=started_at,
-            client_context=client_context,
-            observation_summary=observation_summary,
-        )
         self.store.persist_cycle_records(
             events=events,
             retrieval_run=retrieval_run,
             cycle_summary=cycle_summary,
             cycle_trace=cycle_trace,
-            visual_observation_records=visual_observation_records,
         )
         self._register_interaction_participants(
             memory_set_id=memory_set_id,

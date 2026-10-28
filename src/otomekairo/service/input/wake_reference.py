@@ -49,6 +49,7 @@ class ServiceInputWakeReferenceMixin:
     def _prepare_wake_reference_context(
         self,
         *,
+        acquisition,
         state: dict[str, Any],
         started_at: str,
         input_text: str,
@@ -69,6 +70,7 @@ class ServiceInputWakeReferenceMixin:
             "summary": resolution.summary,
         }
         if resolution.text is not None:
+            acquisition.reference_texts.append((resolution.summary.get("label") or "参照資料", resolution.text, started_at))
             # raw text は trace 用 client_context へ入れず、この cycle の LLM 文脈だけへ渡す。
             reference_context["text"] = resolution.text
             next_client_context["initiative_entry_check"] = self._wake_reference_initiative_entry(
@@ -91,15 +93,8 @@ class ServiceInputWakeReferenceMixin:
             "source_label": resolution.summary.get("label") or "wake reference",
             "reference_summary": resolution.summary,
         }
-        next_client_context, observation_summary = self._interpret_visual_observation(
-            state=state,
-            started_at=started_at,
-            trigger_kind="wake",
-            client_context=next_client_context,
-            observation_summary=observation_summary,
-            input_text=input_text,
-            images=[resolution.image_data_uri],
-        )
+        self._collect_material_images(acquisition=acquisition, images=[resolution.image_data_uri],
+                                      target=observation_summary, origin_kind="wake_reference", observed_at=started_at)
         updated_summary = dict(resolution.summary)
         visual_summary_text = observation_summary.get("visual_summary_text")
         if isinstance(visual_summary_text, str) and visual_summary_text.strip():

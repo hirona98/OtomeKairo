@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from observation_fixtures import input_payload
+from otomekairo.llm.contexts import CurrentInput
 from otomekairo.service.app import OtomeKairoService
 
 
@@ -57,45 +59,32 @@ class EvaluationRegressionTests(unittest.TestCase):
             "change_basis": "no_previous_observation",
             "change_reason_summary": "前回の観測がない。",
         }
-        with patch("otomekairo.llm.client.complete_text", return_value=json.dumps(visual_result)) as complete:
-            _, interpreted = self.service._interpret_visual_observation(
-                state=self.state,
-                started_at=NOW,
-                trigger_kind="capability_result",
-                client_context={"source_kind": "camera"},
-                observation_summary={
-                    "source": "capability_result",
-                    "capability_id": "vision.capture",
-                    "source_kind": "camera",
-                    "source_label": "対面カメラ",
-                    "vision_source_id": "vision_source:test-camera",
-                    "image_count": 1,
-                },
-                input_text="カメラの結果を受信。",
-                images=["data:image/png;base64,YQ=="],
-            )
-        complete.assert_called_once()
-        wake_summary = self.service._wake_policy_observation_success_summary(
-            observation={"observation_id": "wake_observation:camera", "capability_id": "vision.capture"},
-            capability_response={"request_id": "request:test-camera"},
-            observation_summary=interpreted,
-            capability_request_summary=None,
-        )
-        records = self.service._build_visual_observation_records(
-            cycle_id="cycle:test-camera",
-            memory_set_id=self.memory_set_id,
-            observed_at=NOW,
-            client_context={"wake_observation_trace": {"wake_observations": [wake_summary]}},
-            observation_summary=None,
-        )
-
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]["image_input_kind"], "vision_capture_result")
-        self.assertEqual(records[0]["detailed_summary_text"], "机の上に小さな鉢植えが見える。")
-        with self.service.store._memory_db() as conn:
-            self.service.store._insert_visual_observation_record(conn, records[0])
-        stored = self.service.store.list_recent_visual_observation_records(memory_set_id=self.memory_set_id)
-        self.assertEqual(stored[0]["visual_observation_id"], interpreted["visual_observation_id"])
+        self.state["camera_sources"]["vision_source:test-camera"] = {"place_ref": None}
+        acquisition = self.service._new_observation_acquisition(self.state)
+        target = {"source": "capability_result", "capability_id": "vision.capture", "source_kind": "camera",
+                  "source_label": "対面カメラ", "vision_source_id": "vision_source:test-camera", "image_count": 1}
+        response = {"images": ["data:image/png;base64,YQ=="], "captured_at": NOW,
+                    "client_context": {"source_kind": "camera", "source_label": "対面カメラ",
+                                       "vision_source_id": "vision_source:test-camera"}}
+        payload = input_payload(observations=[{"observation_ref": "observation:1", **visual_result}])
+        current_input = CurrentInput(sender_kind="system", sender_ref=None, source_kind="capability_result",
+                                     response_target_refs=(), interaction_context=None, text="カメラの結果を受信。")
+        try:
+            with patch.object(self.service, "_now_iso", return_value=NOW), patch(
+                "otomekairo.llm.client.complete_text", return_value=json.dumps(payload)
+            ) as complete:
+                self.service._collect_capture_images(state=self.state, acquisition=acquisition,
+                                                     capability_response=response, target=target)
+                self.service._interpret_observation_inputs(state=self.state, acquisition=acquisition,
+                    current_input=current_input, recent_turns=[], client_context={}, cycle_id="cycle:test-camera")
+            complete.assert_called_once()
+            stored = self.service.store.list_recent_visual_observation_records(memory_set_id=self.memory_set_id)
+            self.assertEqual(len(stored), 1)
+            self.assertEqual(stored[0]["image_input_kind"], "vision_capture_result")
+            self.assertEqual(stored[0]["detailed_summary_text"], visual_result["summary_text"])
+            self.assertEqual(stored[0]["visual_observation_id"], target["visual_observation_id"])
+        finally:
+            acquisition.close()
 
     def test_interpreted_visual_observation_without_identity_fails_explicitly(self) -> None:
         with self.assertRaisesRegex(ValueError, "observation ID"):

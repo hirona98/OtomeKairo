@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from datetime import datetime
 from typing import Any
 
 from .capture import RtspStillCapture
@@ -99,6 +100,7 @@ class TapoC220Connector:
             image = self.capture.capture_data_uri(timeout_seconds=timeout)
             result = {
                 "images": [image],
+                "captured_at": datetime.now().astimezone().isoformat(),
                 "client_context": client_context,
                 "error": None,
             }
@@ -107,6 +109,7 @@ class TapoC220Connector:
         except Exception as exc:  # noqa: BLE001
             result = {
                 "images": [],
+                "captured_at": None,
                 "client_context": client_context,
                 "error": self._short_error(exc),
             }

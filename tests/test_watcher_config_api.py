@@ -39,7 +39,7 @@ def camera_source(
     vision_source_id: str = "vision_source:stale",
     watcher_id: str = "watcher:stale",
 ) -> dict:
-    return {
+    return {"place_ref": None,
         "vision_source_id": vision_source_id,
         "enabled": True,
         "display_name": display_name,

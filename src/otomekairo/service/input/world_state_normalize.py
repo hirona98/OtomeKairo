@@ -44,7 +44,7 @@ class ServiceInputWorldStateNormalizeMixin:
             state_type = source_candidate.state_type
             scope_type = source_candidate.scope_type
             scope_key = source_candidate.scope_key
-            source_context = self._world_state_source_context(
+            source_context = source_candidate.observation_context or self._world_state_source_context(
                 state_type=state_type,
                 source_pack=source_pack,
             )
@@ -84,6 +84,23 @@ class ServiceInputWorldStateNormalizeMixin:
                     "integration_key": integration_policy["key"],
                 }
             )
+            if source_candidate.observation_source_ref is not None:
+                record = normalized[-1]
+                record.update(observation_source_ref=source_candidate.observation_source_ref,
+                              channel_id=source_candidate.channel_id, place_ref=source_candidate.place_ref,
+                              source_observation_ids=list(source_candidate.source_observation_ids),
+                              observation_payload=source_candidate.observation_payload,
+                              observed_at=source_candidate.observed_at)
+                if self._parse_iso(record["expires_at"]) > self._parse_iso(source_candidate.expires_at):
+                    record["expires_at"] = source_candidate.expires_at
+                record["ttl_seconds"] = int((self._parse_iso(record["expires_at"]) - self._parse_iso(record["observed_at"])).total_seconds())
+                if state_type == "environment":
+                    import json
+                    record["integration_mode"] = "environment_source"
+                    record["integration_key"] = "environment:" + json.dumps(
+                        [source_candidate.observation_source_ref, source_candidate.channel_id], separators=(",", ":"),
+                    )
+                record["source_owner"] = source_candidate.source_owner
             source_owner = self._world_state_source_owner(state_type=state_type, source_context=source_context)
             if source_owner is not None:
                 normalized[-1]["source_owner"] = source_owner

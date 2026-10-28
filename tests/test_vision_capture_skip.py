@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from otomekairo.observations.acquisition import ObservationAcquisition
 from otomekairo.service.app import OtomeKairoService
 from otomekairo.service.common import ServiceError
 from otomekairo.service.spontaneous.capability_payload import (
@@ -70,6 +71,7 @@ class VisionCaptureSkipResultTests(unittest.TestCase):
             self.service._normalize_capability_result_payload(
                 capability_id="vision.capture",
                 result_payload={
+                    "captured_at": None,
                     "images": [PNG_DATA_URI],
                     "error": VISION_CAPTURE_SKIPPED_EXCLUDED_WINDOW_TITLE,
                 },
@@ -80,6 +82,7 @@ class VisionCaptureSkipResultTests(unittest.TestCase):
         payload = self.service._normalize_capability_result_payload(
             capability_id="vision.capture",
             result_payload={
+                "captured_at": None,
                 "images": [],
                 "error": VISION_CAPTURE_SKIPPED_EXCLUDED_WINDOW_TITLE,
             },
@@ -218,12 +221,14 @@ class VisionCaptureSkipResultTests(unittest.TestCase):
         self.assertNotIn("failed", text)
 
     def _run_observation_summaries(self, summaries: list[dict]) -> dict:
+        summaries = [{"vision_source_id": "vision_source:test", **item} for item in summaries]
         with (
             patch.object(self.service, "_enabled_wake_policy_observations", return_value=summaries),
             patch.object(self.service, "_run_wake_policy_observation", side_effect=summaries),
         ):
             return self.service._run_wake_policy_observations(
-                state={}, started_at="2026-08-14T12:00:00+09:00",
+                acquisition=ObservationAcquisition("memory_set:test", 300),
+                state={"camera_sources": {}}, started_at="2026-08-14T12:00:00+09:00",
                 client_context={"source": "background_thinking_scheduler"}, cycle_id=None,
                 for_background_thinking=False,
             )
@@ -287,9 +292,9 @@ class VisionCaptureSkipResultTests(unittest.TestCase):
         for observations in ([succeeded], [failed], [succeeded, failed]):
             with self.subTest(observations=observations):
                 context = self._run_observation_summaries([skipped, *observations])
-                self.assertEqual(context["wake_observations"], observations)
+                self.assertEqual(context["wake_observations"], [{"vision_source_id": "vision_source:test", **item} for item in observations])
                 self.assertEqual(context["wake_observation_summary"],
-                                 self.service._wake_policy_observation_summary_text(observations))
+                                 self.service._wake_policy_observation_summary_text([{**item, "vision_source_id": "vision_source:test"} for item in observations]))
                 self.assertEqual(len(context["wake_observation_trace"]["wake_observations"]),
                                  len(observations) + 1)
 
@@ -299,6 +304,7 @@ class VisionCaptureSkipResultTests(unittest.TestCase):
         self.service._refresh_world_state_context = lambda **kwargs: called.append("world")
         self.service._refresh_activity_context = lambda **kwargs: called.append("activity")
         summary = self.service._apply_wake_policy_observation_result(
+            acquisition=ObservationAcquisition("memory_set:test", 300),
             state={"selected_memory_set_id": "memory_set:test"},
             started_at="2026-08-14T12:00:00+09:00",
             observation={

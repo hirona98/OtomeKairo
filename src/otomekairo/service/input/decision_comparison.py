@@ -226,7 +226,10 @@ class ServiceInputDecisionComparisonMixin:
             initiative_context=initiative_context,
             capability_result_context=None,
             current_visual_observations=[],
-            self_state_context=kwargs.get("self_state_context"),
+            self_state_context=self._build_self_state_context(
+                foreground_world_state=self._self_activity_world_state(kwargs.get("foreground_world_state")),
+                ongoing_action_summary=kwargs.get("ongoing_action_summary"),
+                capability_result_context=None, current_visual_observations=[]),
             people_context=[],
             relationship_context=None,
             prediction_error_context=None,
@@ -253,6 +256,7 @@ class ServiceInputDecisionComparisonMixin:
             item
             for item in foreground_world_state
             if isinstance(item, dict) and item.get("state_type") != "visual_context"
+            and not item.get("observation_source_ref")
         ]
         return kept or None
 
@@ -322,6 +326,7 @@ class ServiceInputDecisionComparisonMixin:
             text="自己評価。いま短い見方として外へ出るかを見る。",
         )
         return self._build_decision_context(
+            observations=kwargs.get("observations"),
             disclosure_context=kwargs.get("disclosure_context"),
             configured_activity_topics=kwargs.get("configured_activity_topics"),
             recent_interactions=kwargs.get("recent_interactions"),
@@ -497,7 +502,7 @@ class ServiceInputDecisionComparisonMixin:
         world_state_summary: list[dict[str, Any]],
     ) -> dict[str, Any]:
         payload = dict(foreground_signal_summary or {})
-        payload.pop("visual_observations", None)
+        payload.pop("observations", None)
         if not world_state_summary:
             payload["foreground_thinness"] = "thin"
             payload["reason_summary"] = "前景 world_state はまだ薄い。"
@@ -528,6 +533,7 @@ class ServiceInputDecisionComparisonMixin:
             item
             for item in initiative_context.world_state_summary
             if isinstance(item, dict) and item.get("state_type") != "visual_context"
+            and not item.get("observation_source_ref")
         ]
         due_periodic_thought_topics = self._workspace_periodic_thought_topics(workspace_context)
         capability_summary = self._self_activity_capability_summary(

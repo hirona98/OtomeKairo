@@ -49,178 +49,10 @@ class ServiceInputVisualMixin:
             return False
         return ";base64" in header
 
-    def _interpret_visual_observation(
-        self,
-        *,
-        state: dict[str, Any],
-        started_at: str,
-        trigger_kind: str,
-        client_context: dict[str, Any],
-        observation_summary: dict[str, Any],
-        input_text: str,
-        images: list[str],
-        visual_observation_change_context: dict[str, Any] | None = None,
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        if not images:
-            return client_context, observation_summary
 
-        # 生成モデル/source pack
-        selected_preset = state["model_presets"][state["selected_model_preset_id"]]
-        persona_context = self._build_selected_persona_context(state=state, role="visual_observation")
-        source_pack = self._build_visual_observation_source_pack(
-            started_at=started_at,
-            input_text=input_text,
-            trigger_kind=trigger_kind,
-            client_context=client_context,
-            observation_summary=observation_summary,
-            persona_context=persona_context,
-            visual_observation_change_context=visual_observation_change_context,
-        )
 
-        # 実行
-        try:
-            payload = self.llm.generate_visual_observation_summary(
-                model_config=selected_preset,
-                persona_context=persona_context,
-                source_pack=source_pack,
-                images=images,
-            )
-        except (LLMError, KeyError, ValueError) as exc:
-            observation_summary["image_interpretation_error"] = str(exc)
-            raise
 
-        # 反映
-        visual_summary_text = str(payload["summary_text"]).strip()
-        visual_confidence_hint = str(payload["confidence_hint"]).strip()
-        change_state = str(payload["change_state"]).strip()
-        change_basis = str(payload["change_basis"]).strip()
-        change_reason_summary = str(payload["change_reason_summary"]).strip()
-        enriched_client_context = {
-            **client_context,
-            "image_summary_text": visual_summary_text,
-        }
-        enriched_observation_summary = {
-            **observation_summary,
-            "visual_observation_id": f"visual_observation:{uuid.uuid4().hex}",
-            "image_input_kind": self._visual_observation_input_kind(
-                trigger_kind=trigger_kind,
-                observation_summary=observation_summary,
-            ),
-            "image_interpreted": True,
-            "visual_summary_text": visual_summary_text,
-            "visual_confidence_hint": visual_confidence_hint,
-            "change_state": change_state,
-            "change_basis": change_basis,
-            "change_reason_summary": change_reason_summary,
-        }
-        capability_id = enriched_observation_summary.get("capability_id")
-        readiness_digest = (
-            capability_readiness_result_digest(capability_id, enriched_observation_summary)
-            if isinstance(capability_id, str)
-            else None
-        )
-        if isinstance(readiness_digest, dict):
-            enriched_observation_summary["readiness_digest"] = readiness_digest
-        return enriched_client_context, enriched_observation_summary
 
-    def _build_visual_observation_source_pack(
-        self,
-        *,
-        started_at: str,
-        input_text: str,
-        trigger_kind: str,
-        client_context: dict[str, Any],
-        observation_summary: dict[str, Any],
-        persona_context: Any,
-        visual_observation_change_context: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "trigger_kind": trigger_kind,
-            "persona_context": persona_context.to_prompt_payload(),
-            "image_input_kind": self._visual_observation_input_kind(
-                trigger_kind=trigger_kind,
-                observation_summary=observation_summary,
-            ),
-            "time_context": llm_local_time_text(started_at).replace("\n", " / "),
-            "client_context": self._build_visual_observation_client_context(
-                trigger_kind=trigger_kind,
-                client_context=client_context,
-                observation_summary=observation_summary,
-            ),
-            "observation_summary": self._build_visual_observation_observation_summary(observation_summary),
-            "current_input_summary": input_text.strip(),
-            "observed_persons": self._observed_persons_from_structured_source(
-                [observation_summary, client_context.get("visual_observation_signals")]
-            ),
-        }
-        if isinstance(visual_observation_change_context, dict) and visual_observation_change_context:
-            payload["change_context"] = visual_observation_change_context
-        return payload
-
-    def _visual_observation_input_kind(
-        self,
-        *,
-        trigger_kind: str,
-        observation_summary: dict[str, Any],
-    ) -> str:
-        image_input_kind = observation_summary.get("image_input_kind")
-        if isinstance(image_input_kind, str) and image_input_kind.strip():
-            return image_input_kind.strip()
-        if trigger_kind == "capability_result" and observation_summary.get("capability_id") == "vision.capture":
-            return "vision_capture_result"
-        return "conversation_attachment"
-
-    def _build_visual_observation_client_context(
-        self,
-        *,
-        trigger_kind: str,
-        client_context: dict[str, Any],
-        observation_summary: dict[str, Any],
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {}
-        include_foreground_hint = (
-            trigger_kind == "capability_result"
-            and observation_summary.get("capability_id") == "vision.capture"
-        )
-        for key, limit in (
-            ("source", 48),
-            ("client_id", 80),
-            ("vision_source_id", 96),
-            ("source_kind", 32),
-            ("source_label", 80),
-            ("active_app", 80),
-            ("window_title", 120),
-            ("locale", 32),
-        ):
-            if key in {"vision_source_id", "source_kind", "source_label", "active_app", "window_title", "locale"} and not include_foreground_hint:
-                continue
-            value = client_context.get(key)
-            if isinstance(value, str) and value.strip():
-                payload[key] = value.strip()
-        return payload
-
-    def _build_visual_observation_observation_summary(
-        self,
-        observation_summary: dict[str, Any],
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {}
-        for key in (
-            "source",
-            "image_input_kind",
-            "capability_id",
-            "vision_source_id",
-            "source_kind",
-            "source_label",
-            "image_count",
-            "image_interpreted",
-            "visual_confidence_hint",
-            "error",
-        ):
-            value = observation_summary.get(key)
-            if value is None:
-                continue
-            payload[key] = value
-        return payload
 
     def _build_current_visual_observations(
         self, *, trigger_kind: str, observation_summary: dict[str, Any] | None,
@@ -249,7 +81,7 @@ class ServiceInputVisualMixin:
                 )
                 if context is None:
                     raise ValueError("unsupported interpreted visual observation source")
-            context.update({"visual_observation_id": visual_id, "observed_at": observed_at,
+            context.update({"visual_observation_id": visual_id, "observed_at": summary["observed_at"],
                             "visual_summary_text": text})
             for key in ("vision_source_id", "source_kind", "source_label", "image_count", "request_id",
                         "change_state", "change_basis", "change_reason_summary"):
@@ -269,6 +101,7 @@ class ServiceInputVisualMixin:
         self, *, input_text: str, trigger_kind: str,
         observation_summary: dict[str, Any] | None,
         current_visual_observations: list[dict[str, Any]], current_input: Any = None,
+        observations: Any = None,
     ) -> str:
         parts = [input_text]
         if trigger_kind == "capability_result" and getattr(current_input, "sender_kind", None) == "person":
@@ -280,6 +113,14 @@ class ServiceInputVisualMixin:
             parts.append("<<<OTOMEKAIRO_INTERNAL_CONTEXT current_visual_observation>>>\n"
                          + str(observation["source"]) + "\n" + observation["visual_summary_text"]
                          + "\n<<<END_OTOMEKAIRO_INTERNAL_CONTEXT>>>")
+        if observations is not None:
+            from otomekairo.observations.models import Image
+            values = observations.to_prompt_payload()
+            for item, observation in zip(values["surroundings"]["observations"] + values["input_materials"]["observations"], observations.observations, strict=True):
+                if not isinstance(observation.payload, Image):
+                    parts.append("<<<OTOMEKAIRO_INTERNAL_CONTEXT current_observation>>>\n"
+                                 + observation.source_label + "\n" + item["interpretation"]["summary_text"]
+                                 + "\n<<<END_OTOMEKAIRO_INTERNAL_CONTEXT>>>")
         return "\n\n".join(parts)
 
     def _observation_summary_is_conversation_attachment(self, observation_summary: dict[str, Any] | None) -> bool:

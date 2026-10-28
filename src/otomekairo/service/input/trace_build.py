@@ -474,6 +474,9 @@ class ServiceInputTraceBuildMixin:
             "runtime_state_summary": runtime_summary,
             "pending_intent_selection": pending_intent_selection or self._empty_pending_intent_selection_trace(),
         }
+        if "observation_snapshot" in client_context:
+            input_trace["observation_snapshot"] = client_context["observation_snapshot"]
+            input_trace["input_interpretation"] = client_context["input_interpretation"]
         input_context_addition_summary = self._input_context_addition_summary(
             input_text=input_text,
             augmented_query_text=augmented_query_text,

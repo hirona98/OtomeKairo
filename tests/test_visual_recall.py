@@ -8,6 +8,7 @@ import pytest
 from otomekairo.defaults import build_default_state
 from otomekairo.llm.client import LLMError
 from otomekairo.llm.contexts import CurrentInput, build_persona_context
+from observation_fixtures import image_context, text_payloads
 from otomekairo.llm.prompts import build_input_interpretation_messages
 from otomekairo.recall.builder import RecallBuilder
 from otomekairo.service.input.mixin import ServiceInputMixin
@@ -151,7 +152,7 @@ def test_visual_embedding_failure_fails_recall_instead_of_using_text_search(setu
 def observation(key, source="conversation_attachment", **changes):
     return {"visual_observation_id": key, "source": source, "image_input_kind": source,
             "image_interpreted": True, "visual_summary_text": "形や色の詳しい説明。" * 70,
-            "visual_confidence_hint": "medium", **changes}
+            "visual_confidence_hint": "medium", "observed_at": TIME, **changes}
 
 
 @pytest.mark.parametrize("trigger,source", [("user_message", "conversation_attachment"),
@@ -178,12 +179,13 @@ def test_current_observation_collection_preserves_details_sources_and_original_i
     persona = build_persona_context({"persona_prompt": "観測を根拠に考える。"}, role="input_interpretation")
     current_input = CurrentInput(sender_kind="person", sender_ref="person:test", source_kind="user_message",
                                 response_target_refs=("person:test",), interaction_context=None, text=text)
+    context = image_context(summary=direct["visual_summary_text"])
     messages = build_input_interpretation_messages(persona_context=persona, current_input=current_input,
-                   recent_turns=[], current_time=TIME, current_visual_observations=result)
-    internal = json.loads(messages[1]["content"].split("\n")[1])
-    assert internal["current_visual_observations"] == result
-    assert direct["visual_summary_text"] not in messages[2]["content"]
-    assert text in messages[2]["content"]
+                   recent_turns=[], current_time=TIME, observations=context)
+    payloads = list(text_payloads(messages))
+    environment = next(item for item in payloads if "surroundings" in item)
+    assert environment["input_materials"]["observations"][0]["interpretation"]["summary_text"] == direct["visual_summary_text"]
+    assert text in messages[-1]["content"]
 
 
 def test_no_current_images_preserves_query_and_empty_observations():
@@ -284,12 +286,13 @@ def test_decision_input_keeps_current_observations_and_historical_details_separa
           sender_kind="person", sender_ref="person:test", source_kind="user_message",
           response_target_refs=("person:test",), interaction_context=None, text="前にも見た？"),
           trigger_kind="user_message", recent_turns=[], time_context={}, affect_context={},
-          current_visual_observations=[current], recall_hint=HINT, recall_pack={"visual_observations": [prior]})
+          current_visual_observations=[current], observations=image_context(summary=current["visual_summary_text"]), recall_hint=HINT, recall_pack={"visual_observations": [prior]})
     persona = build_persona_context({"persona_prompt": "根拠を確かめて答える。"}, role="decision_generation")
     messages = build_decision_messages(persona_context=persona, context=DecisionContext(**payload))
-    payloads = [json.loads(message["content"].split("\n")[1]) for message in messages[1:]]
+    payloads = list(text_payloads(messages))
     internal = next(payload["internal_context"] for payload in payloads
                     if isinstance(payload, dict) and "internal_context" in payload)
-    assert internal["current_visual_observations"] == [current]
+    assert "current_visual_observations" not in internal
+    assert next(p for p in payloads if isinstance(p, dict) and "surroundings" in p)["input_materials"]["observations"][0]["interpretation"]["summary_text"] == current["visual_summary_text"]
     assert internal["recall_pack"]["visual_observations"][0]["detailed_summary_text"] == prior["detailed_summary_text"]
     assert current["visual_summary_text"] not in messages[-1]["content"]

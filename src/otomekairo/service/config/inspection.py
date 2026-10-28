@@ -34,6 +34,7 @@ class ServiceConfigInspectionMixin:
         generated_at = self._now_iso()
         snapshot = {
             "generated_at": generated_at,
+            "surroundings": self._sensor_environment_inspection(current_time=generated_at, memory_set_id=state["selected_memory_set_id"]),
             "settings_snapshot": self._build_settings_snapshot(state),
             "runtime_summary": self._build_runtime_summary(state),
             "runtime_detail": self._build_current_runtime_detail(
@@ -601,11 +602,17 @@ class ServiceConfigInspectionMixin:
     ) -> list[dict[str, Any]]:
         memory_set_id = state["selected_memory_set_id"]
         query_time = current_time or self._now_iso()
-        return self.store.list_world_states(
+        records = self.store.list_world_states(
             memory_set_id=memory_set_id,
             current_time=query_time,
             limit=limit,
         )
+        if any(record.get("observation_payload") is not None for record in records):
+            observations, _ = self._environment_runtime.snapshot(query_time)
+            current_ids = {observation.observation_id for observation in observations}
+            records = [record for record in records if record.get("observation_payload") is None
+                       or set(record["source_observation_ids"]).issubset(current_ids)]
+        return records
 
     def _summarize_foreground_world_states(
         self,
@@ -637,6 +644,10 @@ class ServiceConfigInspectionMixin:
                     updated_at=world_state.get("updated_at"),
                 ),
             }
+            for key in ("observation_source_ref", "channel_id", "place_ref", "source_observation_refs",
+                        "source_observation_ids", "observation_payload", "expires_at"):
+                if key in world_state:
+                    summary[key] = world_state[key]
             source_owner = world_state.get("source_owner")
             if not isinstance(source_owner, str) or not source_owner.strip():
                 source_owner = visual_source_owner(world_state.get("source_kind"))

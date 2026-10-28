@@ -25,6 +25,7 @@ from otomekairo.service.config.constants import (
     MCP_TRANSPORTS,
 )
 from otomekairo.store.clone import MemorySetInUseError
+from otomekairo.observations import ObservationError, validate_environment_config
 
 
 class ServiceConfigResourcesMixin:
@@ -929,6 +930,8 @@ class ServiceConfigResourcesMixin:
         # 削除
         camera_sources.pop(vision_source_id, None)
         self.store.write_state(state)
+        for memory_set_id in state["memory_sets"]:
+            self.store.invalidate_observation_states(memory_set_id=memory_set_id, sources=[(vision_source_id, None)])
         return {
             "deleted_vision_source_id": vision_source_id,
         }
@@ -951,10 +954,19 @@ class ServiceConfigResourcesMixin:
             self._validate_camera_source_definition(vision_source_id, stored_definition)
             normalized_sources[vision_source_id] = stored_definition
         self._validate_unique_camera_source_watcher_ids(normalized_sources)
+        try:
+            validate_environment_config(state["environment_settings"], camera_sources=normalized_sources)
+        except ObservationError as exc:
+            raise ServiceError(exc.status, exc.code, str(exc)) from exc
 
         # 永続化
+        changed_sources = [source_id for source_id, old in state["camera_sources"].items()
+                           if source_id not in normalized_sources or old != normalized_sources[source_id]]
         state["camera_sources"] = normalized_sources
         self.store.write_state(state)
+        if changed_sources:
+            for memory_set_id in state["memory_sets"]:
+                self.store.invalidate_observation_states(memory_set_id=memory_set_id, sources=[(source, None) for source in changed_sources])
         return self._build_camera_sources_editor_state(state)
 
     def list_mcp_servers(self, token: str | None) -> dict[str, Any]:

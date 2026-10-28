@@ -108,9 +108,9 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 `drive_state` から `speech / noop / pending_intent / capability_request` のどれへ置くかは、`decision_generation` が他の文脈と合わせて判断する。
 `time_context_summary` は `current_time_text / part_of_day / time_band_summary` を含む。
 `foreground_signal_summary` は `foreground_thinness / reason_summary / world_state_count` を含む。
-`suppression_summary` は `suppression_level / background_trigger / same_dedupe_recently_replied / visual_repetition_present / same_as_recent_speech_present / all_visual_observations_repeated` を含む。
-`suppression_summary.visual_observation_count` は判断に渡した visual observation signal の件数である。
-`suppression_summary.repeated_visual_observation_count` は `same_as_recent_speech` の件数である。
+`suppression_summary` は `suppression_level / background_trigger / same_dedupe_recently_replied / observation_repetition_present / same_as_recent_speech_present / all_observations_repeated` を含む。
+`suppression_summary.observation_count` は判断に渡した 共通のobservation signal の件数である。
+`suppression_summary.repeated_observation_count` は `same_as_recent_speech` の件数である。
 `suppression_summary.reason_summary` は具体的な抑制理由がある場合に含む。
 `suppression_summary.suppression_level` は `low / high` のいずれかである。
 `candidate_families` の各 entry は `family / available / selected` を含む。
@@ -138,7 +138,7 @@ initiative loop は、候補を次の 3 系統に分ける。
   - 強く前景化した `drive_state`、強い `entry_basis` を持つ `initiative_entry_summary.entry_kind=enter`、視覚観測の `first_seen / changed` と現在文脈が噛み合うもの、または due な定期思考トピック
 
 自発系は、強く前景化した `drive_state`、`ongoing_action`、`pending_intent`、強い `entry_basis` を持つ `initiative_entry_summary`、または視覚観測の `first_seen / changed` と現在文脈の噛み合いを材料にする。
-視覚観測の `first_seen / changed` は `workspace_context` の `visual_observation` 候補として扱う。
+視覚観測の `first_seen / changed` は `workspace_context` の `observation` 候補として扱う。
 視覚観測の `first_seen / changed` で通常判断へ direct entry する場合も、判断前観測で更新された `activity_context` は `initiative_context` と `workspace_context` に残す。
 direct entry は視覚新規性だけへ判断材料を縮約する仕組みではなく、活動遷移、継続時間、source の整合、抑制候補を同じ盤面で比較する入口である。
 due な定期思考トピックは自発系の材料であり、偽の `drive_state` にはしない。その定期思考トピックに関われる手段が無いときの扱いも含め、意味境界は [定期思考トピック.md](定期思考トピック.md) を正とする。
@@ -146,7 +146,7 @@ direct entry でも入力解釈と想起を行う。観測から過去の経験�
 `background_thinking` は定期思考による自己評価である。感覚への反応と向きへの関与は別比較である。
 外向き伝達を控えることと、自身の活動を控えることは別比較である。同じ判断に畳まない。
 対象ごとに結果は 1 つであり、両方進めてよい。比較の分け方は [判断と行動.md](判断と行動.md) を正とする。
-`visual_observations[].change_state=first_seen / changed` は前景候補、`stable` は現在状態の継続シグナル、`same_as_recent_speech` は直近重複の抑制候補である。
+`observations[].change_state=first_seen / changed` は前景候補、`stable` は現在状態の継続シグナル、`same_as_recent_speech` は直近重複の抑制候補である。
 `background_thinking` の `speech` は、観測差分の実況ではなく、現在の個の短い見方として一言にまとまる独り言である。
 前へ出る軽さは `current.thinking_speech_level` を補助に使う。値の意味は [../configuration/設定モデル.md](../configuration/設定モデル.md) を正とし、間合いとの比較はこの文書の外向き伝達の判断に従う。
 `foreground_thinness=thin`、`change_state=stable`、`change_state=changed`、同一活動継続は `speech` を義務づけない。
@@ -390,3 +390,5 @@ decision contract validation の repair 対象は、契約 shape、capability av
 - `world_state` だけで人へ発話すること
 - `risk_level` から initiative loop 専用の安全ポリシーを作ること
 - 見送りを失敗として扱うこと
+
+観測の統合解釈・状態更新は自律入口評価より前に一度行う。処理順とscopeは [周辺環境](周辺環境.md#各入口の実行順) を正とする。

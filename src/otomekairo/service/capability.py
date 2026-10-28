@@ -454,6 +454,14 @@ class ServiceCapabilityMixin:
                 )
             if request_record.get("capability_id") != capability_id:
                 raise CapabilityResultValidationError("capability_id does not match the pending request.")
+            if capability_id == "vision.capture" and result_payload["images"]:
+                from otomekairo.memory.utils import parse_iso
+                try:
+                    captured = parse_iso(result_payload["captured_at"])
+                    if not parse_iso(request_record["created_at"]) <= captured <= parse_iso(current_time):
+                        raise ValueError("Capture time is outside the request interval.")
+                except (ValueError, TypeError) as exc:
+                    raise CapabilityResultValidationError(str(exc), error_code="invalid_capture_time") from exc
             try:
                 self._validate_capability_result_source(
                     capability_id=capability_id,

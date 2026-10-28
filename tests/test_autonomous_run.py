@@ -317,7 +317,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
                 service.store.upsert_autonomous_run(autonomous_run=run)
                 service._autonomous_run_step_guard = Mock(return_value=None)
                 service._now_iso = Mock(return_value="2026-09-21T10:00:00+09:00")
-                generate = Mock(return_value=(None, {
+                generate = Mock(return_value=(SimpleNamespace(observations=None), {
                     "action": {"kind": "none", "capability_request": None, "speech": None},
                     "transition": {"kind": "wait_until", "next_run_at": "2026-09-21T11:00:00+09:00"},
                     "run_update": {"current_step_summary": "以前の結果に基づき待つ。", "history_summary": "追加取得なし。"},
@@ -553,6 +553,7 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             run = self._commitment_run_record(memory_set_id=state["selected_memory_set_id"])
             service.store.upsert_autonomous_run(autonomous_run=run)
             step_context = SimpleNamespace(
+                observations=None,
                 current_input=SimpleNamespace(to_prompt_payload=lambda: {}),
             )
             service._build_autonomous_step_context = Mock(return_value=step_context)

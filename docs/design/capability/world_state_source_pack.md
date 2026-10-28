@@ -141,3 +141,7 @@ LLM は結果要約が現在も成立する外部サービスの条件を表す�
 - pending-intent queue 全件を source pack に載せること
 - `world_state` に capability manifest や binding を直接複写すること
 - raw response body、MCP arguments、raw telemetry、長い OCR、複数段の外部 payload をそのまま LLM に渡すこと
+
+## 共通観測の候補
+
+snapshotの有効な環境観測からsource/channel別の候補を作る。資料と現在状態の境界は [周辺環境](../runtime/周辺環境.md#世界状態への投影) を正とする。

@@ -34,8 +34,6 @@ DEFAULT_CASES = [
     {"case_id": "activity", "text": "今は小説を読んでいる。", "expected": "人物の活動を外界状態の報告へ分類しない。"},
     {"case_id": "history", "text": "さっき何と言った？", "expected": "原文想起の契約を維持し、過去の場所を今回の報告にしない。",
      "recent_turns": [{"role": "person", "speaker_ref": "person:test", "text": "今は駅にいる。", "created_at": "2026-10-17T08:00:00+09:00"}]},
-    {"case_id": "visual", "text": "この画像に何が写っている？", "expected": "画像説明を解釈材料に使い、本人の状態報告にしない。",
-     "current_visual_observations": [{"source": "conversation_attachment", "image_interpreted": True, "visual_summary_text": "開いた窓と机が写っている。"}]},
     {"case_id": "people", "text": "森さんは駅にいるそうだ。私は今、自宅にいる。", "expected": "第三者と今回の話者の場所を区別した引用と想起方針を返す。"},
     {"case_id": "correction", "text": "さっきは駅と言ったけど、今は自宅に戻った。", "expected": "過去と現在を区別し、現在地の根拠は自宅に戻った報告から取る。"},
 ]
@@ -58,13 +56,13 @@ def generate_combined(client: LLMClient, **kwargs: Any) -> dict[str, Any]:
         raise ValueError("意味比較には実モデルを指定してください。")
 
     def validate(payload):
-        _validate_exact_keys(payload, {"recall_hint", "answer_contract", "reported_states"}, "CombinedInputInterpretation")
-        client._validate_input_interpretation_contract({key: payload[key] for key in ("recall_hint", "answer_contract")})
+        _validate_exact_keys(payload, {"recall_hint", "answer_contract", "observation_interpretations", "reported_states"}, "CombinedInputInterpretation")
+        client._validate_input_interpretation_contract({key: payload[key] for key in ("recall_hint", "answer_contract", "observation_interpretations")}, kwargs["observations"])
         validate_world_state_source_selection_contract({"reported_states": payload["reported_states"]}, input_text=current_input.text)
 
     messages = build_input_interpretation_messages(
         **{key: kwargs[key] for key in ("persona_context", "current_input", "recent_turns", "current_time",
-                                      "current_visual_observations", "activity_context")},
+                                      "observations", "activity_context")},
         include_world_state_reports=True,
     )
     payload = client._generate_structured_payload(
@@ -75,7 +73,7 @@ def generate_combined(client: LLMClient, **kwargs: Any) -> dict[str, Any]:
     )
     return {"recall_hint": normalize_recall_hint_payload(payload["recall_hint"]),
             "answer_contract": normalize_answer_contract_payload(payload["answer_contract"]),
-            "reported_states": payload["reported_states"]}
+            "reported_states": payload["reported_states"], "observation_interpretations": payload["observation_interpretations"]}
 
 
 def read_selected_settings(directory: Path):
@@ -215,6 +213,8 @@ def main(argv=None):
         try:
             for repetition in range(args.repetitions):
                 for case in cases:
+                    if case.get("current_visual_observations"):
+                        raise ValueError("画像の比較は媒体付きの入力解釈検証を使ってください。")
                     kwargs = {
                         "model_config": model, "persona_context": build_persona_context(persona, role="input_interpretation"),
                         "input_text": case["text"],
@@ -222,7 +222,7 @@ def main(argv=None):
                                                       response_target_refs=("person:test",), interaction_context=None, text=case["text"]),
                         "recent_turns": case.get("recent_turns", []),
                         "current_time": case.get("current_time", "2026-10-17T09:00:00+09:00"),
-                        "current_visual_observations": case.get("current_visual_observations", []),
+                        "observations": None,
                         "activity_context": case.get("activity_context"),
                     }
                     outputs = {}

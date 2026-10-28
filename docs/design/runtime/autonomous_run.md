@@ -254,3 +254,7 @@ step 実行前と LLM 後の副作用直前に run 状態を再読込し、termi
 - run 内の capability result event
 - `observed_result_summaries` と `observed_persons`
 - 完了サイクルの `turn consolidation` 成否と episode 参照
+
+## 自律stepの周辺環境
+
+能力結果の元画像は同じ同期stepへ渡し、run/request/eventへ保存しない。timer stepはその時点のsensorを採用する。観測がないstepでは観測解釈を追加せず行動判断へ進む。原観測の前段と隔離条件は [周辺環境](周辺環境.md#能力結果自律作業) を参照する。

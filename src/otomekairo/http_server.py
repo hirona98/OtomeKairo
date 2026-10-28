@@ -59,6 +59,7 @@ SUPPRESSED_HTTP_LOG_EXACT_PATHS = {
     "/api/bootstrap/probe",
     "/api/autonomous-runs",
     "/api/capability/result",
+    "/api/observations/sensors",
     # 外部 client が高頻度で再取得する設定 snapshot。
     "/api/config",
     "/api/config/camera-sources",
@@ -228,6 +229,15 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 return
 
             # 参照ルート
+            if method == "GET" and parsed.path == "/api/config/environment/editor-state":
+                self._write_success(HTTPStatus.OK, self.server.service.get_environment_editor_state(token))
+                return
+            if method == "PUT" and parsed.path == "/api/config/environment/editor-state":
+                self._write_success(HTTPStatus.OK, self.server.service.replace_environment_editor_state(token, self._read_json_body()))
+                return
+            if method == "POST" and parsed.path == "/api/observations/sensors":
+                self._write_success(HTTPStatus.OK, self.server.service.submit_sensor_observations(token, self._read_json_body()))
+                return
             if method == "GET" and parsed.path == "/api/status":
                 self._write_success(HTTPStatus.OK, self.server.service.get_status(token))
                 return

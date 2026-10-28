@@ -55,6 +55,8 @@ class RecallAssociationMixin:
                 memory_set_id=state["selected_memory_set_id"], cycle_id=cycle_id,
                 query_embedding=query_embedding, embedding_dimension=embedding_dimension, limit=32,
             ):
+                if hit["record"]["cycle_id"] == cycle_id:
+                    continue
                 visual_id = hit["record"]["visual_observation_id"]
                 hit = {**hit, "query_priority": 0 if spec["kind"] == "visual" else 1}
                 previous = visual_hits.get(visual_id)

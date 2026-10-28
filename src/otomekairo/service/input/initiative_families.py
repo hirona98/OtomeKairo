@@ -201,7 +201,7 @@ class ServiceInputInitiativeFamiliesMixin:
         # autonomous family は構造値が強い drive_state、強い entry basis、または現在観測を候補材料にする。
         entry_is_strong = entry_kind == "enter" and entry_basis in INITIATIVE_ENTRY_ENTER_BASIS_VALUES
         foreground_drives = self._initiative_foreground_drive_summaries(drive_summaries)
-        visual_signals = self._initiative_speech_visual_observation_signals(
+        visual_signals = self._initiative_speech_observation_signals(
             foreground_signal_summary
         )
         available = bool(
@@ -272,7 +272,7 @@ class ServiceInputInitiativeFamiliesMixin:
             preferred_capability_input=preferred_capability_input,
         )
 
-    def _initiative_speech_visual_observation_signals(
+    def _initiative_speech_observation_signals(
         self,
         foreground_signal_summary: dict[str, Any],
     ) -> list[dict[str, Any]]:
@@ -280,8 +280,8 @@ class ServiceInputInitiativeFamiliesMixin:
             return []
         return [
             signal
-            for signal in self._compact_visual_observation_signals(
-                foreground_signal_summary.get("visual_observations")
+            for signal in self._compact_observation_signals(
+                foreground_signal_summary.get("observations")
             )
             if signal.get("change_state") in {"first_seen", "changed", "stable"}
         ]
@@ -445,7 +445,7 @@ class ServiceInputInitiativeFamiliesMixin:
             change_state = self._client_context_text(primary_visual.get("change_state"), limit=48)
             reason_summary = self._client_context_text(primary_visual.get("reason_summary"), limit=180)
             if change_state is not None:
-                parts.append(f"visual change_state={change_state}")
+                parts.append(f"observation change_state={change_state}")
             if reason_summary is not None:
                 parts.append(f"現在観測理由={reason_summary}")
         if drive_summaries:

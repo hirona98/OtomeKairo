@@ -315,3 +315,7 @@ inspection では、`world_state` について少なくとも次を追えるよ�
 - capability availability を `world_state` に入れること
 - `ongoing_action` の進行を `world_state` に入れること
 - TTL の無い世界状態を作ること
+
+## 観測由来の状態
+
+観測から作る状態候補はsource/channelと原観測IDを保持する。統合キー、鮮度上限、取得失敗時の失効は [周辺環境](周辺環境.md#世界状態への投影) を正とする。

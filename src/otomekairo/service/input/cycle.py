@@ -154,8 +154,10 @@ class ServiceInputCycleMixin:
                     cycle_id=cycle_id,
                     current_time=self._now_iso(),
                 )
+            acquisition = self._new_observation_acquisition(state)
             # 会話ごとに感覚を更新してから、入力解釈と行動判断へ進む。
             current_client_context = self._run_wake_policy_observations(
+                acquisition=acquisition,
                 state=state,
                 started_at=started_at,
                 client_context=current_client_context,
@@ -172,18 +174,14 @@ class ServiceInputCycleMixin:
                     "image_interpreted": False,
                     "error": None,
                 }
-                current_client_context, observation_summary = self._interpret_visual_observation(
-                    state=state,
-                    started_at=started_at,
-                    trigger_kind="user_message",
-                    client_context=current_client_context,
-                    observation_summary=observation_summary,
-                    input_text=input_text,
-                    images=input_images,
+                self._collect_material_images(
+                    acquisition=acquisition, images=input_images, target=observation_summary,
+                    origin_kind="conversation_attachment", observed_at=started_at,
                 )
 
             # パイプライン
             pipeline = self._run_input_pipeline(
+                acquisition=acquisition,
                 state=state,
                 started_at=started_at,
                 input_text=input_text,
@@ -290,6 +288,8 @@ class ServiceInputCycleMixin:
                 ongoing_action_transition_summary=ongoing_action_transition_summary,
             )
         finally:
+            if "acquisition" in locals():
+                acquisition.close()
             self._end_user_response_cycle()
             if not cancel_autonomous_runs:
                 self._resume_autonomous_runs_after_user_interaction(

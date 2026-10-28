@@ -48,6 +48,8 @@ class ServiceSpontaneousCapabilityPayloadMixin:
         result_payload: dict[str, Any],
     ) -> dict[str, Any]:
         if capability_id == "vision.capture":
+            if "captured_at" not in result_payload:
+                raise ServiceError(400, "invalid_capture_time", "vision.capture result.captured_at is required.")
             images = result_payload.get("images", [])
             client_context = result_payload.get("client_context")
             error = result_payload.get("error")
@@ -58,13 +60,19 @@ class ServiceSpontaneousCapabilityPayloadMixin:
             normalized_images = self._normalize_vision_capture_result_images(images)
             normalized_error = error.strip() if isinstance(error, str) and error.strip() else None
             if vision_capture_skip_reason(normalized_error) is not None and normalized_images:
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "vision.capture result.error skip code cannot be combined with images.",
-                )
+                raise ServiceError(400, "invalid_capability_result", "vision.capture result.error skip code cannot be combined with images.")
+            captured_at = result_payload["captured_at"]
+            if normalized_images:
+                try:
+                    from otomekairo.memory.utils import local_datetime
+                    captured_at = local_datetime(captured_at).isoformat()
+                except (ValueError, TypeError, AttributeError) as exc:
+                    raise ServiceError(400, "invalid_capture_time", "A captured image requires its timestamp.") from exc
+            elif captured_at is not None:
+                raise ServiceError(400, "invalid_capture_time", "A result without an image must have captured_at=null.")
             return {
                 "images": normalized_images,
+                "captured_at": captured_at,
                 "client_context": client_context or {},
                 "error": normalized_error,
             }

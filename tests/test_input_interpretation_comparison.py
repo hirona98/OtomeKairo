@@ -18,6 +18,7 @@ from compare_input_interpretation import combined_response_format, generate_comb
 
 def interpretation():
     return {
+        "observation_interpretations": [],
         "recall_hint": {"primary_recall_focus": "fact", "secondary_recall_focuses": [], "confidence": 0.8,
                         "time_reference": "none", "focus_scopes": [], "mentioned_entities": [],
                         "mentioned_topics": [], "risk_flags": []},
@@ -32,7 +33,7 @@ def arguments(text="今は自宅にいる。"):
         "persona_context": build_persona_context({"persona_prompt": "入力の根拠を確かめる。"}, role="input_interpretation"),
         "input_text": text, "current_input": CurrentInput("person", "person:test", "user_message", ("person:test",), None, text),
         "recent_turns": [], "current_time": "2026-10-17T09:00:00+09:00",
-        "current_visual_observations": [], "activity_context": None,
+        "observations": None, "activity_context": None,
     }
 
 
@@ -50,7 +51,7 @@ def test_prototype_uses_one_call_and_preserves_full_input_and_existing_contracts
     assert request["response_format"]["json_schema"]["name"] == "input_interpretation_with_world_reports"
     assert text in request["messages"][-1]["content"]
     assert set(combined_response_format()["json_schema"]["schema"]["required"]) == set(payload)
-    assert set(input_interpretation_response_format()["json_schema"]["schema"]["required"]) == {"recall_hint", "answer_contract"}
+    assert set(input_interpretation_response_format()["json_schema"]["schema"]["required"]) == {"recall_hint", "answer_contract", "observation_interpretations"}
 
 
 @pytest.mark.parametrize("invalid", [

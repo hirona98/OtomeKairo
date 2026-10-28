@@ -1079,6 +1079,7 @@ class ServiceConfigValidationMixin:
             )
         supported_fields = {
             "vision_source_id",
+            "place_ref",
             "connector_kind",
             "client_id",
             "kind",
@@ -1095,6 +1096,14 @@ class ServiceConfigValidationMixin:
                 "unsupported_camera_source_field",
                 f"camera_source has unsupported fields: {', '.join(unsupported_fields)}.",
             )
+        if "place_ref" not in definition or (
+            definition["place_ref"] is not None and (
+                not isinstance(definition["place_ref"], str)
+                or not definition["place_ref"].startswith("place:")
+                or definition["place_ref"] == "place:"
+            )
+        ):
+            raise ServiceError(400, "invalid_camera_source_field", "camera_source.place_ref must be a place reference or null.")
         connector_kind = definition.get("connector_kind")
         if connector_kind not in CAMERA_CONNECTOR_KINDS:
             raise ServiceError(
@@ -1136,8 +1145,11 @@ class ServiceConfigValidationMixin:
             self._validate_camera_source_watcher_definition(watcher)
 
     def _normalize_camera_source_definition(self, vision_source_id: str, definition: dict[str, Any]) -> dict[str, Any]:
+        if "place_ref" not in definition:
+            raise ServiceError(400, "invalid_camera_source_field", "camera_source.place_ref is required.")
         normalized = {
             "vision_source_id": vision_source_id,
+            "place_ref": definition["place_ref"],
             "connector_kind": definition.get("connector_kind", CAMERA_DEFAULT_CONNECTOR_KIND),
             "client_id": definition.get("client_id", CAMERA_DEFAULT_CLIENT_ID),
             "kind": "camera",

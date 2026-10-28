@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from otomekairo.observations.acquisition import ObservationAcquisition
 from otomekairo.service.app import OtomeKairoService
 from otomekairo.service.common import BACKGROUND_THINKING_POLL_SECONDS
 
@@ -70,6 +71,7 @@ class WakeObservationSourceReadyTests(unittest.TestCase):
 
     def _run_periodic_observations(self, state: dict) -> dict:
         return self.service._run_wake_policy_observations(
+            acquisition=ObservationAcquisition("memory_set:test", 300),
             state=state,
             started_at=NOW,
             client_context={"source": "background_thinking_scheduler"},

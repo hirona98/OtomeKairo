@@ -25,7 +25,7 @@ class ConfigStoreTests(unittest.TestCase):
             state = store.read_state()
             state["console_access_token"] = "token"
             state["camera_sources"] = {
-                "vision_source:main": {
+                "vision_source:main": {"place_ref": None,
                     "vision_source_id": "vision_source:main",
                     "connector_kind": "tapo_c220",
                     "client_id": "tapo-c220-connector-main",

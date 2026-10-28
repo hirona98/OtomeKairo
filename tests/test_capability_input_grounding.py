@@ -9,6 +9,7 @@ import pytest
 from otomekairo.llm.client import LLMClient
 from otomekairo.llm.contexts import AutonomousStepContext
 from otomekairo.llm.contracts import LLMError
+from observation_fixtures import image_context, text_payloads
 from test_decision_contract import (
     _capability_decision, _current_input, _decision_context, _persona_context, _wire_response,
 )
@@ -60,7 +61,7 @@ def generation(request):
         candidate = _capability_decision('mcp.call_tool', mcp_request['input'])
         context = replace(_decision_context(view), current_input=current, input_text=current.text,
             trigger_kind='capability_result' if request.param == 'followup' else 'user_message',
-            recent_turns=recent_turns, current_visual_observations=[{'visual_summary_text': text}],
+            recent_turns=recent_turns, current_visual_observations=[], observations=image_context(summary=text),
             capability_result_context=result_context, recall_pack={'event_evidence': [{
                 'kind': 'conversation_input', 'role': 'person', 'text': memory_text,
             }]})
@@ -92,8 +93,7 @@ def test_mcp_generation_keeps_arguments_and_source_context_in_one_completion(mon
     completion.assert_called_once()
     assert completion.call_args.kwargs['response_format']['json_schema']['name'] in {'decision', 'autonomous_step'}
     # JSONの入力資料がそのまま届くことを確認し、文章の意味を判定するテストにはしない。
-    payloads = [json.loads(message['content'].splitlines()[1])
-                for message in completion.call_args.kwargs['messages'] if message['role'] == 'user']
+    payloads = list(text_payloads(completion.call_args.kwargs['messages']))
     actual_sources = list(_strings(payloads))
     for source in expected_sources:
         assert source in actual_sources

@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from otomekairo.interaction import InteractionContext
+from otomekairo.observations.context import ObservationContext
 
 
 PERSONA_PROMPT_EXCERPT_LIMIT = 240
@@ -37,7 +38,6 @@ PERSONA_CONTEXT_ROLES = frozenset({
     "memory_reflection_summary_review",
     "world_state",
     "activity_state",
-    "visual_observation",
     "visual_daily_grouping",
     "visual_daily_support",
     "drive_state",
@@ -307,6 +307,7 @@ class DecisionContext:
     recent_interactions: list[dict[str, Any]] | None = None
     configured_activity_topics: list[dict[str, Any]] | None = None
     disclosure_context: dict[str, Any] | None = None
+    observations: ObservationContext | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -328,6 +329,7 @@ class AutonomousStepContext:
     self_state_context: dict[str, Any] | None = None
     drive_state_summary: list[dict[str, Any]] | None = None
     disclosure_context: dict[str, Any] | None = None
+    observations: ObservationContext | None = None
 
     def to_prompt_payload(self) -> dict[str, Any]:
         payload = {

@@ -5,6 +5,26 @@ from typing import Any
 
 
 class StoreCycleMixin:
+    def persist_observations(self, *, visual_records: list[dict[str, Any]], sensor_events: list[dict[str, Any]]) -> None:
+        with self._memory_db() as conn:
+            for record in visual_records:
+                self._insert_visual_observation_record(conn, record)
+            for event in sensor_events:
+                previous = conn.execute(
+                    "SELECT payload_json FROM events WHERE memory_set_id = ? AND kind = 'sensor_observation' "
+                    "AND json_extract(payload_json, '$.observation.observation_id') = ?",
+                    (event["memory_set_id"], event["observation"]["observation_id"]),
+                ).fetchone()
+                if previous is None:
+                    self._insert_event(conn, event)
+                else:
+                    import json
+                    old = json.loads(previous["payload_json"])["observation"]
+                    new = event["observation"]
+                    keys = ("observation_id", "source_ref", "channel_id", "observed_at", "payload", "place_ref", "source_owner")
+                    if any(old[k] != new[k] for k in keys):
+                        raise ValueError("A sensor observation ID refers to different source data.")
+
     def persist_cycle_records(
         self,
         *,

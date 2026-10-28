@@ -78,87 +78,15 @@ index が壊れた場合は `visual_observation_record.detailed_summary_text` �
 
 ## LLM 契約
 
-専用モデル設定を増やさず、選択中の `model_preset` を使う。論理 role は `visual_observation` とする。
-
-LLM に渡す source pack は少なくとも次を持つ。
-
-```json
-{
-  "trigger_kind": "capability_result",
-  "image_input_kind": "vision_capture_result",
-  "time_context": "2026年4月27日 月曜日 23時00分（日本時間）",
-  "client_context": {
-    "vision_source_id": "vision_source:main_display",
-    "source_kind": "desktop",
-    "source_label": "メイン画面",
-    "active_app": "Slack",
-    "window_title": "general | Slack",
-    "locale": "ja-JP"
-  },
-  "observation_summary": {
-    "capability_id": "vision.capture",
-    "vision_source_id": "vision_source:main_display",
-    "source_kind": "desktop",
-    "source_label": "メイン画面",
-    "image_count": 1,
-    "error": null
-  },
-  "current_input_summary": "vision.capture の非同期結果。前景アプリは Slack。ウィンドウタイトルは general | Slack。キャプチャ画像を 1 件受け取った。"
-}
-```
-
-画像は source pack の JSON に埋め込まず、multimodal message の image part として別に添付する。
-1 回の解釈で使う画像件数はコード側で制限する。
-`vision.capture` 由来の source pack には `vision_source_id / source_kind / source_label` を含める。
-通常会話の添付画像では `image_input_kind=conversation_attachment` を使う。
-
-LLM の出力は JSON object 1 個に固定する。
-
-```json
-{
-  "summary_text": "遊園地の屋外風景が写っている。近くにメリーゴーランドがあり、周囲に人や柵が見える。背景には観覧車らしき大きな円形構造物が見える。案内看板や園内設備も一部見えている。",
-  "confidence_hint": "medium",
-  "change_state": "first_seen",
-  "change_basis": "no_previous_observation",
-  "change_reason_summary": "同じ視覚 source の前回観測がない。"
-}
-```
-
-契約は次とする。
-
-- トップレベルキーは `summary_text / confidence_hint / change_state / change_basis / change_reason_summary` だけにする
-- `summary_text` は詳細な視覚説明にする
-- `summary_text` は改行なし、内部識別子なしにする
-- 主要な物体、場所、背景要素、活動、状態、変化を落とさない
-- 後から視覚確認に使えるよう、目立つ物体と背景要素を具体的に書く
-- 不確実な対象は断定せず、「らしき」「可能性がある」として残す
-- 細かな OCR 全文、座標、UI 構造、資格情報、内部 URL、配送先 client、base64 本文を書かない
-- `confidence_hint` は `low / medium / high` のいずれかにする
-- `change_state / change_basis` の値と意味は [視覚機能.md](視覚機能.md) の「視覚変化」を正本とする
-- `summary_text` は 1200 文字以内、`change_reason_summary` は 240 文字以内とする。保存する視覚説明と短い変化理由の用途に応じた上限であり、モデルのトークン容量とは別に扱う。生成プロンプトにも同じ上限を伝え、超過は契約違反として扱う
-- `change_reason_summary` は変化判定の短い理由とし、改行と内部識別子を含めない
+画像の説明と意味上の変化は [入力解釈](../llm/入力解釈.md) の一回の生成で得る。
+専用の視覚説明roleは設けない。
 
 ## パイプライン統合
 
-`vision.capture` の非同期 capability result と会話添付画像では、共有判断パイプラインへ入る前に画像意味理解を行う。
-
-1. 画像入力を受ける
-2. raw image を保存せず、LLM へ multimodal input として渡す
-3. LLM が元画像に基づく詳細な `summary_text` と構造化した視覚変化判定を生成し、コードが出力契約を検証する
-4. `observation_summary.image_interpreted=true`、`image_input_kind`、`visual_observation_id`、`visual_summary_text` を付ける
-5. 解釈結果を当回の観測一覧 `current_visual_observations` に集め、入力解釈・想起・通常判断へ渡す。思考前観測は現在の視覚状態や活動状態にも反映する
-6. `vision.capture` 由来の視覚観測は `world_state.visual_context` 更新候補にする
-7. サイクル結果保存時に、`visual_summary_text` を `visual_observation_record.detailed_summary_text` として保存する
-8. `scene_entities / activity_labels / environment_labels` と検索用 index を派生する
-9. 会話や行動と結びつく場合は episode に紐づける
-10. 重要、反復、継続、会話結合を満たす場合は記憶候補にする
-
-この段階の出力は `visual_observation_record` と派生データに集約する。
-通常の会話サイクルでは、今回の解釈結果を内部文脈から直接判断へ渡し、判断後のサイクル結果保存時に視覚記録も永続化する。同じ回の想起にある視覚記録・日次要約の取得は、その時点でDBに保存済みの資料を対象とし、今回の新しい解釈結果を読み直す経路にはしない。今回の視覚記録は、保存後の次回以降の想起で取得候補になる。日次要約は保存済み観測を後段の日次整理でまとめて生成する。
-通常の成功経路では、`visual_observation` の 1 回の生成で詳細説明と視覚変化判定を得る。生成時に物体の名称と形・構造・配置、人物の同定、属性ごとの確かさを元画像へ照合し、確信度と変化判定を最終説明の根拠に揃える。コードの出力契約検証を通過した結果を当回の判断へ渡し、サイクル結果とともに保存する。契約違反時の repair と provider 生成失敗時の再送は [LLM構造化出力transport](../llm/LLM構造化出力transport.md) に従い、生成または契約検証が完了しない場合は入力サイクルを明示的に失敗させる。
-詳細説明は直接見える形・色・配置・動きと、種類・内容・量などの解釈を区別する。複数の解釈が残る属性は、見える外見と判別できない点を分けて記述する。レコード全体の `confidence_hint` が高くても、各属性の不確かさは消さない。
-物体の同定は今回の画像にある形と構造を根拠にする。用途や内部の状態が確認できない場合は、形・色・内部に見えるものを記述し、用途を確定させる名称より観測できる説明を選ぶ。過去の観測要約は変化の比較に使い、今回の物体名や属性を同定する根拠にはしない。
-当回の短期状態と記憶整理には解釈結果を直接引き継ぐ。後続会話や日次整理では、保存済みの `visual_observation_record` と派生データを使う。
+入口ごとの順序と媒体寿命は [周辺環境](../runtime/周辺環境.md#各入口の実行順) を正とする。
+統合入力解釈の検証後に観測記録を確定し、同じ回の想起では当回の記録を除外する。
+後続の判断へは同じ原画像と説明を渡す。記録の保存は入口の見送りや後続の判断失敗でも保持する。
+後続会話と日次整理は、保存済みの説明と派生データを使う。
 
 ## world_state との関係
 

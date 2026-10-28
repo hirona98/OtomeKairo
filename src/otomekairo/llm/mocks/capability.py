@@ -23,7 +23,7 @@ MOCK_CAPABILITY_REQUEST_RULES = (
 
 
 class LLMMockCapabilityMixin:
-    def generate_visual_observation_summary(
+    def describe_image_fixture(
         self,
         model_config: dict,
         source_pack: dict[str, Any],
@@ -86,6 +86,8 @@ class LLMMockCapabilityMixin:
         change_context = source_pack.get("change_context") if isinstance(source_pack, dict) else None
         if not isinstance(change_context, dict):
             return "first_seen", "no_previous_observation", "前回観測が無いため初回観測として扱う。"
+        if change_context.get("source_identity_changed") is True:
+            return "changed", "source_identity_changed", "観測元の識別条件が変わった。"
         prompted = change_context.get("last_prompted_observation_context")
         if isinstance(prompted, dict) and prompted.get("summary_text") == summary_text:
             return "same_as_recent_speech", "recent_speech_repetition", "直近発話に使った視覚観測と同じ内容。"

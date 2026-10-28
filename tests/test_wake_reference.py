@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from otomekairo.observations.acquisition import ObservationAcquisition
 from otomekairo.service.common import ServiceError
 from otomekairo.service.input.wake_reference import (
     ServiceInputWakeReferenceMixin,
@@ -53,6 +54,7 @@ class DummyImmediateWakePipeline(ServiceInputWakePipelineMixin):
     def _run_wake_policy_observations(
         self,
         *,
+        acquisition,
         state: dict,
         started_at: str,
         client_context: dict,
@@ -85,6 +87,15 @@ class DummyImmediateWakePipeline(ServiceInputWakePipelineMixin):
     ) -> dict:
         _ = state, current_time, trigger_kind, recent_turns, cycle_id
         return client_context
+
+    def _build_current_input(self, **kwargs):
+        return kwargs
+
+    def _interpret_observation_inputs(self, **kwargs):
+        return None, {"recall_hint": {}}
+
+    def _refresh_observation_states(self, **kwargs):
+        return None
 
     def _has_autonomous_initiative_context(
         self,
@@ -241,6 +252,7 @@ class WakeReferenceTests(unittest.TestCase):
         service = DummyImmediateWakePipeline()
 
         pipeline, input_text, _ = service._run_wake_pipeline(
+            acquisition=ObservationAcquisition("memory_set:test", 300),
             state={"wake_policy": {"mode": "disabled", "interval_seconds": 300}},
             started_at="2026-07-05T12:00:00+09:00",
             trigger_kind="wake",
@@ -263,6 +275,7 @@ class WakeReferenceTests(unittest.TestCase):
         service.due_should_skip = False
 
         service._run_wake_pipeline(
+            acquisition=ObservationAcquisition("memory_set:test", 300),
             state={"wake_policy": {"mode": "interval", "interval_seconds": 300}},
             started_at="2026-07-05T12:00:00+09:00",
             trigger_kind="background_thinking",
@@ -293,6 +306,7 @@ class WakeReferenceTests(unittest.TestCase):
         service.due_should_skip = False
 
         pipeline, _, client_context = service._run_wake_pipeline(
+            acquisition=ObservationAcquisition("memory_set:test", 300),
             state={"wake_policy": {"mode": "interval", "interval_seconds": 300}},
             started_at="2026-07-05T12:00:00+09:00",
             trigger_kind="background_thinking",

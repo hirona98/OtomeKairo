@@ -312,14 +312,29 @@ class WorldStateSourceCandidate:
     scope_type: str
     scope_key: str
     evidence_summary: str
+    observation_source_ref: str | None = None
+    channel_id: str | None = None
+    place_ref: str | None = None
+    source_observation_refs: tuple[str, ...] = ()
+    source_observation_ids: tuple[str, ...] = ()
+    observation_payload: dict[str, Any] | None = None
+    observed_at: str | None = None
+    expires_at: str | None = None
+    observation_context: Any = None
+    source_owner: str | None = None
 
-    def to_prompt_payload(self) -> dict[str, str]:
+    def to_prompt_payload(self) -> dict[str, Any]:
         return {
             "candidate_ref": self.candidate_ref,
             "state_type": self.state_type,
             "scope_type": self.scope_type,
             "scope_key": self.scope_key,
             "evidence_summary": self.evidence_summary,
+            "observation_source_ref": self.observation_source_ref,
+            "channel_id": self.channel_id, "place_ref": self.place_ref,
+            "source_observation_refs": list(self.source_observation_refs),
+            "observation_context": self.observation_context.to_prompt_payload() if self.observation_context else None,
+            "observation_payload": self.observation_payload,
         }
 
 
@@ -333,6 +348,7 @@ class WorldStateSourcePack:
     client_context: WorldStateClientContext
     current_person_ref: str | None = None
     state_sources: tuple[WorldStateSourceCandidate, ...] = field(default_factory=tuple)
+    observation_sources: tuple[WorldStateSourceCandidate, ...] = field(default_factory=tuple)
     visual_context: WorldStateVisualContext | None = None
     external_service_context: WorldStateExternalServiceContext | None = None
     body_context: WorldStateBodyContext | None = None

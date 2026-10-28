@@ -136,9 +136,11 @@ class ServiceSpontaneousWakeMixin:
                 selected_candidate=None,
                 wake_message=wake_message,
             )
+            acquisition = self._new_observation_acquisition(state)
             try:
                 if trigger_kind == "wake":
                     client_context, observation_summary, reference_context = self._prepare_wake_reference_context(
+                        acquisition=acquisition,
                         state=state,
                         started_at=started_at,
                         input_text=input_text,
@@ -204,6 +206,7 @@ class ServiceSpontaneousWakeMixin:
                     ),
                 )
                 pipeline, input_text, client_context = self._run_wake_pipeline(
+                    acquisition=acquisition,
                     state=state,
                     started_at=started_at,
                     trigger_kind=trigger_kind,
@@ -384,6 +387,9 @@ class ServiceSpontaneousWakeMixin:
                 )
                 self._broadcast_system_notice(review_notice)
                 return response
+            finally:
+                acquisition.close()
+
 
     def _execute_scheduled_background_thinking(self, *, state: dict[str, Any]) -> None:
         current_time = self._now_iso()

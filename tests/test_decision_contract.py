@@ -1026,7 +1026,8 @@ class DecisionContractTests(unittest.TestCase):
                     self.assertEqual(source["recent_turns"], context.recent_turns)
                     self.assertEqual(source["recent_interactions"], context.recent_interactions)
                     self.assertEqual(source["internal_context"]["workspace_context"], context.workspace_context)
-                    self.assertEqual(source["internal_context"]["current_visual_observations"], context.current_visual_observations)
+                    self.assertNotIn("current_visual_observations", source["internal_context"])
+                    self.assertTrue(any(isinstance(payload, dict) and "surroundings" in payload for payload in payloads))
                     self.assertIn(current.to_prompt_payload(), payloads)
 
     def test_decision_parse_failed_log_includes_rejected_content(self) -> None:
@@ -1214,7 +1215,7 @@ class DecisionPromptScopeTests(unittest.TestCase):
         request_policy = _build_decision_trigger_policy(
             initiative_context=initiative, capability_result_context=None, is_api_request=True,
         )
-        self.assertTrue(all(policy in messages[-2]["content"] for policy in request_policy))
+        self.assertTrue(all(any(isinstance(message["content"], str) and policy in message["content"] for message in messages) for policy in request_policy))
         self.assertIn('"is_api_request":true', messages[-1]["content"])
         self.assertIn(current_input.text, messages[-1]["content"])
         with patch("otomekairo.llm.prompts._speech_frequency_policy", return_value="frequency policy") as frequency:

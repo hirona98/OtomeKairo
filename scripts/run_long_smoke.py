@@ -753,7 +753,7 @@ class LongSmokeRunner:
             "/api/config/camera-sources/editor-state",
             {
                 "camera_sources": [
-                    {
+                    {"place_ref": None,
                         "vision_source_id": self._camera_vision_source_id(),
                         "connector_kind": "tapo_c220",
                         "client_id": self.camera_client_id,
@@ -1147,6 +1147,7 @@ class LongSmokeRunner:
                         "capability_id": "vision.capture",
                         "result": {
                             "images": [],
+                            "captured_at": None,
                             "client_context": client_context,
                             "error": None,
                         },
@@ -1166,6 +1167,7 @@ class LongSmokeRunner:
                         "capability_id": "vision.capture",
                         "result": {
                             "images": [PNG_DATA_URI],
+                            "captured_at": datetime.now().astimezone().isoformat(),
                             "client_context": client_context,
                             "error": None,
                         },
@@ -1183,6 +1185,7 @@ class LongSmokeRunner:
                         "capability_id": "vision.capture",
                         "result": {
                             "images": [""],
+                            "captured_at": None,
                             "client_context": client_context,
                             "error": None,
                         },
@@ -1200,6 +1203,7 @@ class LongSmokeRunner:
                         "capability_id": "vision.capture",
                         "result": {
                             "images": [PNG_DATA_URI],
+                            "captured_at": datetime.now().astimezone().isoformat(),
                             "client_context": client_context,
                             "error": 123,
                         },
@@ -1217,6 +1221,7 @@ class LongSmokeRunner:
                         "capability_id": "vision.capture",
                         "result": {
                             "images": [PNG_DATA_URI],
+                            "captured_at": datetime.now().astimezone().isoformat(),
                             "client_context": client_context,
                             "error": None,
                         },
@@ -1231,6 +1236,7 @@ class LongSmokeRunner:
                     "capability_id": "vision.capture",
                     "result": {
                         "images": [PNG_DATA_URI],
+                            "captured_at": datetime.now().astimezone().isoformat(),
                         "client_context": client_context,
                         "error": None,
                     },

@@ -55,6 +55,10 @@ class _Service(ServiceCapabilityMixin):
         self.llm = reviewer
 
 
+from otomekairo.observations.acquisition import ObservationAcquisition
+from observation_fixtures import input_payload
+
+
 class _PipelineService(ServiceInputDecisionComparisonMixin, ServiceInputPipelineMixin):
     def __init__(self) -> None:
         self.store = _Store()
@@ -280,6 +284,8 @@ class PreSendCheckTests(unittest.TestCase):
         )
 
         result = service._run_input_pipeline(
+            acquisition=ObservationAcquisition("memory_set:test", 300),
+            input_interpretation=input_payload(), precomputed_states=(None, [], None, None),
             state=service.store.read_state(),
             started_at="2026-08-11T12:00:00+09:00",
             input_text="投稿して",

@@ -4404,6 +4404,7 @@ function addCamera() {
       "カメラ",
     ),
     vision_source_id: "",
+    place_ref: null,
     connector_kind: "tapo_c220",
     client_id: "tapo-c220-connector-main",
     kind: "camera",

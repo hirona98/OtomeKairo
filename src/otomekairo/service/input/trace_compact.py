@@ -229,14 +229,14 @@ class ServiceInputTraceCompactMixin:
                 for key in (
                     "background_trigger",
                     "same_dedupe_recently_replied",
-                    "visual_repetition_present",
+                    "observation_repetition_present",
                     "same_as_recent_speech_present",
-                    "all_visual_observations_repeated",
+                    "all_observations_repeated",
                 ):
                     value = suppression_summary.get(key)
                     if isinstance(value, bool):
                         compact_suppression[key] = value
-                for key in ("visual_observation_count", "repeated_visual_observation_count"):
+                for key in ("observation_count", "repeated_observation_count"):
                     value = suppression_summary.get(key)
                     if isinstance(value, int):
                         compact_suppression[key] = value

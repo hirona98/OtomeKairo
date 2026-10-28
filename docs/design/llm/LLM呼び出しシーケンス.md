@@ -6,6 +6,8 @@
 意味境界、入出力契約、失敗条件の詳細は各節の正本文書を参照する。
 図は実モデルを使う経路を示す。
 
+共通観測の契約と各入口の前段順序は [周辺環境](../runtime/周辺環境.md)、生成契約は [入力解釈](入力解釈.md) を正とする。
+
 ## 図の読み方
 
 - 時間は上から下へ進む。参加者は、処理、生成 API、Embedding API、記憶 DB を基本とし、必要な図だけプライバシーチェック API を加える。
@@ -51,28 +53,13 @@ sequenceDiagram
         D-->>C: 保存完了
     end
 
-    Note over C,D: 1. 今回の観測と入力解釈
-    loop 有効な思考前観測で画像を取得できた対象ごと
-        C->>L: 画像を解釈<br>（visual_observation）
-        L-->>C: 今回の視覚観測
-        C->>L: 世界状態を生成<br>（world_state）
-        L-->>C: 状態候補と根拠判定
-        C->>D: 世界状態の更新・置換・失効を保存（world_states）
-        D-->>C: 保存完了
-        opt 活動状態の生成対象がある
-            C->>L: 活動状態を生成<br>（activity_state）
-            L-->>C: 活動候補と根拠判定
-            C->>D: 活動状態の更新・失効を保存（activity_states）
-            D-->>C: 保存完了
-        end
-    end
-    opt 会話に添付画像がある
-        C->>L: 添付画像を解釈<br>（visual_observation）
-        L-->>C: 今回の視覚観測
-    end
-    Note over C,D: 視覚観測の本文は判断材料として保持<br>判断後に視覚記録として保存する
-    C->>L: 入力を解釈<br>（input_interpretation）
-    L-->>C: 想起方針（recall_hint）と必要な回答根拠（answer_contract）
+    Note over C,D: 1. 観測取得・資料と最新センサー報告のsnapshot確定
+    C->>L: 会話・元画像・測定値を統合解釈（input_interpretation）
+    L-->>C: 想起方針・回答根拠契約・観測説明と変化
+    C->>D: 視覚記録・sensor eventを一取引で保存
+    C->>L: 世界状態・活動状態を更新（既存の対象条件）
+    L-->>C: sourceごとの状態候補と根拠
+    C->>D: 状態を更新・置換・失効
 
     Note over C,D: 2. 想起と回答根拠の取得
     C->>D: 記憶・エピソード候補を参照
@@ -141,8 +128,8 @@ sequenceDiagram
     opt 保留意図を選んだ場合
         Note over C,D: 候補をメモリ上に保持。要約は次のサイクル記録へ含める
     end
-    C->>D: 入出力イベント・検索履歴・サイクル要約・追跡情報<br>・今回の視覚記録を保存
-    D-->>C: 保存完了（events・retrieval_runs・cycle_summaries<br>・cycle_traces・visual_observation_records）
+    C->>D: 入出力イベント・検索履歴・サイクル要約・追跡情報を保存
+    D-->>C: 保存完了（events・retrieval_runs・cycle_summaries<br>・cycle_traces（観測記録は前段で確定済み））
     Note over C,D: 会話参加者の登録も、この区間で別途保存<br>（entity_registry・entity_aliases）
 
     Note over C,D: 5. 同期の記憶統合（consolidate_turn）
@@ -172,7 +159,7 @@ sequenceDiagram
 意味比較の対象条件は [記憶更新の比較キー](../memory/記憶更新と再整理.md#比較キー)、検索入力の一括化は [意味検索用索引](../memory/想起と判断.md#意味検索用索引)、バッチ実行単位は [LLM補助契約共通](LLM補助契約共通.md#embedding-のバッチ実行) を参照する。
 思考前観測の状態更新と、その後の人物発話に基づく状態更新も別の呼び出し箇所である。
 後半の世界状態生成は、先行する `world_state_source_selection` が状態報告なしを返し、観測要約や他の状態更新の根拠もなければ省略する。この場合も、非空の人物発話に対する選別 API は呼ぶ。一般的な質問だけで、観測や現在状態の追加情報がない場合が該当する。
-前半の思考前観測は能力結果の更新経路を通るため、画像解釈後に世界状態の生成 API を呼ぶ。API を呼んだ結果として状態候補が 0 件になる場合と、API 自体を呼ばない場合を区別する。
+前半の思考前観測は取得結果を共通前段へ集め、統合入力解釈後に世界状態の生成 API を呼ぶ。API を呼んだ結果として状態候補が 0 件になる場合と、API 自体を呼ばない場合を区別する。
 
 実装: [会話入口](../../../src/otomekairo/service/input/cycle.py)、[入力パイプライン](../../../src/otomekairo/service/input/pipeline.py)、[サイクル保存](../../../src/otomekairo/service/input/trace_persist.py)、[記憶統合](../../../src/otomekairo/memory/consolidator.py)、[記憶処理の確定](../../../src/otomekairo/service/memory.py)。
 契約: [想起と判断](../memory/想起と判断.md)、[世界状態](../runtime/world_state.md)、[活動状態](../runtime/activity_state.md)、[視覚入力のパイプライン統合](../capability/vision_capture画像意味理解.md#パイプライン統合)、[記憶更新と再整理](../memory/記憶更新と再整理.md)。
@@ -220,12 +207,9 @@ sequenceDiagram
         C->>D: 結果処理中の行動へ更新・保存（ongoing_actions）
         D-->>C: 保存完了
     end
-    opt 結果に画像がある
-        C->>L: 結果画像を解釈<br>（visual_observation）
-        L-->>C: 今回の視覚観測
-    end
+    Note over C,D: 結果画像を共通観測へ収集し、図 1 の統合解釈へ渡す
     alt 通常の能力要求の結果
-        Note over C,D: 図 1 の入力解釈・想起・状態更新<br>・判断・出力の選択まで実行
+        Note over C,D: 図 1 の入力解釈・状態更新・想起<br>・判断・出力の選択まで実行
         opt 先行する行動の継続・終了を反映する
             C->>D: 行動の状態を更新・保存（ongoing_actions）
             D-->>C: 保存完了
@@ -267,22 +251,22 @@ sequenceDiagram
 
     Note over C,D: wake または background_thinking。時刻・実行条件をコードで確認
     opt wake の参照画像がある
-        C->>L: 参照画像を解釈<br>（visual_observation）
-        L-->>C: 視覚観測
+        Note over C,D: 参照画像を資料としてsnapshotへ追加
     end
     opt 評価可能な保留意図候補がある
         C->>L: 保留意図を選別<br>（pending_intent_selection）
         L-->>C: 候補1件、または none
     end
     opt 定期思考の観測が有効
-        Note over C,D: 図 1 の思考前観測（画像解釈と状態生成・保存）を実行
+        Note over C,D: 有効な画像を取得し、資料・最新sensorをsnapshotへまとめる
     end
+    Note over C,D: 図 1 の統合入力解釈・観測保存・状態更新を一度実行
     opt 選択済み候補・直接の入口がなく、入口審査の材料がある
         C->>L: 自律判断へ進む入口を審査<br>（initiative_entry_check）
         L-->>C: 入口判定
     end
     alt 判断へ進む
-        Note over C,D: 図 1 の入力解釈・想起・状態生成と保存<br>・Skill 選別を実行
+        Note over C,D: 保持済みの入力解釈結果で想起・Skill 選別へ進む
         alt 自身の活動を分離して比較する
             Note over C,D: 隔離した活動用入力でも<br>図 1 の入力解釈・想起・Skill 選別を実行
             C->>L: 自身の活動を判断<br>（decision:self_activity）

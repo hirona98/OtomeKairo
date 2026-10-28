@@ -12,6 +12,7 @@ class ServiceInputWakePipelineMixin:
     def _run_wake_pipeline(
         self,
         *,
+        acquisition,
         state: dict[str, Any],
         started_at: str,
         trigger_kind: str,
@@ -63,6 +64,7 @@ class ServiceInputWakePipelineMixin:
                 current_time=started_at,
             ) if actor_ref is not None else None
             client_context = self._run_wake_policy_observations(
+                acquisition=acquisition,
                 state=state,
                 started_at=started_at,
                 client_context=client_context,
@@ -96,6 +98,20 @@ class ServiceInputWakePipelineMixin:
             }
             debug_log("Wake", f"{cycle_label} suppress outward speech user_response_changed")
 
+        current_input = self._build_current_input(
+            input_text=input_text, trigger_kind=trigger_kind, interaction_context=interaction_context,
+            capability_request_summary=None, is_api_request=wake_message is not None,
+        )
+        observations, input_interpretation = self._interpret_observation_inputs(
+            state=state, acquisition=acquisition, current_input=current_input, recent_turns=recent_turns,
+            client_context=client_context, cycle_id=cycle_id,
+        )
+        precomputed_states = self._refresh_observation_states(
+            state=state, started_at=started_at, input_text=input_text, current_input=current_input,
+            recent_turns=recent_turns, trigger_kind=trigger_kind, client_context=client_context,
+            cycle_id=cycle_id, selected_candidate=selected_candidate, observation_summary=observation_summary,
+            capability_request_summary=None, cycle_label=cycle_label,
+        )
         # 候補
         if selected_candidate is None and wake_message is None:
             client_context = self._run_autonomous_initiative_entry_check(
@@ -142,7 +158,10 @@ class ServiceInputWakePipelineMixin:
                     reason_summary = "起床機会は来たが、外向きの自律判断へ進める入口はまだ無い。"
                 debug_log("Wake", f"{cycle_label} skipped no_candidate reason={self._clamp(reason_summary)}")
                 return (
-                    self._noop_pipeline(
+                    self._observation_noop_pipeline(
+                        observations=observations, input_interpretation=input_interpretation,
+                        precomputed_states=precomputed_states, client_context=client_context,
+                        observation_summary=observation_summary, trigger_kind=trigger_kind,
                         state=state,
                         started_at=started_at,
                         reason_summary=reason_summary,
@@ -172,7 +191,10 @@ class ServiceInputWakePipelineMixin:
                     f"{cycle_label} skipped recently_replied candidate={selected_candidate.get('candidate_id')}",
                 )
                 return (
-                    self._noop_pipeline(
+                    self._observation_noop_pipeline(
+                        observations=observations, input_interpretation=input_interpretation,
+                        precomputed_states=precomputed_states, client_context=client_context,
+                        observation_summary=observation_summary, trigger_kind=trigger_kind,
                         state=state,
                         started_at=started_at,
                         reason_summary="同じ pending_intent 候補には最近 speech 済みのため、今回は同じ内容を繰り返さない。",
@@ -189,6 +211,8 @@ class ServiceInputWakePipelineMixin:
 
         # 起床入力
         pipeline = self._run_input_pipeline(
+            acquisition=acquisition, observations=observations, input_interpretation=input_interpretation,
+            precomputed_states=precomputed_states,
             state=state,
             started_at=started_at,
             input_text=input_text,
@@ -238,7 +262,7 @@ class ServiceInputWakePipelineMixin:
     ) -> bool:
         if self._client_context_has_initiative_entry(client_context):
             return True
-        if self._client_context_has_judgable_visual_observation(client_context):
+        if self._client_context_has_judgable_observation(client_context):
             return True
         drive_state_summary = self._summarize_drive_states(
             self._list_current_drive_states(
@@ -273,7 +297,7 @@ class ServiceInputWakePipelineMixin:
             current_time=current_time,
         ):
             return client_context
-        if self._client_context_has_judgable_visual_observation(client_context):
+        if self._client_context_has_judgable_observation(client_context):
             return client_context
         foreground_world_state = self._summarize_foreground_world_states(
             self._list_current_world_states(
@@ -382,15 +406,15 @@ class ServiceInputWakePipelineMixin:
             value = self._client_context_text(client_context.get(key), limit=limit)
             if value is not None:
                 input_context[key] = value
-        visual_observations = self._compact_visual_observation_signals(
-            client_context.get("visual_observation_signals")
+        visual_observations = self._compact_observation_signals(
+            client_context.get("observation_signals")
         )
         source_pack: dict[str, Any] = {
             "persona_context": persona_context.to_prompt_payload(),
             "input_context": input_context,
             "recent_turns": self._initiative_entry_check_recent_turns(recent_turns),
             "foreground_world_state": self._initiative_entry_check_world_state(foreground_world_state),
-            "visual_observations": visual_observations,
+            "observations": visual_observations,
             "entry_policy": {
                 "allow_enter": True,
                 "allow_skip": True,
@@ -491,16 +515,16 @@ class ServiceInputWakePipelineMixin:
             return None
         return self._client_context_text(entry_check.get("reason_summary"), limit=180)
 
-    def _client_context_has_judgable_visual_observation(
+    def _client_context_has_judgable_observation(
         self,
         client_context: dict[str, Any] | None,
     ) -> bool:
         if not isinstance(client_context, dict):
             return False
-        visual_signals = self._compact_visual_observation_signals(
-            client_context.get("visual_observation_signals")
+        visual_signals = self._compact_observation_signals(
+            client_context.get("observation_signals")
         )
-        return any(self._visual_observation_signal_needs_wake_judgement(signal) for signal in visual_signals)
+        return any(self._observation_signal_needs_wake_judgement(signal) for signal in visual_signals)
 
     def _client_context_has_successful_wake_observation(
         self,
@@ -511,17 +535,17 @@ class ServiceInputWakePipelineMixin:
         wake_observations = client_context.get("wake_observations")
         if not isinstance(wake_observations, list):
             return False
-        visual_signals = self._compact_visual_observation_signals(
-            client_context.get("visual_observation_signals")
+        visual_signals = self._compact_observation_signals(
+            client_context.get("observation_signals")
         )
         if visual_signals:
-            return any(self._visual_observation_signal_needs_wake_judgement(signal) for signal in visual_signals)
+            return any(self._observation_signal_needs_wake_judgement(signal) for signal in visual_signals)
         for item in wake_observations:
             if not isinstance(item, dict) or item.get("status") != "succeeded":
                 continue
             signal = self._compact_visual_observation_signal(item.get("visual_observation_signal"))
             if signal:
-                return self._visual_observation_signal_needs_wake_judgement(signal)
+                return self._observation_signal_needs_wake_judgement(signal)
             summary_text = item.get("visual_summary_text")
             if isinstance(summary_text, str) and summary_text.strip():
                 return True
@@ -549,7 +573,7 @@ class ServiceInputWakePipelineMixin:
                 retryable_failure = True
         return retryable_failure
 
-    def _visual_observation_signal_needs_wake_judgement(self, signal: dict[str, Any] | None) -> bool:
+    def _observation_signal_needs_wake_judgement(self, signal: dict[str, Any] | None) -> bool:
         if not isinstance(signal, dict):
             return False
         return signal.get("change_state") in {
@@ -560,4 +584,4 @@ class ServiceInputWakePipelineMixin:
     def _visual_observation_signal_is_judgable(self, signal: dict[str, Any] | None) -> bool:
         if not isinstance(signal, dict):
             return False
-        return self._visual_observation_signal_needs_wake_judgement(signal)
+        return self._observation_signal_needs_wake_judgement(signal)

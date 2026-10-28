@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from otomekairo.observations.acquisition import ObservationAcquisition
+from otomekairo.observations.context import ObservationContext
+
 from collections import Counter
 from copy import deepcopy
 from typing import Any
@@ -193,9 +196,22 @@ class ServiceInputPipelineMixin:
             "self_activity_agent_skill_context": None,
         }
 
-    def _run_input_pipeline(
+    def _run_input_pipeline(self, **kwargs: Any) -> dict[str, Any]:
+        acquisition = kwargs.pop("acquisition", None)
+        if acquisition is None:
+            acquisition = self._new_observation_acquisition(kwargs["state"])
+        try:
+            return self._run_input_pipeline_inner(acquisition=acquisition, **kwargs)
+        finally:
+            acquisition.close()
+
+    def _run_input_pipeline_inner(
         self,
         *,
+        acquisition: ObservationAcquisition,
+        observations: ObservationContext | None = None,
+        input_interpretation: dict[str, Any] | None = None,
+        precomputed_states: tuple | None = None,
         state: dict[str, Any],
         started_at: str,
         input_text: str,
@@ -214,7 +230,7 @@ class ServiceInputPipelineMixin:
         is_api_request: bool = False,
     ) -> dict[str, Any]:
         cycle_label = self._debug_cycle_label(cycle_id)
-        current_client_context = client_context or {}
+        current_client_context = client_context if client_context is not None else {}
         current_input = self._build_current_input(
             input_text=input_text,
             trigger_kind=trigger_kind,
@@ -229,13 +245,26 @@ class ServiceInputPipelineMixin:
             client_context=current_client_context,
             inherited_target_client_id=assistant_message_target_client_id,
         )
+        if input_interpretation is None:
+            observations, input_interpretation = self._interpret_observation_inputs(
+                state=state, acquisition=acquisition, current_input=current_input, recent_turns=recent_turns,
+                client_context=current_client_context, cycle_id=cycle_id,
+            )
         current_visual_observations = self._build_current_visual_observations(
             trigger_kind=trigger_kind, observation_summary=observation_summary,
             client_context=current_client_context, observed_at=started_at,
         )
+        if precomputed_states is None:
+            precomputed_states = self._refresh_observation_states(
+                state=state, started_at=started_at, input_text=input_text, current_input=current_input,
+                recent_turns=recent_turns, trigger_kind=trigger_kind, client_context=current_client_context,
+                cycle_id=cycle_id, selected_candidate=selected_candidate, observation_summary=observation_summary,
+                capability_request_summary=capability_request_summary, cycle_label=cycle_label,
+            )
         augmented_query_text = self._pipeline_augmented_query_text(
             input_text=input_text, trigger_kind=trigger_kind, observation_summary=observation_summary,
             current_visual_observations=current_visual_observations, current_input=current_input,
+            observations=observations,
         )
         initial_activity_context = self._load_activity_context(
             memory_set_id=state["selected_memory_set_id"],
@@ -251,6 +280,7 @@ class ServiceInputPipelineMixin:
 
         # 想起入力
         recall_inputs = self._build_pipeline_recall_inputs(
+            input_interpretation=input_interpretation,
             state=state,
             cycle_id=cycle_id,
             started_at=started_at,
@@ -272,6 +302,8 @@ class ServiceInputPipelineMixin:
 
         # 内部コンテキスト
         pipeline_contexts = self._build_pipeline_internal_contexts(
+            observations=observations,
+            precomputed_states=precomputed_states,
             recent_interactions=recent_interactions,
             state=state,
             persona=persona,
@@ -300,6 +332,7 @@ class ServiceInputPipelineMixin:
         )
         # 行動・共有範囲・最終本文を同じ生成で決める。
         decision = self._run_pipeline_decision(
+            observations=observations,
             disclosure_context=disclosure_context,
             configured_activity_topics=self._configured_activity_topic_context(state=state),
             recent_interactions=recent_interactions,
@@ -375,6 +408,7 @@ class ServiceInputPipelineMixin:
         except PreSendCheckWithheldError as first_withhold:
             first_attempt = deepcopy(first_withhold.audit_summary)
             decision = self._run_pipeline_decision(
+                observations=observations,
                 disclosure_context=disclosure_context,
                 configured_activity_topics=self._configured_activity_topic_context(state=state),
                 recent_interactions=recent_interactions,
@@ -514,6 +548,7 @@ class ServiceInputPipelineMixin:
             "prediction_error_context": pipeline_contexts["prediction_error_context"],
             "default_mode_context": pipeline_contexts["default_mode_context"],
             "workspace_context": pipeline_contexts["workspace_context"],
+            "observation_snapshot": observations.to_trace_payload() if observations is not None else None,
             "current_visual_observations": current_visual_observations,
             "world_state_trace": pipeline_contexts["world_state_trace"],
             "decision": decision,
@@ -725,6 +760,7 @@ class ServiceInputPipelineMixin:
     def _build_pipeline_recall_inputs(
         self,
         *,
+        input_interpretation: dict[str, Any] | None = None,
         state: dict[str, Any],
         cycle_id: str,
         started_at: str,
@@ -741,16 +777,17 @@ class ServiceInputPipelineMixin:
     ) -> dict[str, Any]:
         # 入口解釈
         recall_hint_recent_turns = self._recall_hint_recent_turns(recent_turns)
-        input_interpretation = self.llm.generate_input_interpretation(
-            model_config=model_config,
-            persona_context=persona_context,
-            input_text=input_text,
-            current_input=current_input,
-            recent_turns=recall_hint_recent_turns,
-            current_time=started_at,
-            current_visual_observations=current_visual_observations,
-            activity_context=activity_context,
-        )
+        if input_interpretation is None:
+            input_interpretation = self.llm.generate_input_interpretation(
+                model_config=model_config,
+                persona_context=persona_context,
+                input_text=input_text,
+                current_input=current_input,
+                recent_turns=recall_hint_recent_turns,
+                current_time=started_at,
+                observations=None,
+                activity_context=activity_context,
+            )
         recall_hint = input_interpretation["recall_hint"]
         answer_contract = input_interpretation["answer_contract"]
         debug_log(
@@ -806,9 +843,52 @@ class ServiceInputPipelineMixin:
             "evidence_pack": evidence_pack,
         }
 
+    def _refresh_observation_states(self, *, state, started_at, input_text, current_input,
+                                    recent_turns, trigger_kind, client_context, cycle_id,
+                                    selected_candidate, observation_summary, capability_request_summary,
+                                    cycle_label):
+        world_state_trace, foreground_world_state = self._refresh_world_state_context(
+            state=state,
+            started_at=started_at,
+            input_text=input_text,
+            trigger_kind=trigger_kind,
+            client_context=client_context,
+            cycle_id=cycle_id,
+            selected_candidate=selected_candidate,
+            observation_summary=observation_summary,
+            capability_request_summary=capability_request_summary,
+            persona_context=self._build_selected_persona_context(state=state, role="world_state"),
+            current_person_ref=(
+                current_input.sender_ref
+                if current_input.sender_ref is not None
+                else current_input.participant_refs[0]
+                if current_input.participant_refs
+                else None
+            ),
+        )
+        activity_context, activity_trace = self._refresh_activity_context(
+            state=state,
+            started_at=started_at,
+            input_text=input_text,
+            current_input=current_input.to_prompt_payload(),
+            recent_turns=recent_turns,
+            trigger_kind=trigger_kind,
+            client_context=client_context,
+            observation_summary=observation_summary,
+            visual_observation_context=self._build_visual_observation_decision_context(
+                trigger_kind=trigger_kind, observation_summary=observation_summary,
+            ),
+            foreground_world_state=foreground_world_state,
+            cycle_id=cycle_id,
+            cycle_label=cycle_label,
+            persona_context=self._build_selected_persona_context(state=state, role="activity_state"),
+        )
+        return world_state_trace, foreground_world_state, activity_context, activity_trace
+
     def _build_pipeline_internal_contexts(
         self,
         *,
+        observations: ObservationContext | None = None,
         state: dict[str, Any],
         persona: dict[str, Any],
         started_at: str,
@@ -827,6 +907,7 @@ class ServiceInputPipelineMixin:
         recall_pack: dict[str, Any],
         cycle_label: str,
         model_config: dict[str, Any],
+        precomputed_states: tuple | None = None,
         recent_interactions: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         # 内部コンテキスト
@@ -849,25 +930,14 @@ class ServiceInputPipelineMixin:
                 current_time=started_at,
             )
         )
-        world_state_trace, foreground_world_state = self._refresh_world_state_context(
-            state=state,
-            started_at=started_at,
-            input_text=input_text,
-            trigger_kind=trigger_kind,
-            client_context=client_context,
-            cycle_id=cycle_id,
-            selected_candidate=selected_candidate,
-            observation_summary=observation_summary,
-            capability_request_summary=capability_request_summary,
-            persona_context=self._build_selected_persona_context(state=state, role="world_state"),
-            current_person_ref=(
-                current_input.sender_ref
-                if current_input.sender_ref is not None
-                else current_input.participant_refs[0]
-                if current_input.participant_refs
-                else None
-            ),
-        )
+        if precomputed_states is None:
+            precomputed_states = self._refresh_observation_states(
+                state=state, started_at=started_at, input_text=input_text, current_input=current_input,
+                recent_turns=recent_turns, trigger_kind=trigger_kind, client_context=client_context,
+                cycle_id=cycle_id, selected_candidate=selected_candidate, observation_summary=observation_summary,
+                capability_request_summary=capability_request_summary, cycle_label=cycle_label,
+            )
+        world_state_trace, foreground_world_state = precomputed_states[:2]
         ongoing_action_summary = self._summarize_ongoing_action(
             self._current_ongoing_action(
                 state=state,
@@ -894,23 +964,7 @@ class ServiceInputPipelineMixin:
             state=state,
             current_time=started_at,
         )
-        activity_context, activity_trace = self._refresh_activity_context(
-            state=state,
-            started_at=started_at,
-            input_text=input_text,
-            current_input=current_input.to_prompt_payload(),
-            recent_turns=recent_turns,
-            trigger_kind=trigger_kind,
-            client_context=client_context,
-            observation_summary=observation_summary,
-            visual_observation_context=self._build_visual_observation_decision_context(
-                trigger_kind=trigger_kind, observation_summary=observation_summary,
-            ),
-            foreground_world_state=foreground_world_state,
-            cycle_id=cycle_id,
-            cycle_label=cycle_label,
-            persona_context=self._build_selected_persona_context(state=state, role="activity_state"),
-        )
+        activity_context, activity_trace = precomputed_states[2:]
         initiative_context = self._build_initiative_context(
             state=state,
             persona_context_summary=build_persona_context_summary(persona),
@@ -972,6 +1026,7 @@ class ServiceInputPipelineMixin:
             affect_context=affect_context,
         )
         workspace_candidate_pool = self._collect_workspace_candidates(
+            observations=observations,
             recent_interactions=recent_interactions,
             current_input=current_input,
             due_periodic_thought_topics=due_periodic_thought_topics,
@@ -1055,12 +1110,6 @@ class ServiceInputPipelineMixin:
                 value = observation.get(key)
                 if value is not None:
                     visual_entry[key] = value
-            summary_text = self._workspace_item_summary(
-                observation,
-                ("visual_summary_text", "summary_text"),
-            )
-            if summary_text is not None:
-                visual_entry["summary_text"] = summary_text
             sensory_confidence.append(visual_entry)
         for index, item in enumerate(foreground_world_state or []):
             if not isinstance(item, dict):
@@ -1420,6 +1469,7 @@ class ServiceInputPipelineMixin:
     def _collect_workspace_candidates(
         self,
         *,
+        observations: ObservationContext | None = None,
         current_input: CurrentInput,
         due_periodic_thought_topics: list[dict[str, Any]] | None = None,
         recall_pack: dict[str, Any],
@@ -1442,6 +1492,13 @@ class ServiceInputPipelineMixin:
         candidates: list[dict[str, Any]] = []
         used_refs: set[str] = set()
         source_counts: dict[str, int] = {}
+        if observations is not None:
+            payload = observations.to_prompt_payload()
+            for item in payload["surroundings"]["observations"] + payload["input_materials"]["observations"]:
+                self._append_workspace_candidate(candidates=candidates, used_refs=used_refs,
+                    source_counts=source_counts, factor_ref=item["ref"], kind="observation", source="observation_snapshot",
+                    summary_text=item["source_label"],
+                    metadata={key: item[key] for key in ("source_ref", "source_kind", "source_owner", "place_ref", "time_text", "kind")})
         if recent_interactions:
             self._append_workspace_candidate(
                 candidates=candidates,
@@ -1459,7 +1516,7 @@ class ServiceInputPipelineMixin:
             source_counts=source_counts,
             initiative_context=initiative_context,
         )
-        for observation in fresh_visual_observations_from_capability_view(capability_decision_view):
+        for observation in fresh_visual_observations_from_capability_view(capability_decision_view) if observations is None else []:
             if observation.get("fresh_source") != "wake_observation":
                 continue
             source_id = observation["vision_source_id"]
@@ -1612,7 +1669,7 @@ class ServiceInputPipelineMixin:
                 summary_keys=("what_it_does", "fresh_world_state_policy"),
                 metadata_keys=("id", "kind", "risk_level", "readiness"),
             )
-        for index, observation in enumerate(current_visual_observations):
+        for index, observation in enumerate(current_visual_observations if observations is None else []):
             self._append_workspace_context_item(
                 candidates=candidates,
                 used_refs=used_refs,
@@ -1810,13 +1867,13 @@ class ServiceInputPipelineMixin:
         suppression_summary = initiative_context.suppression_summary
         if not isinstance(suppression_summary, dict):
             return
-        if suppression_summary.get("visual_repetition_present") is not True:
+        if suppression_summary.get("observation_repetition_present") is not True:
             return
         self._append_workspace_candidate(
             candidates=candidates,
             used_refs=used_refs,
             source_counts=source_counts,
-            factor_ref="suppression:visual_repetition",
+            factor_ref="suppression:observation_repetition",
             kind="suppression",
             source="initiative_context.suppression_summary",
             summary_text=(
@@ -1827,11 +1884,11 @@ class ServiceInputPipelineMixin:
                 suppression_summary,
                 (
                     "suppression_level",
-                    "visual_repetition_present",
+                    "observation_repetition_present",
                     "same_as_recent_speech_present",
-                    "all_visual_observations_repeated",
-                    "visual_observation_count",
-                    "repeated_visual_observation_count",
+                    "all_observations_repeated",
+                    "observation_count",
+                    "repeated_observation_count",
                 ),
             ),
         )
@@ -1849,7 +1906,7 @@ class ServiceInputPipelineMixin:
         foreground_signal_summary = initiative_context.foreground_signal_summary
         if not isinstance(foreground_signal_summary, dict):
             return
-        visual_observations = foreground_signal_summary.get("visual_observations")
+        visual_observations = foreground_signal_summary.get("observations")
         if not isinstance(visual_observations, list):
             return
         for index, observation in enumerate(visual_observations):
@@ -1870,9 +1927,9 @@ class ServiceInputPipelineMixin:
                 candidates=candidates,
                 used_refs=used_refs,
                 source_counts=source_counts,
-                factor_ref=f"visual_observation_signal:{observation_ref}",
-                kind="visual_observation",
-                source="initiative_context.foreground_signal_summary.visual_observations",
+                factor_ref=f"observation_signal:{observation_ref}",
+                kind="observation",
+                source="initiative_context.foreground_signal_summary.observations",
                 summary_text=summary_text,
                 metadata=self._workspace_metadata(
                     observation,
@@ -2228,6 +2285,7 @@ class ServiceInputPipelineMixin:
     def _run_pipeline_decision(
         self,
         *,
+        observations: ObservationContext | None = None,
         input_text: str,
         current_input: CurrentInput,
         trigger_kind: str,
@@ -2274,6 +2332,7 @@ class ServiceInputPipelineMixin:
             is_api_request=current_input.is_api_request,
         ):
             return self._run_separated_activity_decisions(
+                observations=observations,
                 disclosure_context=disclosure_context,
                 configured_activity_topics=configured_activity_topics,
                 recent_interactions=recent_interactions,
@@ -2313,6 +2372,7 @@ class ServiceInputPipelineMixin:
                 pre_send_check_feedback=pre_send_check_feedback,
             )
         decision_context = self._build_decision_context(
+            observations=observations,
             disclosure_context=disclosure_context,
             configured_activity_topics=configured_activity_topics,
             recent_interactions=recent_interactions,
@@ -2616,6 +2676,7 @@ class ServiceInputPipelineMixin:
     def _build_decision_context(
         self,
         *,
+        observations: ObservationContext | None = None,
         input_text: str,
         current_input: CurrentInput,
         trigger_kind: str,
@@ -2648,6 +2709,7 @@ class ServiceInputPipelineMixin:
         disclosure_context: dict[str, Any] | None = None,
     ) -> DecisionContext:
         return DecisionContext(
+            observations=observations,
             disclosure_context=disclosure_context,
             configured_activity_topics=configured_activity_topics,
             recent_interactions=recent_interactions,

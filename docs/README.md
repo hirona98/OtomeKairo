@@ -10,10 +10,9 @@ OtomeKairo は、人格設定と記憶を基盤に、その時点で成立する
 全体像は [design/foundation/アーキテクチャ.md](design/foundation/アーキテクチャ.md) から入る。
 主要な LLM・Embedding API の呼び出し順と DB 保存のタイミングは [LLM呼び出しシーケンス](design/llm/LLM呼び出しシーケンス.md) を参照する。
 
-未実装の計画は `plans/` で現行仕様と分ける。
-現在の計画は [周辺環境と入力解釈の統合設計](plans/周辺環境と入力解釈/設計.md)、
-[変更予定 API 契約](plans/周辺環境と入力解釈/API契約.md)、
-[実装計画](plans/周辺環境と入力解釈/実装計画.md) を参照する。
+周辺環境の正本は [観測と保存](design/runtime/周辺環境.md)、[入力解釈](design/llm/入力解釈.md)、[観測入力 API](design/api/観測入力.md) に分ける。
+実装と検証の記録は [実装計画](plans/周辺環境と入力解釈/実装計画.md) を参照する。
+未実装の計画と実装記録は `plans/` に置き、仕様本文は現行正本へ集約する。
 
 ## 構成
 
@@ -30,7 +29,7 @@ OtomeKairo は、人格設定と記憶を基盤に、その時点で成立する
 | [design/api/](design/api/) | HTTP / WebSocket の path、method、認証、request / response、error code |
 | [design/memory/](design/memory/) | 記憶 subsystem の内部構造、想起、更新、管理境界 |
 | [design/verification/](design/verification/) | 検証層、通常検証、重い検証、合否基準 |
-| [plans/](plans/) | 未実装の詳細設計と実装計画。適用済みの現行仕様とは区別する |
+| [plans/](plans/) | 詳細設計の計画と実装・検証記録。現行仕様の正本へリンクする |
 
 ## 正本境界
 

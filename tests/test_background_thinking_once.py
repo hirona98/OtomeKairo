@@ -16,6 +16,7 @@ class BackgroundThinkingOnceTests(unittest.TestCase):
         self.token = "test-token"
         state = self.service.store.read_state()
         state["console_access_token"] = self.token
+        state["model_presets"][state["selected_model_preset_id"]]["model"] = "mock-test"
         state["wake_policy"]["observations"] = []
         self.service.store.write_state(state)
 

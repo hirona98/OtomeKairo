@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from otomekairo.observations.context import ObservationContext
+
 import threading
 import uuid
 from copy import deepcopy
@@ -798,6 +800,7 @@ class ServiceAutonomousRunMixin:
     def _execute_autonomous_run_step(
         self,
         *,
+        observations: ObservationContext | None = None,
         state: dict[str, Any],
         run_id: str,
         started_at: str,
@@ -809,6 +812,7 @@ class ServiceAutonomousRunMixin:
     ) -> dict[str, Any]:
         with self._autonomous_run_execution_lock(run_id):
             return self._execute_autonomous_run_step_locked(
+                observations=observations,
                 state=state,
                 run_id=run_id,
                 started_at=started_at,
@@ -822,6 +826,7 @@ class ServiceAutonomousRunMixin:
     def _execute_autonomous_run_step_locked(
         self,
         *,
+        observations: ObservationContext | None = None,
         state: dict[str, Any],
         run_id: str,
         started_at: str,
@@ -876,6 +881,7 @@ class ServiceAutonomousRunMixin:
                 else "scheduled"
             )
             step_context, step, speech_payload = self._generate_autonomous_step_candidate(
+                observations=observations,
                 state=state,
                 run=run,
                 selected_preset=selected_preset,
@@ -883,6 +889,7 @@ class ServiceAutonomousRunMixin:
                 last_result_context=last_result_context or run.get("last_result_context"),
                 step_trigger=step_trigger,
             )
+            observations = step_context.observations
             action = step["action"]
             transition = step["transition"]
             action_kind = str(action.get("kind") or "").strip()
@@ -963,6 +970,7 @@ class ServiceAutonomousRunMixin:
                 except PreSendCheckWithheldError as first_withhold:
                     # autonomous step も候補本文を戻さず、同じ run 文脈で一度だけ再生成する。
                     step_context, step, speech_payload = self._generate_autonomous_step_candidate(
+                        observations=observations,
                         state=state,
                         run=run,
                         selected_preset=selected_preset,
@@ -1239,6 +1247,7 @@ class ServiceAutonomousRunMixin:
     def _generate_autonomous_step_candidate(
         self,
         *,
+        observations: ObservationContext | None = None,
         state: dict[str, Any],
         run: dict[str, Any],
         selected_preset: dict[str, Any],
@@ -1248,6 +1257,7 @@ class ServiceAutonomousRunMixin:
         pre_send_check_feedback: str | None = None,
     ) -> tuple[AutonomousStepContext, dict[str, Any], dict[str, Any] | None]:
         step_context = self._build_autonomous_step_context(
+            observations=observations,
             state=state,
             run=run,
             current_time=self._now_iso(),
@@ -1296,6 +1306,7 @@ class ServiceAutonomousRunMixin:
     def _build_autonomous_step_context(
         self,
         *,
+        observations: ObservationContext | None = None,
         state: dict[str, Any],
         run: dict[str, Any],
         current_time: str,
@@ -1362,7 +1373,24 @@ class ServiceAutonomousRunMixin:
                 else None
             ),
         )
+        if observations is None:
+            acquisition = self._new_observation_acquisition(state)
+            try:
+                sensor_observations, sensor_reports = self._environment_runtime.snapshot(current_time)
+                isolated = origin_kind in {"wake", "background_thinking"} and not response_target_refs
+                if isolated or not (sensor_observations or sensor_reports):
+                    observations = acquisition.freeze(snapshot_at=current_time, sensor_observations=(), sensor_reports=())
+                else:
+                    observations, _ = self._interpret_observation_inputs(
+                        state=state, acquisition=acquisition, current_input=current_input, recent_turns=recent_turns,
+                        client_context={}, cycle_id=self._autonomous_run_event_cycle_id(run),
+                    )
+            finally:
+                acquisition.close()
+        if origin_kind in {"wake", "background_thinking"} and not response_target_refs:
+            observations = observations.isolated_view()
         return AutonomousStepContext(
+            observations=observations,
             run=self._autonomous_run_prompt_summary(run),
             observation_context=self._autonomous_step_observation_context(
                 run=run, current_time=current_time, step_trigger=step_trigger,
@@ -1816,8 +1844,10 @@ class ServiceAutonomousRunMixin:
             client_context=client_context,
             capability_response=capability_response,
         )
+        acquisition = self._new_observation_acquisition(state)
         try:
             client_context, observation_summary, input_text = self._prepare_capability_result_context(
+                acquisition=acquisition,
                 state=state,
                 started_at=started_at,
                 capability_id=capability_id,
@@ -1825,6 +1855,15 @@ class ServiceAutonomousRunMixin:
                 observation_summary=observation_summary,
                 input_text=input_text,
                 capability_response=capability_response,
+            )
+            current_input = self._build_current_input(
+                input_text=input_text, trigger_kind="capability_result",
+                interaction_context=self._capability_result_interaction_context(capability_request_summary),
+                capability_request_summary=capability_request_summary,
+            )
+            observations, _ = self._interpret_observation_inputs(
+                state=state, acquisition=acquisition, current_input=current_input, recent_turns=[],
+                client_context=client_context, cycle_id=self._autonomous_run_event_cycle_id(run),
             )
             participant_refs = run.get("participant_refs")
             current_person_ref = (
@@ -1953,6 +1992,7 @@ class ServiceAutonomousRunMixin:
                     )
                     return
                 self._execute_autonomous_run_step(
+                    observations=observations,
                     state=state,
                     run_id=run_id.strip(),
                     started_at=self._now_iso(),
@@ -1992,6 +2032,9 @@ class ServiceAutonomousRunMixin:
                 f"result cycle failed run={run_id} error={type(exc).__name__}: {format_debug_log_text(str(exc), level='ERROR')}",
                 level="ERROR",
             )
+        finally:
+            acquisition.close()
+
 
     def _persist_autonomous_capability_result_event(
         self,

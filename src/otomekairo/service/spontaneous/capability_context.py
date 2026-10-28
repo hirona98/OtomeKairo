@@ -132,6 +132,7 @@ class ServiceSpontaneousCapabilityContextMixin:
     def _prepare_capability_result_context(
         self,
         *,
+        acquisition,
         state: dict[str, Any],
         started_at: str,
         capability_id: str,
@@ -143,15 +144,16 @@ class ServiceSpontaneousCapabilityContextMixin:
     ) -> tuple[dict[str, Any], dict[str, Any], str]:
         hook_name = self._capability_result_context_hook_name(capability_id)
         if hook_name == "vision_capture":
-            client_context, observation_summary = self._interpret_capability_result_capture(
-                state=state,
-                started_at=started_at,
-                client_context=client_context,
-                observation_summary=observation_summary,
-                input_text=input_text,
-                capability_response=capability_response,
-                visual_observation_change_context=visual_observation_change_context,
-            )
+            if capability_response.get("images"):
+                self._collect_capture_images(state=state, acquisition=acquisition,
+                                             capability_response=capability_response, target=observation_summary,
+                                             comparison=visual_observation_change_context)
+            else:
+                metadata = capability_response["client_context"]
+                self._collect_capture_report(state=state, acquisition=acquisition,
+                    source_ref=metadata["vision_source_id"], source_label=metadata["source_label"],
+                    status="not_observed" if vision_capture_skip_reason(capability_response.get("error")) else "failed",
+                    error_code=None if vision_capture_skip_reason(capability_response.get("error")) else "acquisition_failed")
             input_text = self._build_capability_result_input_text(
                 client_context=client_context,
                 capability_response=capability_response,
@@ -292,31 +294,6 @@ class ServiceSpontaneousCapabilityContextMixin:
             return None
         return None
 
-    def _interpret_capability_result_capture(
-        self,
-        *,
-        state: dict[str, Any],
-        started_at: str,
-        client_context: dict[str, Any],
-        observation_summary: dict[str, Any],
-        input_text: str,
-        capability_response: dict[str, Any],
-        visual_observation_change_context: dict[str, Any] | None = None,
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        images = self._normalize_visual_observation_images(
-            capability_response.get("images", []),
-            allow_missing=True,
-        )
-        return self._interpret_visual_observation(
-            state=state,
-            started_at=started_at,
-            trigger_kind="capability_result",
-            client_context=client_context,
-            observation_summary=observation_summary,
-            input_text=input_text,
-            images=images,
-            visual_observation_change_context=visual_observation_change_context,
-        )
 
     def _build_capability_result_input_text(
         self,

@@ -1125,6 +1125,8 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         important_records = [record for record in important_records if record["cycle_id"] != cycle_id]
         recent_records = [record for record in recent_records if record["cycle_id"] != cycle_id]
 
+        queried_records = [record for record in queried_records if record["cycle_id"] != cycle_id]
+
         # 枠別選定
         selected_records: list[dict[str, Any]] = []
         seen: set[str] = set()

@@ -133,3 +133,7 @@ microphone connector は加えて VAD、STT、音声起動ワード判定、話�
 
 切り出し後も、server 側の capability manifest と wire 契約はこの repository の docs を正本にする。
 この repository には参照実装または起動手順へのリンクだけを残す。
+
+## センサーproducer
+
+producerは取得値・単位・取得時刻を正規化し、[観測入力 API](../api/観測入力.md) へ報告する。機器固有の接続設定はconnector側に置く。受信はruntime更新だけを行い、起床や意味判断を自動で開始しない。

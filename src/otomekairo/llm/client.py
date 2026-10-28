@@ -1,4 +1,5 @@
 from __future__ import annotations
+from otomekairo.observations.context import ObservationContext
 
 import json
 from collections.abc import Callable
@@ -61,7 +62,6 @@ from otomekairo.llm.schemas import (
     pre_send_check_response_format,
     recall_pack_selection_response_format,
     response_format_schema_name,
-    visual_observation_response_format,
     world_state_response_format,
 )
 from otomekairo.llm.prompts import (
@@ -93,8 +93,6 @@ from otomekairo.llm.prompts import (
     build_pending_intent_selection_repair_prompt,
     build_recall_pack_selection_messages,
     build_recall_pack_selection_repair_prompt,
-    build_visual_observation_messages,
-    build_visual_observation_repair_prompt,
     build_world_state_messages,
     build_world_state_repair_prompt,
 )
@@ -303,7 +301,7 @@ class LLMClient:
         current_input: CurrentInput,
         recent_turns: list[dict],
         current_time: str,
-        current_visual_observations: list[dict[str, Any]],
+        observations: ObservationContext | None,
         activity_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         operation = "input_interpretation"
@@ -329,6 +327,7 @@ class LLMClient:
                 payload = {
                     "recall_hint": recall_hint,
                     "answer_contract": answer_contract,
+                    "observation_interpretations": self._mock_observation_interpretations(model_config, observations),
                 }
                 debug_log(
                     "LLM",
@@ -345,13 +344,13 @@ class LLMClient:
                 current_input=current_input,
                 recent_turns=recent_turns,
                 current_time=current_time,
-                current_visual_observations=current_visual_observations,
+                observations=observations,
                 activity_context=activity_context,
             )
             payload = self._generate_structured_payload(
                 model_config=model_config,
                 messages=messages,
-                validator=self._validate_input_interpretation_contract,
+                validator=lambda value: self._validate_input_interpretation_contract(value, observations),
                 repair_prompt_builder=build_input_interpretation_repair_prompt,
                 failure_message="InputInterpretation の生成に失敗しました。解析可能な応答が得られませんでした。",
                 response_format=input_interpretation_response_format(),
@@ -362,13 +361,14 @@ class LLMClient:
             return {
                 "recall_hint": recall_hint,
                 "answer_contract": answer_contract,
+                "observation_interpretations": payload["observation_interpretations"],
             }
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc, level='ERROR')}", level="ERROR")
             raise
 
-    def _validate_input_interpretation_contract(self, payload: dict[str, Any]) -> None:
-        _validate_exact_keys(payload, {"recall_hint", "answer_contract"}, "InputInterpretation")
+    def _validate_input_interpretation_contract(self, payload: dict[str, Any], observations: ObservationContext | None) -> None:
+        _validate_exact_keys(payload, {"recall_hint", "answer_contract", "observation_interpretations"}, "InputInterpretation")
         recall_hint = payload["recall_hint"]
         if not isinstance(recall_hint, dict):
             raise LLMError("InputInterpretation.recall_hint は object である必要があります。")
@@ -376,6 +376,66 @@ class LLMClient:
             raise LLMError("InputInterpretation.answer_contract は object である必要があります。")
         validate_recall_hint_contract(normalize_recall_hint_payload(recall_hint))
         validate_answer_contract_contract(payload["answer_contract"])
+        rows = payload["observation_interpretations"]
+        expected = set(observations.observation_refs()) if observations is not None else set()
+        if not isinstance(rows, list) or len(rows) != len(expected):
+            raise LLMError("InputInterpretation の観測解釈と入力件数が一致しません。")
+        seen: set[str] = set()
+        import json
+        comparisons = {row["observation_ref"]: row for row in json.loads(observations.comparisons_json)} if observations is not None else {}
+        pairs = {"first_seen": "no_previous_observation", "stable": "semantic_stability",
+                 "same_as_recent_speech": "recent_speech_repetition"}
+        for row in rows:
+            if not isinstance(row, dict) or "observation_ref" not in row:
+                raise LLMError("InputInterpretation の観測参照が不正です。")
+            ref = row["observation_ref"]
+            if not isinstance(ref, str) or ref not in expected or ref in seen:
+                raise LLMError("InputInterpretation の観測参照が未知または重複しています。")
+            seen.add(ref)
+            validate_visual_observation_contract({k: v for k, v in row.items() if k != "observation_ref"})
+            comparison = comparisons.get(ref, {})
+            state, basis = row["change_state"], row["change_basis"]
+            if state in pairs and basis != pairs[state] or state == "changed" and basis not in {"semantic_change", "source_identity_changed"}:
+                raise LLMError("InputInterpretation の変化状態と根拠が一致しません。")
+            if comparison.get("source_identity_changed") is True:
+                if (state, basis) != ("changed", "source_identity_changed"):
+                    raise LLMError("InputInterpretation の観測元変更の判定が一致しません。")
+            elif basis == "source_identity_changed":
+                raise LLMError("InputInterpretation の観測元変更に入力根拠がありません。")
+            elif comparison.get("previous_observation_context") is None:
+                if state != "first_seen":
+                    raise LLMError("InputInterpretation の比較対象がありません。")
+            elif state == "first_seen":
+                raise LLMError("InputInterpretation の初回判定に既存比較対象があります。")
+            if state == "same_as_recent_speech" and comparison.get("last_prompted_observation_context") is None:
+                raise LLMError("InputInterpretation の直近発話の比較対象がありません。")
+
+    def _mock_observation_interpretations(self, model_config: dict, observations: ObservationContext | None) -> list[dict[str, Any]]:
+        if observations is None:
+            return []
+        import json
+        from otomekairo.observations.models import Image
+        comparisons = {row["observation_ref"]: row for row in json.loads(observations.comparisons_json)}
+        rows = []
+        for ref, observation in zip(observations.observation_refs(), observations.observations, strict=True):
+            if isinstance(observation.payload, Image):
+                source_pack = {"client_context": {"source_kind": observation.source_kind, "source_label": observation.source_label},
+                               "image_input_kind": "conversation_attachment" if observation.origin_kind == "conversation_attachment" else "vision_capture_result",
+                               "change_context": comparisons.get(ref, {})}
+                value = self.mock_client.describe_image_fixture(model_config, source_pack, ["mock-image"])
+            else:
+                value = {"summary_text": f"{observation.source_label} の測定報告を取得した。", "confidence_hint": "high",
+                         "change_state": "first_seen", "change_basis": "no_previous_observation",
+                         "change_reason_summary": "この項目の観測報告を取得した。"}
+                comparison = comparisons.get(ref, {})
+                previous = comparison.get("previous_observation_context")
+                if comparison.get("source_identity_changed"):
+                    value.update(change_state="changed", change_basis="source_identity_changed")
+                elif previous is not None:
+                    same = previous.get("payload") == observation.payload.to_payload()
+                    value.update(change_state="stable" if same else "changed", change_basis="semantic_stability" if same else "semantic_change")
+            rows.append({"observation_ref": ref, **value})
+        return rows
 
     def generate_decision(
         self,
@@ -1409,40 +1469,6 @@ class LLMClient:
             failure_message="視覚の反復根拠審査に失敗しました。", wrap_validation_error=True,
             response_format=visual_daily_support_response_format(), operation="visual_daily_support")
 
-    def generate_visual_observation_summary(
-        self,
-        *,
-        model_config: dict,
-        persona_context: PersonaContext,
-        source_pack: dict[str, Any],
-        images: list[str],
-    ) -> dict[str, Any]:
-        operation = "visual_observation"
-        source_pack = self._source_pack_with_persona_context(source_pack, persona_context)
-        if self._is_mock_model_config(model_config):
-            payload = self.mock_client.generate_visual_observation_summary(
-                model_config,
-                source_pack,
-                images,
-            )
-            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
-            return payload
-
-        messages = build_visual_observation_messages(
-            persona_context=persona_context,
-            source_pack=source_pack,
-            images=images,
-        )
-        return self._generate_structured_payload(
-            model_config=model_config,
-            messages=messages,
-            validator=validate_visual_observation_contract,
-            repair_prompt_builder=build_visual_observation_repair_prompt,
-            failure_message="VisualObservation の生成に失敗しました。解析可能な応答が得られませんでした。",
-            response_format=visual_observation_response_format(),
-            wrap_validation_error=True,
-            operation=operation,
-        )
 
     def generate_embeddings(
         self,

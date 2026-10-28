@@ -21,6 +21,8 @@ from otomekairo.service.common import ServiceError, configure_debug_log_stream_s
 from otomekairo.service.cycle_coordinator import CycleCoordinator
 from otomekairo.service.config.mixin import ServiceConfigMixin
 from otomekairo.service.docs import ServiceDocsMixin
+from otomekairo.service.environment import ServiceEnvironmentMixin
+from otomekairo.observations import EnvironmentRuntime, validate_environment_config
 from otomekairo.service.memory import ServiceMemoryMixin
 from otomekairo.service.input.mixin import ServiceInputMixin
 from otomekairo.service.speech_output import ServiceSpeechOutputMixin
@@ -32,6 +34,7 @@ from otomekairo.tts import TtsRuntime
 
 # サービス
 class OtomeKairoService(
+    ServiceEnvironmentMixin,
     ServiceAgentSkillsMixin,
     ServiceSpeechOutputMixin,
     ServiceAudioMixin,
@@ -51,6 +54,10 @@ class OtomeKairoService(
         self._log_stream_registry = LogStreamRegistry()
         configure_debug_log_stream_sink(self._append_debug_log_stream_record)
         self.store = FileStore(root_dir)
+        initial_state = self.store.read_state()
+        self._environment_runtime = EnvironmentRuntime(validate_environment_config(
+            initial_state["environment_settings"], camera_sources=initial_state["camera_sources"],
+        ))
         self._agent_skill_registry = AgentSkillRegistry.load(
             self.store.read_state().get("agent_skill_sources", {})
         )
@@ -71,6 +78,7 @@ class OtomeKairoService(
             "active_user_response_cycle_count": 0,
         }
         self._wake_observation_runtime_state: dict[str, dict[str, Any]] = {}
+        self._observation_history: dict[tuple, dict[str, Any]] = {}
         self._autonomous_run_execution_locks: dict[str, threading.RLock] = {}
         self._background_thinking_stop_event: threading.Event | None = None
         self._background_thinking_thread: threading.Thread | None = None

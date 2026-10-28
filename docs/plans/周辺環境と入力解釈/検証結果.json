@@ -1,0 +1,270 @@
+{
+  "date": "2026-10-28",
+  "model": "openrouter/google/gemini-3.1-flash-lite",
+  "baseline_commit": "02049d2",
+  "scope": "原画像→観測解釈→入力解釈→行動判断の中核比較。記憶は同じ空集合。画像はscripts/virtual_time_image_sources.json。各条件1回。全cycleの性能比較ではない。",
+  "cases": [
+    {
+      "version": "baseline-reviewed",
+      "case": "desk",
+      "provider_status": "succeeded",
+      "generation_calls": 3,
+      "elapsed_seconds": 7.669,
+      "input_tokens": 19175,
+      "output_tokens": 752,
+      "stages": [
+        {
+          "role": "visual_observation",
+          "elapsed_ms": 1847,
+          "input_tokens": 4009,
+          "output_tokens": 150
+        },
+        {
+          "role": "input_interpretation",
+          "elapsed_ms": 1378,
+          "input_tokens": 3865,
+          "output_tokens": 204
+        },
+        {
+          "role": "decision",
+          "elapsed_ms": 2337,
+          "input_tokens": 11301,
+          "output_tokens": 398
+        }
+      ],
+      "evaluation": {
+        "factual_fidelity": true,
+        "provenance": true,
+        "uncertainty": true,
+        "issues": []
+      }
+    },
+    {
+      "version": "baseline-reviewed",
+      "case": "working",
+      "provider_status": "succeeded",
+      "generation_calls": 3,
+      "elapsed_seconds": 5.223,
+      "input_tokens": 19121,
+      "output_tokens": 623,
+      "stages": [
+        {
+          "role": "visual_observation",
+          "elapsed_ms": 1536,
+          "input_tokens": 4009,
+          "output_tokens": 124
+        },
+        {
+          "role": "input_interpretation",
+          "elapsed_ms": 1312,
+          "input_tokens": 3841,
+          "output_tokens": 180
+        },
+        {
+          "role": "decision",
+          "elapsed_ms": 2371,
+          "input_tokens": 11271,
+          "output_tokens": 319
+        }
+      ],
+      "evaluation": {
+        "factual_fidelity": false,
+        "provenance": true,
+        "uncertainty": false,
+        "issues": [
+          "マグカップの中身が空であることを視覚情報から断定的に述べているが、実際には画像から内部の有無を確定することはできない。"
+        ]
+      }
+    },
+    {
+      "version": "baseline-reviewed",
+      "case": "person",
+      "provider_status": "succeeded",
+      "generation_calls": 3,
+      "elapsed_seconds": 5.741,
+      "input_tokens": 19241,
+      "output_tokens": 724,
+      "stages": [
+        {
+          "role": "visual_observation",
+          "elapsed_ms": 1609,
+          "input_tokens": 4036,
+          "output_tokens": 168
+        },
+        {
+          "role": "input_interpretation",
+          "elapsed_ms": 1615,
+          "input_tokens": 3885,
+          "output_tokens": 181
+        },
+        {
+          "role": "decision",
+          "elapsed_ms": 2514,
+          "input_tokens": 11320,
+          "output_tokens": 375
+        }
+      ],
+      "evaluation": {
+        "factual_fidelity": true,
+        "provenance": true,
+        "uncertainty": true,
+        "issues": []
+      }
+    },
+    {
+      "version": "current-reviewed",
+      "case": "desk",
+      "provider_status": "succeeded",
+      "generation_calls": 2,
+      "elapsed_seconds": 7.558,
+      "input_tokens": 18582,
+      "output_tokens": 826,
+      "stages": [
+        {
+          "role": "input_interpretation",
+          "elapsed_ms": 2522,
+          "input_tokens": 5690,
+          "output_tokens": 431
+        },
+        {
+          "role": "decision",
+          "elapsed_ms": 2708,
+          "input_tokens": 12892,
+          "output_tokens": 395
+        }
+      ],
+      "evaluation": {
+        "factual_fidelity": true,
+        "provenance": true,
+        "uncertainty": true,
+        "issues": []
+      }
+    },
+    {
+      "version": "current-reviewed",
+      "case": "working",
+      "provider_status": "succeeded",
+      "generation_calls": 2,
+      "elapsed_seconds": 5.05,
+      "input_tokens": 18525,
+      "output_tokens": 784,
+      "stages": [
+        {
+          "role": "input_interpretation",
+          "elapsed_ms": 2546,
+          "input_tokens": 5684,
+          "output_tokens": 410
+        },
+        {
+          "role": "decision",
+          "elapsed_ms": 2500,
+          "input_tokens": 12841,
+          "output_tokens": 374
+        }
+      ],
+      "evaluation": {
+        "factual_fidelity": false,
+        "provenance": true,
+        "uncertainty": false,
+        "issues": [
+          "マグカップの中身が空に見えると断定しており、不確実性の余地を排除している。"
+        ]
+      }
+    },
+    {
+      "version": "current-reviewed",
+      "case": "person",
+      "provider_status": "succeeded",
+      "generation_calls": 2,
+      "elapsed_seconds": 5.349,
+      "input_tokens": 18652,
+      "output_tokens": 906,
+      "stages": [
+        {
+          "role": "input_interpretation",
+          "elapsed_ms": 2730,
+          "input_tokens": 5716,
+          "output_tokens": 489
+        },
+        {
+          "role": "decision",
+          "elapsed_ms": 2616,
+          "input_tokens": 12936,
+          "output_tokens": 417
+        }
+      ],
+      "evaluation": {
+        "factual_fidelity": true,
+        "provenance": true,
+        "uncertainty": true,
+        "issues": []
+      }
+    },
+    {
+      "version": "current-sensors",
+      "case": "different_places_and_old_motion",
+      "provider_status": "succeeded",
+      "generation_calls": 2,
+      "elapsed_seconds": 11.176,
+      "input_tokens": 19928,
+      "output_tokens": 1001,
+      "stages": [
+        {
+          "role": "input_interpretation",
+          "elapsed_ms": 3402,
+          "input_tokens": 6229,
+          "output_tokens": 664
+        },
+        {
+          "role": "decision",
+          "elapsed_ms": 5347,
+          "input_tokens": 13699,
+          "output_tokens": 337
+        }
+      ],
+      "evaluation": {
+        "factual_fidelity": true,
+        "provenance": true,
+        "uncertainty": true,
+        "issues": []
+      }
+    },
+    {
+      "version": "current-sensors",
+      "case": "failed_humidity_and_past_visual",
+      "provider_status": "succeeded",
+      "generation_calls": 2,
+      "elapsed_seconds": 5.482,
+      "input_tokens": 19837,
+      "output_tokens": 1024,
+      "stages": [
+        {
+          "role": "input_interpretation",
+          "elapsed_ms": 2849,
+          "input_tokens": 6185,
+          "output_tokens": 627
+        },
+        {
+          "role": "decision",
+          "elapsed_ms": 2631,
+          "input_tokens": 13652,
+          "output_tokens": 397
+        }
+      ],
+      "evaluation": {
+        "factual_fidelity": true,
+        "provenance": true,
+        "uncertainty": true,
+        "issues": []
+      }
+    }
+  ],
+  "limitations": [
+    "白いカップの中身について、新旧とも自動評価の指摘が残った。新方式も総合精度合格とは扱わない。",
+    "現在方式のworkingは「空に見える」に続けて真に空か判断できないとも発話しており、自動評価の断定判定には揺れがある。原画像から中身不明という保守的評価を維持する。",
+    "センサー取得失敗の故障との混同、人感から現在不在を推定する誤りが初回にあり、プロンプトを修正した。再検証は出所・不確実性を含め合格したが、全入力への保証にはしない。",
+    "provider schemaの観測解釈maxItems=40は実モデルが400で拒否。schema上限を除き、snapshotと出力validatorで件数を検証する現行版で再比較した。",
+    "実LLMの一連の非同期配送・物理センサーは未実施。非同期経路は隔離mock smoke、物理機器は選定後に確認する。",
+    "費用は算出していない。単発結果から速度・費用・精度の一般的な改善を主張しない。"
+  ]
+}

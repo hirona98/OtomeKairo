@@ -21,7 +21,7 @@
 - `pre_send_check`
 - `world_state` 候補抽出
 - `activity_state` 候補抽出
-- `visual_observation` 要約
+- `input_interpretation` による観測説明
 
 ## 共通境界
 

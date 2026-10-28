@@ -3,6 +3,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from otomekairo.observations.acquisition import ObservationAcquisition
 from otomekairo.http_server import OtomeKairoHandler
 from otomekairo.llm.client import LLMError
 from otomekairo.service.app import OtomeKairoService
@@ -26,6 +27,9 @@ class _WakeApi(ServiceSpontaneousMixin):
 
 class _WakePipeline(ServiceInputWakePipelineMixin, ServiceSpontaneousWakeMixin):
     def __init__(self):
+        self._build_current_input = Mock()
+        self._interpret_observation_inputs = Mock(return_value=(None, {}))
+        self._refresh_observation_states = Mock(return_value=None)
         self._run_input_pipeline = Mock(return_value={"decision": {"kind": "noop"}})
         self._run_autonomous_initiative_entry_check = Mock(side_effect=AssertionError("entry gate"))
         self._run_wake_policy_observations = Mock(side_effect=AssertionError("scheduled observations"))
@@ -83,6 +87,7 @@ def test_message_enters_judgment_without_pending_or_initiative_gate():
     reference = {"text": "参照資料の全文。"}
 
     pipeline, input_text, _ = service._run_wake_pipeline(
+        acquisition=ObservationAcquisition("memory_set:test", 300),
         state={},
         started_at="2026-10-24T15:00:00+09:00",
         trigger_kind="wake",

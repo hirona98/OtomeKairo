@@ -81,7 +81,7 @@ class ServiceInputInitiativeContextMixin:
             candidate_families=candidate_families,
             selected_candidate_family=selected_candidate_family,
         )
-        visual_signals = self._initiative_visual_observation_signals(foreground_signal_summary)
+        visual_signals = self._initiative_observation_signals(foreground_signal_summary)
         visual_debug = "-"
         if visual_signals:
             visual_debug = ",".join(
@@ -195,8 +195,8 @@ class ServiceInputInitiativeContextMixin:
         world_state_summary: list[dict[str, Any]],
     ) -> dict[str, Any]:
         _ = trigger_kind
-        visual_signals = self._compact_visual_observation_signals(
-            client_context.get("visual_observation_signals")
+        visual_signals = self._compact_observation_signals(
+            client_context.get("observation_signals")
         )
         state_types = sorted(
             {
@@ -212,7 +212,7 @@ class ServiceInputInitiativeContextMixin:
                 "world_state_count": 0,
             }
             if visual_signals:
-                payload["visual_observations"] = visual_signals
+                payload["observations"] = visual_signals
             return payload
 
         grounded_types = {"schedule", "social_context", "body"}
@@ -233,7 +233,7 @@ class ServiceInputInitiativeContextMixin:
         if state_types:
             payload["state_types"] = state_types[:12]
         if visual_signals:
-            payload["visual_observations"] = visual_signals
+            payload["observations"] = visual_signals
         return payload
 
     def _initiative_activity_context(self, activity_context: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -442,14 +442,14 @@ class ServiceInputInitiativeContextMixin:
             sources.append(payload)
         return sources[:VISUAL_SOURCE_LIMIT]
 
-    def _initiative_visual_observation_signals(
+    def _initiative_observation_signals(
         self,
         foreground_signal_summary: dict[str, Any] | None,
     ) -> list[dict[str, Any]]:
         if not isinstance(foreground_signal_summary, dict):
             return []
-        return self._compact_visual_observation_signals(
-            foreground_signal_summary.get("visual_observations")
+        return self._compact_observation_signals(
+            foreground_signal_summary.get("observations")
         )
 
     def _initiative_speech_timing_summary(
@@ -479,18 +479,18 @@ class ServiceInputInitiativeContextMixin:
         speech_timing_summary: str | None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {}
-        visual_repetition = self._initiative_visual_repetition_summary(foreground_signal_summary)
+        observation_repetition = self._initiative_observation_repetition_summary(foreground_signal_summary)
         suppression_level = "low"
         foreground_drives = self._initiative_foreground_drive_summaries(drive_summaries)
         if speech_timing_state.get("same_dedupe_recently_replied") is True:
             suppression_level = "high"
-        elif visual_repetition.get("same_as_recent_speech_present") is True and not foreground_drives:
+        elif observation_repetition.get("same_as_recent_speech_present") is True and not foreground_drives:
             suppression_level = "high"
         payload["suppression_level"] = suppression_level
         reason_parts: list[str] = []
         if speech_timing_summary is not None:
             reason_parts.append(speech_timing_summary)
-        if visual_repetition.get("same_as_recent_speech_present") is True:
+        if observation_repetition.get("same_as_recent_speech_present") is True:
             reason_parts.append("視覚観測には直近で発話済みの内容があり、同じ内容の重複発話を抑える材料がある。")
         if reason_parts:
             payload["reason_summary"] = " / ".join(reason_parts)
@@ -498,21 +498,21 @@ class ServiceInputInitiativeContextMixin:
             value = speech_timing_state.get(key)
             if isinstance(value, bool):
                 payload[key] = value
-        payload.update(visual_repetition)
+        payload.update(observation_repetition)
         return payload
 
-    def _initiative_visual_repetition_summary(
+    def _initiative_observation_repetition_summary(
         self,
         foreground_signal_summary: dict[str, Any],
     ) -> dict[str, Any]:
-        visual_signals = self._initiative_visual_observation_signals(foreground_signal_summary)
+        visual_signals = self._initiative_observation_signals(foreground_signal_summary)
         if not visual_signals:
             return {
-                "visual_repetition_present": False,
+                "observation_repetition_present": False,
                 "same_as_recent_speech_present": False,
-                "all_visual_observations_repeated": False,
-                "visual_observation_count": 0,
-                "repeated_visual_observation_count": 0,
+                "all_observations_repeated": False,
+                "observation_count": 0,
+                "repeated_observation_count": 0,
             }
         repeated_count = 0
         same_as_recent_speech_present = False
@@ -523,9 +523,9 @@ class ServiceInputInitiativeContextMixin:
             if change_state == "same_as_recent_speech" or signal.get("same_as_recent_speech") is True:
                 same_as_recent_speech_present = True
         return {
-            "visual_repetition_present": repeated_count > 0,
+            "observation_repetition_present": repeated_count > 0,
             "same_as_recent_speech_present": same_as_recent_speech_present,
-            "all_visual_observations_repeated": repeated_count == len(visual_signals),
-            "visual_observation_count": len(visual_signals),
-            "repeated_visual_observation_count": repeated_count,
+            "all_observations_repeated": repeated_count == len(visual_signals),
+            "observation_count": len(visual_signals),
+            "repeated_observation_count": repeated_count,
         }

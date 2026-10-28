@@ -164,12 +164,14 @@ class ServiceSpontaneousCapabilityCycleMixin:
             client_context=client_context,
             capability_response=capability_response,
         )
+        acquisition = self._new_observation_acquisition(state)
         pipeline: dict[str, Any] | None = None
         ongoing_action_transition_summary: dict[str, Any] | None = None
         if user_facing_result:
             self._begin_user_response_cycle()
         try:
             client_context, observation_summary, input_text = self._prepare_capability_result_context(
+                acquisition=acquisition,
                 state=state,
                 started_at=started_at,
                 capability_id=capability_id,
@@ -185,6 +187,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 evidence_event_ids=[],
             )
             pipeline = self._run_input_pipeline(
+                acquisition=acquisition,
                 state=state,
                 started_at=started_at,
                 input_text=input_text,
@@ -386,6 +389,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 failure_reason=str(exc),
             )
         finally:
+            acquisition.close()
             if user_facing_result:
                 self._end_user_response_cycle()
 

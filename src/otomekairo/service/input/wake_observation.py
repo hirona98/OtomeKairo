@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from otomekairo.observations.acquisition import ObservationAcquisition
+from otomekairo.observations.models import SourceReport
+
 from typing import Any
 
 from otomekairo.llm.client import LLMError
@@ -30,6 +33,7 @@ class ServiceInputWakeObservationMixin:
     def _run_wake_policy_observations(
         self,
         *,
+        acquisition: ObservationAcquisition,
         state: dict[str, Any],
         started_at: str,
         client_context: dict[str, Any],
@@ -44,8 +48,12 @@ class ServiceInputWakeObservationMixin:
         summaries: list[dict[str, Any]] = []
         for observation in observations:
             if for_background_thinking and self._wake_observation_source_is_disconnected(observation):
+                source_id = observation["input"]["vision_source_id"]
+                acquisition.reports.append(SourceReport(source_id, None, source_id, None,
+                                                         "failed", started_at, "source_unavailable"))
                 continue
             summary = self._run_wake_policy_observation(
+                acquisition=acquisition,
                 state=state,
                 started_at=started_at,
                 observation=observation,
@@ -57,11 +65,13 @@ class ServiceInputWakeObservationMixin:
                 and self._wake_observation_source_is_disconnected(observation)
             ):
                 continue
-            summary = self._record_wake_policy_observation_runtime_state(
-                summary=summary,
-                current_time=started_at,
-            )
             summaries.append(summary)
+            if summary["status"] in {"failed", "skipped"}:
+                source_id = summary["vision_source_id"]
+                camera = state["camera_sources"].get(source_id)
+                acquisition.reports.append(SourceReport(source_id, None, summary.get("source_label", source_id),
+                    camera["place_ref"] if camera is not None else None,
+                    "failed" if summary["status"] == "failed" else "not_observed", started_at, summary.get("failure_code")))
         if not summaries:
             return client_context
         summary_text = self._wake_policy_observation_summary_text(summaries)
@@ -153,6 +163,7 @@ class ServiceInputWakeObservationMixin:
     def _run_wake_policy_observation(
         self,
         *,
+        acquisition: ObservationAcquisition,
         state: dict[str, Any],
         started_at: str,
         observation: dict[str, Any],
@@ -217,6 +228,7 @@ class ServiceInputWakeObservationMixin:
                 reason_summary="capability response が空。",
             )
         return self._apply_wake_policy_observation_result(
+            acquisition=acquisition,
             state=state,
             started_at=started_at,
             observation=resolved_observation,
@@ -285,6 +297,7 @@ class ServiceInputWakeObservationMixin:
     def _apply_wake_policy_observation_result(
         self,
         *,
+        acquisition: ObservationAcquisition,
         state: dict[str, Any],
         started_at: str,
         observation: dict[str, Any],
@@ -322,109 +335,25 @@ class ServiceInputWakeObservationMixin:
                 observation_summary=observation_summary,
                 capability_request_summary=capability_request_summary,
             )
-        input_text = self._build_capability_result_input_text(
-            client_context=client_context,
-            capability_response=capability_response,
+        summary = self._wake_policy_observation_success_summary(
+            observation=observation, capability_response=capability_response,
+            observation_summary=observation_summary, capability_request_summary=capability_request_summary,
         )
-        interaction_context = self._capability_result_interaction_context(capability_request_summary)
-        try:
-            client_context, observation_summary, input_text = self._prepare_capability_result_context(
-                state=state,
-                started_at=started_at,
-                capability_id=capability_id,
-                client_context=client_context,
-                observation_summary=observation_summary,
-                input_text=input_text,
-                capability_response=capability_response,
-                visual_observation_change_context=self._build_visual_observation_change_context(
-                    previous_observation_runtime
-                ),
+        if summary["status"] == "succeeded":
+            self._collect_capture_images(
+                state=state, acquisition=acquisition, capability_response=capability_response,
+                target=summary, comparison=self._build_visual_observation_change_context(previous_observation_runtime),
             )
-            self._refresh_world_state_context(
-                state=state,
-                started_at=started_at,
-                input_text=input_text,
-                trigger_kind="capability_result",
-                client_context=client_context,
-                cycle_id=cycle_id,
-                selected_candidate=None,
-                observation_summary=observation_summary,
-                capability_request_summary=capability_request_summary,
-                persona_context=self._build_selected_persona_context(state=state, role="world_state"),
-                current_person_ref=(
-                    interaction_context.participant_refs[0]
-                    if interaction_context is not None and interaction_context.participant_refs
-                    else None
-                ),
-            )
-            visual_observation_context = self._build_visual_observation_decision_context(
-                trigger_kind="capability_result",
-                observation_summary=observation_summary,
-            )
-            self._refresh_activity_context(
-                state=state,
-                started_at=started_at,
-                input_text=input_text,
-                current_input=self._build_current_input(
-                    input_text=input_text,
-                    trigger_kind="capability_result",
-                    interaction_context=interaction_context,
-                    capability_request_summary=capability_request_summary,
-                ).to_prompt_payload(),
-                recent_turns=[],
-                trigger_kind="capability_result",
-                client_context=client_context,
-                observation_summary=observation_summary,
-                visual_observation_context=visual_observation_context,
-                foreground_world_state=None,
-                cycle_id=cycle_id,
-                cycle_label=self._debug_cycle_label(cycle_id),
-                persona_context=self._build_selected_persona_context(state=state, role="activity_state"),
-            )
-            transition_summary = self._finish_wake_policy_observation_ongoing_action(
-                request_record=request_record,
-                current_time=self._now_iso(),
-                capability_id=capability_id,
-                capability_response=capability_response,
-                observation_summary=observation_summary,
-                failure_reason=None,
-            )
-            self._apply_capability_runtime_state_followup(
-                capability_id=capability_id,
-                current_time=self._now_iso(),
-                observation_summary=observation_summary,
-                result_payload=capability_response,
-                ongoing_action_transition_summary=transition_summary,
-            )
-            return self._wake_policy_observation_success_summary(
-                observation=observation,
-                capability_response=capability_response,
-                observation_summary=observation_summary,
-                capability_request_summary=capability_request_summary,
-            )
-        except (LLMError, KeyError, TypeError, ValueError) as exc:
-            transition_summary = self._finish_wake_policy_observation_ongoing_action(
-                request_record=request_record,
-                current_time=self._now_iso(),
-                capability_id=capability_id,
-                capability_response=capability_response,
-                observation_summary=observation_summary,
-                failure_reason=str(exc),
-            )
-            self._apply_capability_runtime_state_followup(
-                capability_id=capability_id,
-                current_time=self._now_iso(),
-                observation_summary=observation_summary,
-                result_payload=capability_response,
-                ongoing_action_transition_summary=transition_summary,
-                failure_reason=str(exc),
-            )
-            return self._wake_policy_observation_failure_summary(
-                observation=observation,
-                failure_code="result_processing_failed",
-                reason_summary=str(exc),
-                capability_request_summary=capability_request_summary,
-            )
+        transition = self._finish_wake_policy_observation_ongoing_action(
+            request_record=request_record, current_time=self._now_iso(), capability_id=capability_id,
+            capability_response=capability_response, observation_summary=observation_summary,
+            failure_reason=summary.get("error"),
+        )
+        self._apply_capability_runtime_state_followup(
+            capability_id=capability_id, current_time=self._now_iso(), observation_summary=observation_summary,
+            result_payload=capability_response, ongoing_action_transition_summary=transition,
+        )
+        return summary
 
     def _finish_wake_policy_observation_ongoing_action(
         self,

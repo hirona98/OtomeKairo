@@ -379,6 +379,39 @@ class ServiceInputWorldStateSourcePackMixin:
             capability_result_summary = self._build_world_state_capability_result_summary(observation_summary)
             if capability_result_summary is not None:
                 payload.capability_result_summary = capability_result_summary
+        snapshot = client_context.get("observation_snapshot")
+        if isinstance(snapshot, dict):
+            views = snapshot["observation_interpretations"]["surroundings"]["observations"]
+            contexts = []
+            for observation, view in zip(snapshot["environment_observations"], views, strict=True):
+                interpretation = view["interpretation"]
+                if interpretation is None:
+                    raise ValueError("An interpreted snapshot is required for world state.")
+                if observation["kind"] == "image":
+                    context = WorldStateVisualContext(
+                        summary_text=interpretation["summary_text"], visual_summary_text=interpretation["summary_text"],
+                        image_interpreted=True, visual_confidence_hint=interpretation["confidence_hint"], image_count=1,
+                        capability_id="vision.capture", vision_source_id=observation["source_ref"],
+                        source_kind=observation["source_kind"], source_label=observation["source_label"],
+                        source_owner=observation["source_owner"],
+                    )
+                    state_type = "visual_context"
+                else:
+                    context = WorldStateNamedSummaryContext(summary_text=interpretation["summary_text"], summary_field_name="environment_summary")
+                    state_type = "environment"
+                contexts.append(WorldStateSourceCandidate(
+                    candidate_ref=f"state_source:observation:{len(contexts) + 1}", state_type=state_type,
+                    scope_type="topic" if state_type == "visual_context" else "world",
+                    scope_key="topic:current_work" if state_type == "visual_context" else "world",
+                    evidence_summary=interpretation["summary_text"],
+                    observation_source_ref=observation["source_ref"], channel_id=observation["channel_id"],
+                    place_ref=observation["place_ref"], source_observation_refs=(view["ref"],),
+                    source_observation_ids=(observation["observation_id"],),
+                    observation_payload=view["payload"] if observation["kind"] != "image" else None,
+                    observed_at=observation["observed_at"], expires_at=observation["expires_at"],
+                    observation_context=context, source_owner=observation["source_owner"],
+                ))
+            payload.observation_sources = tuple(contexts)
         payload.state_sources = tuple(self._build_world_state_source_candidates(source_pack=payload))
         return payload
 
@@ -926,9 +959,11 @@ class ServiceInputWorldStateSourcePackMixin:
         source_pack: WorldStateSourcePack,
         reported_states: list[dict[str, str]] | None = None,
     ) -> list[WorldStateSourceCandidate]:
-        candidates: list[WorldStateSourceCandidate] = []
+        candidates: list[WorldStateSourceCandidate] = list(source_pack.observation_sources)
         report_evidence = {report["state_type"]: report["evidence_text"] for report in (reported_states or [])}
         for state_type, context_key in WORLD_STATE_CONTEXT_KEYS_BY_TYPE:
+            if state_type not in report_evidence and any(c.state_type == state_type for c in source_pack.observation_sources):
+                continue
             context = source_pack.context(context_key)
             evidence_summary = self._world_state_source_evidence_summary(context) if context is not None else None
             if state_type in report_evidence:

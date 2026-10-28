@@ -750,6 +750,16 @@ class SQLiteMemoryStore(
         with self._memory_db() as conn:
             conn.execute("DELETE FROM world_states WHERE memory_set_id = ?", (memory_set_id,))
 
+    def invalidate_observation_states(self, *, memory_set_id: str, sources: list[tuple[str, str | None]]) -> None:
+        with self._memory_db() as conn:
+            rows = conn.execute("SELECT world_state_id, payload_json FROM world_states WHERE memory_set_id = ?", (memory_set_id,)).fetchall()
+            for row in rows:
+                record = json.loads(row["payload_json"])
+                identity = (record.get("observation_source_ref"), record.get("channel_id"))
+                if identity in sources or any(channel is None and record.get("integration_key") == f"visual_context:{source}"
+                                              for source, channel in sources):
+                    conn.execute("DELETE FROM world_states WHERE world_state_id = ?", (row["world_state_id"],))
+
     def clear_ongoing_action(self, *, memory_set_id: str) -> None:
         # トランザクション
         with self._memory_db() as conn:

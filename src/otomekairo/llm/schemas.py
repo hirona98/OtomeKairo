@@ -110,6 +110,17 @@ def input_interpretation_response_format() -> dict[str, Any]:
         "input_interpretation",
         closed_object(
             {
+                "observation_interpretations": {
+                    "type": "array",
+                    "items": closed_object({
+                        "observation_ref": {"type": "string"},
+                        "summary_text": {"type": "string"},
+                        "confidence_hint": string_enum(WORLD_STATE_HINT_VALUES),
+                        "change_state": string_enum(VISUAL_OBSERVATION_CHANGE_STATE_VALUES),
+                        "change_basis": string_enum(VISUAL_OBSERVATION_CHANGE_BASIS_VALUES),
+                        "change_reason_summary": {"type": "string"},
+                    }),
+                },
                 "recall_hint": closed_object(
                     {
                         "primary_recall_focus": string_enum(RECALL_FOCUS_VALUES),
@@ -544,19 +555,6 @@ def activity_state_response_format() -> dict[str, Any]:
     )
 
 
-def visual_observation_response_format() -> dict[str, Any]:
-    return structured_response_format(
-        "visual_observation",
-        closed_object(
-            {
-                "summary_text": {"type": "string"},
-                "confidence_hint": string_enum(WORLD_STATE_HINT_VALUES),
-                "change_state": string_enum(VISUAL_OBSERVATION_CHANGE_STATE_VALUES),
-                "change_basis": string_enum(VISUAL_OBSERVATION_CHANGE_BASIS_VALUES),
-                "change_reason_summary": {"type": "string"},
-            }
-        ),
-    )
 
 
 def all_response_formats() -> dict[str, dict[str, Any]]:
@@ -578,7 +576,6 @@ def all_response_formats() -> dict[str, dict[str, Any]]:
         "initiative_entry_check": initiative_entry_check_response_format(),
         "world_state": world_state_response_format(),
         "activity_state": activity_state_response_format(),
-        "visual_observation": visual_observation_response_format(),
         "visual_daily_grouping": visual_daily_grouping_response_format(),
         "visual_daily_support": visual_daily_support_response_format(),
     }

@@ -16,7 +16,7 @@ from otomekairo.service.common import debug_log
 
 
 CONFIG_DB_FILE_NAME = "config.db"
-CURRENT_CONFIG_DB_VERSION = 20
+CURRENT_CONFIG_DB_VERSION = 21
 SUPPORTED_CONFIG_DB_VERSIONS = {0, CURRENT_CONFIG_DB_VERSION}
 
 
@@ -55,7 +55,8 @@ class ConfigStore:
                     wake_policy_json,
                     periodic_thought_topics_json,
                     audio_output_settings_json,
-                    microphone_settings_json
+                    microphone_settings_json,
+                    environment_settings_json
                 FROM current_config
                 WHERE id = 1
                 """
@@ -87,6 +88,7 @@ class ConfigStore:
                     current["audio_output_settings_json"]
                 ),
                 "microphone_settings": json.loads(current["microphone_settings_json"]),
+                "environment_settings": json.loads(current["environment_settings_json"]),
                 "personas": self._read_payload_table(conn, "personas", "persona_id"),
                 "memory_sets": self._read_payload_table(conn, "memory_sets", "memory_set_id"),
                 "model_presets": self._read_payload_table(conn, "model_presets", "model_preset_id"),
@@ -436,6 +438,7 @@ class ConfigStore:
                 periodic_thought_topics_json TEXT NOT NULL,
                 audio_output_settings_json TEXT NOT NULL,
                 microphone_settings_json TEXT NOT NULL,
+                environment_settings_json TEXT NOT NULL,
                 FOREIGN KEY (selected_conversation_display_name_id)
                     REFERENCES conversation_display_names(conversation_display_name_id)
                     ON DELETE RESTRICT
@@ -569,9 +572,10 @@ class ConfigStore:
                 wake_policy_json,
                 periodic_thought_topics_json,
                 audio_output_settings_json,
-                microphone_settings_json
+                microphone_settings_json,
+                environment_settings_json
             )
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 state["selected_persona_id"],
@@ -585,6 +589,7 @@ class ConfigStore:
                 self._to_json(state.get("periodic_thought_topics") or build_default_periodic_thought_topics()),
                 self._to_json(state["audio_output_settings"]),
                 self._to_json(state["microphone_settings"]),
+                self._to_json(state["environment_settings"]),
             ),
         )
         self._write_payload_table(conn, "personas", "persona_id", state["personas"])

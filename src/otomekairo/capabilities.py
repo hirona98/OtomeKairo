@@ -33,6 +33,7 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
         "result_schema": {
             "type": "object",
             "properties": {
+                "captured_at": {"type": ["string", "null"]},
                 "images": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -45,7 +46,7 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
                     "type": ["string", "null"],
                 },
             },
-            "required": ["images"],
+            "required": ["images", "captured_at"],
             "additionalProperties": False,
         },
         "side_effects": {

@@ -16,6 +16,7 @@ class ResultBoundary(ServiceInputTracePersistMixin, ServiceInputTraceBuildMixin)
         self._skipped_memory_trace = Mock(return_value={})
         self._update_cycle_trace_memory_trace = Mock()
         self._emit_memory_trace_logs = Mock()
+        self._record_observation_speech = Mock()
 
 
 @pytest.mark.parametrize('trigger_kind', ['capability_result', 'background_thinking'])
