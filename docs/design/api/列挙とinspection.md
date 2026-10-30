@@ -87,7 +87,7 @@ response:
 - 役割: 現在の判断主体と runtime 前景を point-in-time snapshot として返す
 - この response は「いま何が前景にあり、何が動いているか」を確認する inspection 正本である
 - 含まれる timestamp 系フィールドは OtomeKairo のローカルタイムゾーンに属する offset 付き timestamp で返す
-- raw payload、credential、token、内部 URL、長い画像/OCR 本文は返さない
+- 原画像、credential、token、内部 URL、OCR 全文は返さない。`surroundings` は観測値・取得状態と保存済み視覚説明を返す。shape は [観測入力 API](観測入力.md#inspection) を正とする
 - `pending_intent_candidates` と `pending_capability_requests` は process-local runtime state の snapshot であり、永続正本ではない
 
 response:
@@ -97,6 +97,12 @@ response:
   "ok": true,
   "data": {
     "generated_at": "2026-03-31T09:00:00+09:00",
+    "surroundings": {
+      "generated_at": "2026-03-31T09:00:00+09:00",
+      "observations": [],
+      "source_reports": [],
+      "recent_visual_records": []
+    },
     "settings_snapshot": {},
     "runtime_summary": {},
     "runtime_detail": {

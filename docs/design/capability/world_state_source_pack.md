@@ -99,8 +99,8 @@ source pack 例:
 ```
 
 source pack では、標準の `client_context` と state-type 別の structured context を分ける。
-`state_sources` は LLM が選択できる候補集合の正本であり、各 structured context または上記の人物発話枠からコードが型別に 1 件ずつ生成する。
-`candidate_ref` は request-local な `state_source:<state_type>` とし、`state_type / scope_type / scope_key` はコードが確定する。
+`state_sources` は LLM が選択できる候補集合の正本である。本人報告・外部サービスなどの候補は各 structured context または人物発話枠から型別に作る。共通 snapshot の環境観測は source/channel ごとに独立した候補へする。
+`candidate_ref` は request-local な参照であり、観測由来は `state_source:observation:<番号>`、それ以外は `state_source:<state_type>` とする。`state_type / scope_type / scope_key` はコードが確定する。観測候補の根拠 metadata と鮮度は [周辺環境](../runtime/周辺環境.md#世界状態への投影) を正とする。
 LLM は `state_sources` に存在しない候補を生成しない。
 視覚前景は `vision.capture` result の視覚説明を根拠に `visual_context` へ載せ、`vision_source_id` で観測 source を識別する。
 `vision.capture` result follow-up の `foreground_world_state` は、result の `vision_source_id` と一致する `visual_context` だけを decision / speech に渡す。
@@ -126,7 +126,7 @@ LLM は結果要約が現在も成立する外部サービスの条件を表す�
 - `summary_source` が `capability_result.client_context.<field>` と `client_context.<field>` を区別できるように context へ source hint を残す
 - `schedule_context.schedule_slots` があるときは deterministic な slot state を追加し、`schedule:self` と `schedule:<slot_key>` を併存させる
 - wake の selected pending-intent があるときだけ `schedule_context.pending_intent` を作り、`slot_key` を付ける
-- 対応 structured context が無い状態種別は `state_sources` に追加しない
+- 対応する原観測・structured context・本人報告の根拠がない状態種別は `state_sources` に追加しない
 - LLM が返した候補と根拠判定を、[world_state の LLM 更新契約](../runtime/world_state.md#llm-更新契約) に従って検証・選別する
 - `candidate_ref` からコード確定済みの `state_type / scope_type / scope_key` を解決する
 - TTL は `summary_source` と state_type ごとの規則で決める
@@ -137,10 +137,10 @@ LLM は結果要約が現在も成立する外部サービスの条件を表す�
 ## やらないこと
 
 - 外部サービス capability の定義
-- 身体や機器の raw telemetry 保存
+- 未正規化の vendor telemetry の保存
 - pending-intent queue 全件を source pack に載せること
 - `world_state` に capability manifest や binding を直接複写すること
-- raw response body、MCP arguments、raw telemetry、長い OCR、複数段の外部 payload をそのまま LLM に渡すこと
+- raw response body、MCP arguments、未正規化の vendor telemetry、長い OCR、複数段の外部 payload をそのまま LLM に渡すこと
 
 ## 共通観測の候補
 

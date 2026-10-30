@@ -107,8 +107,7 @@ LLM が返した自由文をそのまま正本状態へ入れない。
 
 LLM に渡す source pack の wire shape は
 [world_state source pack](../capability/world_state_source_pack.md) を正本とする。
-コードは非空の state-type 別 context ごとに `state_sources` を 1 件作り、`candidate_ref / state_type / scope_type / scope_key / evidence_summary` を与える。
-`candidate_ref` は request-local な `state_source:<state_type>` とする。
+コードは根拠のある source ごとに `state_sources` を作り、`candidate_ref / state_type / scope_type / scope_key / evidence_summary` を与える。共通観測からは source/channel ごとに候補を作るため、同じ型の候補も併存する。参照と metadata の shape は [world_state source pack](../capability/world_state_source_pack.md#source-pack-shape)、原観測との対応は [周辺環境](周辺環境.md#世界状態への投影) を正とする。
 
 人物発話から抽出した `environment / location / device / external_service` の報告は `scope_type=entity / scope_key=<current person_ref>` に結び付ける。これはその発話者から得た世界理解の範囲であり、別人物の報告と上書き統合しない。要約と意味審査では、報告の主語と発話者を照合し、別人物や自己の現在状態へ移さない。発話者の参照が無い報告は明示的に失敗させる。
 

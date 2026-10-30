@@ -11,8 +11,7 @@
 
 代表例は次である。
 
-- `input_interpretation`
-- `recall_hint`
+- `input_interpretation`（観測説明・変化、`recall_hint / answer_contract`）
 - `pending_intent_selection`
 - `recall_pack_selection`
 - `memory_interpretation`
@@ -21,7 +20,6 @@
 - `pre_send_check`
 - `world_state` 候補抽出
 - `activity_state` 候補抽出
-- `input_interpretation` による観測説明
 
 ## 共通境界
 

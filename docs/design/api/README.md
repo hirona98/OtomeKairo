@@ -15,6 +15,7 @@ path、method、認証、request / response、error code はこのフォルダ�
 | [状態と設定.md](状態と設定.md) | `status`、`config`、設定定義の read / replace / delete |
 | [列挙とinspection.md](列挙とinspection.md) | `catalog`、`docs`、`inspection`、`logs/stream` |
 | [実行連携.md](実行連携.md) | capability 実行要求・結果・state 操作 |
+| [観測入力.md](観測入力.md) | 周辺環境設定、センサー報告、撮影時刻、観測 inspection |
 
 ## ブラウザ UI 配信面
 

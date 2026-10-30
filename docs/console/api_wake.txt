@@ -63,7 +63,7 @@ reference（任意）
   uri はローカルパス、file://、http://、https:// を受け付ける。
   label は参照の短い名前。reason_summary は wake した理由の短い要約。
   content_hint は auto / image / text。省略時は auto。
-  画像（PNG / JPEG / GIF / WebP）は visual observation として判断へ渡す。
+  画像（PNG / JPEG / GIF / WebP）は参照資料として入力解釈へ渡し、同じ原画像と説明を当該サイクルの判断へ渡す。
   テキストは当該サイクルの判断入力へ一時的に渡す。
   参照先の画像・テキスト本体は reference に埋め込まず、uri で渡す。依頼本文は message に入れる。
   ローカルパスはOtomeKairoサーバ上のパスとして読む。別PCのファイルはサーバから取得できるHTTP(S) URLで渡す。

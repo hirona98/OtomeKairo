@@ -117,6 +117,7 @@ server は MCP raw `content` と `structured_content` を永続化せず、件�
   "result_schema": {
     "type": "object",
     "properties": {
+      "captured_at": { "type": ["string", "null"] },
       "images": {
         "type": "array",
         "items": { "type": "string" },
@@ -129,7 +130,7 @@ server は MCP raw `content` と `structured_content` を永続化せず、件�
         "type": ["string", "null"]
       }
     },
-    "required": ["images"],
+    "required": ["images", "captured_at"],
     "additionalProperties": false
   },
   "side_effects": {
@@ -176,6 +177,8 @@ server は MCP raw `content` と `structured_content` を永続化せず、件�
   ]
 }
 ```
+
+撮影時刻 `result.captured_at` の意味・必須条件・受信検証は [観測入力 API](../api/観測入力.md#visioncapture-result) を正とする。
 
 `vision.capture.input.vision_source_id` は `VisionSourceRegistry` に存在する id を指定する。
 `VisionSource` はカメラ、画面、仮想画面、watch 対象を表し、具体的な client と source metadata を持つ。

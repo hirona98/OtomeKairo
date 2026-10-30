@@ -116,5 +116,6 @@ hello で送る source metadata は次の形に固定する。
 ```
 
 `vision.capture` result の `client_context` は `vision_source_id / source_kind / source_label` を request と同じ値にする。
+撮影時刻 `result.captured_at` の送信契約は [観測入力 API](../../docs/design/api/観測入力.md#visioncapture-result) に従う。
 `camera.ptz` result の `client_context` も `vision_source_id / source_kind / source_label` を request と同じ値にする。
 credential、内部 URL、RTSP URL、host、機器固有 payload は result に入れない。

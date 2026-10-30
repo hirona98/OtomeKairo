@@ -135,12 +135,12 @@ initiative loop は、候補を次の 3 系統に分ける。
 - 再評価系
   - due になった `pending_intent`
 - 自発系
-  - 強く前景化した `drive_state`、強い `entry_basis` を持つ `initiative_entry_summary.entry_kind=enter`、視覚観測の `first_seen / changed` と現在文脈が噛み合うもの、または due な定期思考トピック
+  - 強く前景化した `drive_state`、強い `entry_basis` を持つ `initiative_entry_summary.entry_kind=enter`、共通観測の `first_seen / changed` と現在文脈が噛み合うもの、または due な定期思考トピック
 
-自発系は、強く前景化した `drive_state`、`ongoing_action`、`pending_intent`、強い `entry_basis` を持つ `initiative_entry_summary`、または視覚観測の `first_seen / changed` と現在文脈の噛み合いを材料にする。
-視覚観測の `first_seen / changed` は `workspace_context` の `observation` 候補として扱う。
-視覚観測の `first_seen / changed` で通常判断へ direct entry する場合も、判断前観測で更新された `activity_context` は `initiative_context` と `workspace_context` に残す。
-direct entry は視覚新規性だけへ判断材料を縮約する仕組みではなく、活動遷移、継続時間、source の整合、抑制候補を同じ盤面で比較する入口である。
+自発系は、強く前景化した `drive_state`、`ongoing_action`、`pending_intent`、強い `entry_basis` を持つ `initiative_entry_summary`、または共通観測の `first_seen / changed` と現在文脈の噛み合いを材料にする。
+共通観測の `first_seen / changed` は `workspace_context` の `observation` 候補として扱う。
+共通観測の `first_seen / changed` で通常判断へ direct entry する場合も、判断前観測で更新された `activity_context` は `initiative_context` と `workspace_context` に残す。
+direct entry は観測の新規性だけへ判断材料を縮約する仕組みではなく、活動遷移、継続時間、source の整合、抑制候補を同じ盤面で比較する入口である。
 due な定期思考トピックは自発系の材料であり、偽の `drive_state` にはしない。その定期思考トピックに関われる手段が無いときの扱いも含め、意味境界は [定期思考トピック.md](定期思考トピック.md) を正とする。
 direct entry でも入力解釈と想起を行う。観測から過去の経験を探す契約は [想起と判断](../memory/想起と判断.md#現在の視覚観測を手がかりにした想起) を正とする。
 `background_thinking` は定期思考による自己評価である。感覚への反応と向きへの関与は別比較である。
@@ -181,7 +181,7 @@ direct entry でも入力解釈と想起を行う。観測から過去の経験�
 操作媒体、対象種別、身体動作の組み合わせが、同じ活動モード内の対象差し替えでは説明できないほど変わる場合は、`entry_basis=same_activity_detail_change` に分類しない。
 同じ活動内の画面差分、局所的な状態変化、表示単位の移動は基本的に `entry_basis=same_activity_detail_change` に分類する。
 同一活動内という分類だけでは `skip` にしない。具体的な前景変化に人格・記憶・現在文脈から強い関心や関係上の意味がある場合は `strong_interest` として `enter` 候補に残す。
-`pending_intent` が空の場合も、`drive_state`、`autonomous_run`、`ongoing_action`、視覚観測の `first_seen / changed`、または強い `entry_basis` を持つ `initiative_entry_summary.entry_kind=enter` があれば通常の判断入力へ進める。
+`pending_intent` が空の場合も、`drive_state`、`autonomous_run`、`ongoing_action`、共通観測の `first_seen / changed`、または強い `entry_basis` を持つ `initiative_entry_summary.entry_kind=enter` があれば通常の判断入力へ進める。
 中期の `drive_state` は、人格設定と記憶から継続的に成立する向きだけを対象にする。
 AI 応答由来、`scope_duration=session`、その場限りの「控える」「見守る」は、直近文脈の材料として扱う。
 
@@ -287,7 +287,7 @@ initiative loop は、前へ出る理由と見送る理由を判断入力に含�
 - capability が unavailable であること
 
 visual observation の `change_state=first_seen / changed` は自律判断の前景材料にする。
-autonomous family の availability は、強い `initiative_entry_summary`、構造値が強い `drive_state`、視覚観測の `first_seen / changed`、または due な定期思考トピックで組み立てる。
+autonomous family の availability は、強い `initiative_entry_summary`、構造値が強い `drive_state`、共通観測の `first_seen / changed`、または due な定期思考トピックで組み立てる。
 autonomous family の priority は、`drive_state`、現在文脈、前景世界状態、候補理由の強さで決める。
 `foreground_thinness=thin`、`trigger_kind=background_thinking`、`suppression_level=high` は、LLM が結果を判断するための文脈事実として渡す。視覚発話抑制は向きまで閉じない。
 同じ `dedupe_key` の直近発話は server の重複発話境界として扱う。

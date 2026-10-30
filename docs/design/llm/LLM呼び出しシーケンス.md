@@ -57,9 +57,23 @@ sequenceDiagram
     C->>L: 会話・元画像・測定値を統合解釈（input_interpretation）
     L-->>C: 想起方針・回答根拠契約・観測説明と変化
     C->>D: 視覚記録・sensor eventを一取引で保存
-    C->>L: 世界状態・活動状態を更新（既存の対象条件）
-    L-->>C: sourceごとの状態候補と根拠
-    C->>D: 状態を更新・置換・失効
+    Note over C,D: 現在状態の取得時には、期限切れの失効も DB に反映する
+    opt 空でない人物発話がある
+        C->>L: 世界状態に使う本人報告を選別<br>（world_state_source_selection）
+        L-->>C: 更新根拠となる報告
+    end
+    opt 観測要約・能力結果・状態更新の根拠のいずれかがある
+        C->>L: 世界状態を生成<br>（world_state）
+        L-->>C: 状態候補と根拠判定
+        C->>D: 世界状態の更新・置換・失効を保存（world_states）
+        D-->>C: 保存完了
+    end
+    opt 活動状態の生成対象がある
+        C->>L: 活動状態を生成<br>（activity_state）
+        L-->>C: 活動候補と根拠判定
+        C->>D: 活動状態の更新・失効を保存（activity_states）
+        D-->>C: 保存完了
+    end
 
     Note over C,D: 2. 想起と回答根拠の取得
     C->>D: 記憶・エピソード候補を参照
@@ -90,24 +104,7 @@ sequenceDiagram
     end
     Note over C,D: 原文・日時・視覚記録など必要な根拠を集め、回答根拠を解決
 
-    Note over C,D: 3. 状態の生成・保存と行動判断
-    Note over C,D: 現在状態の取得時には、期限切れの失効も DB に反映する
-    opt 空でない人物発話がある
-        C->>L: 世界状態に使う本人報告を選別<br>（world_state_source_selection）
-        L-->>C: 更新根拠となる報告
-    end
-    opt 観測要約・能力結果・状態更新の根拠のいずれかがある
-        C->>L: 世界状態を生成<br>（world_state）
-        L-->>C: 状態候補と根拠判定
-        C->>D: 世界状態の更新・置換・失効を保存（world_states）
-        D-->>C: 保存完了
-    end
-    opt 活動状態の生成対象がある
-        C->>L: 活動状態を生成<br>（activity_state）
-        L-->>C: 活動候補と根拠判定
-        C->>D: 活動状態の更新・失効を保存（activity_states）
-        D-->>C: 保存完了
-    end
+    Note over C,D: 3. 更新済み状態と想起から判断材料を組み立てる
     opt Skill 一覧がある
         C->>L: 使用する Skill を選別<br>（agent_skill_selection）
         L-->>C: 採用する Skill
@@ -154,12 +151,12 @@ sequenceDiagram
     Note over C,D: サイクル結果を返却（発話する場合は生成済みの本文を返す）
 ```
 
-`input_interpretation` は、想起方針と回答に必要な根拠の条件を 1 回で返す。同期の記憶統合も `memory_interpretation` の **1 回の生成 API** で、記憶の採否、エピソード、感情、訂正対象を決める。出力の形式・参照・数値範囲はコードで検証する。
+`input_interpretation` は、観測説明・意味上の変化・想起方針・回答根拠契約を 1 回で返す。同期の記憶統合も `memory_interpretation` の **1 回の生成 API** で、記憶の採否、エピソード、感情、訂正対象を決める。出力の形式・参照・数値範囲はコードで検証する。
 保存前の意味比較に使う Embedding と、保存後に検索索引へ反映する Embedding［図 5］は別の呼び出しである。
 意味比較の対象条件は [記憶更新の比較キー](../memory/記憶更新と再整理.md#比較キー)、検索入力の一括化は [意味検索用索引](../memory/想起と判断.md#意味検索用索引)、バッチ実行単位は [LLM補助契約共通](LLM補助契約共通.md#embedding-のバッチ実行) を参照する。
-思考前観測の状態更新と、その後の人物発話に基づく状態更新も別の呼び出し箇所である。
-後半の世界状態生成は、先行する `world_state_source_selection` が状態報告なしを返し、観測要約や他の状態更新の根拠もなければ省略する。この場合も、非空の人物発話に対する選別 API は呼ぶ。一般的な質問だけで、観測や現在状態の追加情報がない場合が該当する。
-前半の思考前観測は取得結果を共通前段へ集め、統合入力解釈後に世界状態の生成 API を呼ぶ。API を呼んだ結果として状態候補が 0 件になる場合と、API 自体を呼ばない場合を区別する。
+思考前観測と人物報告は、統合入力解釈後の同じ状態更新段階へ集める。画像取得ごと、想起後に同じ状態生成を繰り返さない。
+非空の人物発話は `world_state_source_selection` へ渡す。状態報告が空で、原観測・能力結果などの根拠もなければ世界状態の生成を省く。生成結果が0件になる場合とは区別する。活動状態も既存の対象条件で同じ前段に更新する。
+
 
 実装: [会話入口](../../../src/otomekairo/service/input/cycle.py)、[入力パイプライン](../../../src/otomekairo/service/input/pipeline.py)、[サイクル保存](../../../src/otomekairo/service/input/trace_persist.py)、[記憶統合](../../../src/otomekairo/memory/consolidator.py)、[記憶処理の確定](../../../src/otomekairo/service/memory.py)。
 契約: [想起と判断](../memory/想起と判断.md)、[世界状態](../runtime/world_state.md)、[活動状態](../runtime/activity_state.md)、[視覚入力のパイプライン統合](../capability/vision_capture画像意味理解.md#パイプライン統合)、[記憶更新と再整理](../memory/記憶更新と再整理.md)。
@@ -326,6 +323,8 @@ sequenceDiagram
     C->>D: 新規作業を保存（autonomous_runs）
     D-->>C: 保存完了
     loop 初回・時刻到来・能力結果の反映後など、次の一手を判断する機会
+        Note over C,D: 許可された観測viewを固定。新しい観測がある場合は共通の入力解釈・観測保存を実行
+        Note over C,L: 同じ同期処理の解釈済みsnapshotは再利用。観測がないstepでは追加の観測解釈を行わない
         opt Skill の選別が必要
             C->>L: 使用する Skill を選別<br>（agent_skill_selection）
             L-->>C: 採用する Skill
