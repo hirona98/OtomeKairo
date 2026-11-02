@@ -814,6 +814,13 @@ class ServiceConfigStreamMixin:
                 if source_paused:
                     source["available"] = False
                     source["unavailable_reason"] = "paused"
+                elif isinstance(source_id, str):
+                    source_unavailable_reason = self._vision_source_runtime_unavailable_reason(
+                        vision_source_id=source_id, current_time=current_time,
+                    )
+                    if source_unavailable_reason is not None:
+                        source["available"] = False
+                        source["unavailable_reason"] = source_unavailable_reason
         if capability_id == "camera.ptz":
             normalized_vision_sources = self._camera_ptz_inspection_vision_sources(
                 vision_sources=normalized_vision_sources,

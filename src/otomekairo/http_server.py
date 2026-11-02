@@ -58,7 +58,6 @@ SUPPRESSED_HTTP_LOG_EXACT_PATHS = {
     "/api/status",
     "/api/bootstrap/probe",
     "/api/autonomous-runs",
-    "/api/capability/result",
     "/api/observations/sensors",
     # 外部 client が高頻度で再取得する設定 snapshot。
     "/api/config",

@@ -319,6 +319,10 @@ source ごとの `supported_controls.camera.ptz.operations` と `amounts` は so
 - `allow_followup_capability_requests`: result follow-up で同一目的の capability 連鎖を許可する例外条件
 - `unavailable_seconds_on_dispatch_failure` / `unavailable_seconds_on_timeout`: dispatch failure や timeout を一時 unavailable として残す秒数
 
+`vision.capture` の dispatch failure と timeout の待機期間は、失敗した `vision_source_id` ごとに保持する。
+デスクトップの失敗後も、接続中の別camera sourceは取得対象に残す。`CapabilityState` の直近失敗は能力全体の運用記録として残し、sourceごとの取得可否を decision view と inspection の `vision_sources[].available / unavailable_reason` に反映する。
+busyによる並列制限は能力単位で維持し、結果待ちが終了したら次のsourceを取得できる。
+
 ## LLM へ渡す decision view
 
 判断 LLM へ manifest 全体を渡さない。

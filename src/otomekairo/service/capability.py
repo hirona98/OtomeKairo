@@ -56,6 +56,7 @@ class CapabilityResultValidationError(ValueError):
     ) -> None:
         if (status_code, error_code) not in {
             (400, "invalid_capability_result"),
+            (400, "invalid_capture_time"),
             (409, "capability_result_client_id_mismatch"),
         }:
             raise ValueError(
@@ -208,6 +209,7 @@ class ServiceCapabilityMixin:
         except CapabilityUnavailableError as exc:
             self._mark_capability_runtime_failure(
                 capability_id=capability_id,
+                vision_source_id=input_payload.get("vision_source_id"),
                 current_time=current_time,
                 failure_summary=str(exc),
                 unavailable_reason=exc.unavailable_reason,
@@ -310,6 +312,7 @@ class ServiceCapabilityMixin:
                 current_time=self._now_iso(),
                 failure_summary=self._capability_dispatch_transition_reason_summary(reason_code="dispatch_failed"),
                 unavailable_reason="dispatch_failed",
+                vision_source_id=request_record.get("vision_source_id"),
                 unavailable_seconds=int(state_policy.get("unavailable_seconds_on_dispatch_failure") or 0),
             )
             transition_summary = self._finish_capability_ongoing_action(
@@ -381,6 +384,7 @@ class ServiceCapabilityMixin:
                 current_time=self._now_iso(),
                 failure_summary=self._capability_dispatch_transition_reason_summary(reason_code="request_timeout"),
                 unavailable_reason="request_timeout",
+                vision_source_id=request_record.get("vision_source_id"),
                 unavailable_seconds=int(state_policy.get("unavailable_seconds_on_timeout") or 0),
             )
             transition_summary = self._finish_capability_ongoing_action(
@@ -459,7 +463,11 @@ class ServiceCapabilityMixin:
                 try:
                     captured = parse_iso(result_payload["captured_at"])
                     if not parse_iso(request_record["created_at"]) <= captured <= parse_iso(current_time):
-                        raise ValueError("Capture time is outside the request interval.")
+                        raise ValueError(
+                            f"captured_at={result_payload['captured_at']} must be between "
+                            f"request.created_at={request_record['created_at']} and received_at={current_time}. "
+                            "Check client/server clock synchronization."
+                        )
                 except (ValueError, TypeError) as exc:
                     raise CapabilityResultValidationError(str(exc), error_code="invalid_capture_time") from exc
             try:
@@ -1478,6 +1486,16 @@ class ServiceCapabilityMixin:
             entry = self._vision_source_runtime_state.get(vision_source_id, {})
             return entry.get("paused") is True
 
+    def _vision_source_runtime_unavailable_reason(
+        self, *, vision_source_id: str, current_time: str,
+    ) -> str | None:
+        with self._runtime_state_lock:
+            entry = self._vision_source_runtime_state.get(vision_source_id, {})
+            until = entry.get("unavailable_until")
+            if isinstance(until, str) and self._parse_iso(until) > self._parse_iso(current_time):
+                return entry["unavailable_reason"]
+        return None
+
     def _validate_capability_runtime_dispatchable(
         self,
         *,
@@ -1497,6 +1515,16 @@ class ServiceCapabilityMixin:
                 reason_code="paused",
                 unavailable_reason="paused",
             )
+        if capability_id == "vision.capture" and isinstance(vision_source_id, str):
+            reason = self._vision_source_runtime_unavailable_reason(
+                vision_source_id=vision_source_id, current_time=current_time,
+            )
+            if reason is not None:
+                raise CapabilityUnavailableError(
+                    f"Vision source is temporarily unavailable: {vision_source_id} {reason}",
+                    reason_code="temporarily_unavailable",
+                    unavailable_reason=reason,
+                )
         dispatch_block = self._capability_runtime_dispatch_block(
             memory_set_id=memory_set_id,
             capability_id=capability_id,
@@ -1584,6 +1612,7 @@ class ServiceCapabilityMixin:
         failure_summary: str,
         unavailable_reason: str | None = None,
         unavailable_seconds: int = 0,
+        vision_source_id: str | None = None,
     ) -> None:
         if unavailable_reason is not None and unavailable_reason not in CAPABILITY_UNAVAILABLE_REASONS:
             raise ValueError(f"Unknown capability unavailable_reason: {unavailable_reason}")
@@ -1592,6 +1621,11 @@ class ServiceCapabilityMixin:
             entry["last_failure_at"] = current_time
             entry["last_failure_summary"] = failure_summary.strip()
             if unavailable_reason and unavailable_seconds > 0:
+                # 撮影先の障害は、その source の次回取得だけを待機させる。
+                if capability_id == "vision.capture":
+                    if not isinstance(vision_source_id, str) or not vision_source_id:
+                        raise ValueError("vision.capture failure requires vision_source_id.")
+                    entry = self._vision_source_runtime_state.setdefault(vision_source_id, {})
                 entry["unavailable_reason"] = unavailable_reason
                 entry["unavailable_until"] = (
                     self._parse_iso(current_time) + timedelta(seconds=unavailable_seconds)
@@ -1813,6 +1847,7 @@ class ServiceCapabilityMixin:
                     current_time=current_time,
                     failure_summary=self._capability_dispatch_transition_reason_summary(reason_code="request_timeout"),
                     unavailable_reason="request_timeout",
+                    vision_source_id=request_record.get("vision_source_id"),
                     unavailable_seconds=int(state_policy.get("unavailable_seconds_on_timeout") or 0),
                 )
             self._finish_capability_ongoing_action(

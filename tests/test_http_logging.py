@@ -106,3 +106,20 @@ def test_static_response_log_levels(monkeypatch) -> None:
     )
 
     assert log.call_args.kwargs == {"level": "WARNING"}
+
+
+def test_capability_result_rejection_is_logged_without_image_or_body(monkeypatch) -> None:
+    log = Mock()
+    monkeypatch.setattr("otomekairo.http_server.debug_log", log)
+    handler = object.__new__(OtomeKairoHandler)
+    handler.command = "POST"
+    handler.path = "/api/capability/result"
+
+    handler._debug_log_response(200, {"ok": True, "data": {}})
+    log.assert_not_called()
+    handler._debug_log_response(400, {"ok": False, "error": {
+        "code": "invalid_capture_time", "message": "not logged",
+    }})
+    log.assert_called_once_with(
+        "HTTP", "POST /api/capability/result -> 400 error=invalid_capture_time", level="WARNING",
+    )
