@@ -1,4 +1,6 @@
 import json
+from dataclasses import replace
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
@@ -6,6 +8,8 @@ import pytest
 from observation_fixtures import IMAGE, STAMP
 from otomekairo.llm.contracts import LLMError
 from otomekairo.service.app import OtomeKairoService
+from otomekairo.memory.utils import parse_iso
+from otomekairo.observations.models import Measurement
 
 
 @pytest.fixture
@@ -68,6 +72,63 @@ def test_full_conversation_passes_same_image_to_interpretation_and_decision(serv
     assert len(records) == 1
     assert len({r['visual_observation_id'] for r in records}) == 1
     assert_media_not_saved(service)
+
+
+@pytest.mark.parametrize("offset_seconds", [-60, 60])
+def test_clock_skewed_capture_reaches_interpretation_decision_and_saved_record(service, offset_seconds):
+    service, token = service
+    captured_at = (service._parse_iso(STAMP) + timedelta(seconds=offset_seconds)).isoformat()
+    seen = []
+    interpret, decide = service.llm.generate_input_interpretation, service.llm.generate_decision
+
+    def capture(**kwargs):
+        service._collect_capture_images(
+            state=kwargs["state"], acquisition=kwargs["acquisition"],
+            capability_response={"captured_at": captured_at, "images": [IMAGE], "client_context": {
+                "vision_source_id": "vision_source:desktop", "source_kind": "desktop", "source_label": "画面",
+            }}, target={"source_kind": "desktop", "source_label": "画面", "vision_source_id": "vision_source:desktop"},
+        )
+        return kwargs["client_context"]
+
+    def interpretation(**kwargs):
+        context = kwargs["observations"]
+        seen.append((context.observations[0].observed_at, context.image_parts()))
+        return interpret(**kwargs)
+
+    def decision(**kwargs):
+        context = kwargs["context"].observations
+        seen.append((context.observations[0].observed_at, context.image_parts()))
+        return decide(**kwargs)
+
+    with patch.object(service, "_run_wake_policy_observations", side_effect=capture), patch.object(
+        type(service.llm), "generate_input_interpretation", side_effect=interpretation,
+    ), patch.object(type(service.llm), "generate_decision", side_effect=decision):
+        result = converse(service, token, images=())
+    assert result["result_kind"] != "internal_failure", result
+    assert len(seen) == 2
+    assert seen[0] == seen[1]
+    assert seen[0][0] == captured_at
+    records = service.store.list_recent_visual_observation_records(memory_set_id=service.store.read_state()["selected_memory_set_id"])
+    assert len(records) == 1
+    assert parse_iso(records[0]["observed_at"]) == parse_iso(captured_at)
+    assert_media_not_saved(service)
+
+
+def test_capture_clock_skew_keeps_expiry_and_other_observation_times_strict():
+    from observation_fixtures import image_context
+    context = image_context(origin_kind="vision_capture")
+    try:
+        observation = context.observations[0]
+        ahead = (parse_iso(STAMP) + timedelta(seconds=60)).isoformat()
+        future = replace(observation, observed_at=ahead)
+        assert future.is_fresh(STAMP)
+        too_far = (parse_iso(STAMP) + timedelta(seconds=60, microseconds=1)).isoformat()
+        assert not replace(future, observed_at=too_far).is_fresh(STAMP)
+        assert not observation.is_fresh(observation.expires_at)
+        assert not replace(future, origin_kind="conversation_attachment").is_fresh(STAMP)
+        assert not replace(future, origin_kind="sensor_report", payload=Measurement(20, "degC")).is_fresh(STAMP)
+    finally:
+        context.snapshot.media_bundle.close()
 
 
 def test_observations_survive_downstream_failure_and_media_are_closed(service):

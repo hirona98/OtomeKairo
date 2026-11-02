@@ -12,6 +12,7 @@ from otomekairo.capabilities import (
     validate_capability_payload,
 )
 from otomekairo.service.common import debug_log
+from otomekairo.observations.models import CAPTURE_CLOCK_SKEW_SECONDS
 from otomekairo.service.config.constants import CAPABILITY_UNAVAILABLE_REASONS
 from otomekairo.service.spontaneous.capability_payload import vision_capture_skip_reason
 
@@ -462,10 +463,12 @@ class ServiceCapabilityMixin:
                 from otomekairo.memory.utils import parse_iso
                 try:
                     captured = parse_iso(result_payload["captured_at"])
-                    if not parse_iso(request_record["created_at"]) <= captured <= parse_iso(current_time):
+                    skew = timedelta(seconds=CAPTURE_CLOCK_SKEW_SECONDS)
+                    if not parse_iso(request_record["created_at"]) - skew <= captured <= parse_iso(current_time) + skew:
                         raise ValueError(
                             f"captured_at={result_payload['captured_at']} must be between "
                             f"request.created_at={request_record['created_at']} and received_at={current_time}. "
+                            f"Clock skew tolerance is {CAPTURE_CLOCK_SKEW_SECONDS} seconds on each side. "
                             "Check client/server clock synchronization."
                         )
                 except (ValueError, TypeError) as exc:

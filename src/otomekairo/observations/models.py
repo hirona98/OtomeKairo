@@ -9,6 +9,7 @@ from otomekairo.memory.utils import llm_local_time_text, parse_iso
 
 MAX_SNAPSHOT_IMAGES = 8
 MAX_SENSOR_OBSERVATIONS = 32
+CAPTURE_CLOCK_SKEW_SECONDS = 60
 
 
 class ObservationError(ValueError):
@@ -78,7 +79,9 @@ class Observation:
         }
 
     def is_fresh(self, current_time: str) -> bool:
-        return parse_iso(self.observed_at) <= parse_iso(current_time) < parse_iso(self.expires_at)
+        current = parse_iso(current_time)
+        skew = timedelta(seconds=CAPTURE_CLOCK_SKEW_SECONDS if self.origin_kind == "vision_capture" else 0)
+        return parse_iso(self.observed_at) <= current + skew and current < parse_iso(self.expires_at)
 
     def to_prompt_payload(self, *, ref: str, source_ref: str, current_time: str) -> dict[str, Any]:
         payload = self.payload.to_payload()
@@ -88,6 +91,7 @@ class Observation:
                        "last_occurred_time_text": (llm_local_time_text(self.payload.last_occurred_at)
                                             if self.payload.last_occurred_at is not None else None)}
         elapsed = int((parse_iso(current_time) - parse_iso(self.observed_at)).total_seconds())
+        age_text = f"{elapsed}秒前" if elapsed >= 0 else f"撮影元の時計が{-elapsed}秒先（許容する時計差の範囲内）"
         return {
             "ref": ref, "source_ref": source_ref, "channel_id": self.channel_id,
             "origin_kind": self.origin_kind, "source_kind": self.source_kind,
@@ -95,7 +99,7 @@ class Observation:
             "place_ref": self.place_ref, "time_basis": self.time_basis,
             "place_name": self.place_name,
             "time_text": llm_local_time_text(self.observed_at),
-            "age_text": f"{elapsed}秒前", "kind": payload["kind"], "payload": payload,
+            "age_text": age_text, "kind": payload["kind"], "payload": payload,
             "interpretation": None,
             "observed_persons": [{"person_ref": person, "display_name": name} for person, name in self.observed_persons],
         }

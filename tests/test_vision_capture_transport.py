@@ -107,8 +107,8 @@ def test_capture_result_http_response_releases_waiting_request(transport, kind, 
 @pytest.mark.parametrize("invalid", [
     {"images": []},
     {"images": [IMAGE], "captured_at": None},
-    {"images": [IMAGE], "captured_at": "2026-11-02T11:59:59+09:00"},
-    {"images": [IMAGE], "captured_at": "2026-11-02T12:00:03+09:00"},
+    {"images": [IMAGE], "captured_at": "2026-11-02T11:58:59.999999+09:00"},
+    {"images": [IMAGE], "captured_at": "2026-11-02T12:01:02.000001+09:00"},
     {"images": [], "captured_at": CAPTURED},
 ])
 def test_invalid_capture_time_returns_400_and_request_accepts_corrected_result(transport, invalid):
@@ -124,6 +124,39 @@ def test_invalid_capture_time_returns_400_and_request_accepts_corrected_result(t
         finally:
             post_result(server, token, event, "desktop", {"images": [IMAGE], "captured_at": CAPTURED})
         assert waiting.result(timeout=5)["images"] == [IMAGE]
+
+
+@pytest.mark.parametrize("kind", ["desktop", "camera"])
+@pytest.mark.parametrize("captured", [
+    "2026-11-02T11:59:00+09:00",  # 要求開始の60秒前を含む。
+    "2026-11-02T11:59:59+09:00",
+    "2026-11-02T12:00:03+09:00",
+    "2026-11-02T12:01:02+09:00",  # 受信の60秒後を含む。
+])
+def test_capture_clock_skew_within_one_minute_reaches_observation_snapshot(transport, kind, captured):
+    service, token, server, sources = transport
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        waiting = executor.submit(dispatch, service, kind)
+        event = sources[kind].requests.get(timeout=5)
+        status, body = post_result(server, token, event, kind, {"images": [IMAGE], "captured_at": captured})
+        assert status == 200, body
+        result = waiting.result(timeout=5)
+    state = service.store.read_state()
+    state["camera_sources"]["vision_source:camera"]["place_ref"] = None
+    acquisition = service._new_observation_acquisition(state)
+    try:
+        service._collect_capture_images(state=state, acquisition=acquisition, capability_response=result, target={})
+        context = acquisition.freeze(snapshot_at=RECEIVED, sensor_observations=(), sensor_reports=())
+        assert len(context.observations) == 1
+        assert context.observations[0].observed_at == result["captured_at"]
+        assert len([part for part in context.image_parts() if part["type"] == "image_url"]) == 1
+        assert context.snapshot.source_reports == ()
+        payload = context.to_prompt_payload()["surroundings"]["observations"][0]
+        assert not payload["age_text"].startswith("-")
+        if captured > RECEIVED:
+            assert "時計" in payload["age_text"]
+    finally:
+        acquisition.close()
 
 
 @pytest.mark.parametrize("failure", ["dispatch", "timeout", "expired"])
