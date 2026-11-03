@@ -157,11 +157,11 @@ class VoicevoxEndpointHealth:
             try:
                 return bool(self._probe_fn(endpoint))
             except Exception as exc:  # noqa: BLE001
-                debug_log(
-                    "TTS",
-                    f"voicevox health probe failed endpoint={endpoint} error={type(exc).__name__}",
-                    level="WARNING",
-                )
+                # debug_log(
+                #     "TTS",
+                #     f"voicevox health probe failed endpoint={endpoint} error={type(exc).__name__}",
+                #     level="WARNING",
+                # )
                 return False
         url = f"{endpoint}{VOICEVOX_HEALTH_PROBE_PATH}"
         request = urllib.request.Request(url, method="GET")
@@ -175,16 +175,16 @@ class VoicevoxEndpointHealth:
                     status = response.getcode()
                 return 200 <= int(status) < 300
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as exc:
-            debug_log(
-                "TTS",
-                f"voicevox health probe failed endpoint={endpoint} error={type(exc).__name__}",
-                level="WARNING",
-            )
+            # debug_log(
+            #     "TTS",
+            #     f"voicevox health probe failed endpoint={endpoint} error={type(exc).__name__}",
+            #     level="WARNING",
+            # )
             return False
         except Exception as exc:  # noqa: BLE001
-            debug_log(
-                "TTS",
-                f"voicevox health probe failed endpoint={endpoint} error={type(exc).__name__}",
-                level="WARNING",
-            )
+            # debug_log(
+            #     "TTS",
+            #     f"voicevox health probe failed endpoint={endpoint} error={type(exc).__name__}",
+            #     level="WARNING",
+            # )
             return False
