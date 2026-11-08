@@ -69,7 +69,7 @@ terminal 時の発話と terminal 監査イベントは `events` に残し、com
 
 run の次の一手は `autonomous_step_generation` が決める。
 step の `current_input` は今回の起動元を表し、timer や結果到着での `sender_kind` と本文は内部入力のまま保持する。その `interaction_context` と `response_target_refs` は run に保存した起点の相互作用と参加者へ対応させ、発話生成・発話記録・実配送と同じ宛先にする。起点入力の相互作用と保存した配送先が一致しない場合は明示的に失敗する。人物の相互作用を持たない run は応答先を持たない。過去の依頼本文を新しい人物発話として扱わず、起点と現在の実行機会は区別する。
-人物依頼でも定期思考でも、個が `autonomous_run` または `capability_request` を選んでよい。server は due な定期思考トピックや MCP 定義から作業を作らない。
+人物依頼でも定期思考でも、自己の判断で `autonomous_run` または `capability_request` を選んでよい。server は due な定期思考トピックや MCP 定義から作業を作らない。
 会話 follow-up で同じ MCP tool を再実行できないときの残作業の開始は [判断と行動.md](判断と行動.md) を正とする。
 `comparison_scope=self_activity` から始まる run の `source_current_input` は、自身の活動用に隔離した current input とする。周期の観測要約入り current input は使わない。
 `origin_kind` が `wake` / `background_thinking` で `response_target_refs` が空の step は、前景 `world_state` から `visual_context` を外す。`external_service` など向き側の状態は残す。

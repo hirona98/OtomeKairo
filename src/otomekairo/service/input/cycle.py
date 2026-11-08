@@ -23,7 +23,7 @@ class ServiceInputCycleMixin:
         *,
         defer_audio_delivery: bool = False,
     ) -> dict[str, Any]:
-        # 一つの個の判断状態を会話到着順に更新する。
+        # 自己の判断状態を会話到着順に更新する。
         self._cycle_coordinator.enter_foreground()
         try:
             response = self._handle_conversation_cycle(token, payload)

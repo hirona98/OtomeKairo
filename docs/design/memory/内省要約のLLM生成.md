@@ -66,9 +66,9 @@ OtomeKairo では、`reflective consolidation` 全体を LLM 任せにはしな�
 
 要約対象の scope、個々の主張の対象、元発言の話者は分けて保つ。
 記憶の `subject_ref / scope_type / scope_key / qualifiers`、episode の primary scope と出典の参加者を入力へ残し、選択済み項目が参照する元イベントに照合する。
-本人の説明、第三者への言及、現在の個の発言・解釈の区別は、既存の要約生成 LLM が構造化した対象・話者と本文から判断する。
+本人の説明、第三者への言及、自己の発言・解釈の区別は、既存の要約生成 LLM が構造化した対象・話者と本文から判断する。
 `entity` の要約は `scope_key` が示す対象について裏付けられる理解に絞る。別の `subject_ref` の記憶は対象との対応を確認する補助として扱う。
-`relationship` の要約では、現在の個の方針、感情、行動は「こちら」のものとして相手と区別する。人格、気分、感情は、本人の発言の裏付けとして扱わない。
+`relationship` の要約では、自己の方針、感情、行動は「こちら」のものとして相手と区別する。人格、気分、感情は、本人の発言の裏付けとして扱わない。
 元イベントの参照が空、または話者や本文の記録がない場合は、その情報の限界を保って記憶の対象・種別・出典に沿った理解を記述する。
 
 ## 論理 role
@@ -304,8 +304,8 @@ episode 窓の起点は、最後に正常に評価した reflection run（`updat
 `reason_summary` は空でない文字列、`supported / scope_supported` は boolean とする。
 候補の全 ref にちょうど 1 件ずつ返し、重複・欠落・未知 ref は生成応答と同じ参照検証で扱う。
 
-照合は候補本文の各主張の対象・話者・根拠を読み、本人の説明、第三者への言及、現在の個の発言や解釈を区別する。
-本文自体で主体が曖昧な場合、現在の個の方針・感情を別人へ移す場合、人物を特定できない観測を対象人物へ結びつける場合は `supported=false` とする。
+照合は候補本文の各主張の対象・話者・根拠を読み、本人の説明、第三者への言及、自己の発言や解釈を区別する。
+本文自体で主体が曖昧な場合、自己の方針・感情を別人へ移す場合、人物を特定できない観測を対象人物へ結びつける場合は `supported=false` とする。
 本文は `scope_key` の対象に帰属する記憶として保存される。対象名を省いた一般的な観測要約でも、特定人物についての理解として裏付けられなければ `supported=false` とする。
 推測や時点も元の不確実性と対応させる。整理先の `scope_key / subject_ref` だけを人物同定の根拠にしない。
 `supported` は本文の主張の裏付け、`scope_supported` は本文を scope の対象へ帰属させる裏付けを独立に判定する。一般的な観測が事実でも、人物を同定できなければ `scope_supported=false` とする。
@@ -325,7 +325,7 @@ system prompt では、少なくとも次を明示する。
 - `summary_status_candidate=inferred` なら断定しすぎない
 - `summary_status_candidate=confirmed` でも過剰に強い人格断定にしない
 - 人格の適用は [../configuration/人格設定詳細.md](../configuration/人格設定詳細.md) を正とし、要約の根拠は `episodes / memory_units` に従う
-- 主張の対象と元発言の話者を、`subject_ref / qualifiers / source_event_refs / source_events` に沿って照合し、本人の説明、第三者についての説明、現在の個の発言・解釈の帰属を保つ
+- 主張の対象と元発言の話者を、`subject_ref / qualifiers / source_event_refs / source_events` に沿って照合し、本人の説明、第三者についての説明、自己の発言・解釈の帰属を保つ
 - `mood_state` と `affect_state` は、`episodes / memory_units` と整合する範囲だけで補助的に使う
 - `open_loops` は長期傾向に効くときだけ触れる
 - 単発イベントの説明ではなく、継続パターンとして要約する

@@ -3,8 +3,8 @@
 この docs は、OtomeKairo の設計正本を置く。
 実装手順と smoke は [../README.md](../README.md) を入口にする。
 
-OtomeKairo は、人格設定と記憶を基盤に、その時点で成立する判断主体を「現在の個」として扱う。
-実際の挙動は、人格設定だけでも記憶だけでも決まらず、人格設定、記憶、そこから派生する内部状態を含む文脈で決まる。
+OtomeKairo は、人格設定と記憶を基盤に、その時点の状態や観測を踏まえて判断し、行動する主体を「自己」と呼ぶ。
+人格設定、記憶、自己の意味境界は [人格と記憶](design/foundation/人格と記憶.md) を正とする。
 
 用語の正規語は [用語表.md](用語表.md) を参照する。
 全体像は [design/foundation/アーキテクチャ.md](design/foundation/アーキテクチャ.md) から入る。
@@ -20,7 +20,7 @@ OtomeKairo は、人格設定と記憶を基盤に、その時点で成立する
 | 場所 | 役割 |
 | --- | --- |
 | [用語表.md](用語表.md) | 用語の正規語、wire/code 表記、避ける表記 |
-| [design/foundation/](design/foundation/) | 全体構成、人格設定、記憶、現在の個の上位関係 |
+| [design/foundation/](design/foundation/) | 全体構成、人格設定、記憶、自己の上位関係 |
 | [design/runtime/](design/runtime/) | 判断ループ、状態、感情、時刻、自律判断、デバッグ |
 | [design/configuration/](design/configuration/) | 設定定義、設定変更、人格設定、モデルプリセット |
 | [design/llm/](design/llm/) | LLM を使う判断と補助処理の契約 |

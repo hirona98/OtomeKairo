@@ -320,9 +320,9 @@ TTS の配送先が接続されていない場合と queue が満杯の場合も
 定期思考（`wake_policy`）とは別経路であり、間隔 due 判定も思考前観測も使わない。
 
 request の field はすべて任意である。空 object `{}` でも受理する。
-依頼本文の意味境界は [現在の個への依頼](../runtime/自律initiative_loop.md#現在の個への依頼) を正とする。
+依頼本文の意味境界は [自己への依頼](../runtime/自律initiative_loop.md#自己への依頼) を正とする。
 
-#### request サンプル: 現在の個への伝言依頼
+#### request サンプル: 自己への伝言依頼
 
 依頼元は人でもソフトウェアでもよい。`client_context.source` には人の名前やソフト名などの送信元ラベルを入れる。
 

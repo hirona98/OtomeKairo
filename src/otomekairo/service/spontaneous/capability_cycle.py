@@ -121,7 +121,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
         capability_response: dict[str, Any],
         started_at: str,
     ) -> None:
-        # 非同期結果も同じ個の状態更新として会話と直列化する。
+        # 非同期結果も自己の状態更新として会話と直列化する。
         self._cycle_coordinator.enter_foreground()
         try:
             self._execute_async_capability_result_cycle_inner(

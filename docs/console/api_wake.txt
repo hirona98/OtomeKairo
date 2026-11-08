@@ -4,8 +4,8 @@ API起床
 概要
 ----
 
-POST /api/wake は、message があれば現在の個への明示的な依頼、なければ「いま自律判断してよい」という機会を受け付ける API である。
-依頼への対応方針の正本は docs/design/runtime/自律initiative_loop.md の「現在の個への依頼」とする。
+POST /api/wake は、message があれば自己（OtomeKairo）への明示的な依頼、なければ「いま自律判断してよい」という機会を受け付ける API である。
+依頼への対応方針の正本は docs/design/runtime/自律initiative_loop.md の「自己への依頼」とする。
 
 - 呼んだ時点で即時に wake 1 サイクルを実行する
 - 定期思考（wake_policy）の間隔判定は使わない
@@ -37,7 +37,7 @@ TOKEN には console_access_token を指定する。
 リクエスト body のフィールドはすべて任意である。空の object {} でも呼べる。
 
 message（任意）
-  現在の個への依頼本文。人が直接送る場合も、ソフトウェアから送る場合も使える。
+  自己（OtomeKairo）への依頼本文。人が直接送る場合も、ソフトウェアから送る場合も使える。
   例: 「修正が終了したと伝えてほしい。」「確認の返答を待っていると伝えてほしい。」
   指定するときは空白だけでない文字列を入れる。null、空文字列、文字列以外は受理しない。
   client_context.source には、人の名前やソフト名などの送信元ラベルを入れる。
@@ -139,10 +139,10 @@ Invoke-RestMethod -Method Post `
   -ContentType "application/json; charset=utf-8" `
   -Body '{"client_context":{"source":"tapo_c220_watcher","client_id":"watcher-C220","locale":"ja-JP"},"reference":{"uri":"/tmp/otomekairo-watch/camera/latest.jpg","label":"部屋カメラの変化","reason_summary":"軽量CVが前回との差分を検出した。","content_hint":"image"}}'
 
-サンプル3: 現在の個への伝言依頼
+サンプル3: 自己（OtomeKairo）への伝言依頼
 ----------------------------------
 
-現在の個へ、送信元からの伝言を依頼する。依頼元は人でもソフトウェアでもよく、人物・会話IDを用意せずに使える。
+自己（OtomeKairo）へ、送信元からの伝言を依頼する。依頼元は人でもソフトウェアでもよく、人物・会話IDを用意せずに使える。
 ソフトウェアから依頼する例:
 
 {

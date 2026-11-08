@@ -7,14 +7,14 @@ OtomeKairo では、人格設定と記憶を操作上は独立に扱う。
 
 - 人格設定は基本姿勢を与える
 - 記憶は自己像、他者理解、関係、未完了、感情傾向を育てる
-- 応答や行動判断は、その時点の人格設定と記憶から構成される現在の個で決まる
+- 応答や行動判断は、その時点の人格設定と記憶から構成される自己で決まる
 
-そのため、記憶は検索補助ではなく、現在の個を構成する基盤として設計する。
+そのため、記憶は検索補助ではなく、自己を構成する基盤として設計する。
 
 ## `design/` 直下との関係
 
 このフォルダは記憶 subsystem の内部構造、想起、更新、管理境界を正本にする。
-[../foundation/人格と記憶.md](../foundation/人格と記憶.md) は、人格設定、記憶、現在の個の上位関係を定める。
+[../foundation/人格と記憶.md](../foundation/人格と記憶.md) は、人格設定、記憶、自己の上位関係を定める。
 この `memory/` 配下は、その前提を変えずに記憶 subsystem の詳細だけを定める。
 
 人格設定そのものの定義や設定変更全体の意味は [../foundation/人格と記憶.md](../foundation/人格と記憶.md)、[../configuration/設定モデル.md](../configuration/設定モデル.md)、[../configuration/設定変更.md](../configuration/設定変更.md) を正とする。
@@ -28,7 +28,7 @@ OtomeKairo では、人格設定と記憶を操作上は独立に扱う。
 3. `memory_units` — 経験から育った継続理解の単位
 4. 感情モデル — `episode_affect / mood_state / affect_state`（正本は [../runtime/感情モデル.md](../runtime/感情モデル.md)）
 
-`memory_links`、`entity_registry`、`relation_index`、`revisions`、`retrieval_runs`、`vector_index_entries` は想起・監査・索引の補助構造であり、現在の個を直接構成する記憶層ではない。
+`memory_links`、`entity_registry`、`relation_index`、`revisions`、`retrieval_runs`、`vector_index_entries` は想起・監査・索引の補助構造であり、自己を直接構成する記憶層ではない。
 
 循環は次のとおり。
 

@@ -549,7 +549,7 @@ class AgentSkillRegistryTests(unittest.TestCase):
 
 
 class AgentSkillHostAuthorizationTests(unittest.TestCase):
-    def test_background_thinking_is_current_individual_decision(self) -> None:
+    def test_background_thinking_is_self_decision(self) -> None:
         authorization = resolve_agent_skill_host_authorization(
             current_input=CurrentInput(
                 sender_kind="system",
@@ -561,7 +561,7 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
             ),
             trigger_kind="background_thinking",
         )
-        self.assertEqual(authorization["kind"], "current_individual_decision")
+        self.assertEqual(authorization["kind"], "self_decision")
 
     def test_person_message_identifies_origin_without_asserting_request(self) -> None:
         authorization = resolve_agent_skill_host_authorization(
@@ -592,7 +592,7 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
         )
         self.assertEqual(authorization["kind"], "person_input")
 
-    def test_run_origin_background_thinking_is_current_individual_decision(self) -> None:
+    def test_run_origin_background_thinking_is_self_decision(self) -> None:
         authorization = resolve_agent_skill_host_authorization(
             current_input=CurrentInput(
                 sender_kind="capability",
@@ -605,7 +605,7 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
             trigger_kind="autonomous_run",
             run={"origin_kind": "background_thinking"},
         )
-        self.assertEqual(authorization["kind"], "current_individual_decision")
+        self.assertEqual(authorization["kind"], "self_decision")
 
     def test_capability_result_inherits_background_origin(self) -> None:
         origin = origin_source_kind_from_capability_request(
@@ -629,7 +629,7 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
             origin_source_kind=origin,
         )
         self.assertEqual(origin, "background_thinking")
-        self.assertEqual(authorization["kind"], "current_individual_decision")
+        self.assertEqual(authorization["kind"], "self_decision")
 
     def test_context_passes_host_authorization_to_selection(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -683,11 +683,11 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
 
             self.assertEqual(
                 selection_contexts[0]["host_authorization"]["kind"],
-                "current_individual_decision",
+                "self_decision",
             )
             self.assertEqual(
                 context["host_authorization"]["kind"],
-                "current_individual_decision",
+                "self_decision",
             )
             self.assertEqual(
                 selection_contexts[0]["recent_turns"],
@@ -711,11 +711,11 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
 
     def test_skill_prompts_describe_host_authorization(self) -> None:
         selection = build_agent_skill_selection_messages(
-            selection_context={"host_authorization": {"kind": "current_individual_decision"}}
+            selection_context={"host_authorization": {"kind": "self_decision"}}
         )
         applied = _build_agent_skill_messages(
             {
-                "host_authorization": {"kind": "current_individual_decision"},
+                "host_authorization": {"kind": "self_decision"},
                 "skills": [],
             }
         )
@@ -725,7 +725,7 @@ class AgentSkillHostAuthorizationTests(unittest.TestCase):
         self.assertIn("orientation_context.periodic_thought_topics", selection[0]["content"])
         self.assertIn("実行指示ではありません", selection[0]["content"])
         self.assertIn("current_input をこの cycle の向きの本体", selection[0]["content"])
-        self.assertIn("current_individual_decision", applied[0]["content"])
+        self.assertIn("self_decision", applied[0]["content"])
         self.assertIn("trusted host policy", applied[0]["content"])
         self.assertIn("skill_id は capability_id でも MCP tool_name でもありません", applied[0]["content"])
 

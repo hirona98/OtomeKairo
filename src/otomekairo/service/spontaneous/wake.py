@@ -643,7 +643,7 @@ class ServiceSpontaneousWakeMixin:
         wake_message: str | None = None,
     ) -> str:
         # プレフィックス
-        parts = ["API経由で届いた現在の個への依頼。" if wake_message is not None else "定期思考。"]
+        parts = ["API経由で届いた自己への依頼。" if wake_message is not None else "定期思考。"]
         parts.extend(
             self._client_context_input_parts(
                 client_context=client_context,

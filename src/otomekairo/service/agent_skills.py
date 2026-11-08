@@ -60,8 +60,8 @@ def resolve_agent_skill_host_authorization(
     )
     if trigger_kind in SELF_INITIATED_SOURCE_KINDS or origin in SELF_INITIATED_SOURCE_KINDS:
         return {
-            "kind": "current_individual_decision",
-            "summary_text": "いまの個がこの判断で働きかける許可である。",
+            "kind": "self_decision",
+            "summary_text": "自己がこの判断で働きかける許可である。",
         }
     if current_input.sender_kind == "person" and current_input.response_target_refs:
         return {

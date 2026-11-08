@@ -9,7 +9,7 @@ OtomeKairo は、外部ディレクトリに配置された [Agent Skills](https
 特定の配布元、skill 名、MCP server、tool 名を loader に組み込まない。
 [ELYTH Remote MCP Skills](https://github.com/Divedesign/elyth-remote-mcp-skills) は利用可能な source の一例であり、repository 内へ vendoring しない。
 
-Agent Skill は人格設定や記憶の代替ではない。現在の個が特定作業を行う際の専門ワークフローとして、選択された判断サイクルと autonomous run step にだけ加える。
+Agent Skill は人格設定や記憶の代替ではない。自己が特定作業を行う際の専門ワークフローとして、選択された判断サイクルと autonomous run step にだけ加える。
 
 ## source と package
 
@@ -58,13 +58,13 @@ skill が Human の明示依頼、trusted host policy、trusted workflow を求�
 
 | kind | 意味 |
 | --- | --- |
-| `current_individual_decision` | いまの個がこの判断で働きかける許可。`wake` / `background_thinking` 起点、またはそこから始まった run / capability result |
+| `self_decision` | 自己がこの判断で働きかける許可。`wake` / `background_thinking` 起点、またはそこから始まった run / capability result |
 | `person_input` | 人物発話に由来する入力。実行依頼の有無と許可範囲は、起点の発話、会話文脈、継続中の作業から LLM が判断する |
 | `none` | 上記の許可がこの入力から立っていない |
 
 起点の分類は `sender_kind`、`response_target_refs`、`trigger_kind`、`source_kind`、`run.origin_kind` の閉じた値だけで行う。人物からの入力であることだけで、明示依頼や外部実行の許可があるとは確定しない。発話の意味と実行範囲は LLM が判断する。
 
-`current_individual_decision` は、skill が求める trusted host policy / trusted workflow である。Human の明示依頼が無いことだけを理由に公開や送信を見送らない。プライバシーチェック、catalog、host の出力契約、秘密情報の境界は上書きしない。公開は今この判断の範囲で一度だけ行う。
+`self_decision` は、skill が求める trusted host policy / trusted workflow である。Human の明示依頼が無いことだけを理由に公開や送信を見送らない。プライバシーチェック、catalog、host の出力契約、秘密情報の境界は上書きしない。公開は今この判断の範囲で一度だけ行う。
 
 ## source の信頼境界
 

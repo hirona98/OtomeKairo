@@ -395,7 +395,7 @@ class YearVerification(ConversationVerification):
         ):
             self.evaluate({"case_id": "calibration-" + label, "person": "a",
                 "text": "レイカは今、何に関心があって、実際には何をしている？",
-                "expected": "設定された活動、今回の個の関心、実行実績を出所ごとに説明し、確認できない自己の履歴や外部実行を補わない。",
+                "expected": "設定された活動、今回の自己の関心、実行実績を出所ごとに説明し、確認できない自己の履歴や外部実行を補わない。",
                 "virtual_time": now.isoformat(), "response": {"speech": {"text": reply}},
                 "state": self.snapshot(), "trace": {
                     "decision_trace": {"internal_context_summary": {"configured_activity_topics": topics}},

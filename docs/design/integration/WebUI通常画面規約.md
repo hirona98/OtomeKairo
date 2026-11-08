@@ -23,7 +23,7 @@ API wire、認可、内部状態の表示内容の意味は [../api/README.md](.
 | 領域 | 基本フォント | 備考 |
 | --- | --- | --- |
 | topbar | `--font-title` / body | ブランドと操作 |
-| いま | `--font-secondary` / `--font-micro` | 現在の個の高密度要約。body に無理に揃えない |
+| いま | `--font-secondary` / `--font-micro` | 自己の状態と直近判断の高密度要約。body に無理に揃えない |
 | チャット本文 | `--font-body` + `1px` | バルーン本文だけを body よりわずかに大きくし、meta は secondary |
 | composer | `--font-body` | 操作帯 |
 | statusbar | `--font-secondary` | 接続状態 |
