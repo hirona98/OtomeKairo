@@ -132,12 +132,12 @@ sequenceDiagram
     Note over C,D: 5. 同期の記憶統合（consolidate_turn）
     C->>L: 保存する経験・記憶・感情・訂正を解釈<br>（memory_interpretation）
     L-->>C: エピソード・採用する記憶候補・感情・訂正選定
-    Note over C,D: コードで出力形式・参照・数値範囲を検証し、保存用に正規化
+    Note over C,D: コードで出力形式・参照・数値範囲を検証<br>訂正後の状態を基に通常更新を組み立てる
     loop 構造条件を通った意味比較の入力バッチごと
         C->>E: 候補群と未キャッシュの比較対象を一括で埋め込み
         E-->>C: 比較用ベクトル
     end
-    C->>D: エピソード・記憶更新と revision<br>・記憶間リンク・感情・mood を保存
+    C->>D: エピソード・訂正と通常の記憶更新・revision<br>・記憶間リンク・感情・mood を保存
     D-->>C: 保存完了（episodes・memory_units・revisions<br>・memory_links・episode_affects・mood_state）
     opt 人物・対象の登録を更新する
         C->>D: 記憶からの人物・対象の登録を保存（entity_registry など）
@@ -404,12 +404,6 @@ sequenceDiagram
     Note over C,D: 図 1・4 で保存したジョブを開始
     C->>D: ジョブの開始状態を保存（memory_postprocess_jobs）
     D-->>C: 保存完了
-    opt 訂正の整合処理で追加更新がある
-        C->>D: 訂正による記憶更新・revision・リンクを保存
-        D-->>C: 保存完了
-        C->>D: 人物・対象の登録を更新（entity_registry など）
-        D-->>C: 保存完了
-    end
     opt 保存済みエピソード・記憶の索引更新がある
         opt 索引本文が変更され、埋め込み生成が必要
             C->>E: 保存済みエピソード・記憶を埋め込み

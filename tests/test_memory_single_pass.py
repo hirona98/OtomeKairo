@@ -9,7 +9,9 @@ from otomekairo.defaults import build_default_state
 from otomekairo.llm.client import LLMClient
 from otomekairo.llm.contracts import LLMError, validate_memory_interpretation_contract
 from otomekairo.memory.consolidator import MemoryConsolidator
+from otomekairo.memory.utils import build_memory_unit_semantic_text, source_text_hash
 from otomekairo.store.file_store import FileStore
+from otomekairo.store.memory_links import MemoryWriteConflictError
 
 
 CURRENT_TIME = "2026-10-17T09:00:00+09:00"
@@ -162,7 +164,7 @@ def test_interpretation_receives_response_registered_run_and_original_evidence_i
 
 
 @pytest.mark.parametrize("offered_revision", [True, False])
-def test_generated_correction_selection_reaches_postprocess_and_checks_offered_ids(turn, offered_revision):
+def test_generated_correction_selection_is_persisted_and_checks_offered_ids(turn, offered_revision):
     consolidator, store, arguments, completion = turn
     first_trace, _ = consolidator.consolidate_turn(**arguments)
     memory_id = first_trace["updated_memory_unit_ids"][0]
@@ -186,25 +188,27 @@ def test_generated_correction_selection_reaches_postprocess_and_checks_offered_i
     arguments.update(cycle_id=event["cycle_id"], finished_at=event["created_at"], input_text=event["text"],
                      events=[event], correction_candidate_memory_unit_ids=[memory_id])
 
-    _, job = consolidator.consolidate_turn(**arguments)
+    trace, job = consolidator.consolidate_turn(**arguments)
 
     assert completion.call_count == 1
-    context = job["correction_reconciliation"]
-    assert context["selection"]["selected_targets"] == payload["selected_targets"]
     prompt = json.loads(completion.call_args.kwargs["messages"][1]["content"].splitlines()[1])
     candidate = next(item for item in prompt["target_candidates"] if item["revision_id"] == revision_id)
     snapshot = prompt["correction_context"]["snapshots"][candidate["after_snapshot_ref"]]
-    saved_target = next(item for item in context["targets"] if item["revision"]["revision_id"] == revision_id)
-    assert snapshot["summary_text"] == saved_target["revision"]["after_snapshot"]["summary_text"]
-    assert "after_snapshot_ref" not in saved_target
-    assert "source_evidence_events" in saved_target
-    actions, trace = consolidator._run_correction_reconciliation(job=job, finished_at=event["created_at"])
+    assert snapshot["summary_text"] == interpretation()["candidate_memory_units"][0]["summary_text"]
+    correction_trace = trace["correction_reconciliation"]
+    assert job["correction_reconciliation"] == correction_trace
+    saved = store.list_memory_units_by_id(
+        memory_set_id=arguments["state"]["selected_memory_set_id"], memory_unit_ids=[memory_id],
+    )[0]
     if offered_revision:
-        assert trace["selected_target_count"] == 1
-        assert actions[0]["after_snapshot"]["status"] == "revoked"
+        assert correction_trace["selected_target_count"] == 1
+        assert correction_trace["selected_revision_ids"] == [revision_id]
+        assert job["memory_actions"][0]["after_snapshot"]["status"] == "revoked"
+        assert saved["status"] == "revoked"
     else:
-        assert trace["result_status"] == "failed"
-        assert actions == []
+        assert correction_trace["result_status"] == "failed"
+        assert job["memory_actions"] == []
+        assert saved["status"] == "confirmed"
 
 
 @pytest.mark.parametrize("invalid_affects", [
@@ -232,13 +236,129 @@ def test_correction_without_any_offered_revision_is_an_explicit_failure(turn):
     completion.return_value = provider_response(payload)
 
     trace, job = consolidator.consolidate_turn(**arguments)
-    actions, correction_trace = consolidator._run_correction_reconciliation(job=job, finished_at=CURRENT_TIME)
+    correction_trace = trace["correction_reconciliation"]
 
     assert completion.call_count == 1
     assert trace["turn_consolidation_status"] == "succeeded"
     assert correction_trace["result_status"] == "failed"
     assert "提示候補" in correction_trace["failure_reason"]
-    assert actions == []
+    assert all(action["operation"] != "correct" for action in job["memory_actions"])
+
+
+@pytest.mark.parametrize("operation", ["create", "refine"])
+@pytest.mark.parametrize("replacement", [False, True])
+def test_correction_and_new_understanding_share_one_ordered_save(turn, operation, replacement):
+    consolidator, store, arguments, completion = turn
+    first_trace, _ = consolidator.consolidate_turn(**arguments)
+    memory_set_id = arguments["state"]["selected_memory_set_id"]
+    memory_id = first_trace["updated_memory_unit_ids"][0]
+    original, = store.list_memory_units_by_id(memory_set_id=memory_set_id, memory_unit_ids=[memory_id])
+    if operation == "refine":
+        erroneous = {**original, "summary_text": "普段は緑茶を好む。", "object_ref_or_value": "緑茶"}
+        store.persist_memory_actions(memory_actions=[consolidator.action_resolver.build_memory_action(
+            operation="refine", memory_set_id=memory_set_id, finished_at=CURRENT_TIME,
+            memory_unit=erroneous, related_memory_unit_ids=[], before_snapshot=original,
+            after_snapshot=erroneous, reason="検証用の誤更新。", event_ids=[arguments["events"][0]["event_id"]],
+        )])
+    with sqlite3.connect(store.memory_db_path) as conn:
+        revision_id = conn.execute(
+            "SELECT revision_id FROM revisions WHERE memory_unit_id = ? ORDER BY rowid DESC LIMIT 1",
+            (memory_id,),
+        ).fetchone()[0]
+    payload = interpretation()
+    payload["correction_status"] = "selected"
+    payload["selected_targets"] = [{
+        "revision_id": revision_id, "memory_unit_id": memory_id, "reason_summary": "先ほどの誤りを訂正した。",
+    }]
+    candidate = payload["candidate_memory_units"][0]
+    candidate["qualifiers_hint"]["replace_prior"] = True
+    if replacement:
+        candidate.update(object_hint={"kind": "value", "value": "紅茶"}, summary_text="普段は紅茶を好む。")
+    event = {**arguments["events"][0], "event_id": "event:correction", "cycle_id": "cycle:correction",
+             "created_at": "2026-10-17T09:01:00+09:00", "text": "先ほどの申告を訂正する。"}
+    store.append_events(events=[event])
+    arguments.update(cycle_id=event["cycle_id"], finished_at=event["created_at"], input_text=event["text"],
+                     events=[event], correction_candidate_memory_unit_ids=[memory_id])
+    completion.reset_mock()
+    completion.return_value = provider_response(payload)
+
+    trace, job = consolidator.consolidate_turn(**arguments)
+
+    assert completion.call_count == 1
+    assert trace["correction_reconciliation"]["result_status"] == "succeeded"
+    correction, *normal = job["memory_actions"]
+    assert correction["operation"] == "correct"
+    assert correction["correction"]["corrects_revision_id"] == revision_id
+    assert correction["after_snapshot"]["status"] == ("revoked" if operation == "create" else "confirmed")
+    if operation == "refine":
+        assert normal[0]["before_snapshot"] == correction["after_snapshot"]
+        assert normal[0]["before_snapshot"]["summary_text"] == original["summary_text"]
+    active = store.find_memory_units_for_compare(
+        **{key: original[key] for key in (
+            "memory_set_id", "memory_type", "scope_type", "scope_key", "subject_ref", "predicate",
+        )},
+    )
+    assert len(active) == 1
+    assert active[0]["object_ref_or_value"] == candidate["object_hint"]["value"]
+    entries = consolidator.vector_indexer._build_vector_index_entries(
+        finished_at=event["created_at"], episode=job["episode"], memory_actions=job["memory_actions"],
+    )
+    for entry in entries:
+        if entry["source_kind"] != "memory_unit":
+            continue
+        saved, = store.list_memory_units_by_id(memory_set_id=memory_set_id, memory_unit_ids=[entry["source_id"]])
+        assert entry["status"] == saved["status"]
+        assert entry["salience"] == saved["salience"]
+        assert entry["text_hash"] == source_text_hash(build_memory_unit_semantic_text(saved))
+
+    with sqlite3.connect(store.memory_db_path) as conn:
+        revision_count = conn.execute("SELECT COUNT(*) FROM revisions").fetchone()[0]
+    consolidator.correction.run = Mock(side_effect=AssertionError("保存済み訂正を再実行しない。"))
+    consolidator.vector_indexer.sync = Mock()
+    consolidator.reflective.run = Mock(return_value={"result_status": "no_change"})
+    result = consolidator.run_postprocess_job(job=job)
+    assert result["correction_reconciliation"] == trace["correction_reconciliation"]
+    assert result["vector_index_sync"]["result_status"] == "succeeded"
+    assert result["relation_index_sync"]["result_status"] == "succeeded"
+    with sqlite3.connect(store.memory_db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM revisions").fetchone()[0] == revision_count
+
+
+def test_external_change_still_rolls_back_correction_and_new_turn(turn, monkeypatch):
+    consolidator, store, arguments, completion = turn
+    first_trace, _ = consolidator.consolidate_turn(**arguments)
+    memory_id = first_trace["updated_memory_unit_ids"][0]
+    with sqlite3.connect(store.memory_db_path) as conn:
+        revision_id = conn.execute("SELECT revision_id FROM revisions WHERE memory_unit_id = ?", (memory_id,)).fetchone()[0]
+    payload = interpretation()
+    payload.update(correction_status="selected", selected_targets=[{
+        "revision_id": revision_id, "memory_unit_id": memory_id, "reason_summary": "誤りを訂正した。",
+    }])
+    completion.return_value = provider_response(payload)
+    arguments.update(cycle_id="cycle:correction", finished_at="2026-10-17T09:01:00+09:00",
+                     correction_candidate_memory_unit_ids=[memory_id])
+    resolve = consolidator.action_resolver.resolve_memory_actions_batch
+    tables = ("memory_units", "revisions", "memory_links", "episodes", "episode_affects", "mood_state")
+    after_external_update = {}
+
+    def change_before_save(**kwargs):
+        actions = resolve(**kwargs)
+        unit, = store.list_memory_units_by_id(memory_set_id=kwargs["memory_set_id"], memory_unit_ids=[memory_id])
+        changed = {**unit, "salience": 0.9}
+        store.persist_memory_actions(memory_actions=[consolidator.action_resolver.build_memory_action(
+            operation="reinforce", memory_set_id=kwargs["memory_set_id"], finished_at=arguments["finished_at"],
+            memory_unit=changed, related_memory_unit_ids=[], before_snapshot=unit, after_snapshot=changed,
+            reason="別処理による更新。", event_ids=[],
+        )])
+        with sqlite3.connect(store.memory_db_path) as conn:
+            after_external_update.update({table: conn.execute(f"SELECT * FROM {table}").fetchall() for table in tables})
+        return actions
+
+    monkeypatch.setattr(consolidator.action_resolver, "resolve_memory_actions_batch", change_before_save)
+    with pytest.raises(MemoryWriteConflictError):
+        consolidator.consolidate_turn(**arguments)
+    with sqlite3.connect(store.memory_db_path) as conn:
+        assert {table: conn.execute(f"SELECT * FROM {table}").fetchall() for table in tables} == after_external_update
 
 
 @pytest.mark.parametrize("open_loops", [[None], [""], ["   "], [42]])

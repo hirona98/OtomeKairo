@@ -53,24 +53,6 @@ class MemoryCorrectionReconciler:
         ]} for target in targets]
         return {
             "targets": targets,
-            "trace": self.queued_trace(targets=targets),
-        }
-
-    def queued_trace(self, *, targets: list[dict[str, Any]]) -> dict[str, Any]:
-        # 同期の記憶解釈で選定し、選定結果の反映は後段 worker に渡す。
-        result_status = "queued" if targets else "skipped"
-        selection_status = "queued" if targets else "not_requested"
-        return {
-            "result_status": result_status,
-            "selection_status": selection_status,
-            "target_candidate_count": len(targets),
-            "selected_target_count": 0,
-            "selected_revision_ids": [],
-            "correction_group_ids": [],
-            "action_count": 0,
-            "operation_counts": {},
-            "actions": [],
-            "failure_reason": None,
         }
 
     def skipped_trace(self, *, reason: str) -> dict[str, Any]:

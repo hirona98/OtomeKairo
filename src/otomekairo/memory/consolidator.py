@@ -104,6 +104,19 @@ class MemoryConsolidator:
             provenance=provenance,
         )
 
+        correction_actions, correction_trace = self._resolve_correction_reconciliation(
+            context=self._build_correction_context(
+                input_text=input_text,
+                speech_payload=speech_payload,
+                decision=decision,
+                event_ids=event_ids,
+                cycle_id=cycle_id,
+                prepared=correction_prepared,
+                interpretation=interpretation,
+            ),
+            finished_at=finished_at,
+        )
+
         # 記憶アクション群
         candidates: list[dict[str, Any]] = []
         for candidate_payload in interpretation["candidate_memory_units"]:
@@ -114,11 +127,13 @@ class MemoryConsolidator:
                     **provenance,
                 }
             candidates.append(candidate)
-        memory_actions = self.action_resolver.resolve_memory_actions_batch(
+        normal_actions = self.action_resolver.resolve_memory_actions_batch(
             memory_set_id=selected_memory_set_id, finished_at=finished_at,
             event_ids=event_ids, cycle_ids=[cycle_id], candidates=candidates,
             embedding_definition=embedding_definition,
+            pending_memory_units=[action["memory_unit"] for action in correction_actions],
         )
+        memory_actions = [*correction_actions, *normal_actions]
 
         # episode affect群
         episode_affects = [
@@ -148,7 +163,7 @@ class MemoryConsolidator:
                 "episode_series_id": episode.get("episode_series_id"),
                 "open_loops": episode.get("open_loops", []),
                 "memory_action_count": len(memory_actions),
-                "correction_reconciliation": correction_prepared["trace"],
+                "correction_reconciliation": correction_trace,
                 "episode_affect_count": len(episode_affects),
                 "updated_memory_unit_ids": [
                     action["memory_unit_id"]
@@ -227,15 +242,7 @@ class MemoryConsolidator:
                 finished_at=finished_at,
                 episode=episode,
                 memory_actions=memory_actions,
-                correction_context=self._build_correction_job_context(
-                    input_text=input_text,
-                    speech_payload=speech_payload,
-                    decision=decision,
-                    event_ids=event_ids,
-                    cycle_id=cycle_id,
-                    prepared=correction_prepared,
-                    interpretation=interpretation,
-                ),
+                correction_trace=correction_trace,
             ),
         )
 
@@ -414,17 +421,6 @@ class MemoryConsolidator:
         finished_at = job["turn_finished_at"]
         episode = job["episode"]
         memory_actions = job["memory_actions"]
-        correction_actions, correction_trace = self._run_correction_reconciliation(
-            job=job,
-            finished_at=finished_at,
-        )
-        if correction_actions:
-            self.store.persist_turn_consolidation(
-                episode=None,
-                memory_actions=correction_actions,
-                episode_affects=[],
-            )
-        all_memory_actions = [*memory_actions, *correction_actions]
 
         # ベクトル索引
         vector_index_sync = {
@@ -436,7 +432,7 @@ class MemoryConsolidator:
                 state=state_snapshot,
                 finished_at=finished_at,
                 episode=episode,
-                memory_actions=all_memory_actions,
+                memory_actions=memory_actions,
             )
         except Exception as exc:  # noqa: BLE001
             vector_index_sync = {
@@ -450,7 +446,7 @@ class MemoryConsolidator:
                 state=state_snapshot,
                 finished_at=finished_at,
                 episode=episode,
-                memory_actions=all_memory_actions,
+                memory_actions=memory_actions,
             )
         else:
             reflective_result = self._not_started_reflective_result()
@@ -464,7 +460,7 @@ class MemoryConsolidator:
         return {
             "vector_index_sync": vector_index_sync,
             "relation_index_sync": relation_index_sync,
-            "correction_reconciliation": correction_trace,
+            "correction_reconciliation": job["correction_reconciliation"],
             "reflective_consolidation": reflective_result,
         }
 
@@ -547,25 +543,24 @@ class MemoryConsolidator:
             "failure_reason": None,
         }
 
-    def _run_correction_reconciliation(
+    def _resolve_correction_reconciliation(
         self,
         *,
-        job: dict[str, Any],
+        context: dict[str, Any] | None,
         finished_at: str,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        # correction jobなし
-        correction_context = job.get("correction_reconciliation")
-        if not isinstance(correction_context, dict):
+        # 訂正文脈なし
+        if context is None:
             return [], self.correction.skipped_trace(reason="no_context")
 
         # 実行
         try:
             return self.correction.run(
-                context=correction_context,
+                context=context,
                 finished_at=finished_at,
             )
         except Exception as exc:  # noqa: BLE001
-            targets = correction_context.get("targets", [])
+            targets = context.get("targets", [])
             return [], {
                 "result_status": "failed",
                 "selection_status": "failed",
@@ -587,7 +582,7 @@ class MemoryConsolidator:
         finished_at: str,
         episode: dict[str, Any],
         memory_actions: list[dict[str, Any]],
-        correction_context: dict[str, Any] | None,
+        correction_trace: dict[str, Any],
     ) -> dict[str, Any]:
         selected_memory_set_id = state["selected_memory_set_id"]
         selected_model_preset_id = state["selected_model_preset_id"]
@@ -626,7 +621,7 @@ class MemoryConsolidator:
             },
             "episode": deepcopy(episode),
             "memory_actions": deepcopy(memory_actions),
-            "correction_reconciliation": deepcopy(correction_context),
+            "correction_reconciliation": deepcopy(correction_trace),
         }
 
     def _build_memory_interpretation_context(
@@ -649,7 +644,7 @@ class MemoryConsolidator:
                 }
         return payload
 
-    def _build_correction_job_context(
+    def _build_correction_context(
         self,
         *,
         input_text: str,
@@ -668,7 +663,7 @@ class MemoryConsolidator:
         if not targets and selection is not None and selection["correction_status"] == "no_correction":
             return None
 
-        # job context
+        # 訂正文脈
         return {
             "input_text": input_text,
             "speech_text": speech_payload.get("speech_text") if isinstance(speech_payload, dict) else None,

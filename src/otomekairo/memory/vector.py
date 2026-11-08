@@ -93,10 +93,13 @@ class MemoryVectorIndexer:
                 seen_source_ids.add(("episode", episode["episode_id"]))
 
         # 記憶単位群
+        latest_units: dict[str, dict[str, Any]] = {}
         for action in memory_actions:
             memory_unit = action.get("memory_unit")
             if not isinstance(memory_unit, dict):
                 continue
+            latest_units[memory_unit["memory_unit_id"]] = memory_unit
+        for memory_unit in latest_units.values():
             source_key = ("memory_unit", memory_unit["memory_unit_id"])
             if source_key in seen_source_ids:
                 continue

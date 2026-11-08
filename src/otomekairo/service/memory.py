@@ -75,7 +75,6 @@ class ServiceMemoryMixin:
                 "failure_reason": None,
             },
             relation_index_sync=self._relation_index_sync_trace("queued"),
-            correction_reconciliation=self._correction_reconciliation_trace("queued"),
             reflective_consolidation={
                 "started": False,
                 "result_status": "queued",
@@ -182,10 +181,6 @@ class ServiceMemoryMixin:
                     "failure_reason": failure_reason,
                 },
                 relation_index_sync=self._relation_index_sync_trace("not_started"),
-                correction_reconciliation=self._correction_reconciliation_trace(
-                    "not_started",
-                    failure_reason=None,
-                ),
                 reflective_consolidation={
                     "started": False,
                     "result_status": "not_started",

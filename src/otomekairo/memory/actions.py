@@ -176,6 +176,7 @@ class MemoryActionResolver:
         candidates: list[dict[str, Any]],
         embedding_definition: dict[str, Any] | None = None,
         allow_summary: bool = False,
+        pending_memory_units: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         # 全候補を保存前の正本へ照合し、必要な意味比較だけをまとめる。
         prepared: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
@@ -192,6 +193,7 @@ class MemoryActionResolver:
                     memory_type=normalized["memory_type"],
                     scope_type=normalized["scope_type"], scope_key=normalized["scope_key"],
                     subject_ref=normalized["subject_ref"], predicate=normalized["predicate"],
+                    pending_memory_units=pending_memory_units,
                 ))
             prepared.append((normalized, matches))
             comparisons.append((normalized, self._semantic_comparison_matches(
@@ -210,6 +212,7 @@ class MemoryActionResolver:
                 matches=matches,
                 semantic_refine_match=self._semantic_refine_match(semantic_matches, candidate),
                 allow_summary=allow_summary,
+                pending_memory_units=pending_memory_units,
             ))
         return actions
 
@@ -218,6 +221,7 @@ class MemoryActionResolver:
         event_ids: list[str], cycle_ids: list[str], candidate: dict[str, Any],
         matches: list[dict[str, Any]], semantic_refine_match: dict[str, Any] | None,
         allow_summary: bool,
+        pending_memory_units: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         normalized_candidate = candidate
         actions = self._resolve_candidate_memory_actions(
@@ -245,6 +249,7 @@ class MemoryActionResolver:
                 memory_type=target["memory_type"], scope_type=target["scope_type"],
                 scope_key=target["scope_key"], subject_ref=target["subject_ref"],
                 predicate=target["predicate"],
+                pending_memory_units=pending_memory_units,
             )
             for existing in matches:
                 if existing["status"] not in ACTIVE_MEMORY_STATUSES or existing["memory_unit_id"] in resolved_ids:

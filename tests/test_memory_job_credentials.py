@@ -25,7 +25,7 @@ class MemoryJobCredentialsTests(unittest.TestCase):
     def job(self) -> dict:
         return self.consolidator._build_postprocess_job(
             state=self.state, cycle_id="cycle:test", finished_at="2026-10-01T12:00:00+09:00",
-            episode={}, memory_actions=[], correction_context=None,
+            episode={}, memory_actions=[], correction_trace={"result_status": "skipped"},
         )
 
     def test_queued_payload_excludes_credentials_and_execution_resolves_current_keys(self) -> None:

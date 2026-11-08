@@ -1158,11 +1158,16 @@ class SQLiteMemoryStore(
         subject_ref: str,
         predicate: str,
         limit: int = 5,
+        pending_memory_units: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
+        pending = {unit["memory_unit_id"]: unit for unit in pending_memory_units or []}
+        excluded = ""
+        if pending:
+            excluded = f"AND memory_unit_id NOT IN ({', '.join('?' for _ in pending)})"
         # クエリ
         with self._memory_db() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT payload_json
                 FROM memory_units
                 WHERE memory_set_id = ?
@@ -1172,6 +1177,7 @@ class SQLiteMemoryStore(
                   AND subject_ref = ?
                   AND predicate = ?
                   AND status NOT IN ('superseded', 'revoked')
+                  {excluded}
                 ORDER BY salience DESC, confidence DESC, formed_at DESC, rowid DESC
                 LIMIT ?
                 """,
@@ -1182,12 +1188,31 @@ class SQLiteMemoryStore(
                     scope_key,
                     subject_ref,
                     predicate,
+                    *pending,
                     limit,
                 ),
             ).fetchall()
 
         # 結果
-        return [json.loads(row["payload_json"]) for row in rows]
+        records = [json.loads(row["payload_json"]) for row in rows]
+        if not pending:
+            return records
+        # 同じ保存バッチで先行する訂正の結果を、通常更新の比較対象にする。
+        criteria = {
+            "memory_set_id": memory_set_id, "memory_type": memory_type,
+            "scope_type": scope_type, "scope_key": scope_key,
+            "subject_ref": subject_ref, "predicate": predicate,
+        }
+        projected = [
+            unit for unit in pending.values()
+            if unit["status"] not in {"superseded", "revoked"}
+            and all(unit[key] == value for key, value in criteria.items())
+        ]
+        return sorted(
+            [*projected, *records],
+            key=lambda unit: (unit["salience"], unit["confidence"], unit["formed_at"]),
+            reverse=True,
+        )[:limit]
 
     def list_memory_units_for_recall(
         self,
