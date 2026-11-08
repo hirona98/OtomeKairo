@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from otomekairo.memory.grounding import RETENTION_KINDS, SUPPORT_KINDS
+
 from otomekairo.llm.contracts import (
     ACTIVITY_ACTOR_VALUES,
     ACTIVITY_TRANSITION_VALUES,
@@ -358,6 +360,13 @@ def memory_interpretation_response_format() -> dict[str, Any]:
                     "type": "array",
                     "items": closed_object(
                         {
+                            "evidence_text": {"type": "string", "description": "一次資料の発話者と内容を読み、直接支持される理解と推測を説明する。"},
+                            "grounding": closed_object({
+                                "evidence_refs": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                                "support_kind": string_enum(SUPPORT_KINDS),
+                                "retention_reason": {"type": "string"},
+                                "retention": string_enum(RETENTION_KINDS),
+                            }),
                             "memory_type": string_enum(MEMORY_TYPE_VALUES),
                             "scope": string_enum(SCOPE_TYPE_VALUES),
                             "subject_hint": {
@@ -379,7 +388,6 @@ def memory_interpretation_response_format() -> dict[str, Any]:
                                 description="補助情報の JSON object を表す文字列。空の object は {}。"
                             ),
                             "summary_text": {"type": "string"},
-                            "evidence_text": {"type": "string"},
                             "confidence_hint": string_enum({"low", "medium", "high"}),
                         }
                     ),

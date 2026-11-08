@@ -5,6 +5,8 @@ import math
 import re
 from typing import Any
 
+from otomekairo.memory.grounding import validate_memory_grounding
+
 from otomekairo.memory.utils import normalized_memory_object_hint, validate_timestamp_fields
 from otomekairo.world_state.models import WorldStateSourcePack
 
@@ -1176,6 +1178,7 @@ def validate_memory_interpretation_contract(
             "qualifiers_hint",
             "summary_text",
             "evidence_text",
+            "grounding",
             "confidence_hint",
         }
         _validate_exact_keys(candidate, required_candidate_keys, "MemoryInterpretation candidate_memory_unit")
@@ -1227,6 +1230,10 @@ def validate_memory_interpretation_contract(
             raise LLMError("MemoryInterpretation candidate_memory_unit.evidence_text が不正です。")
         if candidate["confidence_hint"] not in {"low", "medium", "high"}:
             raise LLMError("MemoryInterpretation candidate_memory_unit.confidence_hint が不正です。")
+        try:
+            validate_memory_grounding(candidate)
+        except ValueError as exc:
+            raise LLMError(f"MemoryInterpretation candidate_memory_unit.grounding: {exc}") from exc
 
     # episode affect検証
     _validate_episode_affects(payload["episode_affects"], label="MemoryInterpretation")

@@ -51,6 +51,14 @@ class LLMMockMemoryMixin:
             person_ref=person_ref,
             person_display_name=person_display_name,
         )
+        for candidate in candidate_memory_units:
+            source = candidate["qualifiers_hint"].pop("source", "inference")
+            candidate["grounding"] = {
+                "evidence_refs": ["input"],
+                "support_kind": {"explicit_statement": "person_statement", "explicit_correction": "person_correction",
+                                 "explicit_confirmation": "person_confirmation"}.get(source, "inference"),
+                "retention": "long_term", "retention_reason": "モックで継続理解として設定された候補。",
+            }
 
         # episode affect生成
         episode_affects = self._mock_episode_affects(normalized, person_ref=person_ref)

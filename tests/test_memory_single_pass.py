@@ -4,6 +4,7 @@ import sqlite3
 from unittest.mock import Mock
 
 import pytest
+from memory_fixtures import grounding
 
 from otomekairo.defaults import build_default_state
 from otomekairo.llm.client import LLMClient
@@ -38,7 +39,7 @@ def interpretation():
         "candidate_memory_units": [{
             "memory_type": "preference", "scope": "entity", "subject_hint": "person:test",
             "predicate_hint": "preferred_drink", "object_hint": {"kind": "value", "value": "ほうじ茶"},
-            "qualifiers_hint": {"source": "explicit_statement"},
+            "qualifiers_hint": {}, "grounding": grounding(),
             "summary_text": "普段はほうじ茶を好む。", "evidence_text": "本人が普段の好みを述べた。",
             "confidence_hint": "high",
         }],
@@ -367,3 +368,117 @@ def test_interpretation_rejects_invalid_open_loops(open_loops):
     payload["episode"]["open_loops"] = open_loops
     with pytest.raises(LLMError, match="open_loops"):
         validate_memory_interpretation_contract(payload)
+
+
+@pytest.mark.parametrize('bad_grounding', [
+    grounding(refs=['missing']),
+    grounding(refs=['input', 'input']),
+    grounding(refs=['speech']),
+    grounding(refs=['speech'], support='inference'),
+    grounding(refs=['decision'], support='verified_result'),
+    grounding(refs=['input', 'event:1'], support='independent_events'),
+    grounding(support='unsupported'),
+])
+def test_invalid_primary_evidence_is_repaired_then_fails_without_writes(turn, bad_grounding):
+    consolidator, store, arguments, completion = turn
+    payload = interpretation()
+    payload['candidate_memory_units'][0]['grounding'] = bad_grounding
+    completion.return_value = provider_response(payload)
+    with pytest.raises(LLMError, match='grounding'):
+        consolidator.consolidate_turn(**arguments)
+    assert completion.call_count == 2
+    with sqlite3.connect(store.memory_db_path) as conn:
+        assert conn.execute('SELECT COUNT(*) FROM memory_units').fetchone()[0] == 0
+        assert conn.execute('SELECT COUNT(*) FROM episodes').fetchone()[0] == 0
+
+
+def test_assistant_example_is_kept_as_an_episode_without_becoming_a_person_fact(turn):
+    consolidator, store, arguments, completion = turn
+    arguments['input_text'] = 'こだわりかぁ～難しいな。具体的などんな事？'
+    arguments['speech_payload'] = {'speech_text': '例えば可読性とパフォーマンスなどです。'}
+    payload = interpretation()
+    payload['episode']['summary_text'] = '本人が具体例を求め、自己が可読性や性能を例に挙げた。'
+    candidate = payload['candidate_memory_units'][0]
+    candidate.update(summary_text='本人は可読性と性能にこだわる。', evidence_text=arguments['speech_payload']['speech_text'],
+                     grounding=grounding(refs=['speech'], support='unsupported', retention='episode_only'))
+    completion.return_value = provider_response(payload)
+    trace, job = consolidator.consolidate_turn(**arguments)
+    assert trace['memory_action_count'] == 0
+    assert job['memory_actions'] == []
+    assert trace['candidate_grounding'][0]['grounding']['retention'] == 'episode_only'
+    with sqlite3.connect(store.memory_db_path) as conn:
+        assert conn.execute('SELECT COUNT(*) FROM memory_units').fetchone()[0] == 0
+        assert conn.execute('SELECT summary_text FROM episodes').fetchone()[0] == payload['episode']['summary_text']
+
+
+def test_high_confidence_inference_is_not_confirmed_or_treated_as_explicit(turn):
+    consolidator, store, arguments, completion = turn
+    payload = interpretation()
+    payload['candidate_memory_units'][0]['grounding'] = grounding(support='inference')
+    completion.return_value = provider_response(payload)
+    trace, _ = consolidator.consolidate_turn(**arguments)
+    unit, = store.list_memory_units_by_id(memory_set_id=arguments['state']['selected_memory_set_id'],
+                                          memory_unit_ids=trace['updated_memory_unit_ids'])
+    assert unit['status'] == 'inferred'
+    assert unit['confidence'] == 0.86
+    assert unit['last_confirmed_at'] is None
+    assert not consolidator.action_resolver._candidate_is_explicit(unit)
+    assert not consolidator.action_resolver._candidate_is_explicit({**unit, 'status': 'confirmed'})
+
+
+def test_transient_visual_state_is_not_saved_as_a_long_term_fact(turn):
+    consolidator, store, arguments, completion = turn
+    arguments['memory_context']['current_visual_observations'] = [{'summary_text': 'PCにGit Graphが表示されている。'}]
+    payload = interpretation()
+    payload['candidate_memory_units'][0].update(
+        memory_type='fact', summary_text='本人は現在PC作業中である。',
+        grounding=grounding(refs=['observation:1'], support='verified_result', retention='episode_only'))
+    completion.return_value = provider_response(payload)
+    trace, _ = consolidator.consolidate_turn(**arguments)
+    assert trace['memory_action_count'] == 0
+    assert trace['turn_consolidation_status'] == 'succeeded'
+
+
+def test_registered_self_commitment_keeps_its_confirmed_status_and_execution_time(turn):
+    consolidator, store, arguments, completion = turn
+    arguments['speech_payload'] = {'speech_text': '明日の9時にお知らせします。'}
+    arguments['memory_context']['autonomous_run_summary'] = {'run_id': 'autonomous_run:reminder', 'status': 'waiting_timer'}
+    payload = interpretation()
+    candidate = payload['candidate_memory_units'][0]
+    candidate.update(memory_type='commitment', scope='self', subject_hint='self', predicate_hint='notify',
+                     summary_text='明日の9時に一度通知する約束を引き受けた。',
+                     qualifiers_hint={'commitment_actor': 'self'},
+                     grounding=grounding(refs=['speech', 'autonomous_run_summary'], support='self_commitment'))
+    completion.return_value = provider_response(payload)
+    trace, _ = consolidator.consolidate_turn(**arguments)
+    unit, = store.list_memory_units_by_id(memory_set_id=arguments['state']['selected_memory_set_id'],
+                                          memory_unit_ids=trace['updated_memory_unit_ids'])
+    assert unit['status'] == 'confirmed'
+    assert unit['valid_to'] is None
+    assert unit['qualifiers']['grounding']['support_kind'] == 'self_commitment'
+
+
+def test_person_statement_cannot_use_another_persons_identity(turn):
+    consolidator, _, arguments, completion = turn
+    arguments['memory_context']['people_context'].append({'person_ref': 'person:other', 'display_name': '別人'})
+    payload = interpretation()
+    payload['candidate_memory_units'][0]['subject_hint'] = 'person:other'
+    completion.return_value = provider_response(payload)
+    with pytest.raises(LLMError, match='speaker_ref'):
+        consolidator.consolidate_turn(**arguments)
+
+
+def test_assistant_example_cannot_be_saved_by_calling_it_a_relationship_inference(turn):
+    consolidator, _, arguments, completion = turn
+    invalid = interpretation()
+    invalid['candidate_memory_units'][0].update(
+        memory_type='interpretation', scope='relationship', subject_hint='self|person:test',
+        summary_text='本人はコードの可読性や性能にこだわりを持っている。',
+        grounding=grounding(refs=['speech'], support='inference'))
+    repaired = deepcopy(invalid)
+    repaired['candidate_memory_units'][0]['grounding']['retention'] = 'episode_only'
+    completion.side_effect = [provider_response(invalid), provider_response(repaired)]
+    trace, _ = consolidator.consolidate_turn(**arguments)
+    assert trace['turn_consolidation_status'] == 'succeeded'
+    assert trace['memory_action_count'] == 0
+    assert completion.call_count == 2

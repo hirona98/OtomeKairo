@@ -23,6 +23,7 @@ from otomekairo.memory.utils import (
     timestamp_sort_key,
 )
 from otomekairo.store.file_store import FileStore
+from otomekairo.memory.grounding import CONFIRMED_SUPPORT_KINDS
 
 if TYPE_CHECKING:
     from otomekairo.llm.client import LLMClient
@@ -841,8 +842,6 @@ class MemoryActionResolver:
             valid_to = self._session_scoped_valid_to(finished_at)
 
         status = self._candidate_memo_status(
-            memory_type=memory_type,
-            confidence_hint=confidence_hint,
             qualifiers=qualifiers,
             object_ref_or_value=object_ref_or_value,
         )
@@ -875,6 +874,8 @@ class MemoryActionResolver:
 
     def _normalized_commitment_qualifiers(self, *, qualifiers: dict[str, Any], predicate: str) -> dict[str, Any]:
         normalized = dict(qualifiers)
+        if normalized.get("grounding", {}).get("support_kind") == "self_commitment":
+            return normalized
         source = normalized.get("source")
         actor = normalized.get("commitment_actor")
         if (
@@ -887,6 +888,8 @@ class MemoryActionResolver:
         return normalized
 
     def _weak_commitment_candidate(self, *, qualifiers: dict[str, Any]) -> bool:
+        if qualifiers.get("grounding", {}).get("support_kind") == "self_commitment":
+            return qualifiers.get("scope_duration") == "session"
         return (
             qualifiers.get("scope_duration") == "session"
             or qualifiers.get("source") in WEAK_COMMITMENT_SOURCE_VALUES
@@ -899,8 +902,6 @@ class MemoryActionResolver:
     def _candidate_memo_status(
         self,
         *,
-        memory_type: str,
-        confidence_hint: str,
         qualifiers: dict[str, Any],
         object_ref_or_value: str | None,
     ) -> str:
@@ -909,9 +910,7 @@ class MemoryActionResolver:
             return "revoked"
         if qualifiers.get("dormant") is True:
             return "dormant"
-        if qualifiers.get("source") in DIRECT_SOURCE_VALUES:
-            return "confirmed"
-        if memory_type in {"fact", "preference", "commitment"} and confidence_hint == "high":
+        if qualifiers.get("grounding", {}).get("support_kind") in CONFIRMED_SUPPORT_KINDS:
             return "confirmed"
         return "inferred"
 
@@ -1391,8 +1390,7 @@ class MemoryActionResolver:
         if source in DIRECT_SOURCE_VALUES:
             return True
 
-        # 代替
-        return candidate["status"] == "confirmed" and candidate["memory_type"] in {"fact", "preference", "commitment"}
+        return False
 
     def _same_object(self, existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
         # 比較

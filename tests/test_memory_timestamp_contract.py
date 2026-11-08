@@ -3,6 +3,7 @@ import json
 from unittest.mock import Mock
 
 import pytest
+from memory_fixtures import grounding
 
 from otomekairo.llm.client import LLMClient
 from otomekairo.llm.contexts import PersonaContext
@@ -21,7 +22,7 @@ def interpretation(qualifiers):
             'memory_type': 'preference', 'scope': 'entity', 'subject_hint': 'person:a',
             'predicate_hint': 'preferred_drink', 'object_hint': {'kind': 'value', 'value': '麦茶'},
             'qualifiers_hint': qualifiers, 'summary_text': '今は麦茶が好き。',
-            'evidence_text': '本人が以前の好みから変わったと述べた。', 'confidence_hint': 'high',
+            'evidence_text': '本人が以前の好みから変わったと述べた。', 'confidence_hint': 'high', 'grounding': grounding(),
         }],
         'episode_affects': [],
     }

@@ -1156,6 +1156,22 @@ class LLMClient:
         correction_targets: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         operation = "memory_interpretation"
+        from otomekairo.memory.grounding import memory_evidence_sources, validate_memory_grounding
+
+        memory_context = dict(memory_context or {})
+        memory_context["evidence_sources"] = memory_evidence_sources(
+            input_text=input_text, speech_text=speech_text, decision=decision, memory_context=memory_context,
+        )
+
+        def validate_interpretation(payload):
+            validate_memory_interpretation_contract(payload)
+            validate_known_person_references(payload, person_refs=known_person_refs_from_context(memory_context))
+            for candidate in payload["candidate_memory_units"]:
+                try:
+                    validate_memory_grounding(candidate, memory_context["evidence_sources"])
+                except ValueError as exc:
+                    raise LLMError(f"MemoryInterpretation grounding: {exc}") from exc
+
         # モック経路
         if self._is_mock_model_config(model_config):
             payload = self.mock_client.generate_memory_interpretation(
@@ -1168,6 +1184,7 @@ class LLMClient:
                 persona_context=persona_context,
                 correction_targets=correction_targets,
             )
+            validate_interpretation(payload)
             debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
 
@@ -1182,9 +1199,6 @@ class LLMClient:
             current_time=current_time,
             correction_targets=correction_targets,
         )
-        def validate_interpretation(payload):
-            validate_memory_interpretation_contract(payload)
-            validate_known_person_references(payload, person_refs=known_person_refs_from_context(memory_context or {}))
         payload = self._generate_structured_payload(
             model_config=model_config,
             messages=messages,

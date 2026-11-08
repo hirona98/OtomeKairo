@@ -8,6 +8,7 @@ from otomekairo.llm.client import LLMClient
 from otomekairo.llm.contexts import build_persona_context
 from otomekairo.memory.actions import MemoryActionResolver
 from otomekairo.memory.correction import MemoryCorrectionReconciler
+from otomekairo.memory.grounding import grounded_candidate, memory_evidence_sources
 from otomekairo.memory.reflection.consolidator import ReflectiveConsolidator
 from otomekairo.memory.utils import clamp_score, merged_event_ids, normalized_text_list, now_iso, optional_text
 from otomekairo.memory.vector import MemoryVectorIndexer
@@ -77,6 +78,10 @@ class MemoryConsolidator:
             memory_context=memory_context,
             events=events,
         )
+        evidence_sources = memory_evidence_sources(
+            input_text=input_text, speech_text=speech_payload["speech_text"] if speech_payload else None,
+            decision=decision, memory_context=interpretation_context,
+        )
         interpretation = self.llm.generate_memory_interpretation(
             model_config=selected_preset,
             persona_context=build_persona_context(
@@ -120,7 +125,9 @@ class MemoryConsolidator:
         # 記憶アクション群
         candidates: list[dict[str, Any]] = []
         for candidate_payload in interpretation["candidate_memory_units"]:
-            candidate = deepcopy(candidate_payload)
+            if candidate_payload["grounding"]["retention"] == "episode_only":
+                continue
+            candidate = grounded_candidate(candidate_payload, evidence_sources)
             if provenance:
                 candidate["qualifiers_hint"] = {
                     **candidate.get("qualifiers_hint", {}),
@@ -163,6 +170,11 @@ class MemoryConsolidator:
                 "episode_series_id": episode.get("episode_series_id"),
                 "open_loops": episode.get("open_loops", []),
                 "memory_action_count": len(memory_actions),
+                "candidate_grounding": [
+                    {"summary_text": item["summary_text"], "evidence_text": item["evidence_text"],
+                     "grounding": deepcopy(item["grounding"])}
+                    for item in interpretation["candidate_memory_units"]
+                ],
                 "correction_reconciliation": correction_trace,
                 "episode_affect_count": len(episode_affects),
                 "updated_memory_unit_ids": [

@@ -54,6 +54,7 @@ def memory_claim_context(record: dict[str, Any]) -> dict[str, Any]:
             key: qualifiers[key]
             for key in (
                 "source", "object_kind", "scope_duration", "summary_scope", "source_memory_types",
+                "grounding", "evidence_sources",
                 "commitment_actor", "commitment_focus", "negates_previous", "replace_prior",
                 "source_interaction_refs", "source_participant_refs",
             )
@@ -267,6 +268,8 @@ def display_scope_key(scope_key: str) -> str:
 
 
 NON_SEMANTIC_QUALIFIER_KEYS = {
+    "grounding",
+    "evidence_sources",
     "visual_evidence",
     "object_kind",
     "allow_parallel",

@@ -3,6 +3,7 @@ import json
 from unittest.mock import Mock
 
 import pytest
+from memory_fixtures import grounding
 
 from otomekairo.llm.client import LLMClient
 from otomekairo.llm.contexts import PersonaContext
@@ -46,7 +47,7 @@ def test_memory_summary_invalid_object_reference_names_its_field():
         'memory_type': 'summary', 'scope': 'entity', 'subject_hint': 'person:a',
         'predicate_hint': 'long_term_pattern', 'object_hint': {'kind': 'reference', 'value': 'entity:person:a:summary'},
         'qualifiers_hint': {}, 'summary_text': '普段はほうじ茶が好き。',
-        'evidence_text': '本人の訂正。', 'confidence_hint': 'high',
+        'evidence_text': '本人の訂正。', 'confidence_hint': 'high', 'grounding': grounding(),
     }], 'episode_affects': []}
     with pytest.raises(LLMError, match=r'candidate_memory_unit\.object_hint'):
         validate_memory_interpretation_contract(payload)
@@ -65,7 +66,7 @@ def test_memory_interpretation_repairs_an_unknown_person_before_returning(monkey
         'memory_type': 'preference', 'scope': 'entity', 'subject_hint': 'person:a',
         'predicate_hint': 'preferred_drink', 'object_hint': {'kind': 'value', 'value': 'ジャスミン茶'},
         'qualifiers_hint': '{}', 'summary_text': '普段はジャスミン茶が好き。',
-        'evidence_text': '本人が明示した。', 'confidence_hint': 'high',
+        'evidence_text': '本人が明示した。', 'confidence_hint': 'high', 'grounding': grounding(),
     }], 'episode_affects': []}
     invalid = deepcopy(valid)
     invalid['candidate_memory_units'][0]['subject_hint'] = 'person:相沢'
