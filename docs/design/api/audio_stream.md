@@ -488,7 +488,7 @@ response:
         "conversation_display_name_id": "conversation_display_name:hiro",
         "display_name": "ひろ",
         "registration_status": "registered",
-        "model_id": "wespeaker-resnet34-voxceleb-v1",
+        "model_id": "eres2netv2-zh-cn-16k-v1",
         "registered_at": "2026-07-28T10:00:00+09:00",
         "updated_at": "2026-07-28T10:00:00+09:00"
       }
@@ -498,6 +498,8 @@ response:
 ```
 
 `registration_status` は `registered / unregistered` のいずれかにする。
+保存済みの`model_id`を返し、モデル変更時もDBの登録を自動変換しない。
+現在のmodel IDは[inspection](列挙とinspection.md)の`audio_runtime_state.model_ids.speaker_embedding`で確認する。
 `GET /ui/api/audio/speakers` は同じ処理を呼び出す。
 
 ## 話者登録

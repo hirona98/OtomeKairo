@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import Mock
 
+from otomekairo.audio.runtime import AudioRuntime
 from otomekairo.interaction import InteractionContext, ParticipantContext
 from otomekairo.service.speech_output import ServiceSpeechOutputMixin
 from otomekairo.service.spontaneous.wake import ServiceSpontaneousWakeMixin
@@ -41,6 +43,7 @@ class _Service(ServiceSpontaneousWakeMixin, ServiceSpeechOutputMixin):
     def __init__(self) -> None:
         self._event_stream_registry = _Registry()
         self._tts_runtime = _TtsRuntime()
+        self._audio_runtime = Mock(spec=AudioRuntime)
         self._event_id = 0
 
     def _next_stream_event_id(self) -> int:
@@ -82,6 +85,7 @@ class SpontaneousSpeechDeliveryTests(unittest.TestCase):
         self.assertIsNone(service._tts_runtime.reservations[0]["interaction_ref"])
         self.assertEqual(service._tts_runtime.reservations[0]["recipient_person_refs"], [])
         self.assertEqual(len(service._tts_runtime.activated), 1)
+        service._audio_runtime.activate_normal_input.assert_called_once_with()
 
     def test_wake_speech_without_interaction_uses_ambient_delivery(self) -> None:
         service = _Service()
@@ -97,6 +101,7 @@ class SpontaneousSpeechDeliveryTests(unittest.TestCase):
         data = service._event_stream_registry.events[0]["data"]
         self.assertIsNone(data["interaction_ref"])
         self.assertEqual(data["recipient_person_refs"], [])
+        service._audio_runtime.activate_normal_input.assert_called_once_with()
 
     def test_directed_wake_speech_preserves_interaction(self) -> None:
         service = _Service()
@@ -119,6 +124,7 @@ class SpontaneousSpeechDeliveryTests(unittest.TestCase):
         data = service._event_stream_registry.events[0]["data"]
         self.assertEqual(data["interaction_ref"], "interaction:test")
         self.assertEqual(data["recipient_person_refs"], ["person:test"])
+        service._audio_runtime.activate_normal_input.assert_called_once_with()
 
     def test_wake_without_speech_does_not_emit_or_reserve_audio(self) -> None:
         service = _Service()
@@ -134,6 +140,7 @@ class SpontaneousSpeechDeliveryTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(service._event_stream_registry.events, [])
         self.assertEqual(service._tts_runtime.reservations, [])
+        service._audio_runtime.activate_normal_input.assert_not_called()
 
     def test_ambient_delivery_is_rejected_for_directed_source_kinds(self) -> None:
         service = _Service()

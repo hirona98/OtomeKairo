@@ -1146,6 +1146,9 @@ function renderDashboardHealth() {
         `設定 ${displayValue(audio.configured_source)}`,
         `実効 ${displayValue(audio.effective_source || audio.active_source)}`,
         audio.mode ? `mode ${audio.mode}` : "",
+        audio.mode !== "enrollment" && audio.active_source
+          ? audio.normal_activation?.state === "waiting" ? "呼びかけ待ち" : "会話受付中"
+          : "",
       ].filter(Boolean).join(" · "),
       meta: [
         audio.selected_device?.name,
@@ -1158,6 +1161,7 @@ function renderDashboardHealth() {
           ? `識別 ${formatScore(last.top1_similarity)}${last.threshold_met ? " 超過" : " 未満"}`
           : "",
         audio.paused_reason ? `pause ${audio.paused_reason}` : "",
+        last?.result_code === "wake_word_not_matched" ? "直近: 起動ワード不一致" : "",
       ].filter(Boolean).join(" · "),
     }));
   }
@@ -1498,10 +1502,18 @@ function renderWebMicrophoneControls() {
         audioPauseLabel(state.audioRuntime.paused_reason),
         "processing",
       );
+    } else if (state.audioRuntime?.mode === "enrollment") {
+      setWebMicrophoneStatus("話者登録中");
+    } else if (state.audioRuntime?.active_source) {
+      const activation = state.audioRuntime.normal_activation;
+      if (activation.state === "waiting") {
+        const calls = activation.wake_words.map((word) => `「${word}」`).join(" / ");
+        setWebMicrophoneStatus(`${calls} と呼びかけ待ち`, "processing");
+      } else {
+        setWebMicrophoneStatus("会話受付中");
+      }
     } else {
-      setWebMicrophoneStatus(
-        state.audioRuntime?.mode === "enrollment" ? "話者登録中" : "待機中",
-      );
+      setWebMicrophoneStatus("音声入力元の接続待ち", "processing");
     }
   }
   if (state.settingsOpen) {
@@ -2020,10 +2032,10 @@ function currentVadThreshold() {
 function currentSpeakerThreshold() {
   const slider = element("speaker-recognition-threshold");
   if (slider && state.settingsOpen) {
-    return numberValue("speaker-recognition-threshold", 0.6);
+    return numberValue("speaker-recognition-threshold", 0.4);
   }
   const saved = state.avatarSpeech?.microphone_settings?.speaker_recognition_threshold;
-  return typeof saved === "number" ? saved : 0.6;
+  return typeof saved === "number" ? saved : 0.4;
 }
 
 function clampMeterRatio(ratio) {
@@ -2901,7 +2913,7 @@ function syncMicrophoneSettings() {
     local_input_device: selectedDevice ? JSON.parse(selectedDevice) : null,
     console: state.avatarSpeech.microphone_settings.console,
     vad_probability_threshold: numberValue("vad-probability-threshold", 0.5),
-    speaker_recognition_threshold: numberValue("speaker-recognition-threshold", 0.6),
+    speaker_recognition_threshold: numberValue("speaker-recognition-threshold", 0.4),
   };
   const selectedOutputDevice = textValue("local-output-device");
   state.avatarSpeech.audio_output_settings = {
@@ -2914,7 +2926,7 @@ function updateMicrophoneSettingLabels() {
   element("vad-probability-threshold-value").textContent =
     numberValue("vad-probability-threshold", 0.5).toFixed(2);
   element("speaker-recognition-threshold-value").textContent =
-    numberValue("speaker-recognition-threshold", 0.6).toFixed(2);
+    numberValue("speaker-recognition-threshold", 0.4).toFixed(2);
   // しきい値スライダ操作中は未保存値を thr マーカーへ即時反映する。
   renderAudioMeters();
 }
@@ -3178,12 +3190,16 @@ function renderSpeakerEnrollment() {
   const enrollment = state.activeEnrollment || state.audioRuntime?.enrollment;
   const speaker = selectedConversationSpeaker();
   const registered = speaker?.registration_status === "registered";
+  const currentModelId = state.audioRuntime?.model_ids?.speaker_embedding;
+  const needsReregistration = registered && Boolean(currentModelId)
+    && speaker.model_id !== currentModelId;
   const startButton = element("start-speaker-enrollment");
   const hasInputLease = webMicrophoneHasLease();
   const hasSelection = Boolean(selectedConversationDisplayNameId());
   element("speaker-registration-status").value = !hasSelection
     ? "呼ばれ方を選択してください"
-    : registered ? "音声登録済み" : "音声未登録";
+    : needsReregistration ? "モデル更新のため再登録が必要"
+      : registered ? "音声登録済み" : "音声未登録";
   startButton.textContent = registered ? "再登録（3発話）" : "3発話で登録";
   startButton.disabled = Boolean(enrollment) || !hasInputLease || !hasSelection;
   element("unregister-speaker").disabled = Boolean(enrollment) || !registered;
@@ -3195,6 +3211,8 @@ function renderSpeakerEnrollment() {
       status = "呼ばれ方を選択してください";
     } else if (!hasInputLease) {
       status = "音声入力が有効になってから話者登録を開始してください";
+    } else if (needsReregistration) {
+      status = "音声モデルを更新しました。再登録で、2秒以上の発話を3回登録してください。";
     }
     element("speaker-enrollment-status").textContent = status;
     element("speaker-enrollment-status").hidden = status === "";
@@ -3204,7 +3222,7 @@ function renderSpeakerEnrollment() {
   const required = enrollment.required_samples || 3;
   element("speaker-enrollment-status").hidden = false;
   element("speaker-enrollment-status").textContent =
-    `話者登録中: ${completed} / ${required} 発話`;
+    `話者登録中: ${completed} / ${required} 発話。2秒以上話し、一息あけてください。`;
 }
 
 async function startSpeakerEnrollment() {

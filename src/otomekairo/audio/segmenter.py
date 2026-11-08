@@ -16,6 +16,7 @@ PREBUFFER_SAMPLES = SAMPLE_RATE // 2
 END_SILENCE_SAMPLES = SAMPLE_RATE // 2
 MINIMUM_VOICED_SAMPLES = SAMPLE_RATE // 2
 MAXIMUM_UTTERANCE_SAMPLES = SAMPLE_RATE * 15
+SPEAKER_PADDING_SAMPLES = SAMPLE_RATE // 10
 
 
 @dataclass(frozen=True)
@@ -47,17 +48,17 @@ class AudioSegmenter:
     ) -> None:
         self._vad = vad
         self._probability_threshold = probability_threshold
+        self._exit_probability_threshold = max(0.01, probability_threshold - 0.15)
         self.reset()
 
     def reset(self) -> None:
         # PCM、VAD状態、発話構築状態を同じリース境界で破棄する。
         self._vad.reset()
+        self._vad_probability: float | None = None
         self._pending_samples: deque[int] = deque()
         self._prebuffer: deque[int] = deque(maxlen=PREBUFFER_SAMPLES)
         self._speaking = False
-        self._amivoice_samples: list[int] = []
-        self._speaker_samples: list[int] = []
-        self._amivoice_prebuffer_samples = 0
+        self._utterance_samples: list[int] = []
         self._first_positive_offset = 0
         self._last_positive_end = 0
         self._silence_samples = 0
@@ -68,7 +69,6 @@ class AudioSegmenter:
         samples = self._pcm_to_ints(pcm16le)
         self._pending_samples.extend(samples)
         utterances: list[SegmentedUtterance] = []
-        probability: float | None = None
         while len(self._pending_samples) >= VAD_WINDOW_SAMPLES:
             window = [
                 self._pending_samples.popleft()
@@ -76,15 +76,21 @@ class AudioSegmenter:
             ]
             float_samples = self._vad_samples(window)
             probability = self._vad.infer(float_samples)
+            self._vad_probability = probability
+            threshold = (
+                self._exit_probability_threshold
+                if self._speaking
+                else self._probability_threshold
+            )
             utterance = self._consume_window(
                 window,
-                is_positive=probability >= self._probability_threshold,
+                is_positive=probability >= threshold,
             )
             if utterance is not None:
                 utterances.append(utterance)
         return SegmenterUpdate(
             utterances=utterances,
-            vad_probability=probability,
+            vad_probability=self._vad_probability,
             vad_speaking=self._speaking,
             dbfs=self._calculate_dbfs(samples),
         )
@@ -100,24 +106,21 @@ class AudioSegmenter:
                 self._prebuffer.extend(window)
                 return None
             self._speaking = True
-            self._amivoice_samples = [*self._prebuffer, *window]
-            self._amivoice_prebuffer_samples = len(self._prebuffer)
-            self._speaker_samples = list(window)
-            self._first_positive_offset = 0
-            self._last_positive_end = len(window)
+            self._utterance_samples = [*self._prebuffer, *window]
+            self._first_positive_offset = len(self._prebuffer)
+            self._last_positive_end = len(self._utterance_samples)
             self._silence_samples = 0
             self._prebuffer.clear()
             return None
 
-        self._amivoice_samples.extend(window)
-        self._speaker_samples.extend(window)
+        self._utterance_samples.extend(window)
         if is_positive:
-            self._last_positive_end = len(self._speaker_samples)
+            self._last_positive_end = len(self._utterance_samples)
             self._silence_samples = 0
         else:
             self._silence_samples += len(window)
 
-        if len(self._speaker_samples) >= MAXIMUM_UTTERANCE_SAMPLES:
+        if len(self._utterance_samples) - self._first_positive_offset >= MAXIMUM_UTTERANCE_SAMPLES:
             return self._finish_utterance(forced_split=True)
         if self._silence_samples >= END_SILENCE_SAMPLES:
             return self._finish_utterance(forced_split=False)
@@ -125,27 +128,25 @@ class AudioSegmenter:
 
     def _finish_utterance(self, *, forced_split: bool) -> SegmentedUtterance | None:
         voiced_samples = self._last_positive_end - self._first_positive_offset
-        speaker_samples = self._speaker_samples[
-            self._first_positive_offset : self._last_positive_end
+        # 同じPCMから両viewを切り出し、話者用にも弱い語頭・語尾を残す。
+        speaker_samples = self._utterance_samples[
+            max(0, self._first_positive_offset - SPEAKER_PADDING_SAMPLES)
+            : self._last_positive_end + SPEAKER_PADDING_SAMPLES
         ]
         if forced_split:
-            amivoice_samples = self._amivoice_samples
+            amivoice_samples = self._utterance_samples
             self._prebuffer.clear()
         else:
-            trailing_start = (
-                self._amivoice_prebuffer_samples + self._last_positive_end
-            )
+            trailing_start = self._last_positive_end
             trailing_end = trailing_start + END_SILENCE_SAMPLES
-            amivoice_samples = self._amivoice_samples[:trailing_end]
+            amivoice_samples = self._utterance_samples[:trailing_end]
             self._prebuffer = deque(
-                self._amivoice_samples[trailing_start:trailing_end],
+                self._utterance_samples[trailing_start:trailing_end],
                 maxlen=PREBUFFER_SAMPLES,
             )
 
         self._speaking = False
-        self._amivoice_samples = []
-        self._speaker_samples = []
-        self._amivoice_prebuffer_samples = 0
+        self._utterance_samples = []
         self._first_positive_offset = 0
         self._last_positive_end = 0
         self._silence_samples = 0

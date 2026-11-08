@@ -4,18 +4,49 @@ import hashlib
 import json
 import threading
 from dataclasses import dataclass
+from functools import lru_cache
 from importlib import resources
 from typing import Any
 
 
 MODEL_PACKAGE = "otomekairo.audio.model_assets"
 SILERO_MODEL_ID = "silero-vad-v5-16k-opset15"
-WESPEAKER_MODEL_ID = "wespeaker-resnet34-voxceleb-v1"
-SPEAKER_EMBEDDING_DIMENSION = 256
+SPEAKER_EMBEDDING_DIMENSION = 192
 
 
 class AudioModelError(RuntimeError):
     pass
+
+
+_MODEL_LOAD_LOCK = threading.Lock()
+
+
+def _build_cpu_session(model_bytes: bytes) -> Any:
+    import onnxruntime as ort
+
+    options = ort.SessionOptions()
+    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    options.inter_op_num_threads = 1
+    options.intra_op_num_threads = 1
+    return ort.InferenceSession(model_bytes, sess_options=options, providers=["CPUExecutionProvider"])
+
+
+@lru_cache(maxsize=1)
+def _shared_model_sessions(
+    vad_file: str, vad_hash: str, speaker_file: str, speaker_hash: str,
+) -> tuple[Any, Any, Any, Any]:
+    # 重みはprocess内で一度だけ読み込み、推論状態は各runtimeに持たせる。
+    sessions = []
+    for file_name, expected_hash in ((vad_file, vad_hash), (speaker_file, speaker_hash)):
+        try:
+            data = resources.files(MODEL_PACKAGE).joinpath(file_name).read_bytes()
+        except FileNotFoundError as exc:
+            raise AudioModelError(f"Audio model file is unavailable: {file_name}.") from exc
+        if hashlib.sha256(data).hexdigest() != expected_hash:
+            raise AudioModelError(f"Audio model hash mismatch: {file_name}.")
+        sessions.append(_build_cpu_session(data))
+    return sessions[0], sessions[1], threading.Lock(), threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -29,32 +60,38 @@ class SpeakerIdentification:
 
 
 class SileroVadSession:
-    def __init__(self, session: Any, numpy_module: Any) -> None:
+    def __init__(self, session: Any, numpy_module: Any, *, inference_lock: Any = None) -> None:
         self._session = session
         self._np = numpy_module
         self._lock = threading.Lock()
+        self._inference_lock = inference_lock if inference_lock is not None else threading.Lock()
         self.reset()
 
     def reset(self) -> None:
-        # リースごとの recurrent state を初期状態へ戻す。
-        self._state = self._np.zeros((2, 1, 128), dtype=self._np.float32)
+        # リースごとの recurrent state と直前64 sampleを同時に破棄する。
+        with self._lock:
+            self._state = self._np.zeros((2, 1, 128), dtype=self._np.float32)
+            self._context = self._np.zeros((1, 64), dtype=self._np.float32)
 
     def infer(self, samples: Any) -> float:
         if samples.shape != (512,):
             raise AudioModelError("Silero VAD input must contain 512 samples.")
-        with self._lock:
+        with self._lock, self._inference_lock:
+            # Silero v5のONNX入力は直前64 sample + 今回512 sample。
+            model_input = self._np.concatenate(
+                (self._context, samples.reshape(1, 512)),
+                axis=1,
+            ).astype(self._np.float32, copy=False)
             output, next_state = self._session.run(
                 ["output", "stateN"],
                 {
-                    "input": samples.reshape(1, 512).astype(
-                        self._np.float32,
-                        copy=False,
-                    ),
+                    "input": model_input,
                     "state": self._state,
                     "sr": self._np.asarray(16000, dtype=self._np.int64),
                 },
             )
             self._state = next_state.astype(self._np.float32, copy=False)
+            self._context = model_input[:, -64:].copy()
         probability = float(output.reshape(-1)[0])
         if not 0.0 <= probability <= 1.0:
             raise AudioModelError("Silero VAD returned an invalid probability.")
@@ -81,35 +118,36 @@ class AudioModelRuntime:
         self._np = np
         self._ort = ort
         manifest = self._read_manifest()
-        self._verify_model_files(manifest)
-        self._silero_session = self._build_session(
-            self._model_bytes(manifest["silero_vad"]["file"])
-        )
-        self._speaker_session = self._build_session(
-            self._model_bytes(manifest["wespeaker"]["file"])
-        )
+        try:
+            vad_model = manifest["silero_vad"]
+            speaker_model = manifest["speaker_embedding"]
+            with _MODEL_LOAD_LOCK:
+                self._silero_session, self._speaker_session, vad_lock, self._speaker_lock = _shared_model_sessions(
+                    vad_model["file"], vad_model["sha256"],
+                    speaker_model["file"], speaker_model["sha256"],
+                )
+        except (KeyError, TypeError) as exc:
+            raise AudioModelError("Audio model manifest is invalid.") from exc
         self._validate_sessions()
         self.silero_model_id = manifest["silero_vad"]["model_id"]
-        self.speaker_model_id = manifest["wespeaker"]["model_id"]
-        self.vad = SileroVadSession(self._silero_session, self._np)
-        self._speaker_lock = threading.Lock()
+        self.speaker_model_id = manifest["speaker_embedding"]["model_id"]
+        self.vad = SileroVadSession(self._silero_session, self._np, inference_lock=vad_lock)
 
     def extract_speaker_embedding(self, pcm16le: bytes) -> list[float]:
         # PCMから公式Kaldi互換Fbankを生成し、発話CMNを適用する。
         if len(pcm16le) % 2 != 0 or not pcm16le:
             raise AudioModelError("Speaker PCM must be non-empty PCM16LE.")
-        samples = (
-            self._np.frombuffer(pcm16le, dtype="<i2")
-            .astype(self._np.float32)
-            / 32768.0
-        )
+        # ERes2NetV2は正規化float32とPovey窓のFbankを受け取る。
+        samples = self._np.frombuffer(pcm16le, dtype="<i2").astype(self._np.float32) / 32768.0
         options = self._knf.FbankOptions()
         options.frame_opts.samp_freq = 16000.0
         options.frame_opts.frame_length_ms = 25.0
         options.frame_opts.frame_shift_ms = 10.0
-        options.frame_opts.window_type = "hamming"
+        options.frame_opts.window_type = "povey"
         options.frame_opts.dither = 0.0
+        options.frame_opts.snip_edges = True
         options.mel_opts.num_bins = 80
+        options.use_energy = False
         fbank = self._knf.OnlineFbank(options)
         fbank.accept_waveform(16000.0, samples.tolist())
         fbank.input_finished()
@@ -126,15 +164,15 @@ class AudioModelRuntime:
 
         with self._speaker_lock:
             output = self._speaker_session.run(
-                ["embs"],
-                {"feats": features[self._np.newaxis, :, :]},
+                ["embedding"],
+                {"x": features[self._np.newaxis, :, :]},
             )[0]
         embedding = output.reshape(-1).astype(self._np.float32, copy=False)
         if embedding.shape != (SPEAKER_EMBEDDING_DIMENSION,):
-            raise AudioModelError("WeSpeaker embedding dimension is invalid.")
+            raise AudioModelError("Speaker embedding dimension is invalid.")
         norm = float(self._np.linalg.norm(embedding))
         if not self._np.isfinite(norm) or norm <= 1.0e-6:
-            raise AudioModelError("WeSpeaker embedding norm is invalid.")
+            raise AudioModelError("Speaker embedding norm is invalid.")
         return (embedding / norm).tolist()
 
     def identify_speaker(
@@ -157,9 +195,10 @@ class AudioModelRuntime:
             if (
                 speaker.get("registration_status") != "registered"
                 or speaker.get("model_id") != self.speaker_model_id
-                or registered.shape != (SPEAKER_EMBEDDING_DIMENSION,)
             ):
                 continue
+            if registered.shape != (SPEAKER_EMBEDDING_DIMENSION,) or not self._np.isfinite(registered).all():
+                raise AudioModelError("Registered speaker embedding is invalid.")
             scored.append(
                 (
                     float(self._np.dot(probe, registered)),
@@ -206,40 +245,8 @@ class AudioModelRuntime:
         except (FileNotFoundError, json.JSONDecodeError) as exc:
             raise AudioModelError("Audio model manifest is unavailable.") from exc
 
-    def _verify_model_files(self, manifest: dict[str, Any]) -> None:
-        try:
-            entries = (manifest["silero_vad"], manifest["wespeaker"])
-            for entry in entries:
-                model_bytes = self._model_bytes(entry["file"])
-                digest = hashlib.sha256(model_bytes).hexdigest()
-                if digest != entry["sha256"]:
-                    raise AudioModelError(
-                        f"Audio model hash mismatch: {entry['file']}."
-                    )
-        except (KeyError, TypeError) as exc:
-            raise AudioModelError("Audio model manifest is invalid.") from exc
-
-    def _model_bytes(self, file_name: str) -> bytes:
-        try:
-            return resources.files(MODEL_PACKAGE).joinpath(file_name).read_bytes()
-        except FileNotFoundError as exc:
-            raise AudioModelError(
-                f"Audio model file is unavailable: {file_name}."
-            ) from exc
-
     def _build_session(self, model_bytes: bytes) -> Any:
-        options = self._ort.SessionOptions()
-        options.graph_optimization_level = (
-            self._ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        )
-        options.execution_mode = self._ort.ExecutionMode.ORT_SEQUENTIAL
-        options.inter_op_num_threads = 1
-        options.intra_op_num_threads = 1
-        return self._ort.InferenceSession(
-            model_bytes,
-            sess_options=options,
-            providers=["CPUExecutionProvider"],
-        )
+        return _build_cpu_session(model_bytes)
 
     def _validate_sessions(self) -> None:
         silero_inputs = {
@@ -258,10 +265,22 @@ class AudioModelRuntime:
         speaker_outputs = self._speaker_session.get_outputs()
         if (
             len(speaker_inputs) != 1
-            or speaker_inputs[0].name != "feats"
+            or speaker_inputs[0].name != "x"
+            or speaker_inputs[0].type != "tensor(float)"
             or speaker_inputs[0].shape[-1] != 80
             or len(speaker_outputs) != 1
-            or speaker_outputs[0].name != "embs"
+            or speaker_outputs[0].name != "embedding"
+            or speaker_outputs[0].type != "tensor(float)"
             or speaker_outputs[0].shape[-1] != SPEAKER_EMBEDDING_DIMENSION
         ):
-            raise AudioModelError("WeSpeaker model shape is invalid.")
+            raise AudioModelError("Speaker model shape is invalid.")
+        metadata = self._speaker_session.get_modelmeta().custom_metadata_map
+        required = {
+            "framework": "3d-speaker",
+            "sample_rate": "16000",
+            "normalize_samples": "1",
+            "feature_normalize_type": "global-mean",
+            "output_dim": str(SPEAKER_EMBEDDING_DIMENSION),
+        }
+        if any(metadata.get(key) != value for key, value in required.items()):
+            raise AudioModelError("Speaker model preprocessing metadata is invalid.")

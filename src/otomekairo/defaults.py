@@ -206,7 +206,7 @@ def build_default_state() -> dict:
             "local_input_device": None,
             "console": None,
             "vad_probability_threshold": 0.5,
-            "speaker_recognition_threshold": 0.6,
+            "speaker_recognition_threshold": 0.4,
         },
         "wake_policy": {
             "mode": "disabled",

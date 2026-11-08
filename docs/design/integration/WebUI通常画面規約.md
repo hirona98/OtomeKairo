@@ -71,6 +71,7 @@ badge、`.status.processing` / `.status.error` は上記を共有する。
 - その隣に音声合成 ON/OFF の `.mic-toggle`（スピーカーアイコン、`#toggle-web-tts`）。正本は `tts.enabled` であり、`audio_runtime_state.tts_enabled` を表示する
 - `web_microphone` のときだけ STT ON に合わせてブラウザ capture と Web 入力 session を開始する
 - 音声状態（停止中・入力中・STT 無効など）は composer 内ではなく statusbar の `#web-microphone-status` に出す
+- 通常入力では`normal_activation`に従い、保存済み起動ワードを添えた呼びかけ待ちと、会話受付中を区別する。ダッシュボードでも直近の起動ワード不一致を表示する
 - マイク操作行の直下に音声観測行（`.audio-meters`）を置く
   - 入力レベル（`vad.dbfs`）
   - VAD しきい値超過（`vad.probability` と threshold の比較。probability 未取得時は 0.0 として表示）

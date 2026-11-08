@@ -148,6 +148,7 @@ class ServiceSpeechOutputMixin:
             field_value = event_data.get(field_name)
             if not isinstance(field_value, str) or not field_value.strip():
                 raise ValueError(f"assistant_message.{field_name} is required.")
+        self._audio_runtime.activate_normal_input()
         event = {
             "event_id": self._next_stream_event_id(),
             "type": "assistant_message",

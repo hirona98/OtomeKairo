@@ -29,7 +29,7 @@ AUDIO_PROTOCOL_VERSION = "2"
 HEARTBEAT_INTERVAL_SECONDS = 5
 LEASE_TIMEOUT_SECONDS = 15
 ENROLLMENT_TIMEOUT_SECONDS = 120
-NORMAL_ACTIVE_SECONDS = 60
+NORMAL_ACTIVE_SECONDS = 180
 MAX_WAITING_UTTERANCES = 4
 ENROLLMENT_REQUIRED_SAMPLES = 3
 ENROLLMENT_MINIMUM_SAMPLES = 32000
@@ -598,6 +598,19 @@ class AudioRuntime:
         self._publish_state(force=True)
         return speaker
 
+    def activate_normal_input(self) -> None:
+        with self._lock:
+            self._activate_normal_input_locked()
+        self._publish_state(force=True)
+
+    def _activate_normal_input_locked(self) -> None:
+        self._normal_active_until_monotonic = (
+            time.monotonic() + NORMAL_ACTIVE_SECONDS
+        )
+        self._normal_active_until = (
+            local_now() + timedelta(seconds=NORMAL_ACTIVE_SECONDS)
+        ).isoformat()
+
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             state = self._service.store.read_state()
@@ -608,10 +621,16 @@ class AudioRuntime:
                 "browser": "browser",
             }[audio_output_settings["destination"]]
             active = self._active_connection
+            activation_required = (
+                self._web_input_session is None and bool(self._settings["wake_words"])
+            )
             normal_state = (
                 "active"
-                if self._normal_active_until_monotonic is not None
-                and self._normal_active_until_monotonic > time.monotonic()
+                if not activation_required
+                or (
+                    self._normal_active_until_monotonic is not None
+                    and self._normal_active_until_monotonic > time.monotonic()
+                )
                 else "waiting"
             )
             models = {
@@ -620,7 +639,7 @@ class AudioRuntime:
                     if self._models is not None
                     else None
                 ),
-                "wespeaker": (
+                "speaker_embedding": (
                     self._models.speaker_model_id
                     if self._models is not None
                     else None
@@ -679,7 +698,8 @@ class AudioRuntime:
                 },
                 "normal_activation": {
                     "state": normal_state,
-                    "active_until": self._normal_active_until,
+                    "active_until": self._normal_active_until if activation_required else None,
+                    "wake_words": deepcopy(self._settings["wake_words"]),
                 },
                 "queue": {
                     "processing": (
@@ -1275,13 +1295,7 @@ class AudioRuntime:
         if not item.explicit_input:
             with self._lock:
                 if self._item_is_current_locked(item):
-                    self._normal_active_until_monotonic = (
-                        time.monotonic() + NORMAL_ACTIVE_SECONDS
-                    )
-                    self._normal_active_until = (
-                        local_now()
-                        + timedelta(seconds=NORMAL_ACTIVE_SECONDS)
-                    ).isoformat()
+                    self._activate_normal_input_locked()
         speech = response.get("speech")
         if isinstance(speech, dict) and isinstance(speech.get("text"), str):
             _, audio_delivery = self._service._emit_assistant_message_with_audio(

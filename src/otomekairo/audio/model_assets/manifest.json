@@ -15,18 +15,19 @@
     "sha256": "597d30b3ec076608d059477bb14cfeffdf951bf5cae370d38f65d33bbfe82004",
     "source": "https://github.com/snakers4/silero-vad"
   },
-  "wespeaker": {
-    "file": "wespeaker_resnet34.onnx",
+  "speaker_embedding": {
+    "file": "eres2netv2.onnx",
     "inputs": {
-      "feats": ["batch", "frames", 80]
+      "x": ["batch", "frames", 80]
     },
-    "license": "CC BY 4.0",
-    "model_id": "wespeaker-resnet34-voxceleb-v1",
+    "license": "Apache-2.0",
+    "model_id": "eres2netv2-zh-cn-16k-v1",
     "outputs": {
-      "embs": ["batch", 256]
+      "embedding": ["batch", 192]
     },
-    "sha256": "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1",
-    "source": "https://github.com/wenet-e2e/wespeaker",
-    "training_dataset": "VoxCeleb"
+    "sha256": "bf1a75b9930474cf3389ef415e6e5d38ca96fea4a3a00f7e301d080a58ee2239",
+    "source": "https://modelscope.cn/models/iic/speech_eres2netv2_sv_zh-cn_16k-common/summary",
+    "onnx_source": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx",
+    "training_dataset": "Chinese speaker corpus with approximately 200000 speakers"
   }
 }

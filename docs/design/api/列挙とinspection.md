@@ -141,7 +141,7 @@ response:
         "unavailable_reason": null,
         "model_ids": {
           "silero_vad": "silero-vad-v5",
-          "wespeaker": "wespeaker-resnet34-voxceleb-v1"
+          "speaker_embedding": "eres2netv2-zh-cn-16k-v1"
         },
         "configured_source": "local_microphone",
         "effective_source": "local_microphone",
@@ -168,7 +168,8 @@ response:
         "conversation_input_blocked_reason": null,
         "normal_activation": {
           "state": "waiting",
-          "active_until": null
+          "active_until": null,
+          "wake_words": ["ミク"]
         },
         "vad": {
           "speaking": false,
@@ -231,6 +232,9 @@ response:
 `current_state.relation_index` は読み取り専用であり、支持元の本文や revision 本文を含めない。
 `runtime_detail` は scheduler、memory postprocess、visual daily worker、capability request 待ち、due `autonomous_run` のような runtime state を返す。
 `runtime_detail.audio_runtime_state` は音声 model、connector、入力リース、VAD、発話キュー、話者登録、直近発話結果、保存済み音声出力先と接続中出力 client 数の process-local snapshot を返す。
+`model_ids`は`silero_vad`と`speaker_embedding`を持ち、各値は現在読み込んだmodel ID、未読み込み時は`null`とする。
+`normal_activation`は`state`（`waiting / active`）、`active_until`、保存済みの音声起動ワード配列`wake_words`を持つ。
+音声起動ワードが空、または明示入力session中で期限を使わない場合、`state=active / active_until=null`を返す。
 音声 runtime state の意味と必須情報は [../audio/音声入力と話者識別.md](../audio/音声入力と話者識別.md) を正とする。
 `last_utterance_result` は直近 1 件だけを持ち、文字起こし、音声、表示名、embedding を含めない。
 通常発話の `last_utterance_result` は `top1_similarity` / `top2_similarity` / `threshold_met` を持つ。

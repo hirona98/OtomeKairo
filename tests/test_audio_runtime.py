@@ -42,6 +42,18 @@ class FakeWebSocket:
 
 
 class AudioSegmenterTests(unittest.TestCase):
+    def test_vad_probability_is_held_between_windows_and_cleared_on_reset(self) -> None:
+        segmenter = AudioSegmenter(FakeVad([0.85, 0.2]), probability_threshold=0.5)
+        frame = bytes(FRAME_BYTES)
+
+        # 20ms frameと32ms推論windowの境界が異なっても直近推論値を保つ。
+        self.assertIsNone(segmenter.feed_frame(frame).vad_probability)
+        self.assertEqual(segmenter.feed_frame(frame).vad_probability, 0.85)
+        self.assertEqual(segmenter.feed_frame(frame).vad_probability, 0.85)
+        self.assertEqual(segmenter.feed_frame(frame).vad_probability, 0.2)
+        segmenter.reset()
+        self.assertIsNone(segmenter.feed_frame(frame).vad_probability)
+
     def test_builds_exact_prebuffer_and_trailing_views(self) -> None:
         # 512 sampleの陽性16回で最短発話を成立させ、末尾500msを切り出す。
         vad = FakeVad([0.9] * 16 + [0.1] * 16)
@@ -55,8 +67,58 @@ class AudioSegmenterTests(unittest.TestCase):
         self.assertEqual(len(utterances), 1)
         utterance = utterances[0]
         self.assertEqual(utterance.voiced_samples, 8192)
-        self.assertEqual(len(utterance.speaker_pcm16le), 8192 * 2)
+        self.assertEqual(len(utterance.speaker_pcm16le), (8192 + 1600) * 2)
         self.assertEqual(len(utterance.amivoice_pcm16le), (8192 + 8000) * 2)
+
+    def _feed_windows(self, probabilities, values):
+        segmenter = AudioSegmenter(FakeVad(probabilities), probability_threshold=0.5)
+        pcm = b"".join(value.to_bytes(2, "little", signed=True) * 512 for value in values)
+        pcm += bytes(-len(pcm) % FRAME_BYTES)
+        utterances = []
+        for offset in range(0, len(pcm), FRAME_BYTES):
+            utterances.extend(segmenter.feed_frame(pcm[offset : offset + FRAME_BYTES]).utterances)
+        return segmenter, utterances
+
+    def test_speaker_padding_retains_edges_without_counting_as_voiced_time(self) -> None:
+        _, utterances = self._feed_windows(
+            [0.1] * 20 + [0.9] * 64 + [0.1] * 20,
+            [-1] * 20 + [2] * 64 + [3] * 20,
+        )
+        utterance, = utterances
+        self.assertEqual(utterance.voiced_samples, 64 * 512)
+        self.assertEqual(
+            utterance.speaker_pcm16le,
+            b"\xff\xff" * 1600 + b"\x02\x00" * (64 * 512) + b"\x03\x00" * 1600,
+        )
+        self.assertEqual(
+            utterance.amivoice_pcm16le,
+            b"\xff\xff" * 8000 + b"\x02\x00" * (64 * 512) + b"\x03\x00" * 8000,
+        )
+
+    def test_hysteresis_keeps_weak_speech_after_a_positive_start(self) -> None:
+        _, utterances = self._feed_windows(
+            [0.4] * 4 + [0.9] + [0.4] * 20 + [0.1] * 16,
+            [1] * 41,
+        )
+        utterance, = utterances
+        self.assertEqual(utterance.voiced_samples, 21 * 512)
+
+    def test_padding_does_not_allow_a_short_utterance(self) -> None:
+        _, utterances = self._feed_windows(
+            [0.1] * 20 + [0.9] * 10 + [0.1] * 16,
+            [1] * 46,
+        )
+        self.assertEqual(utterances, [])
+
+    def test_forced_split_measures_duration_without_prebuffer(self) -> None:
+        _, utterances = self._feed_windows(
+            [0.1] * 20 + [0.9] * 469 + [0.1] * 16,
+            [1] * 505,
+        )
+        utterance, = utterances
+        self.assertTrue(utterance.forced_split)
+        self.assertEqual(utterance.voiced_samples, 469 * 512)
+        self.assertEqual(len(utterance.speaker_pcm16le), (1600 + 469 * 512) * 2)
 
 
 class AudioRuntimeControlTests(unittest.TestCase):
@@ -124,6 +186,11 @@ class AudioRuntimeControlTests(unittest.TestCase):
                 )
 
                 runtime_state = service._audio_runtime.snapshot()
+                self.assertEqual(set(runtime_state["model_ids"]), {"silero_vad", "speaker_embedding"})
+                self.assertEqual(
+                    runtime_state["model_ids"]["speaker_embedding"],
+                    service._audio_runtime._models.speaker_model_id,
+                )
                 self.assertIsNone(audio_socket.sent[0]["paused_reason"])
                 self.assertEqual(
                     runtime_state["conversation_input_blocked_reason"],
