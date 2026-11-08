@@ -1153,6 +1153,21 @@ def build_activity_state_repair_prompt(validation_error: str) -> str:
 
 
 
+def _observation_comparison_instruction() -> str:
+    return (
+        "観測の変化比較は、observation_comparisons の同じ observation_ref にある比較資料だけを根拠にします。"
+        "recent_turns は会話の理解と想起に使い、観測比較の根拠とは区別します。\n"
+        "source_identity_changed=true の場合は change_state=changed / change_basis=source_identity_changed を返します。\n"
+        "それ以外で previous_observation_context=null の場合は change_state=first_seen / change_basis=no_previous_observation を返します。"
+        "first_seen は同じ観測元の比較資料がないという意味です。再起動後など会話履歴が残っている場合も、この比較資料の有無に従います。\n"
+        "previous_observation_context がある場合に、その資料と今回の原観測を比べ、意味上同じなら stable / semantic_stability、"
+        "意味上の変化があれば changed / semantic_change とします。"
+        "さらに last_prompted_observation_context があり、直近発話に使った観測と意味上同じなら same_as_recent_speech / recent_speech_repetition とします。\n"
+        "過去の説明は変化比較に使い、現在の物体同定は今回の元画像に基づいて行います。"
+        "測定値の差や新しい報告であることと、意味上の変化を区別します。\n"
+    )
+
+
 def build_input_interpretation_repair_prompt(
     validation_error: str, *, include_world_state_reports: bool = False,
 ) -> str:
@@ -1162,7 +1177,10 @@ def build_input_interpretation_repair_prompt(
         f"validator_error: {validation_error}\n"
         "同じ入力だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
         f"トップレベルキーは {keys}だけです。\n"
-        f"recall_hint は {', '.join(RECALL_HINT_REQUIRED_KEYS)} の 8 キーだけを持ちます。\n"
+        "observation_interpretations は有効な観測の ref と一対一に対応させ、観測がない場合は [] にします。\n"
+        "各項目は observation_ref, summary_text, confidence_hint, change_state, change_basis, change_reason_summary の 6 キーです。\n"
+        + _observation_comparison_instruction()
+        + f"recall_hint は {', '.join(RECALL_HINT_REQUIRED_KEYS)} の 8 キーだけを持ちます。\n"
         "recall_hint の配列 field は対象がない場合も省略せず [] を入れてください。\n"
         "recall_hint.confidence は 0.0 以上 1.0 以下の JSON number です。文字列、low/medium/high、百分率は禁止です。\n"
         "mentioned_topics の各要素は topic:<name> 形式です。例: [\"topic:仕事\"]。話題タグを特定できないなら [] にしてください。\n"
@@ -1214,9 +1232,7 @@ def _build_input_interpretation_system_prompt(*, include_world_state_reports: bo
             f"返す JSON はトップレベルに {keys} だけを持ちます。\n"
             + "observation_interpretations は、有効な観測の ref と一対一に対応させます。観測がないときは空配列です。\n"
             + "各観測の summary_text は1200文字以内、change_reason_summary は240文字以内の改行のない説明にします。観測IDや秘密値は説明本文に含めません。\n"
-            + "observation_comparisons にある同じ source の前回説明は変化比較に使い、今回の物体同定へ転写しません。\n"
-            + "比較がない初回は first_seen / no_previous_observation、意味上同じなら stable / semantic_stability、意味上の変化は changed / semantic_change、直近発話の内容と同じなら same_as_recent_speech / recent_speech_repetition とします。\n"
-            + "source identity の変更が明示された場合は changed / source_identity_changed とします。値の差や新しい報告であることだけでは意味上の変化を確定しません。\n"
+            + _observation_comparison_instruction()
             + f"recall_hint は {', '.join(RECALL_HINT_REQUIRED_KEYS)} の 8 キーだけを必ず持ちます。\n"
             + "recall_hint の配列 field は対象がない場合も省略せず [] を入れてください。\n"
             + f"answer_contract は {', '.join(ANSWER_CONTRACT_REQUIRED_KEYS)} の 7 キーだけを必ず持ちます。\n"

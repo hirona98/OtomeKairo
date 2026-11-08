@@ -33,6 +33,8 @@ class ObservationContext:
 
     def to_prompt_payload(self) -> dict[str, Any]:
         import json
+        comparisons = {row["observation_ref"]: row for row in json.loads(self.comparisons_json)}
+        comparison_items = []
         source_refs: dict[str, str] = {}
         def source_ref(source_id):
             if source_id not in source_refs:
@@ -45,6 +47,13 @@ class ObservationContext:
             from copy import deepcopy
             item["interpretation"] = deepcopy(self._interpretation_map.get(ref))
             items.append(item)
+            comparison_items.append({
+                "observation_ref": ref,
+                "source_identity_changed": False,
+                "previous_observation_context": None,
+                "last_prompted_observation_context": None,
+                **comparisons.get(ref, {}),
+            })
         env_count = len(self.snapshot.environment_observations)
         reports = []
         for report in self.snapshot.source_reports:
@@ -59,7 +68,7 @@ class ObservationContext:
                     {"ref": f"reference_text:{index}", "label": label, "text": value,
                      "time_text": llm_local_time_text(stamp), "time_basis": "resolved"}
                     for index, (label, value, stamp) in enumerate(self.snapshot.reference_texts, start=1)]},
-                "observation_comparisons": json.loads(self.comparisons_json)}
+                "observation_comparisons": comparison_items}
 
     def image_parts(self) -> list[dict[str, Any]]:
         refs = tuple(o.payload.media_ref for o in self.observations if isinstance(o.payload, Image))

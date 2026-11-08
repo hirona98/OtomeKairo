@@ -396,19 +396,36 @@ class LLMClient:
             comparison = comparisons.get(ref, {})
             state, basis = row["change_state"], row["change_basis"]
             if state in pairs and basis != pairs[state] or state == "changed" and basis not in {"semantic_change", "source_identity_changed"}:
-                raise LLMError("InputInterpretation の変化状態と根拠が一致しません。")
+                raise LLMError(f"InputInterpretation {ref} の変化状態と根拠が一致しません: change_state={state}, change_basis={basis}。")
             if comparison.get("source_identity_changed") is True:
                 if (state, basis) != ("changed", "source_identity_changed"):
-                    raise LLMError("InputInterpretation の観測元変更の判定が一致しません。")
+                    raise LLMError(
+                        f"InputInterpretation {ref} は source_identity_changed=true です。"
+                        "change_state=changed, change_basis=source_identity_changed を返してください。"
+                    )
             elif basis == "source_identity_changed":
-                raise LLMError("InputInterpretation の観測元変更に入力根拠がありません。")
+                raise LLMError(
+                    f"InputInterpretation {ref} は source_identity_changed=false です。"
+                    "previous_observation_context の有無に従って change_state と change_basis を返してください。"
+                )
             elif comparison.get("previous_observation_context") is None:
                 if state != "first_seen":
-                    raise LLMError("InputInterpretation の比較対象がありません。")
+                    raise LLMError(
+                        f"InputInterpretation {ref} は previous_observation_context=null です。"
+                        "change_state=first_seen, change_basis=no_previous_observation を返してください。"
+                        f"受信値: change_state={state}, change_basis={basis}。"
+                    )
             elif state == "first_seen":
-                raise LLMError("InputInterpretation の初回判定に既存比較対象があります。")
+                raise LLMError(
+                    f"InputInterpretation {ref} には previous_observation_context があります。"
+                    "その比較資料に基づいて stable / semantic_stability または changed / semantic_change を判断してください。"
+                    "last_prompted_observation_context もある場合は same_as_recent_speech / recent_speech_repetition も選べます。"
+                )
             if state == "same_as_recent_speech" and comparison.get("last_prompted_observation_context") is None:
-                raise LLMError("InputInterpretation の直近発話の比較対象がありません。")
+                raise LLMError(
+                    f"InputInterpretation {ref} は last_prompted_observation_context=null です。"
+                    "previous_observation_context と比較し、stable / semantic_stability または changed / semantic_change を返してください。"
+                )
 
     def _mock_observation_interpretations(self, model_config: dict, observations: ObservationContext | None) -> list[dict[str, Any]]:
         if observations is None:
