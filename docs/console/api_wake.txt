@@ -226,42 +226,6 @@ speech 以外の結果では speech は null になる。発話しなくても A
 人物・会話先を指定しなかった場合は、interaction_ref は null、recipient_person_refs は空配列になる。
 発話本文と音声配送の結果は別であり、音声が無効・配送失敗の場合も発話本文は表示される。
 
-Bash送信コマンド
-----------------
-
-CocoroNotify.sh はBashとcurl 7.76以降だけで動作する。Python・jqは不要である。
-配布された CocoroNotify.sh を送信端末のホームディレクトリに配置し、実行権限を付ける。
-
-mkdir -p ~/.config/otomekairo
-chmod 755 ~/CocoroNotify.sh
-touch ~/.config/otomekairo/notify.conf
-chmod 600 ~/.config/otomekairo/notify.conf
-
-~/.config/otomekairo/notify.conf に次のBash変数を設定する。
-URLは接続先に合わせ、TOKENには取得済みの console_access_token を入れる。
-
-OTOMEKAIRO_URL='https://cocoro-box:55601'
-OTOMEKAIRO_TOKEN='<TOKEN>'
-OTOMEKAIRO_TLS_VERIFY=true
-OTOMEKAIRO_CA_FILE=''
-OTOMEKAIRO_TIMEOUT_SECONDS=300
-
-OTOMEKAIRO_URL を省略した場合の既定の接続先は https://cocoro-box:55601 とする。
-TLS検証は既定で有効である。独自CAを使うときは OTOMEKAIRO_CA_FILE に証明書ファイルを指定する。
-LAN・VPN内で既存の自己署名証明書を検証せずに使う構成では、OTOMEKAIRO_TLS_VERIFY=false を明示し、OTOMEKAIRO_CA_FILE は空にする。
-設定ファイルはBashとして読み込むため、利用者自身が管理するファイルを使う。
-
-送信例:
-
-~/CocoroNotify.sh Codex '修正が終了したと伝えてほしい。'
-~/CocoroNotify.sh Codex '確認の返答を待っていると伝えてほしい。'
-~/CocoroNotify.sh '田中さん' '準備ができたと伝えてほしい。'
-
-別の設定ファイルを使うときは --config FILE を送信元の前に指定する。
-別PCでも同じスクリプトを使い、そのPCの設定ファイルに接続先とtokenを設定する。
-応答はJSONのまま表示される。正常な noop は終了コード0、通信・HTTP・内部判断の失敗は非ゼロで終了する。
-コマンドは自動再送しない。
-
 主な失敗
 --------
 
