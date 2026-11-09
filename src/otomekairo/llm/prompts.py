@@ -385,10 +385,10 @@ def _append_observation_message(messages: list[dict[str, Any]], observations: Ob
         "surroundings": {"snapshot_ref": None, "snapshot_time_text": None, "observations": [], "source_reports": [], "state_summaries": []},
         "input_materials": {"observations": [], "reference_texts": []}, "observation_comparisons": [],
     }
-    for index, state in enumerate(world_states or []):
+    for state in world_states or []:
         if state.get("state_type") in {"visual_context", "environment"}:
             payload["surroundings"]["state_summaries"].append({
-                "state_ref": f"state:{index}", "summary_text": state["summary_text"],
+                "state_ref": state["world_state_id"], "summary_text": state["summary_text"],
                 "source_observation_refs": state.get("source_observation_refs", []),
                 "source_kind": state.get("source_kind"), "source_ref": state.get("source_ref"),
                 "time_text": state.get("age_label"),
@@ -2014,7 +2014,7 @@ def _memory_grounding_instruction() -> str:
         "evidence_text から生成し、誰が何を述べた・行った資料なのか、そこから直接支持できる理解と推測を説明します。次に grounding で根拠と継続性を評価し、その結果から候補の主語・種類・最終要約を作ります。scope=relationship の要約も、原資料が実際に示す関係の経験に沿わせます。\n"
         "人格設定は経験を解釈する自己の基底です。今回獲得した記憶候補は evidence_sources の経験から得た新しい理解にし、人格本文に既にある方針や関係の定義とは区別します。\n"
         "grounding は evidence_refs, support_kind, retention, retention_reason の4キーを持ちます。"
-        "evidence_refs は根拠に使った資料の ref の非空配列です。同じ出来事を別名で参照しても独立した根拠は増えません。\n"
+        "evidence_refs は memory_context.evidence_sources に提示された資料の ref をそのまま選ぶ非空配列です。ref は保存と共通の短い正本IDです。input・speech などの用途は usage_roles に示します。同じ出来事は一件の資料として扱います。\n"
         "資料ごとの support_kinds は、その出所に対応する支持の種類です。参照資料の support_kinds から、今回の主張を支持する種類を選びます。自己の speech は本人の申告ではなく、自己の表現または引き受けた約束として読みます。\n"
         "support_kind は person_statement / person_confirmation / person_correction / verified_result / independent_events / self_commitment / inference / unsupported です。"
         "person_* は主語本人の発言内容が主張を明示的に支持するときに使います。質問・例示・仮定・提案と本人の事実報告を、元の発話全体から読み分けます。"

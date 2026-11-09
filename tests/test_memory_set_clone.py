@@ -86,6 +86,7 @@ def test_cloned_revision_can_restore_previous_memory_in_the_destination(tmp_path
 def visual_memory(tmp_path):
     store = SQLiteMemoryStore(tmp_path)
     runner = ServiceVisualDailyMixin()
+    runner.store = store
     runner._now_iso = lambda: STAMP
     digests, evidence = [], []
     for day in ("2026-10-24", "2026-10-25"):
@@ -245,6 +246,7 @@ def test_visual_clone_rejects_missing_evidence_atomically(visual_memory, missing
 def test_visual_clone_preserves_pending_and_failed_processing_results(tmp_path, result, promotion, pending):
     store = SQLiteMemoryStore(tmp_path)
     runner = ServiceVisualDailyMixin()
+    runner.store = store
     digest = runner._build_visual_daily_digest(
         digest_id=runner._visual_daily_digest_id(memory_set_id=SOURCE, local_date="2026-10-25"),
         memory_set_id=SOURCE, local_date="2026-10-25", started_at=STAMP, finished_at=STAMP,

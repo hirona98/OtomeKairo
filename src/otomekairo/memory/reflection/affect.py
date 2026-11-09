@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import timedelta
 from typing import Any
-import uuid
 
 from otomekairo.memory.reflection.constants import (
     REFLECTION_AFFECT_STATE_CONFIDENCE_WEAKEN_FACTOR,
@@ -72,7 +71,7 @@ class MemoryReflectionAffectMixin:
                 continue
 
             if existing is None:
-                affect_state_id = f"affect_state:{uuid.uuid4().hex}"
+                affect_state_id = self.store.allocate_id("affect_state")
                 intensity = moment["intensity"]
                 confidence = moment["confidence"]
                 update_kind = "created"

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import uuid
 from typing import Any
 
 from otomekairo.memory.utils import memory_claim_context
@@ -484,7 +483,7 @@ class StoreMemoryLinksMixin:
                 record = self._upsert_memory_link(
                     conn,
                     {
-                        "memory_link_id": f"memory_link:{uuid.uuid4().hex}",
+                        "memory_link_id": self._allocate_id(conn, "memory_link"),
                         "memory_set_id": action["memory_set_id"],
                         "source_memory_unit_id": link_spec["source_memory_unit_id"],
                         "target_memory_unit_id": link_spec["target_memory_unit_id"],

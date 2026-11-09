@@ -1,4 +1,5 @@
 import json
+from identifier_fixtures import id_allocator
 
 from otomekairo.observations.acquisition import ObservationAcquisition
 
@@ -7,7 +8,7 @@ IMAGE = "data:image/png;base64,YWJj"
 
 
 def image_context(*, summary="机と椅子が見える。", origin_kind="conversation_attachment", comparisons=None, persons=()):
-    acquisition = ObservationAcquisition("memory_set:test", 300)
+    acquisition = ObservationAcquisition("memory_set:test", 300, id_allocator())
     acquisition.add_image(
         data_uri=IMAGE, source_ref="vision_source:test", source_kind="camera" if origin_kind == "vision_capture" else origin_kind,
         source_label="テスト画像", source_owner="self" if origin_kind == "vision_capture" else None,
@@ -16,7 +17,7 @@ def image_context(*, summary="机と椅子が見える。", origin_kind="convers
         target={"observed_persons": list(persons)}, comparison=comparisons,
     )
     context = acquisition.freeze(snapshot_at=STAMP, sensor_observations=(), sensor_reports=())
-    result = {"observation_ref": "observation:1", "summary_text": summary, "confidence_hint": "medium",
+    result = {"observation_ref": context.observation_refs()[0], "summary_text": summary, "confidence_hint": "medium",
               "change_state": "first_seen", "change_basis": "no_previous_observation",
               "change_reason_summary": "この取得元の初回観測である。"}
     return acquisition.apply(context, [result])

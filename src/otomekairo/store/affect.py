@@ -441,7 +441,9 @@ class StoreAffectMixin:
 
         if existing_row is None:
             previous = {
-                "mood_state_id": f"mood_state:{self_affects[0]['memory_set_id']}",
+                "mood_state_id": self._resolve_internal_id(
+                    conn, "mood_state", scope=self_affects[0]["memory_set_id"], key="self",
+                ),
                 "memory_set_id": self_affects[0]["memory_set_id"],
                 "baseline_vad": _zero_vad(),
                 "residual_vad": _zero_vad(),

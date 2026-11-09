@@ -4,18 +4,18 @@ import json
 import math
 import threading
 import uuid
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-from otomekairo.memory.utils import local_datetime, parse_iso
+from otomekairo.memory.utils import local_datetime, parse_iso, source_text_hash
+from otomekairo.store.identifiers import InternalIdentityConflictError
 from otomekairo.observations.models import (
     EventReport, Measurement, Observation, ObservationError, SourceReport,
     MAX_SENSOR_OBSERVATIONS, observation_expires_at,
 )
 from otomekairo.observations.validation import exact_fields, nonempty
-
-SENSOR_OBSERVATION_NAMESPACE = uuid.UUID("7c6a1c78-8a1e-43fc-a186-d2d7bdc83c96")
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,8 +27,18 @@ class SensorSample:
     error_code: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedSensorSample:
+    sample_id: str
+    occurred_at: str
+    fingerprint: str
+    payload: Measurement | EventReport | None
+    error_code: str | None
+
+
 class EnvironmentRuntime:
-    def __init__(self, config: dict[str, Any]) -> None:
+    def __init__(self, config: dict[str, Any], *, resolve_ids: Callable[[list[tuple[str, str]]], list[str]]) -> None:
+        self._resolve_ids = resolve_ids
         self._lock = threading.RLock()
         self._revision = 0
         self._sources: dict[str, dict[str, Any]] = {}
@@ -79,7 +89,7 @@ class EnvironmentRuntime:
         if not isinstance(raw_samples, list) or not 1 <= len(raw_samples) <= MAX_SENSOR_OBSERVATIONS:
             raise ObservationError(code, "Sensor samples must be a non-empty bounded array.")
         channels = {c["channel_id"]: c for c in source["channels"]}
-        prepared: dict[str, SensorSample] = {}
+        prepared: dict[str, PreparedSensorSample] = {}
         for raw in raw_samples:
             exact_fields(raw, {"sample_id", "channel_id", "occurred_at", "status", "payload", "error_code"}, code)
             channel_id = nonempty(raw["channel_id"], code)
@@ -104,26 +114,14 @@ class EnvironmentRuntime:
                 payload = self._payload(raw["payload"], channels[channel_id], occurred)
             else:
                 raise ObservationError("invalid_sensor_value", "Sensor report status is invalid.")
-            observation = None
-            if payload is not None:
-                identity = json.dumps([source_id, channel_id, sample_id], separators=(",", ":"))
-                observation = Observation(
-                    observation_id=f"observation:{uuid.uuid5(SENSOR_OBSERVATION_NAMESPACE, identity)}",
-                    source_ref=source_id, channel_id=channel_id, origin_kind="sensor_report",
-                    source_kind="sensor", source_label=f"{source['display_name']} / {channels[channel_id]['display_name']}",
-                    source_owner=source["source_owner"], place_ref=source["place_ref"], observed_at=occurred,
-                    received_at=received_at, expires_at=observation_expires_at(occurred, source["max_age_seconds"]),
-                    time_basis="reported" if isinstance(payload, EventReport) else "measured", payload=payload,
-                    place_name=places[source["place_ref"]] if source["place_ref"] is not None else None,
-                )
-            prepared[channel_id] = SensorSample(
+            prepared[channel_id] = PreparedSensorSample(
                 sample_id, occurred, json.dumps(raw, sort_keys=True, ensure_ascii=False, allow_nan=False),
-                observation, raw["error_code"],
+                payload, raw["error_code"],
             )
         with self._lock:
             if revision != self._revision:
                 raise ObservationError("sensor_source_changed", "Sensor configuration changed while validating.", 409)
-            results = []
+            acceptance_by_channel = {}
             for channel_id, sample in prepared.items():
                 previous = self._samples.get((source_id, channel_id))
                 acceptance = "accepted"
@@ -135,17 +133,39 @@ class EnvironmentRuntime:
                     elif parse_iso(sample.occurred_at) <= parse_iso(previous.occurred_at):
                         raise ObservationError("sensor_sample_out_of_order", "Sensor report is not newer than the latest report.", 409)
                     if acceptance == "accepted":
-                        self._validate_event_order(self._event_order.get((source_id, channel_id)), sample.observation)
+                        self._validate_event_order(self._event_order.get((source_id, channel_id)), sample.payload)
+                acceptance_by_channel[channel_id] = acceptance
+            successful = [(channel_id, sample) for channel_id, sample in prepared.items() if sample.payload is not None]
+            identities = [(json.dumps([source_id, channel_id, sample.sample_id], separators=(",", ":")),
+                           source_text_hash(sample.fingerprint)) for channel_id, sample in successful]
+            try:
+                identifiers = self._resolve_ids(identities)
+            except InternalIdentityConflictError as exc:
+                raise ObservationError("sensor_sample_conflict", "Sample ID was reused with different data.", 409) from exc
+            observations = {}
+            for (channel_id, sample), observation_id in zip(successful, identifiers, strict=True):
+                observations[channel_id] = Observation(
+                    observation_id=observation_id,
+                    source_ref=source_id, channel_id=channel_id, origin_kind="sensor_report",
+                    source_kind="sensor", source_label=f"{source['display_name']} / {channels[channel_id]['display_name']}",
+                    source_owner=source["source_owner"], place_ref=source["place_ref"], observed_at=sample.occurred_at,
+                    received_at=received_at, expires_at=observation_expires_at(sample.occurred_at, source["max_age_seconds"]),
+                    time_basis="reported" if isinstance(sample.payload, EventReport) else "measured", payload=sample.payload,
+                    place_name=places[source["place_ref"]] if source["place_ref"] is not None else None,
+                )
+            results = []
+            for channel_id, sample in prepared.items():
+                observation = observations.get(channel_id)
                 results.append({"sample_id": sample.sample_id, "channel_id": channel_id,
-                                "acceptance": acceptance,
-                                "observation_id": sample.observation.observation_id if sample.observation else None})
-            for result in results:
-                if result["acceptance"] == "accepted":
-                    key = (source_id, result["channel_id"])
-                    sample = prepared[result["channel_id"]]
-                    self._samples[key] = sample
-                    if sample.observation is not None and isinstance(sample.observation.payload, EventReport):
-                        self._event_order[key] = sample.observation
+                                "acceptance": acceptance_by_channel[channel_id],
+                                "observation_id": observation.observation_id if observation is not None else None})
+                if acceptance_by_channel[channel_id] == "accepted":
+                    key = (source_id, channel_id)
+                    self._samples[key] = SensorSample(
+                        sample.sample_id, sample.occurred_at, sample.fingerprint, observation, sample.error_code,
+                    )
+                    if observation is not None and isinstance(observation.payload, EventReport):
+                        self._event_order[key] = observation
             return {"sensor_source_id": source_id, "results": results}
 
     @staticmethod
@@ -182,10 +202,10 @@ class EnvironmentRuntime:
         return EventReport(started, last)
 
     @staticmethod
-    def _validate_event_order(previous: Observation | None, current: Observation | None) -> None:
+    def _validate_event_order(previous: Observation | None, current: Measurement | EventReport | None) -> None:
         if previous is None or current is None or not isinstance(previous.payload, EventReport):
             return
-        old, new = previous.payload, current.payload
+        old, new = previous.payload, current
         if not isinstance(new, EventReport):
             raise ObservationError("invalid_sensor_value", "Event channel kind changed.")
         if parse_iso(new.monitoring_started_at) < parse_iso(old.monitoring_started_at) or (

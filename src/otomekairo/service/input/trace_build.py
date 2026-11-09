@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from otomekairo.llm.contexts import InitiativeContext
@@ -128,7 +127,7 @@ class ServiceInputTraceBuildMixin:
         input_speaker_ref = interaction_context.speaker_ref if interaction_context is not None else None
         events = [
             {
-                "event_id": f"event:{uuid.uuid4().hex}",
+                "event_id": self.store.allocate_id("event"),
                 "cycle_id": cycle_id,
                 "memory_set_id": memory_set_id,
                 "kind": input_event_kind,
@@ -159,7 +158,7 @@ class ServiceInputTraceBuildMixin:
                 payload.update(failure_event_payload)
             events.append(
                 {
-                    "event_id": f"event:{uuid.uuid4().hex}",
+                    "event_id": self.store.allocate_id("event"),
                     "cycle_id": cycle_id,
                     "memory_set_id": memory_set_id,
                     "kind": failure_event_kind,
@@ -188,7 +187,7 @@ class ServiceInputTraceBuildMixin:
         if decision is None or result_kind is None:
             raise ValueError("decision and result_kind are required for success events.")
         decision_event = {
-            "event_id": f"event:{uuid.uuid4().hex}",
+            "event_id": self.store.allocate_id("event"),
             "cycle_id": cycle_id,
             "memory_set_id": memory_set_id,
             "kind": "decision",
@@ -214,7 +213,7 @@ class ServiceInputTraceBuildMixin:
         if speech_payload is not None:
             events.append(
                 {
-                    "event_id": f"event:{uuid.uuid4().hex}",
+                    "event_id": self.store.allocate_id("event"),
                     "cycle_id": cycle_id,
                     "memory_set_id": memory_set_id,
                     "kind": "speech",
@@ -250,7 +249,7 @@ class ServiceInputTraceBuildMixin:
         system_notice: dict[str, Any],
     ) -> dict[str, Any]:
         return {
-            "event_id": f"event:{uuid.uuid4().hex}",
+            "event_id": self.store.allocate_id("event"),
             "cycle_id": cycle_id,
             "memory_set_id": memory_set_id,
             "kind": "system_notice",

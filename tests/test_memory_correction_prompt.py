@@ -21,7 +21,7 @@ def interpretation_arguments(targets):
         ),
         "input_text": "先ほどの報告を訂正したい。", "recall_hint": {},
         "decision": {"kind": "speech", "reason_summary": "訂正を受け止める。"},
-        "speech_text": "確認します。", "memory_context": {},
+        "speech_text": "確認します。", "memory_context": {"events": [{"event_id": "event:input", "kind": "conversation_input"}]},
         "current_time": CURRENT_TIME, "correction_targets": targets,
     }
 

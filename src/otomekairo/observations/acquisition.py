@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -13,6 +14,7 @@ from otomekairo.observations.models import Image, MediaBundle, Observation, Obse
 class ObservationAcquisition:
     memory_set_id: str
     image_max_age_seconds: int
+    allocate_id: Callable[[str], str] = field(repr=False)
     media: MediaBundle = field(default_factory=MediaBundle, repr=False)
     images: list[Observation] = field(default_factory=list)
     targets: list[dict[str, Any]] = field(default_factory=list)
@@ -24,7 +26,7 @@ class ObservationAcquisition:
                   source_owner: str | None, place_ref: str | None, origin_kind: str,
                   observed_at: str, received_at: str, time_basis: str, target: dict[str, Any],
                   comparison: dict[str, Any] | None = None, place_name: str | None = None) -> None:
-        observation_id = f"visual_observation:{uuid.uuid4().hex}"
+        observation_id = self.allocate_id("visual_observation")
         media_ref = f"media:{uuid.uuid4().hex}"
         media_type = self.media.add(media_ref, data_uri)
         self.images.append(Observation(

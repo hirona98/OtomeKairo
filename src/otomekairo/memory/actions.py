@@ -4,7 +4,6 @@ from copy import deepcopy
 from datetime import timedelta
 import math
 import re
-import uuid
 from typing import TYPE_CHECKING, Any
 
 from otomekairo.llm.embeddings import embed_text_batches
@@ -463,7 +462,7 @@ class MemoryActionResolver:
     ) -> dict[str, Any]:
         # 記録
         return {
-            "memory_unit_id": f"memory_unit:{uuid.uuid4().hex}",
+            "memory_unit_id": self.store.allocate_id("memory_unit"),
             "memory_set_id": memory_set_id,
             "memory_type": candidate["memory_type"],
             "scope_type": candidate["scope_type"],
@@ -634,7 +633,7 @@ class MemoryActionResolver:
         # アクション
         action = {
             "operation": operation,
-            "revision_id": f"revision:{uuid.uuid4().hex}",
+            "revision_id": self.store.allocate_id("revision"),
             "memory_set_id": memory_set_id,
             "memory_unit_id": memory_unit["memory_unit_id"],
             "occurred_at": finished_at,

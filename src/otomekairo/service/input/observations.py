@@ -16,7 +16,9 @@ class ServiceInputObservationsMixin:
             camera["place_ref"] if camera is not None else None, status, self._now_iso(), error_code))
 
     def _new_observation_acquisition(self, state: dict[str, Any]) -> ObservationAcquisition:
-        return ObservationAcquisition(state["selected_memory_set_id"], state["environment_settings"]["image_max_age_seconds"])
+        return ObservationAcquisition(
+            state["selected_memory_set_id"], state["environment_settings"]["image_max_age_seconds"], self.store.allocate_id,
+        )
 
     def _collect_capture_images(self, *, state: dict[str, Any], acquisition: ObservationAcquisition,
                                 capability_response: dict[str, Any], target: dict[str, Any],
@@ -137,8 +139,8 @@ class ServiceInputObservationsMixin:
         selected = {selection.get("primary_factor_ref"), *selection.get("supporting_factor_refs", [])}
         selected_ids = {signal["observation_id"] for signal in client_context.get("observation_signals", [])
                         if f"observation_signal:{signal['observation_id']}" in selected}
-        selected_ids.update(signal["observation_id"] for index, signal in enumerate(client_context.get("observation_signals", []), start=1)
-                            if f"observation:{index}" in selected)
+        selected_ids.update(signal["observation_id"] for signal in client_context.get("observation_signals", [])
+                            if signal["observation_id"] in selected)
         selected_ids.update(observation["visual_observation_id"] for index, observation in enumerate(current_visual_observations or [])
                             if f"visual_observation:current:{index}" in selected)
         with self._runtime_state_lock:
@@ -199,12 +201,10 @@ class ServiceInputObservationsMixin:
                 if record is not None:
                     visuals.append(record)
         events = []
-        import uuid
         for observation in context.observations:
             if isinstance(observation.payload, Image):
                 continue
             events.append({
-                "event_id": f"event:{uuid.uuid5(uuid.NAMESPACE_URL, json.dumps([context.snapshot.memory_set_id, observation.observation_id]))}",
                 "cycle_id": cycle_id, "memory_set_id": context.snapshot.memory_set_id,
                 "kind": "sensor_observation", "role": None, "text": None,
                 "created_at": context.snapshot.snapshot_at, "observation": observation.to_trace_payload(),

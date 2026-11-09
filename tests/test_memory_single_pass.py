@@ -62,7 +62,7 @@ def turn(tmp_path, monkeypatch):
     state["model_presets"][state["selected_model_preset_id"]]["model"] = "provider/test"
     memory_set_id = state["selected_memory_set_id"]
     event = {
-        "event_id": "event:single-pass", "cycle_id": "cycle:single-pass", "memory_set_id": memory_set_id,
+        "event_id": "event:input", "cycle_id": "cycle:single-pass", "memory_set_id": memory_set_id,
         "kind": "conversation_input", "role": "person", "created_at": CURRENT_TIME,
         "speaker_ref": "person:test", "participant_refs": ["person:test"],
         "text": "普段はほうじ茶が好き。友人が発熱して心配だ。",
@@ -79,13 +79,14 @@ def turn(tmp_path, monkeypatch):
         "state": state, "cycle_id": event["cycle_id"], "finished_at": CURRENT_TIME,
         "input_text": event["text"], "recall_hint": {}, "correction_candidate_memory_unit_ids": [],
         "decision": {"kind": "speech", "reason_summary": "近況を受け止める。"},
-        "speech_payload": {"speech_text": "どうぞお大事に。"}, "events": [event],
+        "speech_payload": {"speech_text": "どうぞお大事に。"}, "events": [event, {**event, "event_id": "event:decision", "kind": "decision", "role": "system"}, {**event, "event_id": "event:speech", "kind": "speech", "role": "assistant"}],
         "memory_context": {
             "current_input": {"sender_ref": "person:test"},
             "people_context": [{"person_ref": "person:test", "display_name": "テスト人物"}],
-            "person_utterances": [{"speaker_ref": "person:test", "text": event["text"]}],
+            "person_utterances": [{"event_id": event["event_id"], "speaker_ref": "person:test", "text": event["text"]}],
         },
     }
+    store.append_events(events=arguments["events"])
     return consolidator, store, arguments, completion
 
 
@@ -107,6 +108,73 @@ def test_one_generation_persists_memory_and_both_affects_and_updates_mood(turn):
     assert next(affect for affect in affects if affect["target_scope_type"] == "self")["vad"] == SELF_CONCERN["vad"]
     mood = store.get_mood_state(memory_set_id=arguments["state"]["selected_memory_set_id"], current_time=CURRENT_TIME)
     assert mood["current_vad"]["v"] < 0
+
+
+def test_evidence_uses_canonical_ids_and_merges_current_input_and_utterance(turn):
+    consolidator, _, arguments, completion = turn
+    consolidator.consolidate_turn(**arguments)
+    request = json.loads(completion.call_args.kwargs["messages"][1]["content"].splitlines()[1])
+    sources = request["memory_context"]["evidence_sources"]
+    assert {source["ref"] for source in sources} == {event["event_id"] for event in arguments["events"]}
+    current, = [source for source in sources if "input" in source["usage_roles"]]
+    assert current["ref"] == arguments["events"][0]["event_id"]
+    assert set(current["usage_roles"]) == {"event", "input", "utterance"}
+    assert current["text"] == arguments["input_text"]
+    assert completion.call_count == 1
+
+
+def test_unknown_evidence_id_is_repaired_with_the_offered_canonical_ids(turn):
+    consolidator, _, arguments, completion = turn
+    rejected = interpretation()
+    rejected["candidate_memory_units"][0]["grounding"]["evidence_refs"] = ["event:unoffered"]
+    completion.side_effect = [provider_response(rejected), provider_response(interpretation())]
+    trace, _ = consolidator.consolidate_turn(**arguments)
+    assert trace["turn_consolidation_status"] == "succeeded"
+    assert completion.call_count == 2
+    repair = completion.call_args.kwargs["messages"][-1]["content"]
+    assert "unknown_refs=['event:unoffered']" in repair
+    assert "allowed_refs=['event:input', 'event:decision', 'event:speech']" in repair
+
+
+def test_recent_turns_preserve_event_and_cycle_ids_for_primary_evidence(turn):
+    from otomekairo.memory.grounding import memory_evidence_sources
+    _, store, arguments, _ = turn
+    event = {**arguments["events"][0], "interaction_ref": "interaction:test"}
+    store.append_events(events=[event])
+    turns = store.load_recent_turns(
+        memory_set_id=event["memory_set_id"], interaction_ref="interaction:test", since_iso=CURRENT_TIME, limit=8,
+    )
+    assert turns[0]["event_id"] == event["event_id"]
+    assert turns[0]["cycle_id"] == event["cycle_id"]
+    sources = memory_evidence_sources(
+        input_text=arguments["input_text"], speech_text=None, decision=arguments["decision"],
+        memory_context={"events": [event], "person_utterances": turns},
+    )
+    assert len(sources) == 1
+    assert sources[0]["ref"] == event["event_id"]
+
+
+def test_clone_remaps_canonical_grounding_and_snapshots_without_rewriting_text(turn):
+    consolidator, store, arguments, completion = turn
+    payload = interpretation()
+    payload["candidate_memory_units"][0]["summary_text"] = "event:input"
+    completion.return_value = provider_response(payload)
+    consolidator.consolidate_turn(**arguments)
+    target = "memory_set:copy"
+    store.clone_memory_set_records(
+        source_memory_set_id=arguments["state"]["selected_memory_set_id"], target_memory_set_id=target,
+    )
+    with sqlite3.connect(store.memory_db_path) as conn:
+        unit = json.loads(conn.execute("SELECT payload_json FROM memory_units WHERE memory_set_id = ?", (target,)).fetchone()[0])
+        revision = json.loads(conn.execute("SELECT payload_json FROM revisions WHERE memory_set_id = ?", (target,)).fetchone()[0])
+        events = {row[0] for row in conn.execute("SELECT event_id FROM events WHERE memory_set_id = ?", (target,))}
+    refs = unit["qualifiers"]["grounding"]["evidence_refs"]
+    assert set(refs) <= events
+    assert "event:input" not in refs
+    assert unit["qualifiers"]["evidence_sources"][0]["ref"] == refs[0]
+    assert unit["qualifiers"]["evidence_sources"][0]["event_id"] == refs[0]
+    assert revision["after_snapshot"]["qualifiers"]["grounding"]["evidence_refs"] == refs
+    assert unit["summary_text"] == "event:input"
 
 
 def test_episode_only_result_needs_one_generation_and_preserves_empty_memory_and_affects(turn):
@@ -372,11 +440,11 @@ def test_interpretation_rejects_invalid_open_loops(open_loops):
 
 @pytest.mark.parametrize('bad_grounding', [
     grounding(refs=['missing']),
-    grounding(refs=['input', 'input']),
-    grounding(refs=['speech']),
-    grounding(refs=['speech'], support='inference'),
-    grounding(refs=['decision'], support='verified_result'),
-    grounding(refs=['input', 'event:1'], support='independent_events'),
+    grounding(refs=['event:input', 'event:input']),
+    grounding(refs=['event:speech']),
+    grounding(refs=['event:speech'], support='inference'),
+    grounding(refs=['event:decision'], support='verified_result'),
+    grounding(refs=['event:input', 'event:speech'], support='independent_events'),
     grounding(support='unsupported'),
 ])
 def test_invalid_primary_evidence_is_repaired_then_fails_without_writes(turn, bad_grounding):
@@ -400,7 +468,7 @@ def test_assistant_example_is_kept_as_an_episode_without_becoming_a_person_fact(
     payload['episode']['summary_text'] = '本人が具体例を求め、自己が可読性や性能を例に挙げた。'
     candidate = payload['candidate_memory_units'][0]
     candidate.update(summary_text='本人は可読性と性能にこだわる。', evidence_text=arguments['speech_payload']['speech_text'],
-                     grounding=grounding(refs=['speech'], support='unsupported', retention='episode_only'))
+                     grounding=grounding(refs=['event:speech'], support='unsupported', retention='episode_only'))
     completion.return_value = provider_response(payload)
     trace, job = consolidator.consolidate_turn(**arguments)
     assert trace['memory_action_count'] == 0
@@ -428,11 +496,11 @@ def test_high_confidence_inference_is_not_confirmed_or_treated_as_explicit(turn)
 
 def test_transient_visual_state_is_not_saved_as_a_long_term_fact(turn):
     consolidator, store, arguments, completion = turn
-    arguments['memory_context']['current_visual_observations'] = [{'summary_text': 'PCにGit Graphが表示されている。'}]
+    arguments['memory_context']['current_visual_observations'] = [{'visual_observation_id': 'visual_observation:current', 'summary_text': 'PCにGit Graphが表示されている。'}]
     payload = interpretation()
     payload['candidate_memory_units'][0].update(
         memory_type='fact', summary_text='本人は現在PC作業中である。',
-        grounding=grounding(refs=['observation:1'], support='verified_result', retention='episode_only'))
+        grounding=grounding(refs=['visual_observation:current'], support='verified_result', retention='episode_only'))
     completion.return_value = provider_response(payload)
     trace, _ = consolidator.consolidate_turn(**arguments)
     assert trace['memory_action_count'] == 0
@@ -448,7 +516,7 @@ def test_registered_self_commitment_keeps_its_confirmed_status_and_execution_tim
     candidate.update(memory_type='commitment', scope='self', subject_hint='self', predicate_hint='notify',
                      summary_text='明日の9時に一度通知する約束を引き受けた。',
                      qualifiers_hint={'commitment_actor': 'self'},
-                     grounding=grounding(refs=['speech', 'autonomous_run_summary'], support='self_commitment'))
+                     grounding=grounding(refs=['event:speech', 'autonomous_run:reminder'], support='self_commitment'))
     completion.return_value = provider_response(payload)
     trace, _ = consolidator.consolidate_turn(**arguments)
     unit, = store.list_memory_units_by_id(memory_set_id=arguments['state']['selected_memory_set_id'],
@@ -474,7 +542,7 @@ def test_assistant_example_cannot_be_saved_by_calling_it_a_relationship_inferenc
     invalid['candidate_memory_units'][0].update(
         memory_type='interpretation', scope='relationship', subject_hint='self|person:test',
         summary_text='本人はコードの可読性や性能にこだわりを持っている。',
-        grounding=grounding(refs=['speech'], support='inference'))
+        grounding=grounding(refs=['event:speech'], support='inference'))
     repaired = deepcopy(invalid)
     repaired['candidate_memory_units'][0]['grounding']['retention'] = 'episode_only'
     completion.side_effect = [provider_response(invalid), provider_response(repaired)]

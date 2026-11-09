@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from datetime import timedelta
 from typing import Any
 
@@ -351,7 +350,7 @@ class ServiceInputActivityMixin:
             ) or self._activity_previous_summary(previous_state, current_time=started_at)
         activity_id = previous_state.get("activity_id") if transition == "continue" and isinstance(previous_state, dict) else None
         if not isinstance(activity_id, str) or not activity_id.strip():
-            activity_id = f"activity:{uuid.uuid4().hex}"
+            activity_id = self.store.allocate_id("activity")
         started_source = previous_state.get("started_at") if transition == "continue" and isinstance(previous_state, dict) else None
         started_source = started_source if isinstance(started_source, str) and started_source.strip() else started_at
         ttl_seconds = self._activity_ttl_seconds(str(candidate["ttl_hint"]))

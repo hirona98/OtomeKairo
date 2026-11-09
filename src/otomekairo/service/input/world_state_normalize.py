@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from datetime import timedelta
 from typing import Any
 from urllib.parse import quote
@@ -64,7 +63,7 @@ class ServiceInputWorldStateNormalizeMixin:
             normalized.append(
                 {
                     "candidate_ref": source_candidate.candidate_ref,
-                    "world_state_id": f"world_state:{uuid.uuid4().hex}",
+                    "world_state_id": self.store.allocate_id("world_state"),
                     "memory_set_id": memory_set_id,
                     "state_type": state_type,
                     "scope_type": scope_type,
@@ -226,7 +225,7 @@ class ServiceInputWorldStateNormalizeMixin:
                 continue
             seen_slot_keys.add(schedule_slot.slot_key)
             record: dict[str, Any] = {
-                "world_state_id": f"world_state:{uuid.uuid4().hex}",
+                "world_state_id": self.store.allocate_id("world_state"),
                 "memory_set_id": memory_set_id,
                 "state_type": "schedule",
                 "scope_type": "self",

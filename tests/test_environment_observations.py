@@ -20,6 +20,11 @@ LATER = "2026-10-28T10:00:30+09:00"
 
 
 @pytest.fixture
+def identifier_store(tmp_path):
+    return FileStore(tmp_path)
+
+
+@pytest.fixture
 def definition():
     return {"image_max_age_seconds": 300, "places": [{"place_ref": "place:room", "display_name": "作業部屋"}],
             "sensor_sources": [{"sensor_source_id": "sensor_source:room", "display_name": "室内センサー",
@@ -43,8 +48,8 @@ def submit(runtime, *samples, received_at=LATER):
                            "samples": list(samples)}, received_at=received_at)
 
 
-def test_latest_samples_keep_zero_false_and_stable_identity(definition):
-    runtime = EnvironmentRuntime(definition)
+def test_latest_samples_keep_zero_false_and_stable_identity(definition, identifier_store):
+    runtime = EnvironmentRuntime(definition, resolve_ids=identifier_store.resolve_observation_ids)
     zero, false = sample(), sample("presence", False)
     response = submit(runtime, zero, false)
     observations, reports = runtime.snapshot(LATER)
@@ -54,14 +59,14 @@ def test_latest_samples_keep_zero_false_and_stable_identity(definition):
     assert [r["acceptance"] for r in duplicate["results"]] == ["duplicate", "duplicate"]
     assert [r["observation_id"] for r in response["results"]] == [r["observation_id"] for r in duplicate["results"]]
     assert runtime.snapshot(LATER)[0][0].received_at == LATER
-    restarted = EnvironmentRuntime(definition)
+    restarted = EnvironmentRuntime(definition, resolve_ids=identifier_store.resolve_observation_ids)
     assert not restarted.snapshot(LATER)[0]
     assert submit(restarted, zero)["results"][0]["observation_id"] == response["results"][0]["observation_id"]
     assert runtime.snapshot("2026-10-28T10:01:00+09:00")[0] == ()
 
 
-def test_failed_channel_does_not_resurrect_previous_value(definition):
-    runtime = EnvironmentRuntime(definition)
+def test_failed_channel_does_not_resurrect_previous_value(definition, identifier_store):
+    runtime = EnvironmentRuntime(definition, resolve_ids=identifier_store.resolve_observation_ids)
     submit(runtime, sample())
     failed = sample(occurred_at=LATER)
     failed.update(status="failed", payload=None, error_code="acquisition_failed")
@@ -76,8 +81,8 @@ def test_failed_channel_does_not_resurrect_previous_value(definition):
 
 @pytest.mark.parametrize("value,unit", [(True, "degC"), (float("nan"), "degC"), (float("inf"), "degC"),
                                          (10**1000, "degC"), (1, "%"), (None, "degC")])
-def test_invalid_measurements_are_explicit_failures(definition, value, unit):
-    runtime = EnvironmentRuntime(definition)
+def test_invalid_measurements_are_explicit_failures(definition, value, unit, identifier_store):
+    runtime = EnvironmentRuntime(definition, resolve_ids=identifier_store.resolve_observation_ids)
     invalid = sample(value=value)
     invalid["payload"]["unit"] = unit
     with pytest.raises(ObservationError) as caught:
@@ -86,8 +91,8 @@ def test_invalid_measurements_are_explicit_failures(definition, value, unit):
     assert runtime.snapshot(LATER)[0] == ()
 
 
-def test_conflicting_batch_is_atomic(definition):
-    runtime = EnvironmentRuntime(definition)
+def test_conflicting_batch_is_atomic(definition, identifier_store):
+    runtime = EnvironmentRuntime(definition, resolve_ids=identifier_store.resolve_observation_ids)
     initial = sample()
     submit(runtime, initial)
     conflicting = deepcopy(initial)
@@ -103,8 +108,26 @@ def test_conflicting_batch_is_atomic(definition):
     assert caught.value.code == "sensor_sample_out_of_order"
 
 
-def test_event_report_keeps_monitoring_and_occurrence_separate(definition):
-    runtime = EnvironmentRuntime(definition)
+def test_failed_batch_does_not_reserve_other_observation_identities(definition, identifier_store):
+    runtime = EnvironmentRuntime(definition, resolve_ids=identifier_store.resolve_observation_ids)
+    initial = sample()
+    submit(runtime, initial)
+    restarted = EnvironmentRuntime(definition, resolve_ids=identifier_store.resolve_observation_ids)
+    presence = sample("presence", True)
+    conflicting = deepcopy(initial)
+    conflicting["payload"]["value"] = 4
+    with pytest.raises(ObservationError) as caught:
+        submit(restarted, presence, conflicting)
+    assert caught.value.code == "sensor_sample_conflict"
+    assert restarted.snapshot(LATER)[0] == ()
+    with identifier_store._memory_db() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM internal_identities").fetchone()[0] == 1
+    presence["payload"]["value"] = False
+    assert submit(restarted, presence)["results"][0]["acceptance"] == "accepted"
+
+
+def test_event_report_keeps_monitoring_and_occurrence_separate(definition, identifier_store):
+    runtime = EnvironmentRuntime(definition, resolve_ids=identifier_store.resolve_observation_ids)
     event = sample("motion")
     event["payload"] = {"kind": "event", "monitoring_started_at": "2026-10-28T09:00:00+09:00", "last_occurred_at": None}
     submit(runtime, event)
@@ -124,8 +147,8 @@ def test_event_report_keeps_monitoring_and_occurrence_separate(definition):
     assert caught.value.code == "invalid_observation_time"
 
 
-def test_configuration_revision_rejects_racing_report(definition, monkeypatch):
-    runtime = EnvironmentRuntime(definition)
+def test_configuration_revision_rejects_racing_report(definition, monkeypatch, identifier_store):
+    runtime = EnvironmentRuntime(definition, resolve_ids=identifier_store.resolve_observation_ids)
     original = runtime._payload
     def changing(payload, channel, occurred):
         changed = deepcopy(definition)
@@ -139,8 +162,8 @@ def test_configuration_revision_rejects_racing_report(definition, monkeypatch):
     assert runtime.snapshot(LATER)[0] == ()
 
 
-def test_snapshot_is_immutable_and_trace_contains_no_media(definition):
-    runtime = EnvironmentRuntime(definition)
+def test_snapshot_is_immutable_and_trace_contains_no_media(definition, identifier_store):
+    runtime = EnvironmentRuntime(definition, resolve_ids=identifier_store.resolve_observation_ids)
     submit(runtime, sample())
     observations, reports = runtime.snapshot(LATER)
     media = MediaBundle()
@@ -159,7 +182,7 @@ def test_snapshot_is_immutable_and_trace_contains_no_media(definition):
     assert snapshot.environment_observations[0].payload.value == 0
 
 
-def test_environment_api_persists_config_and_invalidates_changed_source(tmp_path, definition):
+def test_environment_api_persists_config_and_invalidates_changed_source(tmp_path, definition, identifier_store):
     service = OtomeKairoService.__new__(OtomeKairoService)
     service._config_update_lock = threading.RLock()
     service._runtime_state_lock = threading.RLock()
@@ -167,7 +190,7 @@ def test_environment_api_persists_config_and_invalidates_changed_source(tmp_path
     service.store = FileStore(tmp_path)
     service._now_iso = lambda: LATER
     state = service.store.read_state()
-    service._environment_runtime = EnvironmentRuntime(state["environment_settings"])
+    service._environment_runtime = EnvironmentRuntime(state["environment_settings"], resolve_ids=identifier_store.resolve_observation_ids)
     token = service.acquire_console_access_token()["console_access_token"]
     assert service.replace_environment_editor_state(token, definition) == definition
     assert FileStore(tmp_path).read_state()["environment_settings"] == definition
@@ -190,16 +213,16 @@ def test_invalid_source_config_is_rejected(definition, field, value):
     assert caught.value.code == "invalid_environment_config"
 
 
-def test_event_timestamps_can_build_multimodal_prompt_without_double_conversion(definition):
+def test_event_timestamps_can_build_multimodal_prompt_without_double_conversion(definition, identifier_store):
     from otomekairo.llm.contexts import CurrentInput, PersonaContext
     from otomekairo.llm.prompts import build_input_interpretation_messages
     from otomekairo.observations.acquisition import ObservationAcquisition
-    runtime = EnvironmentRuntime(definition)
+    runtime = EnvironmentRuntime(definition, resolve_ids=identifier_store.resolve_observation_ids)
     event = sample('motion')
     event['payload'] = {'kind': 'event', 'monitoring_started_at': STAMP, 'last_occurred_at': None}
     submit(runtime, event)
     observations, reports = runtime.snapshot(LATER)
-    acquisition = ObservationAcquisition('memory_set:test', 300)
+    acquisition = ObservationAcquisition('memory_set:test', 300, identifier_store.allocate_id)
     context = acquisition.freeze(snapshot_at=LATER, sensor_observations=observations, sensor_reports=reports)
     try:
         messages = build_input_interpretation_messages(persona_context=PersonaContext('テスト', '観測を確認する。', None, ''),
@@ -212,8 +235,8 @@ def test_event_timestamps_can_build_multimodal_prompt_without_double_conversion(
         acquisition.close()
 
 
-def test_sensor_event_identity_survives_clone_and_delete(tmp_path, definition):
-    runtime = EnvironmentRuntime(definition)
+def test_sensor_event_identity_survives_clone_and_delete(tmp_path, definition, identifier_store):
+    runtime = EnvironmentRuntime(definition, resolve_ids=identifier_store.resolve_observation_ids)
     submit(runtime, sample())
     observation = runtime.snapshot(LATER)[0][0].to_trace_payload()
     store = FileStore(tmp_path)
@@ -230,9 +253,9 @@ def test_sensor_event_identity_survives_clone_and_delete(tmp_path, definition):
         assert conn.execute("SELECT COUNT(*) FROM events WHERE kind='sensor_observation'").fetchone()[0] == 1
 
 
-def test_inspection_never_resurrects_stored_sensor_state_after_restart_or_failed_report(definition):
+def test_inspection_never_resurrects_stored_sensor_state_after_restart_or_failed_report(definition, identifier_store):
     from types import SimpleNamespace
-    runtime = EnvironmentRuntime(definition)
+    runtime = EnvironmentRuntime(definition, resolve_ids=identifier_store.resolve_observation_ids)
     report = sample()
     observation_id = submit(runtime, report)['results'][0]['observation_id']
     record = {'observation_payload': report['payload'], 'source_observation_ids': [observation_id]}
@@ -245,7 +268,7 @@ def test_inspection_never_resurrects_stored_sensor_state_after_restart_or_failed
     failed.update(status='failed', payload=None, error_code='acquisition_failed')
     submit(runtime, failed)
     assert service._list_current_world_states(state=state, current_time=LATER) == []
-    service._environment_runtime = EnvironmentRuntime(definition)
+    service._environment_runtime = EnvironmentRuntime(definition, resolve_ids=identifier_store.resolve_observation_ids)
     assert service._list_current_world_states(state=state, current_time=LATER) == []
 
 

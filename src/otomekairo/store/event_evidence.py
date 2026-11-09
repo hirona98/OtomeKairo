@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import uuid
 from typing import Any
 
 from otomekairo.memory.event_references import (
@@ -89,7 +88,7 @@ class StoreEventEvidenceMixin:
             new_ids = [value for value in missing if known is None or value not in known["removed_event_ids"]]
             if new_ids or new_repairs:
                 self._insert_event(conn, {
-                    "event_id": f"event:{uuid.uuid4().hex}", "cycle_id": cycle_id,
+                    "event_id": self._allocate_id(conn, "event"), "cycle_id": cycle_id,
                     "memory_set_id": memory_set_id, "kind": "event_reference_repaired", "role": "system",
                     "created_at": detected_at, "failure_stage": "load_event",
                     "failure_reason": "referenced event was not found in this memory set.",

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
@@ -345,7 +344,7 @@ class MemoryCorrectionReconciler:
     ) -> dict[str, Any]:
         revision = target["revision"]
         action_reason = reason or "利用者の訂正により直近の記憶更新を補正したため。"
-        group_id = correction_group_id or f"correction:{uuid.uuid4().hex}"
+        group_id = correction_group_id or self.store.allocate_id("correction")
         return self.action_resolver.build_memory_action(
             operation="correct",
             memory_set_id=memory_unit["memory_set_id"],

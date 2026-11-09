@@ -10,7 +10,7 @@ from otomekairo.service.common import debug_log
 
 # 定数
 MEMORY_DB_FILE_NAME = "memory.db"
-CURRENT_MEMORY_DB_VERSION = 17
+CURRENT_MEMORY_DB_VERSION = 18
 SUPPORTED_MEMORY_DB_VERSIONS = {0, CURRENT_MEMORY_DB_VERSION}
 
 
@@ -28,6 +28,10 @@ class StoreSchemaMixin:
                 )
 
             self._apply_current_schema(conn)
+            if version == 0:
+                conn.execute("INSERT INTO internal_id_sequence(id, last_value) VALUES (1, 0)")
+            elif conn.execute("SELECT 1 FROM internal_id_sequence WHERE id = 1").fetchone() is None:
+                raise RuntimeError("Internal ID sequence is missing.")
             if version != CURRENT_MEMORY_DB_VERSION:
                 conn.execute(f"PRAGMA user_version = {CURRENT_MEMORY_DB_VERSION}")
                 debug_log("Store", f"memory_db initialized user_version={CURRENT_MEMORY_DB_VERSION}")
@@ -65,6 +69,20 @@ class StoreSchemaMixin:
         # 現行 schema 全体
         conn.executescript(
             """
+            CREATE TABLE IF NOT EXISTS internal_id_sequence (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                last_value INTEGER NOT NULL CHECK (typeof(last_value) = 'integer' AND last_value >= 0)
+            );
+
+            CREATE TABLE IF NOT EXISTS internal_identities (
+                kind TEXT NOT NULL,
+                scope TEXT NOT NULL,
+                identity_key TEXT NOT NULL,
+                identifier TEXT NOT NULL UNIQUE,
+                fingerprint TEXT,
+                PRIMARY KEY (kind, scope, identity_key)
+            );
+
             CREATE TABLE IF NOT EXISTS events (
                 event_id TEXT PRIMARY KEY,
                 cycle_id TEXT NOT NULL,

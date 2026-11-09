@@ -1,4 +1,6 @@
 import unittest
+from types import SimpleNamespace
+from identifier_fixtures import id_allocator
 from copy import deepcopy
 from pathlib import Path
 import tempfile
@@ -105,6 +107,9 @@ class _PipelineService(ServiceInputDecisionComparisonMixin, ServiceInputPipeline
 
 
 class _TraceService(ServiceInputTraceBuildMixin):
+    def __init__(self):
+        self.store = SimpleNamespace(allocate_id=id_allocator())
+
     pass
 
 
@@ -284,7 +289,7 @@ class PreSendCheckTests(unittest.TestCase):
         )
 
         result = service._run_input_pipeline(
-            acquisition=ObservationAcquisition("memory_set:test", 300),
+            acquisition=ObservationAcquisition("memory_set:test", 300, id_allocator()),
             input_interpretation=input_payload(), precomputed_states=(None, [], None, None),
             state=service.store.read_state(),
             started_at="2026-08-11T12:00:00+09:00",

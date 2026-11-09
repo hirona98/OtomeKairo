@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import uuid
 from collections import Counter
 from typing import Any
 
@@ -13,7 +12,6 @@ ACTIVE_MEMORY_STATUSES = {"confirmed", "inferred"}
 CONFIRMED_MEMORY_STATUS = "confirmed"
 RELATION_REF_PREFIXES = ("person:", "place:", "tool:", "topic:")
 RELATION_LINK_LABELS = {"supports", "contradicts", "about_same_scope", "affects"}
-RELATION_INDEX_NAMESPACE = uuid.UUID("5e0fa4c4-7e9f-4fd8-beca-a2e46e10f2fb")
 
 
 class StoreRelationIndexMixin:
@@ -58,6 +56,9 @@ class StoreRelationIndexMixin:
         )
         records = [
             self._build_relation_index_record(
+                relation_index_id=self._resolve_internal_id(
+                    conn, "relation_index", scope=memory_set_id, key=json.dumps(identity),
+                ),
                 memory_set_id=memory_set_id,
                 identity=identity,
                 units=supporting_units,
@@ -308,6 +309,7 @@ class StoreRelationIndexMixin:
     def _build_relation_index_record(
         self,
         *,
+        relation_index_id: str,
         memory_set_id: str,
         identity: tuple[str, str, str],
         units: list[dict[str, Any]],
@@ -363,9 +365,8 @@ class StoreRelationIndexMixin:
             ),
         )
         source_ref, target_ref, predicate = identity
-        identity_text = f"{memory_set_id}\n{source_ref}\n{target_ref}\n{predicate}"
         record = {
-            "relation_index_id": f"relation_index:{uuid.uuid5(RELATION_INDEX_NAMESPACE, identity_text).hex}",
+            "relation_index_id": relation_index_id,
             "memory_set_id": memory_set_id,
             "source_ref": source_ref,
             "target_ref": target_ref,

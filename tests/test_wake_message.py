@@ -1,3 +1,4 @@
+from identifier_fixtures import id_allocator
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -87,7 +88,7 @@ def test_message_enters_judgment_without_pending_or_initiative_gate():
     reference = {"text": "参照資料の全文。"}
 
     pipeline, input_text, _ = service._run_wake_pipeline(
-        acquisition=ObservationAcquisition("memory_set:test", 300),
+        acquisition=ObservationAcquisition("memory_set:test", 300, id_allocator()),
         state={},
         started_at="2026-10-24T15:00:00+09:00",
         trigger_kind="wake",

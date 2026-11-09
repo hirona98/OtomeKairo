@@ -64,7 +64,7 @@ def test_memory_interpretation_repairs_a_date_only_qualifier_before_returning(mo
             persona_context=PersonaContext('Test', 'テスト人格。', None, '判断の基底。'),
             input_text='以前はほうじ茶が好きだったけど、これから普段飲みたいのは麦茶。',
             recall_hint={}, decision={'kind': 'speech'}, speech_text=None,
-            memory_context={'current_input': {'sender_ref': 'person:a'}},
+            memory_context={'current_input': {'sender_ref': 'person:a'}, 'events': [{'event_id': 'event:input', 'kind': 'conversation_input', 'role': 'person', 'speaker_ref': 'person:a'}]},
             current_time='2026-10-04T09:00:36+09:00',
         )
 

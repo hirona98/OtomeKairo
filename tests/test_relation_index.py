@@ -247,7 +247,7 @@ class RelationIndexTests(unittest.TestCase):
             with sqlite3.connect(root_dir / "memory.db") as conn:
                 conn.execute("PRAGMA user_version = 16")
 
-            with self.assertRaisesRegex(RuntimeError, "Expected 17"):
+            with self.assertRaisesRegex(RuntimeError, "Expected 18"):
                 FileStore(root_dir)
 
     def test_relation_sync_failure_marks_job_failed_and_appends_audit_event(self) -> None:

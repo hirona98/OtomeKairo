@@ -1004,10 +1004,10 @@ class ServiceCapabilityMixin:
         if isinstance(existing, dict):
             if state_policy.get("blocks_parallel_capability") and existing.get("status") == "waiting_result":
                 raise ValueError("Another ongoing_action is already active.")
-            action_id = str(existing.get("action_id") or "").strip() or f"ongoing_action:{uuid.uuid4().hex}"
-            episode_series_id = (
-                str(existing.get("episode_series_id") or "").strip() or f"episode_series:{uuid.uuid4().hex}"
-            )
+            action_id = existing["action_id"]
+            episode_series_id = existing["episode_series_id"]
+            if any(not isinstance(identifier, str) or not identifier.strip() for identifier in (action_id, episode_series_id)):
+                raise ValueError("An existing ongoing_action requires its action and episode series IDs.")
             continued_goal_summary = str(existing.get("goal_summary") or normalized_goal_summary).strip() or normalized_goal_summary
             self.store.upsert_ongoing_action(
                 ongoing_action={
@@ -1031,8 +1031,8 @@ class ServiceCapabilityMixin:
                 "transition_kind": "continued",
             }
 
-        action_id = f"ongoing_action:{uuid.uuid4().hex}"
-        episode_series_id = f"episode_series:{uuid.uuid4().hex}"
+        action_id = self.store.allocate_id("ongoing_action")
+        episode_series_id = self.store.allocate_id("episode_series")
         self.store.upsert_ongoing_action(
             ongoing_action={
                 "action_id": action_id,

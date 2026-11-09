@@ -16,7 +16,7 @@ class StoreCycleMixin:
                     (event["memory_set_id"], event["observation"]["observation_id"]),
                 ).fetchone()
                 if previous is None:
-                    self._insert_event(conn, event)
+                    self._insert_event(conn, {**event, "event_id": self._allocate_id(conn, "event")})
                 else:
                     import json
                     old = json.loads(previous["payload_json"])["observation"]

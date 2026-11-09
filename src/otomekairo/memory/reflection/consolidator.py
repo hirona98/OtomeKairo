@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any
-import uuid
 
 from otomekairo.llm.client import LLMClient
 from otomekairo.memory.actions import MemoryActionResolver
@@ -80,7 +79,7 @@ class ReflectiveConsolidator(
             }
 
         # 実行状態
-        reflection_run_id = f"reflection_run:{uuid.uuid4().hex}"
+        reflection_run_id = self.store.allocate_id("reflection_run")
         started_at = now_iso()
         since_iso = latest_evaluated_run["finished_at"] if isinstance(latest_evaluated_run, dict) else None
         episodes: list[dict[str, Any]] = []

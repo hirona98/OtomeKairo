@@ -197,12 +197,7 @@ class ServiceInputLoggingMixin:
         return self._clamp(first_line, limit=limit)
 
     def _short_cycle_id(self, cycle_id: str) -> str:
-        # 空
-        if ":" not in cycle_id:
-            return cycle_id[:12]
-
-        # 結果
-        return cycle_id.split(":", 1)[1][:12]
+        return cycle_id
 
     def _debug_cycle_label(self, cycle_id: str | None) -> str:
         # 未採番経路

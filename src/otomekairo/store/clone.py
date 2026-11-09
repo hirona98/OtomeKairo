@@ -2,10 +2,45 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import uuid
 from typing import Any
 
-from otomekairo.store.clone_visual import build_visual_clone_reference_map, clone_visual_references
+# 複製する正本と、その識別子・保存処理。実行中の作業と短期状態は複製しない。
+CLONE_TABLES = (
+    ("events", "event_id", "event", "_insert_event"),
+    ("visual_observation_records", "visual_observation_id", "visual_observation", "_insert_visual_observation_record"),
+    ("daily_visual_digests", "digest_id", "daily_visual_digest", "_insert_daily_visual_digest"),
+    ("episodes", "episode_id", "episode", "_insert_episode"),
+    ("memory_units", "memory_unit_id", "memory_unit", "_upsert_memory_unit"),
+    ("revisions", "revision_id", "revision", "_insert_revision"),
+    ("memory_links", "memory_link_id", "memory_link", "_upsert_memory_link"),
+    ("entity_registry", None, None, "_upsert_entity_registry_record"),
+    ("episode_affects", "episode_affect_id", "episode_affect", "_insert_episode_affect"),
+    ("mood_state", "mood_state_id", "mood_state", "_upsert_mood_state"),
+    ("affect_state", "affect_state_id", "affect_state", "_upsert_affect_state"),
+    ("reflection_runs", "reflection_run_id", "reflection_run", "_insert_reflection_run"),
+)
+# 本文には触れず、閉じた参照フィールドだけを処理する。
+CLONE_REFERENCE_FIELDS = {
+    "ref", "source_ref", "source_id", "event_id", "cycle_id", "related_cycle_id", "source_cycle_id",
+    "episode_id", "episode_series_id", "memory_unit_id", "revision_id", "memory_link_id",
+    "source_memory_unit_id", "target_memory_unit_id", "evidence_revision_id", "corrects_revision_id",
+    "correction_group_id", "episode_affect_id", "mood_state_id", "affect_state_id", "reflection_run_id",
+    "observation_id", "visual_observation_id", "representative_visual_observation_id",
+    "digest_id", "daily_digest_id", "duplicate_group_id", "group_ref", "evidence_ref", "memory_ref",
+    "linked_event_ids", "evidence_event_ids", "evidence_cycle_ids", "correction_basis_event_ids",
+    "source_episode_ids", "affected_memory_unit_ids", "related_memory_unit_ids", "supporting_memory_unit_ids",
+    "memory_unit_ids", "promoted_memory_unit_ids", "support_group_refs", "candidate_groups", "evidence_groups",
+    "evidence_refs", "source_event_refs", "source_event_ids", "source_observation_ids", "source_observation_refs",
+}
+CLONE_AUXILIARY_IDS = {
+    "cycle_id": "cycle", "related_cycle_id": "cycle", "source_cycle_id": "cycle",
+    "evidence_cycle_ids": "cycle", "episode_series_id": "episode_series", "correction_group_id": "correction",
+}
+CLONE_ID_KINDS = {kind for _, _, kind, _ in CLONE_TABLES if kind} | set(CLONE_AUXILIARY_IDS.values()) | {"visual_duplicate_group"}
+CLONE_STRICT_REFERENCE_FIELDS = CLONE_REFERENCE_FIELDS - {
+    "ref", "source_ref", "source_id", "observation_id", "source_observation_ids", "source_observation_refs",
+    "group_ref", "evidence_ref", "memory_ref", "evidence_refs",
+}
 
 
 class MemorySetInUseError(ValueError):
@@ -51,428 +86,126 @@ class StoreCloneMixin:
             conn.execute("DELETE FROM retrieval_runs WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM cycle_traces WHERE selected_memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM cycle_summaries WHERE selected_memory_set_id = ?", (memory_set_id,))
+            conn.execute("DELETE FROM internal_identities WHERE scope = ?", (memory_set_id,))
 
     def clone_memory_set_records(
-        self,
-        *,
-        source_memory_set_id: str,
-        target_memory_set_id: str,
+        self, *, source_memory_set_id: str, target_memory_set_id: str,
     ) -> None:
-        # トランザクション
+        if source_memory_set_id == target_memory_set_id:
+            raise ValueError("記憶集合の複製先は別の集合にします。")
         with self._memory_db() as conn:
-            visual_records = self._load_payload_rows(conn, "visual_observation_records", source_memory_set_id)
-            visual_digests = self._load_payload_rows(conn, "daily_visual_digests", source_memory_set_id)
-            visual_references = build_visual_clone_reference_map(
-                observations=visual_records, digests=visual_digests, target_memory_set_id=target_memory_set_id)
-            cycle_id_map, event_id_map = self._clone_event_records(
-                conn,
-                source_memory_set_id=source_memory_set_id,
-                target_memory_set_id=target_memory_set_id,
-            )
-            episode_id_map = self._clone_episode_records(
-                conn,
-                source_memory_set_id=source_memory_set_id,
-                target_memory_set_id=target_memory_set_id,
-                cycle_id_map=cycle_id_map,
-                event_id_map=event_id_map,
-            )
-            memory_unit_id_map = self._clone_memory_unit_records(
-                conn,
-                source_memory_set_id=source_memory_set_id,
-                target_memory_set_id=target_memory_set_id,
-                event_id_map=event_id_map,
-                visual_references=visual_references,
-            )
-            revision_id_map = self._clone_revision_records(
-                conn,
-                source_memory_set_id=source_memory_set_id,
-                target_memory_set_id=target_memory_set_id,
-                event_id_map=event_id_map,
-                memory_unit_id_map=memory_unit_id_map,
-                visual_references=visual_references,
-            )
-            self._clone_memory_link_records(
-                conn,
-                source_memory_set_id=source_memory_set_id,
-                target_memory_set_id=target_memory_set_id,
-                memory_unit_id_map=memory_unit_id_map,
-                revision_id_map=revision_id_map,
-            )
-            self._clone_entity_registry_records(
-                conn,
-                source_memory_set_id=source_memory_set_id,
-                target_memory_set_id=target_memory_set_id,
-                event_id_map=event_id_map,
-                memory_unit_id_map=memory_unit_id_map,
-            )
+            records = {table: self._load_payload_rows(conn, table, source_memory_set_id)
+                       for table, _, _, _ in CLONE_TABLES}
+            if any(self._load_payload_rows(conn, table, target_memory_set_id) for table, _, _, _ in CLONE_TABLES):
+                raise ValueError("記憶集合の複製先は空である必要があります。")
+            references: dict[str, str] = {}
+            for table, id_key, kind, _ in CLONE_TABLES:
+                if id_key is None:
+                    continue
+                for record in records[table]:
+                    if kind == "daily_visual_digest":
+                        identifier = self._resolve_internal_id(
+                            conn, kind, scope=target_memory_set_id, key=record["local_date"],
+                        )
+                    elif kind == "mood_state":
+                        identifier = self._resolve_internal_id(conn, kind, scope=target_memory_set_id, key="self")
+                    else:
+                        identifier = self._allocate_id(conn, kind)
+                    references[record[id_key]] = identifier
+            for digest in records["daily_visual_digests"]:
+                for index, group in enumerate(digest["group_summaries"], start=1):
+                    references[group["duplicate_group_id"]] = self._resolve_internal_id(
+                        conn, "visual_duplicate_group", scope=target_memory_set_id,
+                        key=f"{digest['local_date']}:{index}",
+                    )
+
+            def prepare_auxiliary_ids(value):
+                if isinstance(value, list):
+                    for item in value:
+                        prepare_auxiliary_ids(item)
+                elif isinstance(value, dict):
+                    for key, item in value.items():
+                        if key in CLONE_AUXILIARY_IDS and item is not None:
+                            for identifier in item if isinstance(item, list) else [item]:
+                                if not isinstance(identifier, str) or not identifier:
+                                    raise ValueError("複製する識別子は空でない文字列である必要があります。")
+                                if identifier not in references:
+                                    references[identifier] = self._allocate_id(conn, CLONE_AUXILIARY_IDS[key])
+                        elif key != "event_reference_integrity":
+                            prepare_auxiliary_ids(item)
+            prepare_auxiliary_ids(list(records.values()))
+            missing_event_ids = {
+                identifier for event in records["events"] if event["kind"] == "event_reference_repaired"
+                for identifier in event["missing_event_ids"]
+            }
+
+            for table, _, _, insert_method in CLONE_TABLES:
+                for record in records[table]:
+                    cloned = self._clone_record_references(
+                        record, references, target_memory_set_id,
+                        historical=table == "revisions", missing_event_ids=missing_event_ids,
+                    )
+                    getattr(self, insert_method)(conn, cloned)
+                    if table == "entity_registry":
+                        for alias in cloned.get("aliases", []):
+                            self._upsert_entity_alias(
+                                conn, memory_set_id=target_memory_set_id, entity_ref=cloned["entity_ref"],
+                                alias_text=alias, entity_type=cloned["entity_type"], confidence=cloned["confidence"],
+                                updated_at=cloned["last_seen_at"],
+                            )
             self._rebuild_relation_index(
-                conn,
-                memory_set_id=target_memory_set_id,
+                conn, memory_set_id=target_memory_set_id,
                 updated_at=self._relation_index_latest_source_time(conn, target_memory_set_id),
             )
-            self._clone_episode_affect_records(
-                conn,
-                source_memory_set_id=source_memory_set_id,
-                target_memory_set_id=target_memory_set_id,
-                episode_id_map=episode_id_map,
-            )
-            self._clone_mood_state_records(
-                conn,
-                source_memory_set_id=source_memory_set_id,
-                target_memory_set_id=target_memory_set_id,
-            )
-            self._clone_affect_state_records(
-                conn,
-                source_memory_set_id=source_memory_set_id,
-                target_memory_set_id=target_memory_set_id,
-            )
-            self._clone_reflection_run_records(
-                conn,
-                source_memory_set_id=source_memory_set_id,
-                target_memory_set_id=target_memory_set_id,
-                episode_id_map=episode_id_map,
-                memory_unit_id_map=memory_unit_id_map,
-            )
-            self._clone_visual_observation_records(
-                conn,
-                source_records=visual_records,
-                target_memory_set_id=target_memory_set_id,
-                cycle_id_map=cycle_id_map,
-                visual_references=visual_references,
-            )
-            for digest in visual_digests:
-                cloned_digest = clone_visual_references(digest, visual_references)
-                cloned_digest["memory_set_id"] = target_memory_set_id
-                self._insert_daily_visual_digest(conn, cloned_digest)
             self._clone_vector_index_entries(
-                conn,
-                source_memory_set_id=source_memory_set_id,
-                target_memory_set_id=target_memory_set_id,
-                episode_id_map=episode_id_map,
-                memory_unit_id_map=memory_unit_id_map,
+                conn, source_memory_set_id=source_memory_set_id, target_memory_set_id=target_memory_set_id,
+                episode_id_map={record["episode_id"]: references[record["episode_id"]] for record in records["episodes"]},
+                memory_unit_id_map={record["memory_unit_id"]: references[record["memory_unit_id"]] for record in records["memory_units"]},
             )
 
-    def _clone_event_records(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        source_memory_set_id: str,
-        target_memory_set_id: str,
-    ) -> tuple[dict[str, str], dict[str, str]]:
-        cycle_id_map: dict[str, str] = {}
-        event_id_map: dict[str, str] = {}
-        source_events = self._load_payload_rows(conn, "events", source_memory_set_id)
-        for record in source_events:
-            source_cycle_id = record["cycle_id"]
-            cycle_id_map.setdefault(source_cycle_id, f"cycle:{uuid.uuid4().hex}")
-            old_event_id = record["event_id"]
-            event_id_map[old_event_id] = f"event:{uuid.uuid4().hex}"
-            self._insert_event(
-                conn,
-                {
-                    **record,
-                    "event_id": event_id_map[old_event_id],
-                    "cycle_id": cycle_id_map[source_cycle_id],
-                    "memory_set_id": target_memory_set_id,
-                },
-            )
-        return cycle_id_map, event_id_map
+    def _clone_record_references(
+        self, value: Any, references: dict[str, str], memory_set_id: str, *,
+        historical: bool, missing_event_ids: set[str],
+    ) -> Any:
+        def reference(item, *, strict):
+            if item is None:
+                return None
+            if isinstance(item, list):
+                return [reference(child, strict=strict) for child in item]
+            if isinstance(item, dict):
+                return {references[key] if key in references else key: reference(child, strict=strict)
+                        for key, child in item.items()}
+            if not isinstance(item, str):
+                raise ValueError("複製する根拠参照は文字列である必要があります。")
+            if item in references:
+                return references[item]
+            if historical and item in missing_event_ids:
+                # revisionは当時の記録。欠落が監査済みの根拠IDは履歴として保持する。
+                return item
+            if strict or item.partition(":")[0] in CLONE_ID_KINDS:
+                raise ValueError(f"記憶集合の複製元参照がありません: {item}")
+            # 人物・機器・外部sampleや履歴にのみ属する実行識別子は複製対象ではない。
+            return item
 
-    def _clone_episode_records(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        source_memory_set_id: str,
-        target_memory_set_id: str,
-        cycle_id_map: dict[str, str],
-        event_id_map: dict[str, str],
-    ) -> dict[str, str]:
-        episode_id_map: dict[str, str] = {}
-        source_episodes = self._load_payload_rows(conn, "episodes", source_memory_set_id)
-        cloned_episodes: list[dict[str, Any]] = []
-        for record in source_episodes:
-            source_cycle_id = record["cycle_id"]
-            cycle_id_map.setdefault(source_cycle_id, f"cycle:{uuid.uuid4().hex}")
-            old_episode_id = record["episode_id"]
-            episode_id_map[old_episode_id] = f"episode:{uuid.uuid4().hex}"
-            cloned_episodes.append(
-                {
-                    **record,
-                    "episode_id": episode_id_map[old_episode_id],
-                    "cycle_id": cycle_id_map[source_cycle_id],
-                    "memory_set_id": target_memory_set_id,
-                }
-            )
-
-        for record in cloned_episodes:
-            record["linked_event_ids"] = [
-                event_id_map.get(event_id, event_id)
-                for event_id in record.get("linked_event_ids", [])
-            ]
-            episode_series_id = record.get("episode_series_id")
-            if isinstance(episode_series_id, str) and episode_series_id in episode_id_map:
-                record["episode_series_id"] = episode_id_map[episode_series_id]
-            self._insert_episode(conn, record)
-        return episode_id_map
-
-    def _clone_memory_unit_records(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        source_memory_set_id: str,
-        target_memory_set_id: str,
-        event_id_map: dict[str, str],
-        visual_references: dict[str, str],
-    ) -> dict[str, str]:
-        source_memory_units = self._load_payload_rows(conn, "memory_units", source_memory_set_id)
-        memory_unit_id_map = {
-            record["memory_unit_id"]: f"memory_unit:{uuid.uuid4().hex}" for record in source_memory_units
-        }
-        visual_references.update(memory_unit_id_map)
-        for record in source_memory_units:
-            old_memory_unit_id = record["memory_unit_id"]
-            self._upsert_memory_unit(
-                conn,
-                {
-                    **record,
-                    "memory_unit_id": memory_unit_id_map[old_memory_unit_id],
-                    "memory_set_id": target_memory_set_id,
-                    "qualifiers": clone_visual_references(record.get("qualifiers", {}), visual_references),
-                    "evidence_event_ids": [
-                        event_id_map.get(event_id, event_id)
-                        for event_id in record.get("evidence_event_ids", [])
-                    ],
-                },
-            )
-        return memory_unit_id_map
-
-    def _clone_revision_records(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        source_memory_set_id: str,
-        target_memory_set_id: str,
-        event_id_map: dict[str, str],
-        memory_unit_id_map: dict[str, str],
-        visual_references: dict[str, str],
-    ) -> dict[str, str]:
-        revision_id_map: dict[str, str] = {}
-        source_revisions = self._load_payload_rows(conn, "revisions", source_memory_set_id)
-        for record in source_revisions:
-            old_revision_id = record["revision_id"]
-            revision_id_map[old_revision_id] = f"revision:{uuid.uuid4().hex}"
-            review = (
-                {"visual_daily_review": clone_visual_references(record["visual_daily_review"], visual_references)}
-                if "visual_daily_review" in record else {}
-            )
-            self._insert_revision(
-                conn,
-                {
-                    **record,
-                    **review,
-                    "revision_id": revision_id_map[old_revision_id],
-                    "memory_set_id": target_memory_set_id,
-                    "memory_unit_id": memory_unit_id_map.get(record["memory_unit_id"], record["memory_unit_id"]),
-                    "related_memory_unit_ids": [
-                        memory_unit_id_map.get(memory_unit_id, memory_unit_id)
-                        for memory_unit_id in record.get("related_memory_unit_ids", [])
-                    ],
-                    "before_snapshot": self._clone_memory_unit_snapshot(
-                        record.get("before_snapshot"),
-                        target_memory_set_id=target_memory_set_id,
-                        event_id_map=event_id_map,
-                        memory_unit_id_map=memory_unit_id_map,
-                        visual_references=visual_references,
-                    ),
-                    "after_snapshot": self._clone_memory_unit_snapshot(
-                        record.get("after_snapshot"),
-                        target_memory_set_id=target_memory_set_id,
-                        event_id_map=event_id_map,
-                        memory_unit_id_map=memory_unit_id_map,
-                        visual_references=visual_references,
-                    ),
-                    "evidence_event_ids": [
-                        event_id_map.get(event_id, event_id)
-                        for event_id in record.get("evidence_event_ids", [])
-                    ],
-                },
-            )
-        return revision_id_map
-
-    def _clone_memory_link_records(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        source_memory_set_id: str,
-        target_memory_set_id: str,
-        memory_unit_id_map: dict[str, str],
-        revision_id_map: dict[str, str],
-    ) -> None:
-        source_memory_links = self._load_payload_rows(conn, "memory_links", source_memory_set_id)
-        for record in source_memory_links:
-            source_memory_unit_id = memory_unit_id_map.get(record["source_memory_unit_id"])
-            target_memory_unit_id = memory_unit_id_map.get(record["target_memory_unit_id"])
-            if source_memory_unit_id is None or target_memory_unit_id is None:
-                continue
-            self._upsert_memory_link(
-                conn,
-                {
-                    **record,
-                    "memory_link_id": f"memory_link:{uuid.uuid4().hex}",
-                    "memory_set_id": target_memory_set_id,
-                    "source_memory_unit_id": source_memory_unit_id,
-                    "target_memory_unit_id": target_memory_unit_id,
-                    "evidence_revision_id": revision_id_map.get(
-                        record["evidence_revision_id"],
-                        record["evidence_revision_id"],
-                    ),
-                },
-            )
-
-    def _clone_entity_registry_records(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        source_memory_set_id: str,
-        target_memory_set_id: str,
-        event_id_map: dict[str, str],
-        memory_unit_id_map: dict[str, str],
-    ) -> None:
-        source_records = self._load_payload_rows(conn, "entity_registry", source_memory_set_id)
-        for record in source_records:
-            cloned_record = {
-                **record,
-                "memory_set_id": target_memory_set_id,
-                "evidence_event_ids": [
-                    event_id_map.get(event_id, event_id)
-                    for event_id in record.get("evidence_event_ids", [])
-                ],
-                "supporting_memory_unit_ids": [
-                    memory_unit_id_map.get(memory_unit_id, memory_unit_id)
-                    for memory_unit_id in record.get("supporting_memory_unit_ids", [])
-                ],
-            }
-            self._upsert_entity_registry_record(conn, cloned_record)
-            for alias in cloned_record.get("aliases", []):
-                if not isinstance(alias, str):
-                    continue
-                self._upsert_entity_alias(
-                    conn,
-                    memory_set_id=target_memory_set_id,
-                    entity_ref=cloned_record["entity_ref"],
-                    alias_text=alias,
-                    entity_type=cloned_record["entity_type"],
-                    confidence=cloned_record["confidence"],
-                    updated_at=cloned_record["last_seen_at"],
-                )
-
-    def _clone_affect_state_records(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        source_memory_set_id: str,
-        target_memory_set_id: str,
-    ) -> None:
-        source_affect_states = self._load_payload_rows(conn, "affect_state", source_memory_set_id)
-        for record in source_affect_states:
-            self._upsert_affect_state(
-                conn,
-                {
-                    **record,
-                    "affect_state_id": f"affect_state:{uuid.uuid4().hex}",
-                    "memory_set_id": target_memory_set_id,
-                },
-            )
-
-    def _clone_episode_affect_records(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        source_memory_set_id: str,
-        target_memory_set_id: str,
-        episode_id_map: dict[str, str],
-    ) -> None:
-        source_episode_affects = self._load_payload_rows(conn, "episode_affects", source_memory_set_id)
-        for record in source_episode_affects:
-            self._insert_episode_affect(
-                conn,
-                {
-                    **record,
-                    "episode_affect_id": f"episode_affect:{uuid.uuid4().hex}",
-                    "memory_set_id": target_memory_set_id,
-                    "episode_id": episode_id_map.get(record["episode_id"], record["episode_id"]),
-                },
-            )
-
-    def _clone_mood_state_records(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        source_memory_set_id: str,
-        target_memory_set_id: str,
-    ) -> None:
-        source_mood_states = self._load_payload_rows(conn, "mood_state", source_memory_set_id)
-        for record in source_mood_states:
-            self._upsert_mood_state(
-                conn,
-                {
-                    **record,
-                    "mood_state_id": f"mood_state:{target_memory_set_id}",
-                    "memory_set_id": target_memory_set_id,
-                },
-            )
-
-    def _clone_visual_observation_records(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        source_records: list[dict[str, Any]],
-        target_memory_set_id: str,
-        cycle_id_map: dict[str, str],
-        visual_references: dict[str, str],
-    ) -> None:
-        for record in source_records:
-            cycle_id_map.setdefault(record["cycle_id"], f"cycle:{uuid.uuid4().hex}")
-            related_cycle_id = record.get("related_cycle_id")
-            if related_cycle_id is not None:
-                cycle_id_map.setdefault(related_cycle_id, f"cycle:{uuid.uuid4().hex}")
-            self._insert_visual_observation_record(
-                conn,
-                {
-                    **clone_visual_references(record, visual_references),
-                    "memory_set_id": target_memory_set_id,
-                    "cycle_id": cycle_id_map[record["cycle_id"]],
-                    "related_cycle_id": cycle_id_map[related_cycle_id] if related_cycle_id is not None else None,
-                },
-            )
-
-    def _clone_reflection_run_records(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        source_memory_set_id: str,
-        target_memory_set_id: str,
-        episode_id_map: dict[str, str],
-        memory_unit_id_map: dict[str, str],
-    ) -> None:
-        source_reflection_runs = self._load_payload_rows(conn, "reflection_runs", source_memory_set_id)
-        for record in source_reflection_runs:
-            self._insert_reflection_run(
-                conn,
-                {
-                    **record,
-                    "reflection_run_id": f"reflection_run:{uuid.uuid4().hex}",
-                    "memory_set_id": target_memory_set_id,
-                    "source_episode_ids": [
-                        episode_id_map.get(episode_id, episode_id)
-                        for episode_id in record.get("source_episode_ids", [])
-                    ],
-                    "affected_memory_unit_ids": [
-                        memory_unit_id_map.get(memory_unit_id, memory_unit_id)
-                        for memory_unit_id in record.get("affected_memory_unit_ids", [])
-                    ],
-                },
-            )
+        if isinstance(value, list):
+            return [self._clone_record_references(
+                item, references, memory_set_id, historical=historical, missing_event_ids=missing_event_ids,
+            ) for item in value]
+        if isinstance(value, dict):
+            result = {}
+            for key, item in value.items():
+                if key == "memory_set_id":
+                    result[key] = memory_set_id
+                elif key == "event_reference_integrity":
+                    result[key] = item
+                elif key in CLONE_REFERENCE_FIELDS:
+                    result[key] = reference(item, strict=key in CLONE_STRICT_REFERENCE_FIELDS)
+                else:
+                    result[key] = self._clone_record_references(
+                        item, references, memory_set_id, historical=historical, missing_event_ids=missing_event_ids,
+                    )
+            return result
+        return value
 
     def _load_payload_rows(
         self,
@@ -490,29 +223,6 @@ class StoreCloneMixin:
             (memory_set_id,),
         ).fetchall()
         return [json.loads(row["payload_json"]) for row in rows]
-
-    def _clone_memory_unit_snapshot(
-        self,
-        snapshot: dict[str, Any] | None,
-        *,
-        target_memory_set_id: str,
-        event_id_map: dict[str, str],
-        memory_unit_id_map: dict[str, str],
-        visual_references: dict[str, str],
-    ) -> dict[str, Any] | None:
-        if snapshot is None:
-            return None
-        cloned_snapshot = {
-            **snapshot,
-            "memory_set_id": target_memory_set_id,
-            "memory_unit_id": memory_unit_id_map.get(snapshot["memory_unit_id"], snapshot["memory_unit_id"]),
-            "qualifiers": clone_visual_references(snapshot.get("qualifiers", {}), visual_references),
-            "evidence_event_ids": [
-                event_id_map.get(event_id, event_id)
-                for event_id in snapshot.get("evidence_event_ids", [])
-            ],
-        }
-        return cloned_snapshot
 
     def _clone_vector_index_entries(
         self,
@@ -541,9 +251,9 @@ class StoreCloneMixin:
             elif source_kind == "memory_unit":
                 target_source_id = memory_unit_id_map.get(source_id)
             else:
-                continue
+                raise ValueError(f"複製する検索索引の種類が不正です: {source_kind}")
             if target_source_id is None:
-                continue
+                raise ValueError(f"複製する検索索引の正本がありません: {source_id}")
 
             cursor = conn.execute(
                 """
@@ -584,7 +294,7 @@ class StoreCloneMixin:
                 (row["vector_entry_id"],),
             ).fetchone()
             if vector_blob is None:
-                continue
+                raise ValueError(f"複製する検索索引のベクトルがありません: {source_id}")
             conn.execute(
                 f"INSERT INTO {self._vector_table_name(source_kind)}(id, embedding) VALUES (?, ?)",
                 (new_vector_entry_id, vector_blob["embedding"]),

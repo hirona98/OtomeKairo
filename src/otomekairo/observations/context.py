@@ -29,7 +29,7 @@ class ObservationContext:
         ))
 
     def observation_refs(self) -> tuple[str, ...]:
-        return tuple(f"observation:{i}" for i in range(1, len(self.observations) + 1))
+        return tuple(observation.observation_id for observation in self.observations)
 
     def to_prompt_payload(self) -> dict[str, Any]:
         import json

@@ -14,6 +14,7 @@ from otomekairo.store.config import ConfigStore
 from otomekairo.store.cycle import StoreCycleMixin
 from otomekairo.store.entity_registry import StoreEntityRegistryMixin
 from otomekairo.store.event_evidence import StoreEventEvidenceMixin
+from otomekairo.store.identifiers import StoreIdentifierMixin
 from otomekairo.store.memory_links import StoreMemoryLinksMixin
 from otomekairo.store.relation_index import StoreRelationIndexMixin
 from otomekairo.store.schema import MEMORY_DB_FILE_NAME, StoreSchemaMixin
@@ -24,6 +25,7 @@ from otomekairo.store.visual_vector import StoreVisualVectorMixin
 
 # 保存
 class SQLiteMemoryStore(
+    StoreIdentifierMixin,
     StoreCycleMixin,
     StoreEventEvidenceMixin,
     StoreMemoryLinksMixin,
@@ -820,7 +822,7 @@ class SQLiteMemoryStore(
         with self._memory_db() as conn:
             rows = conn.execute(
                 """
-                SELECT role, text, interaction_ref, speaker_ref, participant_refs_json, created_at
+                SELECT event_id, cycle_id, role, text, interaction_ref, speaker_ref, participant_refs_json, created_at
                 FROM events
                 WHERE memory_set_id = ?
                   AND interaction_ref = ?
@@ -836,6 +838,8 @@ class SQLiteMemoryStore(
         # 結果
         turns = [
             {
+                "event_id": row["event_id"],
+                "cycle_id": row["cycle_id"],
                 "role": row["role"],
                 "text": row["text"],
                 "interaction_ref": row["interaction_ref"],
@@ -859,7 +863,7 @@ class SQLiteMemoryStore(
             rows = conn.execute(
                 """
                 WITH ranked AS (
-                    SELECT event_id, role, text, interaction_ref, speaker_ref,
+                    SELECT event_id, cycle_id, role, text, interaction_ref, speaker_ref,
                            participant_refs_json, created_at, rowid AS event_order,
                            ROW_NUMBER() OVER (
                                PARTITION BY interaction_ref
@@ -884,6 +888,7 @@ class SQLiteMemoryStore(
             })
             group["turns"].append({
                 "event_id": row["event_id"],
+                "cycle_id": row["cycle_id"],
                 "role": row["role"],
                 "text": row["text"],
                 "speaker_ref": row["speaker_ref"],

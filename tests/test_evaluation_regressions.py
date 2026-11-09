@@ -66,15 +66,17 @@ class EvaluationRegressionTests(unittest.TestCase):
         response = {"images": ["data:image/png;base64,YQ=="], "captured_at": NOW,
                     "client_context": {"source_kind": "camera", "source_label": "対面カメラ",
                                        "vision_source_id": "vision_source:test-camera"}}
-        payload = input_payload(observations=[{"observation_ref": "observation:1", **visual_result}])
         current_input = CurrentInput(sender_kind="system", sender_ref=None, source_kind="capability_result",
                                      response_target_refs=(), interaction_context=None, text="カメラの結果を受信。")
         try:
             with patch.object(self.service, "_now_iso", return_value=NOW), patch(
-                "otomekairo.llm.client.complete_text", return_value=json.dumps(payload)
+                "otomekairo.llm.client.complete_text"
             ) as complete:
                 self.service._collect_capture_images(state=self.state, acquisition=acquisition,
                                                      capability_response=response, target=target)
+                complete.return_value = json.dumps(input_payload(observations=[{
+                    "observation_ref": acquisition.images[0].observation_id, **visual_result,
+                }]))
                 self.service._interpret_observation_inputs(state=self.state, acquisition=acquisition,
                     current_input=current_input, recent_turns=[], client_context={}, cycle_id="cycle:test-camera")
             complete.assert_called_once()

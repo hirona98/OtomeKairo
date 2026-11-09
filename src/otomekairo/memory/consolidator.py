@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import uuid
 from typing import Any
 
 from otomekairo.llm.client import LLMClient
@@ -842,7 +841,7 @@ class MemoryConsolidator:
 
         # 記録
         record = {
-            "episode_id": f"episode:{uuid.uuid4().hex}",
+            "episode_id": self.store.allocate_id("episode"),
             "cycle_id": cycle_id,
             "memory_set_id": memory_set_id,
             "episode_type": payload["episode_type"],
@@ -911,7 +910,7 @@ class MemoryConsolidator:
     ) -> dict[str, Any]:
         # 記録
         return {
-            "episode_affect_id": f"episode_affect:{uuid.uuid4().hex}",
+            "episode_affect_id": self.store.allocate_id("episode_affect"),
             "memory_set_id": memory_set_id,
             "episode_id": episode_id,
             "target_scope_type": payload["target_scope_type"],

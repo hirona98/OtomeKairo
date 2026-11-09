@@ -66,7 +66,7 @@ LLM 補助 role は schema 値に API 由来の `person_ref` を使い、内部�
 次を守る。
 
 - raw DB row をそのまま渡さない
-- request-local ref を使い、永続 ID を必要以上に渡さない
+- 提示する永続資料のrefには正本と同じ短いIDを使う。保存実体のない比較候補・scope・snapshotには、その処理内の参照を使う
 - 正本 timestamp は生活文脈向けの自然文または相対時間要約へ変換する
 - 秘密値、credential、内部 URL、配送先 client、transport 詳細を入れない
 - 画像、音声、長い外部サービス応答、巨大 payload をそのまま入れない
@@ -82,8 +82,8 @@ structured 呼び出しが JSON object を要求する transport は [LLM構造�
 
 - 必須キーと許可キーを個別文書で固定する
 - 余計なトップレベルキーを受け入れない
-- 参照値は source pack 内の request-local ref だけを使う
-- 内部識別子、秘密値、内部 URL、配送先 client を出力しない
+- 構造化された参照欄はsource packに提示されたrefから選ぶ。正本IDの新規発行はコードが担当する
+- 自然文には判断に必要な内容を表し、内部識別子、秘密値、内部 URL、配送先 clientを含めない
 - 改行を含む長文や生ログの長い逐語引用を出力しない
 - source pack に無い事実を補わない
 

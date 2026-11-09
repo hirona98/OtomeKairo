@@ -3,7 +3,6 @@ from __future__ import annotations
 from otomekairo.observations.context import ObservationContext
 
 import threading
-import uuid
 from copy import deepcopy
 from datetime import timedelta
 from typing import Any
@@ -603,7 +602,7 @@ class ServiceAutonomousRunMixin:
         self._parse_iso(source_started_at)
         origin_kind = str(source_current_input.get("source_kind") or "user_message").strip() or "user_message"
         run = {
-            "run_id": f"autonomous_run:{uuid.uuid4().hex}",
+            "run_id": self.store.allocate_id("autonomous_run"),
             "memory_set_id": state["selected_memory_set_id"],
             "status": "active",
             "objective_summary": objective_summary,
@@ -748,7 +747,7 @@ class ServiceAutonomousRunMixin:
             mode="cancel_existing",
         )
         self.store.append_events(events=[{
-            "event_id": f"event:{uuid.uuid4().hex}", "cycle_id": cycle_id,
+            "event_id": self.store.allocate_id("event"), "cycle_id": cycle_id,
             "memory_set_id": state["selected_memory_set_id"], "created_at": current_time,
             "kind": "autonomous_run_intervention", "role": "system", "text": None,
             "cancel_run_ids": cancelled, "reason_summary": intervention["reason_summary"],
@@ -2048,7 +2047,7 @@ class ServiceAutonomousRunMixin:
     ) -> dict[str, Any]:
         observed_persons = self._observed_persons_from_mcp_observation(observation_summary)
         event = {
-            "event_id": f"event:{uuid.uuid4().hex}",
+            "event_id": self.store.allocate_id("event"),
             "cycle_id": self._autonomous_run_event_cycle_id(run),
             "memory_set_id": run["memory_set_id"],
             "kind": "capability_result",
@@ -2384,7 +2383,7 @@ class ServiceAutonomousRunMixin:
         participant_refs = list(interaction.participant_refs) if interaction is not None else []
         persona_id = state["selected_persona_id"]
         event = {
-            "event_id": f"event:{uuid.uuid4().hex}",
+            "event_id": self.store.allocate_id("event"),
             "cycle_id": self._autonomous_run_event_cycle_id(run),
             "memory_set_id": run["memory_set_id"],
             "kind": "speech",
@@ -2434,7 +2433,7 @@ class ServiceAutonomousRunMixin:
         self._broadcast_system_notice(notice)
         events = [
             {
-                "event_id": f"event:{uuid.uuid4().hex}",
+                "event_id": self.store.allocate_id("event"),
                 "cycle_id": self._autonomous_run_event_cycle_id(run),
                 "memory_set_id": run["memory_set_id"],
                 "kind": "pre_send_check",
@@ -2449,7 +2448,7 @@ class ServiceAutonomousRunMixin:
         if conversation_visible:
             events.append(
                 {
-                    "event_id": f"event:{uuid.uuid4().hex}",
+                    "event_id": self.store.allocate_id("event"),
                     "cycle_id": self._autonomous_run_event_cycle_id(run),
                     "memory_set_id": run["memory_set_id"],
                     "kind": "system_notice",
@@ -2476,7 +2475,7 @@ class ServiceAutonomousRunMixin:
         self.store.append_events(
             events=[
                 {
-                    "event_id": f"event:{uuid.uuid4().hex}",
+                    "event_id": self.store.allocate_id("event"),
                     "cycle_id": self._autonomous_run_event_cycle_id(run),
                     "memory_set_id": run["memory_set_id"],
                     "kind": "pre_send_check",
@@ -2498,7 +2497,7 @@ class ServiceAutonomousRunMixin:
         current_time: str,
     ) -> dict[str, Any]:
         event = {
-            "event_id": f"event:{uuid.uuid4().hex}",
+            "event_id": self.store.allocate_id("event"),
             "cycle_id": self._autonomous_run_event_cycle_id(run),
             "memory_set_id": run["memory_set_id"],
             "kind": "autonomous_run_terminal",
@@ -2844,7 +2843,7 @@ class ServiceAutonomousRunMixin:
         source_cycle_id = run.get("source_cycle_id")
         if isinstance(source_cycle_id, str) and source_cycle_id.strip():
             return source_cycle_id.strip()
-        return f"cycle:{uuid.uuid4().hex}"
+        return self.store.allocate_id("cycle")
 
     def _emit_autonomous_run_assistant_message_event(
         self,

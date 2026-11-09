@@ -227,7 +227,7 @@ class VisionCaptureSkipResultTests(unittest.TestCase):
             patch.object(self.service, "_run_wake_policy_observation", side_effect=summaries),
         ):
             return self.service._run_wake_policy_observations(
-                acquisition=ObservationAcquisition("memory_set:test", 300),
+                acquisition=ObservationAcquisition("memory_set:test", 300, self.service.store.allocate_id),
                 state={"camera_sources": {}}, started_at="2026-08-14T12:00:00+09:00",
                 client_context={"source": "background_thinking_scheduler"}, cycle_id=None,
                 for_background_thinking=False,
@@ -304,7 +304,7 @@ class VisionCaptureSkipResultTests(unittest.TestCase):
         self.service._refresh_world_state_context = lambda **kwargs: called.append("world")
         self.service._refresh_activity_context = lambda **kwargs: called.append("activity")
         summary = self.service._apply_wake_policy_observation_result(
-            acquisition=ObservationAcquisition("memory_set:test", 300),
+            acquisition=ObservationAcquisition("memory_set:test", 300, self.service.store.allocate_id),
             state={"selected_memory_set_id": "memory_set:test"},
             started_at="2026-08-14T12:00:00+09:00",
             observation={

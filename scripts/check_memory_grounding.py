@@ -73,17 +73,26 @@ def main():
     if client._is_mock_model_config(model):
         raise ValueError('実モデル設定が必要です。')
     args.artifact_dir.mkdir(parents=True, exist_ok=False)
+    from otomekairo.store.file_store import SQLiteMemoryStore
+    identifiers = SQLiteMemoryStore(args.artifact_dir / 'data')
     results = []
     for repetition in range(args.repetitions):
         for case in CASES:
+            cycle_id = identifiers.allocate_id('cycle')
             context = {
                 'trigger_kind': 'user_message', 'input_event_kind': 'conversation_input', 'input_event_role': 'person',
                 'current_input': {'sender_kind': 'person', 'sender_ref': 'person:test', 'text': case['input']},
                 'people_context': [{'person_ref': 'person:test', 'display_name': 'マスター'}],
-                'current_visual_observations': [{'summary_text': case['observation']}] if 'observation' in case else [],
+                'events': [
+                    {'event_id': identifiers.allocate_id('event'), 'kind': kind, 'role': role,
+                     'cycle_id': cycle_id,
+                     'speaker_ref': 'person:test' if role == 'person' else 'self'}
+                    for kind, role in (('conversation_input', 'person'), ('speech', 'assistant'), ('decision', 'system'))
+                ],
+                'current_visual_observations': [{'visual_observation_id': identifiers.allocate_id('visual_observation'), 'summary_text': case['observation']}] if 'observation' in case else [],
             }
             if 'run' in case:
-                context['autonomous_run_summary'] = case['run']
+                context['autonomous_run_summary'] = {**case['run'], 'run_id': identifiers.allocate_id('autonomous_run')}
             output = client.generate_memory_interpretation(
                 model_config=model, persona_context=build_persona_context(persona, role='memory_interpretation'),
                 input_text=case['input'], recall_hint={},

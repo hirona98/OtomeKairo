@@ -38,7 +38,7 @@ def build_summary_source_pack(
                         event = events_by_id[event_id]
                         if event["event_id"] != event_id:
                             raise ValueError("内省要約の根拠イベントIDが一致しません。")
-                        ref = f"source_event:{len(source_events)}"
+                        ref = event_id
                         event_refs[event_id] = ref
                         source = {
                             key: deepcopy(event[key]) for key in (

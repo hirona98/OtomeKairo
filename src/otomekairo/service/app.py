@@ -57,7 +57,7 @@ class OtomeKairoService(
         initial_state = self.store.read_state()
         self._environment_runtime = EnvironmentRuntime(validate_environment_config(
             initial_state["environment_settings"], camera_sources=initial_state["camera_sources"],
-        ))
+        ), resolve_ids=self.store.resolve_observation_ids)
         self._agent_skill_registry = AgentSkillRegistry.load(
             self.store.read_state().get("agent_skill_sources", {})
         )

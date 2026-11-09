@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import unittest
 from unittest.mock import Mock
+from types import SimpleNamespace
+from identifier_fixtures import id_allocator
 from datetime import datetime
 
 from otomekairo.service.input.activity import ServiceInputActivityMixin
 
 
 class DummyActivityService(ServiceInputActivityMixin):
+    def __init__(self):
+        self.store = SimpleNamespace(allocate_id=id_allocator())
+
     def _parse_iso(self, value: str) -> datetime:
         return datetime.fromisoformat(value)
 

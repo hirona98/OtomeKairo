@@ -71,7 +71,7 @@ class WakeObservationSourceReadyTests(unittest.TestCase):
 
     def _run_periodic_observations(self, state: dict) -> dict:
         return self.service._run_wake_policy_observations(
-            acquisition=ObservationAcquisition("memory_set:test", 300),
+            acquisition=ObservationAcquisition("memory_set:test", 300, self.service.store.allocate_id),
             state=state,
             started_at=NOW,
             client_context={"source": "background_thinking_scheduler"},

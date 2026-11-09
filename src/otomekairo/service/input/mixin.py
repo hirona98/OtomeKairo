@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import secrets
-import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -687,7 +686,7 @@ class ServiceInputMixin(
 
     def _new_cycle_id(self) -> str:
         # 識別子
-        return f"cycle:{uuid.uuid4().hex}"
+        return self.store.allocate_id("cycle")
 
     def _now_iso(self) -> str:
         # タイムスタンプ

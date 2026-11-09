@@ -4,7 +4,7 @@ import hashlib
 import threading
 from typing import Any
 
-from otomekairo.memory.utils import local_now, visual_daily_digest_id, visual_daily_group_id
+from otomekairo.memory.utils import local_now
 from otomekairo.llm.contexts import build_persona_context
 from otomekairo.llm.visual_daily import validate_support
 from otomekairo.service.common import debug_log, format_debug_log_text
@@ -299,11 +299,13 @@ class ServiceVisualDailyMixin:
 
     def _visual_daily_digest_id(self, *, memory_set_id: str, local_date: str) -> str:
         # 安定ID
-        return visual_daily_digest_id(memory_set_id=memory_set_id, local_date=local_date)
+        return self.store.resolve_internal_id("daily_visual_digest", scope=memory_set_id, key=local_date)
 
     def _visual_daily_group_id(self, *, memory_set_id: str, local_date: str, index: int) -> str:
         # 安定ID
-        return visual_daily_group_id(memory_set_id=memory_set_id, local_date=local_date, index=index)
+        return self.store.resolve_internal_id(
+            "visual_duplicate_group", scope=memory_set_id, key=f"{local_date}:{index}",
+        )
 
     @guard_memory_set_work
     def _run_due_visual_daily_promotions(self, *, memory_set_id: str) -> None:
@@ -460,7 +462,7 @@ class ServiceVisualDailyMixin:
             if previous_digest["result_status"] != "succeeded":
                 continue
             for previous_candidate in previous_digest.get("memory_candidate_summaries", []):
-                evidence[f"past:{len(evidence)}"] = {
+                evidence[previous_candidate["duplicate_group_id"]] = {
                     **previous_candidate, "digest_id": previous_digest["digest_id"],
                     "local_date": previous_digest["local_date"],
                 }
@@ -471,11 +473,10 @@ class ServiceVisualDailyMixin:
             comparison = self.store.load_visual_daily_comparison_memories(
                 memory_set_id=digest["memory_set_id"], topic_refs=topic_refs, memory_unit_ids=promoted_ids)
             sources = {candidate["source_key"] for candidate in candidates}
-            memories = {f"memory:{index}": item for index, item in enumerate(
-                item for item in comparison if item["source_key"] in sources)}
+            memories = {item["memory_unit"]["memory_unit_id"]: item for item in comparison if item["source_key"] in sources}
         context = {
             "local_date": digest["local_date"],
-            "candidates": [{"candidate_index": index, "group_ref": f"current:{index}",
+            "candidates": [{"candidate_index": index, "group_ref": item["duplicate_group_id"],
                             "source_key": item["source_key"], "summary_text": item["summary_text"]}
                            for index, item in enumerate(candidates)],
             "evidence": [{"evidence_ref": ref, "local_date": item["local_date"],

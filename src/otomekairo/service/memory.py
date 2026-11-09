@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import queue
 import threading
-import uuid
 from typing import Any
 
 from otomekairo.llm.contexts import fresh_visual_observations_from_capability_view
@@ -833,7 +832,7 @@ class ServiceMemoryMixin:
     ) -> dict[str, Any]:
         # イベント
         return {
-            "event_id": f"event:{uuid.uuid4().hex}",
+            "event_id": self.store.allocate_id("event"),
             "cycle_id": cycle_id,
             "memory_set_id": memory_set_id,
             "kind": kind,

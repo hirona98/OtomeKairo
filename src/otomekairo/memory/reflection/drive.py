@@ -349,7 +349,7 @@ class MemoryReflectionDriveMixin:
             "supporting_memory_unit_ids": supporting_memory_unit_ids[:DRIVE_MAX_SUPPORTING_MEMORY_UNITS],
         }
         return {
-            "drive_id": f"drive:{stable_json(drive_signature)[:20]}",
+            "drive_id": self.store.resolve_internal_id("drive", scope=memory_set_id, key=stable_json(drive_signature)),
             "memory_set_id": memory_set_id,
             "drive_kind": drive_kind,
             "summary_text": lead["summary_text"],

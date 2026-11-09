@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
+from identifier_fixtures import id_allocator
 
 from otomekairo.evidence import EvidenceResolver
 from otomekairo.llm.prompts import _compact_recall_pack
@@ -114,6 +115,7 @@ class RecallEvidenceStatusTests(unittest.TestCase):
                 self.assertEqual(stages["event:missing"], "load_event")
                 self.assertEqual(stages["event:invalid"], "validate_event" if records else "load_event")
                 service = ServiceMemoryMixin()
+                service.store = SimpleNamespace(allocate_id=id_allocator())
                 audits = service._build_event_evidence_audit_events(
                     cycle_id="cycle:test", memory_set_id="memory_set:test",
                     created_at="2026-10-04T09:00:00+09:00", recall_pack=result,

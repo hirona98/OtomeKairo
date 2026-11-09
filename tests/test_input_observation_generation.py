@@ -1,4 +1,5 @@
 import json
+from identifier_fixtures import id_allocator
 from unittest.mock import patch
 
 import pytest
@@ -10,7 +11,7 @@ from otomekairo.llm.contracts import LLMError
 from otomekairo.observations.acquisition import ObservationAcquisition
 
 PERSONA = PersonaContext("Test", "観測を確かめて判断する。", None, "判断の基底。")
-ROW = {"observation_ref": "observation:1", "summary_text": "白い縦長の容器に赤い花が見える。中身は判別できない。",
+ROW = {"observation_ref": "visual_observation:1", "summary_text": "白い縦長の容器に赤い花が見える。中身は判別できない。",
        "confidence_hint": "medium", "change_state": "first_seen", "change_basis": "no_previous_observation",
        "change_reason_summary": "同じ取得元の前回観測がない。"}
 
@@ -37,7 +38,7 @@ def test_input_interpretation_reads_image_and_returns_observations_in_one_comple
     assert [part["image_url"]["url"] for part in image_parts] == [IMAGE]
     surroundings = next(value for value in text_payloads(request["messages"]) if "observation_comparisons" in value)
     assert surroundings["observation_comparisons"] == [{
-        "observation_ref": "observation:1", "source_identity_changed": False,
+        "observation_ref": "visual_observation:1", "source_identity_changed": False,
         "previous_observation_context": None, "last_prompted_observation_context": None,
     }]
 
@@ -64,7 +65,7 @@ def test_input_interpretation_repairs_json_with_the_same_image():
 
 
 def test_input_interpretation_repairs_missing_comparison_per_observation_with_recent_conversation():
-    acquisition = ObservationAcquisition("memory_set:test", 300)
+    acquisition = ObservationAcquisition("memory_set:test", 300, id_allocator())
     previous = {"summary_text": "机と椅子が見える。", "observed_at": STAMP}
     for kind in ("desktop", "camera"):
         acquisition.add_image(
@@ -76,8 +77,8 @@ def test_input_interpretation_repairs_missing_comparison_per_observation_with_re
     context = acquisition.freeze(snapshot_at=STAMP, sensor_observations=(), sensor_reports=())
     stable = {**ROW, "change_state": "stable", "change_basis": "semantic_stability",
               "change_reason_summary": "前回と主要な配置は同じ。"}
-    invalid = input_payload(observations=[stable, {**stable, "observation_ref": "observation:2"}])
-    corrected_row = {**ROW, "observation_ref": "observation:2"}
+    invalid = input_payload(observations=[stable, {**stable, "observation_ref": "visual_observation:2"}])
+    corrected_row = {**ROW, "observation_ref": "visual_observation:2"}
     corrected = input_payload(observations=[stable, corrected_row])
     turns = [{"role": "assistant", "text": "カメラには机と椅子が見えます。", "created_at": STAMP}]
     with patch("otomekairo.llm.client.complete_text", side_effect=[json.dumps(invalid), json.dumps(corrected)]) as complete:
@@ -91,16 +92,16 @@ def test_input_interpretation_repairs_missing_comparison_per_observation_with_re
         assert next(value for value in values if "recent_turns" in value)["recent_turns"] == turns
         comparisons = next(value for value in values if "observation_comparisons" in value)["observation_comparisons"]
         assert comparisons == [
-            {"observation_ref": "observation:1", "source_identity_changed": False,
+            {"observation_ref": "visual_observation:1", "source_identity_changed": False,
              "previous_observation_context": previous, "last_prompted_observation_context": None, "same_sample": False},
-            {"observation_ref": "observation:2", "source_identity_changed": False,
+            {"observation_ref": "visual_observation:2", "source_identity_changed": False,
              "previous_observation_context": None, "last_prompted_observation_context": None},
         ]
         image_parts = [part for message in request["messages"] if isinstance(message["content"], list)
                        for part in message["content"] if part["type"] == "image_url"]
         assert [part["image_url"]["url"] for part in image_parts] == [IMAGE, IMAGE]
     repair = requests[1]["messages"][-1]["content"]
-    assert "observation:2" in repair
+    assert "visual_observation:2" in repair
     assert "previous_observation_context=null" in repair
     assert "change_state=first_seen, change_basis=no_previous_observation" in repair
     acquisition.close()
@@ -124,7 +125,7 @@ def test_input_interpretation_repairs_comparison_prerequisites(comparisons, inva
         assert generate(context)["observation_interpretations"] == [corrected]
     assert complete.call_count == 2
     repair = complete.call_args.kwargs["messages"][-1]["content"]
-    assert "observation:1" in repair
+    assert "visual_observation:1" in repair
     assert "source_identity_changed" in repair
 
 

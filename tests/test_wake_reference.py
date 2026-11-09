@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from identifier_fixtures import id_allocator
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -252,7 +254,7 @@ class WakeReferenceTests(unittest.TestCase):
         service = DummyImmediateWakePipeline()
 
         pipeline, input_text, _ = service._run_wake_pipeline(
-            acquisition=ObservationAcquisition("memory_set:test", 300),
+            acquisition=ObservationAcquisition("memory_set:test", 300, id_allocator()),
             state={"wake_policy": {"mode": "disabled", "interval_seconds": 300}},
             started_at="2026-07-05T12:00:00+09:00",
             trigger_kind="wake",
@@ -275,7 +277,7 @@ class WakeReferenceTests(unittest.TestCase):
         service.due_should_skip = False
 
         service._run_wake_pipeline(
-            acquisition=ObservationAcquisition("memory_set:test", 300),
+            acquisition=ObservationAcquisition("memory_set:test", 300, id_allocator()),
             state={"wake_policy": {"mode": "interval", "interval_seconds": 300}},
             started_at="2026-07-05T12:00:00+09:00",
             trigger_kind="background_thinking",
@@ -306,7 +308,7 @@ class WakeReferenceTests(unittest.TestCase):
         service.due_should_skip = False
 
         pipeline, _, client_context = service._run_wake_pipeline(
-            acquisition=ObservationAcquisition("memory_set:test", 300),
+            acquisition=ObservationAcquisition("memory_set:test", 300, id_allocator()),
             state={"wake_policy": {"mode": "interval", "interval_seconds": 300}},
             started_at="2026-07-05T12:00:00+09:00",
             trigger_kind="background_thinking",

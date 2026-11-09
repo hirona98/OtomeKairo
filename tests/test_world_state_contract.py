@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import unittest
+from types import SimpleNamespace
+from identifier_fixtures import id_allocator
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from datetime import datetime
@@ -28,6 +30,9 @@ from otomekairo.world_state.models import (
 
 
 class _WorldStateService(ServiceInputWorldStateMixin):
+    def __init__(self):
+        self.store = SimpleNamespace(allocate_id=id_allocator())
+
     # 実サービスの時刻変換境界だけをテスト用に与える。
     def _parse_iso(self, value: str) -> datetime:
         return datetime.fromisoformat(value)

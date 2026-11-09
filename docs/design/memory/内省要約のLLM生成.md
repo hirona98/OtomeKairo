@@ -251,7 +251,7 @@ LLM の出力は JSON object 1 個に固定する。
 
 トップレベルキーは `summaries` だけである。
 各要素は `scope_ref` と `summary_text` だけを持つ。
-`scope_ref` は source pack にある request-local ref だけを使う。
+`scope_ref` は source pack にある request-local ref だけを使う。一次資料表`source_events`は根拠eventの正本IDをキーとする。資料の参照方式は [LLM補助契約共通](../llm/LLM補助契約共通.md) を参照する。
 各バッチで渡された `scope_ref` ごとに、対応する項目をちょうど 1 件ずつ返す。
 
 `summary_text` の契約は次とする。

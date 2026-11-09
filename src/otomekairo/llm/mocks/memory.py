@@ -54,7 +54,7 @@ class LLMMockMemoryMixin:
         for candidate in candidate_memory_units:
             source = candidate["qualifiers_hint"].pop("source", "inference")
             candidate["grounding"] = {
-                "evidence_refs": ["input"],
+                "evidence_refs": [next(item["ref"] for item in memory_context["evidence_sources"] if "input" in item["usage_roles"])],
                 "support_kind": {"explicit_statement": "person_statement", "explicit_correction": "person_correction",
                                  "explicit_confirmation": "person_confirmation"}.get(source, "inference"),
                 "retention": "long_term", "retention_reason": "モックで継続理解として設定された候補。",

@@ -176,7 +176,7 @@ def validate_support(payload: dict[str, Any], context: dict[str, Any]) -> None:
             if not isinstance(claim["group_ref"], str) or not isinstance(claim["claim_text"], str) or not claim["claim_text"].strip():
                 raise LLMError("VisualDailySupport 根拠ごとの主張が不正です。")
             claim_refs.append(claim["group_ref"])
-        current_refs = {f"current:{index}" for index in indexes}
+        current_refs = {context["candidates"][index]["group_ref"] for index in indexes}
         allowed_claim_refs = current_refs | {ref for ref, record in evidence.items()
                                             if record["source_key"] in sources and record["local_date"] < context["local_date"]}
         expected_refs = current_refs | set(refs)

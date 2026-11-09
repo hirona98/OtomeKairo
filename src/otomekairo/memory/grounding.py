@@ -23,54 +23,72 @@ def memory_evidence_sources(
     *, input_text: str, speech_text: str | None, decision: dict[str, Any],
     memory_context: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
-    """入力の出所をコードで確定し、生成内で参照する資料表を作る。"""
+    """一次資料を正本IDごとに一件へまとめ、当回の用途と発話者を保持する。"""
     context = memory_context or {}
-    current = context.get("current_input") or {}
-    speaker = current.get("sender_ref")
-    role = context.get("input_event_role") or current.get("sender_kind")
-    if role is None and isinstance(speaker, str) and speaker.startswith("person:"):
-        role = "person"
-    sources = [{"ref": "input", "kind": context.get("input_event_kind", "input"), "role": role or "unknown",
-                "speaker_ref": speaker, "text": input_text}]
-    input_events = [event for event in context.get("events", [])
-                    if event.get("kind") == context.get("input_event_kind", "conversation_input")]
-    if len(input_events) == 1:
-        sources[0].update({key: input_events[0][key] for key in ("event_id", "cycle_id") if key in input_events[0]})
-    if speech_text:
-        sources.append({"ref": "speech", "kind": "speech", "role": "assistant", "text": speech_text})
-        speech_events = [event for event in context.get("events", []) if event.get("kind") == "speech"]
-        if len(speech_events) == 1:
-            sources[-1].update({key: speech_events[0][key] for key in ("event_id", "cycle_id") if key in speech_events[0]})
-    sources.append({"ref": "decision", "kind": "decision", "role": "system", "payload": decision})
-    for index, event in enumerate(context.get("events", []), 1):
-        sources.append({"ref": f"event:{index}", **{k: event[k] for k in (
+    by_ref: dict[str, dict[str, Any]] = {}
+
+    def add(ref: str, usage: str, **fields: Any) -> dict[str, Any]:
+        if not isinstance(ref, str) or not ref:
+            raise ValueError(f"Memory evidence requires a canonical ID: {usage}")
+        source = by_ref.setdefault(ref, {"ref": ref, "usage_roles": []})
+        source.update(fields)
+        if usage not in source["usage_roles"]:
+            source["usage_roles"].append(usage)
+        return source
+
+    events = context.get("events", [])
+    for event in events:
+        add(event["event_id"], "event", **{key: event[key] for key in (
             "event_id", "cycle_id", "kind", "role", "speaker_ref", "created_at", "text_summary",
             "terminal_status", "run_id",
-        ) if k in event}})
-    for index, turn in enumerate(context.get("person_utterances", []), 1):
-        sources.append({"ref": f"utterance:{index}", "kind": "person_utterance", "role": "person",
-                        **{k: turn[k] for k in ("event_id", "cycle_id", "speaker_ref", "text", "created_at") if k in turn}})
-    for index, observation in enumerate(context.get("current_visual_observations") or [], 1):
-        sources.append({"ref": f"observation:{index}", "kind": "observation", "role": "observation",
-                        "payload": observation, **{key: observation[key] for key in (
-                            "visual_observation_id", "observation_id", "vision_source_id", "request_id", "observed_at",
-                        ) if key in observation}})
-    for key in ("observation_summary", "autonomous_run_summary"):
-        if context.get(key):
-            sources.append({"ref": key, "kind": "execution", "role": "system", "payload": context[key],
-                            **{k: context[key][k] for k in ("run_id", "status") if k in context[key]}})
-    for source in sources:
+        ) if key in event})
+    input_events = [event for event in events
+                    if event.get("kind") == context.get("input_event_kind", "conversation_input")]
+    if len(input_events) != 1:
+        raise ValueError("Memory evidence requires exactly one current input event.")
+    current = context.get("current_input") or {}
+    source = add(input_events[0]["event_id"], "input", text=input_text)
+    if "role" not in source:
+        source["role"] = context.get("input_event_role") or current.get("sender_kind") or "unknown"
+    if "speaker_ref" not in source and current.get("sender_ref"):
+        source["speaker_ref"] = current["sender_ref"]
+    if source["role"] == "unknown" and str(source.get("speaker_ref", "")).startswith("person:"):
+        source["role"] = "person"
+    if context.get("observation_summary"):
+        add(source["ref"], "observation_result", observation_summary=context["observation_summary"])
+    for event in events:
+        if event.get("kind") == "speech" and speech_text:
+            add(event["event_id"], "speech", text=speech_text)
+        elif event.get("kind") == "decision":
+            add(event["event_id"], "decision", payload=decision)
+    for turn in context.get("person_utterances", []):
+        ref = turn["event_id"]
+        fields = {key: turn[key] for key in ("event_id", "cycle_id", "speaker_ref", "text", "created_at") if key in turn}
+        if ref not in by_ref:
+            fields.update(kind="person_utterance", role="person")
+        add(ref, "utterance", **fields)
+    for observation in context.get("current_visual_observations") or []:
+        ref = observation["visual_observation_id"] if "visual_observation_id" in observation else observation["observation_id"]
+        add(ref, "observation", kind="observation", role="observation", payload=observation,
+            **{key: observation[key] for key in (
+                "visual_observation_id", "observation_id", "vision_source_id", "request_id", "observed_at",
+            ) if key in observation})
+    if context.get("autonomous_run_summary"):
+        run = context["autonomous_run_summary"]
+        add(run["run_id"], "autonomous_run", kind="execution", role="system", payload=run,
+            **{key: run[key] for key in ("run_id", "status") if key in run})
+    for source in by_ref.values():
         allowed = {"inference", "unsupported"}
         if source.get("role") == "person":
             allowed.update(PERSON_SUPPORT_KINDS)
-        if source.get("kind") == "speech" or source["ref"] == "autonomous_run_summary":
+        if source.get("kind") == "speech" or "autonomous_run" in source["usage_roles"]:
             allowed.add("self_commitment")
-        if source.get("kind") in {"observation", "execution", "capability_result", "autonomous_run_terminal"}:
+        if source.get("kind") in {"observation", "execution", "capability_result", "autonomous_run_terminal"} or "observation_result" in source["usage_roles"]:
             allowed.add("verified_result")
         if source.get("cycle_id") and source.get("kind") not in {"decision", "event_evidence_precise_check"}:
             allowed.add("independent_events")
         source["support_kinds"] = sorted(allowed)
-    return sources
+    return list(by_ref.values())
 
 
 def validate_memory_grounding(candidate: dict[str, Any], sources: list[dict[str, Any]] | None = None) -> None:
@@ -97,14 +115,17 @@ def validate_memory_grounding(candidate: dict[str, Any], sources: list[dict[str,
     if sources is None:
         return
     by_ref = {source["ref"]: source for source in sources}
-    if any(ref not in by_ref for ref in refs):
-        raise ValueError("grounding.evidence_refs は evidence_sources に提示された参照を使います。")
+    unknown = [ref for ref in refs if ref not in by_ref]
+    if unknown:
+        raise ValueError(
+            f"grounding.evidence_refs は提示された正本IDを使います。unknown_refs={unknown!r}; allowed_refs={list(by_ref)!r}"
+        )
     selected = [by_ref[ref] for ref in refs]
     if (kind not in {"self_commitment", "independent_events"}
             and grounding["retention"] == "long_term" and not any(
                 source.get("role") in {"person", "observation", "capability"}
                 or source.get("kind") in {"capability_result", "autonomous_run_terminal"}
-                or source["ref"] == "observation_summary"
+                or "observation_result" in source.get("usage_roles", [])
                 for source in selected
             )):
         raise ValueError("単回の自己の発話・判断だけを根拠にした候補は episode_only に置きます。長期理解は本人発話・観測・実行結果などの一次経験に結び付けます。")
@@ -120,7 +141,7 @@ def validate_memory_grounding(candidate: dict[str, Any], sources: list[dict[str,
     if kind == "self_commitment":
         if (candidate["memory_type"] != "commitment"
                 or candidate["qualifiers_hint"].get("commitment_actor") != "self"
-                or not any(source.get("kind") == "speech" or source["ref"] == "autonomous_run_summary"
+                or not any(source.get("kind") == "speech" or "autonomous_run" in source.get("usage_roles", [])
                            for source in selected)):
             raise ValueError("self_commitment は自己の応答・実行登録を根拠とする commitment_actor=self の commitment です。約束以外の単回の自己表現は episode_only に置きます。")
     if kind == "verified_result" and not any(
