@@ -630,6 +630,7 @@ class ServiceConfigInspectionMixin:
             if not isinstance(scope_type, str) or not isinstance(scope_key, str):
                 continue
             summary = {
+                "world_state_id": world_state["world_state_id"],
                 "state_type": world_state.get("state_type"),
                 "scope": self._world_state_scope_ref(scope_type=scope_type, scope_key=scope_key),
                 "summary_text": world_state.get("summary_text"),

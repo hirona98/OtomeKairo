@@ -77,6 +77,10 @@ def memory_evidence_sources(
         run = context["autonomous_run_summary"]
         add(run["run_id"], "autonomous_run", kind="execution", role="system", payload=run,
             **{key: run[key] for key in ("run_id", "status") if key in run})
+    available_cycles = {
+        source["cycle_id"] for source in by_ref.values()
+        if source.get("cycle_id") and source.get("kind") not in {"decision", "event_evidence_precise_check"}
+    }
     for source in by_ref.values():
         allowed = {"inference", "unsupported"}
         if source.get("role") == "person":
@@ -85,7 +89,7 @@ def memory_evidence_sources(
             allowed.add("self_commitment")
         if source.get("kind") in {"observation", "execution", "capability_result", "autonomous_run_terminal"} or "observation_result" in source["usage_roles"]:
             allowed.add("verified_result")
-        if source.get("cycle_id") and source.get("kind") not in {"decision", "event_evidence_precise_check"}:
+        if len(available_cycles) >= 2 and source.get("cycle_id") and source.get("kind") not in {"decision", "event_evidence_precise_check"}:
             allowed.add("independent_events")
         source["support_kinds"] = sorted(allowed)
     return list(by_ref.values())
@@ -128,9 +132,15 @@ def validate_memory_grounding(candidate: dict[str, Any], sources: list[dict[str,
                 or "observation_result" in source.get("usage_roles", [])
                 for source in selected
             )):
-        raise ValueError("単回の自己の発話・判断だけを根拠にした候補は episode_only に置きます。長期理解は本人発話・観測・実行結果などの一次経験に結び付けます。")
+        selected_roles = [(source["ref"], source.get("kind"), source.get("role")) for source in selected]
+        raise ValueError(
+            "長期理解は本人発話・観測・実行結果などの一次経験に結び付けます。"
+            "単回のシステム通知や自己の発話・判断だけの候補は episode_only に置き、その出来事をepisodeに記録します。"
+            f"selected_sources(ref, kind, role)={selected_roles!r}"
+        )
     if not any(kind in source["support_kinds"] for source in selected):
-        raise ValueError("grounding.support_kind は参照資料の support_kinds と整合させます。")
+        allowed = {source["ref"]: source["support_kinds"] for source in selected}
+        raise ValueError(f"grounding.support_kind は参照資料の support_kinds から選びます。allowed_support_kinds={allowed!r}")
     if kind in PERSON_SUPPORT_KINDS:
         person_sources = [source for source in selected if source.get("role") == "person"]
         if not person_sources:

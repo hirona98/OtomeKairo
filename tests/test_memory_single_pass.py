@@ -123,6 +123,48 @@ def test_evidence_uses_canonical_ids_and_merges_current_input_and_utterance(turn
     assert completion.call_count == 1
 
 
+def test_single_cycle_sources_do_not_offer_independent_events(turn):
+    consolidator, _, arguments, completion = turn
+    consolidator.consolidate_turn(**arguments)
+    request = json.loads(completion.call_args.kwargs["messages"][1]["content"].splitlines()[1])
+    assert all("independent_events" not in source["support_kinds"] for source in request["memory_context"]["evidence_sources"])
+
+
+def test_distinct_cycle_sources_still_allow_independent_events(turn):
+    consolidator, store, arguments, completion = turn
+    previous = {**arguments["events"][0], "event_id": "event:previous", "cycle_id": "cycle:previous"}
+    store.append_events(events=[previous])
+    arguments["memory_context"]["person_utterances"].append(previous)
+    payload = interpretation()
+    payload["candidate_memory_units"][0]["grounding"] = grounding(
+        refs=["event:input", "event:previous"], support="independent_events",
+    )
+    completion.return_value = provider_response(payload)
+    trace, _ = consolidator.consolidate_turn(**arguments)
+    assert trace["turn_consolidation_status"] == "succeeded"
+    assert trace["memory_action_count"] == 1
+    assert completion.call_count == 1
+
+
+def test_system_notification_is_repaired_as_an_episode_without_weakening_long_term_validation(turn):
+    consolidator, store, arguments, completion = turn
+    arguments["events"][0].update(kind="wake_input", role="system", speaker_ref=None)
+    arguments["memory_context"].update(input_event_kind="wake_input", input_event_role="system", person_utterances=[])
+    store.append_events(events=arguments["events"])
+    rejected = interpretation()
+    rejected["candidate_memory_units"][0]["grounding"] = grounding(support="inference")
+    accepted = deepcopy(rejected)
+    accepted["candidate_memory_units"][0]["grounding"].update(retention="episode_only", retention_reason="今回受け取った完了通知として残す。")
+    completion.side_effect = [provider_response(rejected), provider_response(accepted)]
+    trace, _ = consolidator.consolidate_turn(**arguments)
+    assert trace["turn_consolidation_status"] == "succeeded"
+    assert trace["memory_action_count"] == 0
+    assert completion.call_count == 2
+    repair = completion.call_args.kwargs["messages"][-1]["content"]
+    assert "selected_sources(ref, kind, role)=[('event:input', 'wake_input', 'system')]" in repair
+    assert "episode_only" in repair
+
+
 def test_unknown_evidence_id_is_repaired_with_the_offered_canonical_ids(turn):
     consolidator, _, arguments, completion = turn
     rejected = interpretation()

@@ -164,33 +164,34 @@ class AudioRuntime:
         return session_id
 
     def unregister_connection(self, session_id: str) -> None:
-        publish = False
         with self._condition:
-            connection = self._connections.pop(session_id, None)
-            if connection is None:
-                return
-            if connection.endpoint_source == "local_microphone":
-                publish = True
-            if self._active_connection is connection:
-                self._release_active_locked()
-                publish = True
-            if (
-                connection.endpoint_source == "web_microphone"
-                and self._web_input_session is not None
-                and connection.client_id
-                == self._web_input_session["owner_client_id"]
-            ):
-                self._web_input_session = None
-                publish = True
-            if (
-                self._enrollment is not None
-                and connection.endpoint_source == "web_microphone"
-                and connection.client_id == self._enrollment["owner_client_id"]
-            ):
-                self._cancel_enrollment_locked()
-                publish = True
+            publish = self._unregister_connection_locked(session_id)
         if publish:
             self._publish_state(force=True)
+
+    def _unregister_connection_locked(self, session_id: str) -> bool:
+        connection = self._connections.pop(session_id, None)
+        if connection is None:
+            return False
+        publish = connection.endpoint_source == "local_microphone"
+        if self._active_connection is connection:
+            self._release_active_locked()
+            publish = True
+        if (
+            connection.endpoint_source == "web_microphone"
+            and self._web_input_session is not None
+            and connection.client_id == self._web_input_session["owner_client_id"]
+        ):
+            self._web_input_session = None
+            publish = True
+        if (
+            self._enrollment is not None
+            and connection.endpoint_source == "web_microphone"
+            and connection.client_id == self._enrollment["owner_client_id"]
+        ):
+            self._cancel_enrollment_locked()
+            publish = True
+        return publish
 
     def handle_message(
         self,
@@ -267,13 +268,11 @@ class AudioRuntime:
             self._web_input_session = None
             active = self._active_connection
             if active is not None:
-                active.websocket.send_json(
-                    {
-                        "type": "audio_paused",
-                        "lease_generation": active.lease_generation,
-                        "reason": "settings_reloaded",
-                    }
-                )
+                self._send_control_locked(active, {
+                    "type": "audio_paused",
+                    "lease_generation": active.lease_generation,
+                    "reason": "settings_reloaded",
+                })
                 active.lease_generation = None
             self._active_connection = None
             self._paused_reason = None
@@ -1336,13 +1335,11 @@ class AudioRuntime:
                     >= LEASE_TIMEOUT_SECONDS
                 ):
                     timed_out = active
-                    active.websocket.send_json(
-                        {
-                            "type": "audio_error",
-                            "code": "audio_lease_timeout",
-                            "message": "The audio input lease heartbeat timed out.",
-                        }
-                    )
+                    self._send_control_locked(active, {
+                        "type": "audio_error",
+                        "code": "audio_lease_timeout",
+                        "message": "The audio input lease heartbeat timed out.",
+                    })
                     self._release_active_locked()
                     publish = True
                 if (
@@ -1382,12 +1379,10 @@ class AudioRuntime:
         if reason is None:
             if self._paused_reason is not None:
                 self._paused_reason = None
-                active.websocket.send_json(
-                    {
-                        "type": "audio_resumed",
-                        "lease_generation": active.lease_generation,
-                    }
-                )
+                self._send_control_locked(active, {
+                    "type": "audio_resumed",
+                    "lease_generation": active.lease_generation,
+                })
             return
         self._set_paused_locked(reason)
 
@@ -1432,19 +1427,29 @@ class AudioRuntime:
             return "speaker_enrollment_required"
         return None
 
+    def _send_control_locked(self, connection: AudioConnection, payload: dict[str, Any]) -> None:
+        try:
+            connection.websocket.send_json(payload)
+        except OSError as exc:
+            # 接続の失敗をそのsessionの終了へ結び付け、共有workerを維持する。
+            debug_log(
+                "Audio", f"control_send_failed session={connection.session_id} "
+                f"type={payload['type']} error={type(exc).__name__}", level="WARNING",
+            )
+            self._unregister_connection_locked(connection.session_id)
+            connection.websocket.close()
+
     def _set_paused_locked(self, reason: str) -> None:
         if self._paused_reason == reason:
             return
         self._paused_reason = reason
         active = self._active_connection
         if active is not None:
-            active.websocket.send_json(
-                {
-                    "type": "audio_paused",
-                    "lease_generation": active.lease_generation,
-                    "reason": reason,
-                }
-            )
+            self._send_control_locked(active, {
+                "type": "audio_paused",
+                "lease_generation": active.lease_generation,
+                "reason": reason,
+            })
 
     def _release_active_locked(self) -> None:
         if self._active_connection is not None:
@@ -1457,13 +1462,11 @@ class AudioRuntime:
     def _revoke_active_locked(self, reason: str) -> None:
         active = self._active_connection
         if active is not None and active.lease_generation is not None:
-            active.websocket.send_json(
-                {
-                    "type": "audio_paused",
-                    "lease_generation": active.lease_generation,
-                    "reason": reason,
-                }
-            )
+            self._send_control_locked(active, {
+                "type": "audio_paused",
+                "lease_generation": active.lease_generation,
+                "reason": reason,
+            })
             active.lease_generation = None
         self._active_connection = None
         self._paused_reason = None
