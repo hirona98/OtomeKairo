@@ -140,3 +140,4 @@ microphone connector は加えて VAD、STT、音声起動ワード判定、話�
 
 producerは取得値・単位・取得時刻を正規化し、[観測入力 API](../api/観測入力.md) へ報告する。機器固有の接続設定はconnector側に置く。受信はruntime更新だけを行い、起床や意味判断を自動で開始しない。
 Pico環境センサーの参照実装とUSB契約は [connectors/pico_environment/README.md](../../../connectors/pico_environment/README.md) を参照する。
+同producerは測定上の分類を報告し、温度の急変では既存のAPI起床を呼び出す。取得処理と通知処理は並行して動かし、具体的な分類・再通知条件は上記READMEを正とする。

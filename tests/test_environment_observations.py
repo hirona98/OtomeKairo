@@ -91,6 +91,35 @@ def test_invalid_measurements_are_explicit_failures(definition, value, unit, ide
     assert runtime.snapshot(LATER)[0] == ()
 
 
+@pytest.mark.parametrize("change", [
+    None,
+    {},
+    {"pattern": "other", "previous_value": 24, "delta": 1, "elapsed_seconds": 10},
+    {"pattern": "initial", "previous_value": 24, "delta": 1, "elapsed_seconds": 10},
+    {"pattern": "steady", "previous_value": 24, "delta": 99, "elapsed_seconds": 10},
+    {"pattern": "rapid_change", "previous_value": 24, "delta": 1, "elapsed_seconds": 0},
+    {"pattern": "rapid_change", "previous_value": 24, "delta": 1, "elapsed_seconds": True},
+    {"pattern": "rapid_change", "previous_value": float("inf"), "delta": 1, "elapsed_seconds": 10},
+])
+def test_invalid_numeric_change_rejects_entire_report(definition, identifier_store, change):
+    runtime = EnvironmentRuntime(definition, resolve_ids=identifier_store.resolve_observation_ids)
+    reading = sample(value=25)
+    reading["payload"]["change"] = change
+    with pytest.raises(ObservationError) as caught:
+        submit(runtime, reading, sample("presence", True))
+    assert caught.value.code == "invalid_sensor_value"
+    assert runtime.snapshot(LATER)[0] == ()
+
+
+def test_boolean_measurement_does_not_accept_numeric_change(definition, identifier_store):
+    runtime = EnvironmentRuntime(definition, resolve_ids=identifier_store.resolve_observation_ids)
+    reading = sample("presence", False)
+    reading["payload"]["change"] = {"pattern": "initial", "previous_value": None, "delta": None, "elapsed_seconds": None}
+    with pytest.raises(ObservationError) as caught:
+        submit(runtime, reading)
+    assert caught.value.code == "invalid_sensor_value"
+
+
 def test_conflicting_batch_is_atomic(definition, identifier_store):
     runtime = EnvironmentRuntime(definition, resolve_ids=identifier_store.resolve_observation_ids)
     initial = sample()

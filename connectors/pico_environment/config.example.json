@@ -11,5 +11,19 @@
     "serial_port": "/dev/serial/by-id/REPLACE_WITH_PICO_DEVICE",
     "poll_interval_seconds": 10,
     "serial_timeout_seconds": 10
+  },
+  "change_detection": {
+    "max_gap_seconds": 30,
+    "channels": {
+      "temperature": {"steady_delta": 0.1, "rapid_delta": 0.5},
+      "humidity": {"steady_delta": 1, "rapid_delta": 5},
+      "illuminance": {"steady_delta": 10, "rapid_delta": 100},
+      "co2": {"steady_delta": 30, "rapid_delta": 300}
+    }
+  },
+  "temperature_wake": {
+    "enabled": true,
+    "min_interval_seconds": 120,
+    "request_timeout_seconds": 120
   }
 }

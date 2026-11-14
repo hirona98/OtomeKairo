@@ -71,7 +71,30 @@ connectors/pico_environment/.venv/bin/python -m otomekairo_pico_environment_conn
 `--once`は1回分の報告を表示し、失敗channelがあれば終了コード2を返す。通常起動は既定の設定例で10秒間隔。sourceを無効にすると取得を休止し、有効化すると再開する。未登録・producerやchannelの不一致・設定不正は明示失敗とする。
 USB切断や不正な応答は全channelの失敗を報告する。機器単位の測定失敗は該当channelだけを失敗にし、同じ機器を次の周期で再試行する。HTTPの接続失敗・5xxは同じserverを再試行し、4xxは終了する。
 
-`scripts/prepare_service_env.sh`はこのproducer用venvも準備する。`config.local.json`がある場合、`scripts/run_service_all.sh`が既存process群と同じlifecycleで起動する。現在値は`GET /api/inspection/current-state`の`surroundings`で確認できる。送信は観測runtimeだけを更新し、LLM呼び出しやwakeを開始しない。
+`scripts/prepare_service_env.sh`はこのproducer用venvも準備する。`config.local.json`がある場合、`scripts/run_service_all.sh`が既存process群と同じlifecycleで起動する。現在値は`GET /api/inspection/current-state`の`surroundings`で確認できる。観測APIへの報告はruntimeだけを更新する。温度急変の通知は次の条件でAPI起床を呼び出す。
+
+## 変化分類と温度急変の通知
+
+PC側producerは各channelの前回値・取得時点だけを保持し、送信するmeasurementへ`change`を添える。時系列の蓄積は行わない。分類と比較値のwireは[観測入力API](../../docs/design/api/観測入力.md)、LLMとの意味境界は[測定上の変化情報](../../docs/design/runtime/周辺環境.md#測定上の変化情報)を正とする。
+
+`change_detection`の全項目は必須とする。比較間隔はmonotonic clockで測り、0秒以下または`max_gap_seconds`を超えた場合、初回、取得失敗後の復帰、有効化後は`initial`とする。比較できる場合、前回との差の絶対値が`steady_delta`以下なら`steady`、`rapid_delta`以上なら`rapid_change`、中間は`changing`とする。境界値には浮動小数点の比較許容差（相対・絶対とも`1e-9`）を使う。
+
+設定例は`max_gap_seconds=30`、次の値とする。数値条件は`config.local.json`で変更できる。
+
+| channel | ほぼ同じ（steady_delta以下） | 急変動（rapid_delta以上） |
+| --- | --- | --- |
+| temperature | 0.1 degC | 0.5 degC |
+| humidity | 1 % | 5 % |
+| illuminance | 10 lux | 100 lux |
+| co2 | 30 ppm | 300 ppm |
+
+温度が`rapid_change`へ入ったとき、または急変の方向が反転したとき、観測の送信成功後に既存の`POST /api/wake`へ参照付き起床を送る。同じ方向の急変が連続する間は通知を増やさず、`initial / steady / changing`を挟むと次の急変を新しい通知機会にする。他のchannelの分類は測定報告だけに添える。
+
+`temperature_wake`の全項目は必須とする。`enabled`で通知を有効化し、`min_interval_seconds`で起床要求の開始間隔を制限する。設定例では120秒。実行中の起床は最大1件、待機する通知も最新1件にまとめる。待機中に温度が元に戻っても、急変時の値・時刻・比較情報を保持する。sourceを無効にすると未送信の通知を破棄する。
+
+起床のHTTP応答待ちは別threadで行い、通常の測定送信を続ける。`request_timeout_seconds`の設定例は120秒。起床時だけ測定報告を一時的なJSON参照ファイルへ固定し、その起床が終了すると削除する。`message`や対象人物を指定せず、自律判断の機会と測定根拠を渡す。発話・行動・見送りはOtomeKairoが決める。
+
+起床の失敗はログに残し、処理済みの起床を重複させないよう同じ要求を自動再送しない。通常の測定・分類は継続する。`--once`は分類の初回報告だけを送り、起床を行わない。
 
 ## USBプロトコル
 

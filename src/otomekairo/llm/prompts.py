@@ -1165,6 +1165,9 @@ def _observation_comparison_instruction() -> str:
         "さらに last_prompted_observation_context があり、直近発話に使った観測と意味上同じなら same_as_recent_speech / recent_speech_repetition とします。\n"
         "過去の説明は変化比較に使い、現在の物体同定は今回の元画像に基づいて行います。"
         "測定値の差や新しい報告であることと、意味上の変化を区別します。\n"
+        "measurement payload の change は、producerが数値条件で付けた測定上の分類と比較値です。"
+        "pattern の initial / steady / changing / rapid_change は、それぞれ比較開始・ほぼ同じ・変動・急変動を表します。"
+        "前回値、差、経過秒数を観測の補助根拠として読み、生活上の意味や今回の change_state は他の根拠と合わせて判断します。\n"
     )
 
 

@@ -4,7 +4,9 @@ from datetime import datetime
 import json
 import logging
 import math
+from pathlib import Path
 import ssl
+import tempfile
 import time
 from typing import Any
 import urllib.error
@@ -12,6 +14,8 @@ import urllib.request
 import uuid
 
 from .config import Config, ConfigError
+from .changes import ChangeTracker
+from .notifications import TemperatureNotifier
 from .protocol import CHANNELS, PROTOCOL
 
 
@@ -34,14 +38,14 @@ class Api:
             self.context.check_hostname = False
             self.context.verify_mode = ssl.CERT_NONE
 
-    def request(self, method: str, path: str, payload=None) -> dict[str, Any]:
+    def request(self, method: str, path: str, payload=None, *, timeout_seconds: float | None = None) -> dict[str, Any]:
         body = None if payload is None else json.dumps(payload, allow_nan=False).encode("utf-8")
         request = urllib.request.Request(self.config.base_url + path, data=body, method=method,
                                          headers={"Authorization": "Bearer " + self.token,
                                                   "Content-Type": "application/json", "Accept": "application/json"})
         try:
             with urllib.request.urlopen(request, context=self.context,
-                                        timeout=self.config.request_timeout_seconds) as response:
+                                        timeout=self.config.request_timeout_seconds if timeout_seconds is None else timeout_seconds) as response:
                 envelope = json.load(response)
         except urllib.error.HTTPError as exc:
             raise ApiError(f"{method} {path}: HTTP {exc.code}", retryable=exc.code >= 500) from exc
@@ -124,8 +128,9 @@ def failed_samples(code: str) -> list[dict[str, Any]]:
     return [{"channel_id": channel, "status": "failed", "payload": None, "error_code": code} for channel in CHANNELS]
 
 
-def poll_once(config: Config, api: Api, *, reader=read_device) -> dict[str, Any] | None:
+def poll_once(config: Config, api: Api, tracker: ChangeTracker, *, reader=read_device) -> dict[str, Any] | None:
     if not api.enabled_source():
+        tracker.reset()
         return None
     try:
         samples = reader(config)
@@ -135,6 +140,7 @@ def poll_once(config: Config, api: Api, *, reader=read_device) -> dict[str, Any]
     except ProtocolError:
         logging.warning("Pico protocol error; reporting all channels failed")
         samples = failed_samples("acquisition_failed")
+    tracker.annotate(samples, now=time.monotonic())
     observed_at = datetime.now().astimezone().isoformat(timespec="microseconds")
     payload = {"client_id": config.client_id, "sensor_source_id": config.sensor_source_id,
                "samples": [{**sample, "sample_id": str(uuid.uuid4()), "occurred_at": observed_at} for sample in samples]}
@@ -145,18 +151,45 @@ def poll_once(config: Config, api: Api, *, reader=read_device) -> dict[str, Any]
     return payload
 
 
+def notify_temperature(config: Config, api: Api, event: dict[str, Any]) -> None:
+    try:
+        # Keep the triggering measurement unchanged while later polls continue.
+        with tempfile.TemporaryDirectory(prefix="otomekairo-pico-change-") as directory:
+            path = Path(directory) / "temperature.json"
+            path.write_text(json.dumps(event, ensure_ascii=False, allow_nan=False), encoding="utf-8")
+            result = api.request("POST", "/api/wake", {
+                "client_context": {"source": "pico_environment", "source_kind": "sensor_change",
+                                   "client_id": config.client_id},
+                "reference": {"uri": str(path), "label": "Picoの温度変化の測定報告",
+                              "reason_summary": "temperature: rapid_change", "content_hint": "text"},
+            }, timeout_seconds=config.temperature_wake.request_timeout_seconds)
+            if result.get("result_kind") == "internal_failure":
+                logging.error("Temperature wake returned internal_failure")
+            else:
+                logging.info("Temperature wake completed (result_kind=%s)", result.get("result_kind"))
+    except (ApiError, OSError) as exc:
+        # A timed-out wake may already be executing. Do not issue the same wake twice.
+        logging.error("Temperature wake failed (%s); request is not automatically repeated", type(exc).__name__)
+
+
 def run(config: Config, *, once: bool = False) -> int:
     api = Api(config)
-    while True:
-        started = time.monotonic()
-        try:
-            payload = poll_once(config, api)
-        except ApiError as exc:
-            if once or not exc.retryable:
-                raise
-            logging.warning("%s; retrying the same server on the next poll", exc)
-        else:
-            if once:
-                print(json.dumps(payload if payload is not None else {"status": "disabled"}, ensure_ascii=False, allow_nan=False))
-                return 0 if payload is None or all(sample["status"] == "succeeded" for sample in payload["samples"]) else 2
-        time.sleep(max(0, config.poll_interval_seconds - (time.monotonic() - started)))
+    tracker = ChangeTracker(config.change_detection)
+    notifier = TemperatureNotifier(config.temperature_wake, lambda event: notify_temperature(config, api, event))
+    try:
+        while True:
+            started = time.monotonic()
+            try:
+                payload = poll_once(config, api, tracker)
+            except ApiError as exc:
+                if once or not exc.retryable:
+                    raise
+                logging.warning("%s; retrying the same server on the next poll", exc)
+            else:
+                if once:
+                    print(json.dumps(payload if payload is not None else {"status": "disabled"}, ensure_ascii=False, allow_nan=False))
+                    return 0 if payload is None or all(sample["status"] == "succeeded" for sample in payload["samples"]) else 2
+                notifier.observe(payload, now=time.monotonic())
+            time.sleep(max(0, config.poll_interval_seconds - (time.monotonic() - started)))
+    finally:
+        notifier.close()

@@ -20,12 +20,28 @@ class ObservationError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class MeasurementChange:
+    pattern: str
+    previous_value: float | int | None
+    delta: float | int | None
+    elapsed_seconds: float | int | None
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"pattern": self.pattern, "previous_value": self.previous_value,
+                "delta": self.delta, "elapsed_seconds": self.elapsed_seconds}
+
+
+@dataclass(frozen=True, slots=True)
 class Measurement:
     value: float | int | bool
     unit: str | None
+    change: MeasurementChange | None = None
 
     def to_payload(self) -> dict[str, Any]:
-        return {"kind": "measurement", "value": self.value, "unit": self.unit}
+        payload = {"kind": "measurement", "value": self.value, "unit": self.unit}
+        if self.change is not None:
+            payload["change"] = self.change.to_payload()
+        return payload
 
 
 @dataclass(frozen=True, slots=True)

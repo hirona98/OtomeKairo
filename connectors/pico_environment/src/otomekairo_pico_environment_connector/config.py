@@ -7,9 +7,30 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .protocol import CHANNELS
+
 
 class ConfigError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class ChangeThreshold:
+    steady_delta: float
+    rapid_delta: float
+
+
+@dataclass(frozen=True)
+class ChangeDetection:
+    max_gap_seconds: float
+    channels: dict[str, ChangeThreshold]
+
+
+@dataclass(frozen=True)
+class TemperatureWake:
+    enabled: bool
+    min_interval_seconds: float
+    request_timeout_seconds: float
 
 
 @dataclass(frozen=True)
@@ -23,6 +44,8 @@ class Config:
     serial_port: str
     poll_interval_seconds: float
     serial_timeout_seconds: float
+    change_detection: ChangeDetection
+    temperature_wake: TemperatureWake
 
     def read_access_token(self) -> str:
         try:
@@ -58,7 +81,7 @@ def load_config(path: Path) -> Config:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise ConfigError("could not read connector JSON config") from exc
-    _keys(raw, {"server", "connector"}, "config")
+    _keys(raw, {"server", "connector", "change_detection", "temperature_wake"}, "config")
     server = _keys(raw["server"], {"base_url", "config_db_path", "tls_verify", "request_timeout_seconds"}, "server")
     connector = _keys(raw["connector"], {"client_id", "sensor_source_id", "serial_port",
                                        "poll_interval_seconds", "serial_timeout_seconds"}, "connector")
@@ -78,8 +101,24 @@ def load_config(path: Path) -> Config:
     db_path = Path(_text(server["config_db_path"], "config_db_path")).expanduser()
     if not db_path.is_absolute():
         db_path = path.resolve().parent / db_path
+    changes = _keys(raw["change_detection"], {"max_gap_seconds", "channels"}, "change_detection")
+    thresholds = _keys(changes["channels"], set(CHANNELS), "change_detection.channels")
+    channel_thresholds = {}
+    for channel, values in thresholds.items():
+        _keys(values, {"steady_delta", "rapid_delta"}, f"change_detection.channels.{channel}")
+        steady = _positive(values["steady_delta"], "steady_delta")
+        rapid = _positive(values["rapid_delta"], "rapid_delta")
+        if steady >= rapid:
+            raise ConfigError("steady_delta must be less than rapid_delta")
+        channel_thresholds[channel] = ChangeThreshold(steady, rapid)
+    wake = _keys(raw["temperature_wake"], {"enabled", "min_interval_seconds", "request_timeout_seconds"}, "temperature_wake")
+    if type(wake["enabled"]) is not bool:
+        raise ConfigError("temperature_wake.enabled must be a boolean")
     return Config(base_url.rstrip("/"), db_path.resolve(), server["tls_verify"],
                   _positive(server["request_timeout_seconds"], "request_timeout_seconds"),
                   _text(connector["client_id"], "client_id"), source_id, serial_port,
                   _positive(connector["poll_interval_seconds"], "poll_interval_seconds"),
-                  _positive(connector["serial_timeout_seconds"], "serial_timeout_seconds"))
+                  _positive(connector["serial_timeout_seconds"], "serial_timeout_seconds"),
+                  ChangeDetection(_positive(changes["max_gap_seconds"], "max_gap_seconds"), channel_thresholds),
+                  TemperatureWake(wake["enabled"], _positive(wake["min_interval_seconds"], "min_interval_seconds"),
+                                  _positive(wake["request_timeout_seconds"], "temperature_wake.request_timeout_seconds")))

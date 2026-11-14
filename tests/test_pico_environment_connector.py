@@ -16,6 +16,7 @@ CONNECTOR = Path(__file__).resolve().parents[1] / "connectors" / "pico_environme
 sys.path.insert(0, str(CONNECTOR / "src"))
 
 from otomekairo_pico_environment_connector import app, protocol
+from otomekairo_pico_environment_connector.changes import ChangeTracker
 from otomekairo_pico_environment_connector.config import ConfigError, load_config
 from otomekairo.observations import EnvironmentRuntime, MediaBundle, ObservationSnapshot
 from otomekairo.observations.context import ObservationContext
@@ -152,7 +153,8 @@ def test_sensor_report_reaches_llm_surroundings_and_usb_failure_invalidates_it(c
             assert method == "POST" and path == "/api/observations/sensors"
             return runtime.submit(payload, received_at=datetime.now().astimezone().isoformat())
 
-    result = app.poll_once(config, Api(), reader=lambda _: readings())
+    tracker = ChangeTracker(config.change_detection)
+    result = app.poll_once(config, Api(), tracker, reader=lambda _: readings())
     assert len({item["sample_id"] for item in result["samples"]}) == 4
     now = datetime.now().astimezone().isoformat()
     observations, reports = runtime.snapshot(now)
@@ -161,12 +163,13 @@ def test_sensor_report_reaches_llm_surroundings_and_usb_failure_invalidates_it(c
     prompted = context.to_prompt_payload()["surroundings"]["observations"]
     assert {item["channel_id"]: item["payload"]["value"] for item in prompted} == {
         "temperature": 24.5, "humidity": 45.0, "illuminance": 0, "co2": 600}
+    assert all(item["payload"]["change"]["pattern"] == "initial" for item in prompted)
     assert runtime.snapshot((datetime.fromisoformat(now) + timedelta(seconds=121)).isoformat())[0] == ()
 
     def disconnected(_):
         raise OSError("USB disconnected")
 
-    app.poll_once(config, Api(), reader=disconnected)
+    app.poll_once(config, Api(), tracker, reader=disconnected)
     observations, reports = runtime.snapshot(datetime.now().astimezone().isoformat())
     assert observations == ()
     assert len(reports) == 4
@@ -178,7 +181,7 @@ def test_disabled_source_does_not_read_usb(config):
         def enabled_source(self):
             return False
 
-    assert app.poll_once(config, Api(), reader=lambda _: pytest.fail("USB was opened")) is None
+    assert app.poll_once(config, Api(), ChangeTracker(config.change_detection), reader=lambda _: pytest.fail("USB was opened")) is None
 
 
 def test_sensor_crc_known_vector_and_corruption():

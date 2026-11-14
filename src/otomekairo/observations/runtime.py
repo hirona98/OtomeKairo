@@ -12,7 +12,7 @@ from typing import Any
 from otomekairo.memory.utils import local_datetime, parse_iso, source_text_hash
 from otomekairo.store.identifiers import InternalIdentityConflictError
 from otomekairo.observations.models import (
-    EventReport, Measurement, Observation, ObservationError, SourceReport,
+    EventReport, Measurement, MeasurementChange, Observation, ObservationError, SourceReport,
     MAX_SENSOR_OBSERVATIONS, observation_expires_at,
 )
 from otomekairo.observations.validation import exact_fields, nonempty
@@ -180,7 +180,10 @@ class EnvironmentRuntime:
     def _payload(self, payload: Any, channel: dict[str, Any], occurred: str) -> Measurement | EventReport:
         code = "invalid_sensor_value"
         if channel["kind"] == "measurement":
-            exact_fields(payload, {"kind", "value", "unit"}, code)
+            fields = {"kind", "value", "unit"}
+            if isinstance(payload, dict) and "change" in payload:
+                fields.add("change")
+            exact_fields(payload, fields, code)
             value = payload["value"]
             try:
                 valid_type = (type(value) in {int, float} and math.isfinite(value)
@@ -189,7 +192,8 @@ class EnvironmentRuntime:
                 valid_type = False
             if payload["kind"] != "measurement" or not valid_type or payload["unit"] != channel["unit"]:
                 raise ObservationError(code, "Measurement value or unit does not match the registered channel.")
-            return Measurement(value, payload["unit"])
+            change = self._measurement_change(payload["change"], value) if "change" in payload else None
+            return Measurement(value, payload["unit"], change)
         exact_fields(payload, {"kind", "monitoring_started_at", "last_occurred_at"}, code)
         if payload["kind"] != "event":
             raise ObservationError(code, "Event payload kind is invalid.")
@@ -200,6 +204,27 @@ class EnvironmentRuntime:
         )):
             raise ObservationError("invalid_observation_time", "Event monitoring and occurrence times are inconsistent.")
         return EventReport(started, last)
+
+    @staticmethod
+    def _measurement_change(raw: Any, value: Any) -> MeasurementChange:
+        code = "invalid_sensor_value"
+        exact_fields(raw, {"pattern", "previous_value", "delta", "elapsed_seconds"}, code)
+        if type(value) not in {int, float} or raw["pattern"] not in ("initial", "steady", "changing", "rapid_change"):
+            raise ObservationError(code, "Numeric measurement change pattern is invalid.")
+        if raw["pattern"] == "initial":
+            if any(raw[key] is not None for key in ("previous_value", "delta", "elapsed_seconds")):
+                raise ObservationError(code, "Initial measurement has no comparison values.")
+        else:
+            try:
+                valid = all(type(raw[key]) in {int, float} and math.isfinite(raw[key])
+                            for key in ("previous_value", "delta", "elapsed_seconds"))
+                valid = valid and raw["elapsed_seconds"] > 0 and math.isclose(
+                    value - raw["previous_value"], raw["delta"], rel_tol=1e-9, abs_tol=1e-9)
+            except OverflowError:
+                valid = False
+            if not valid:
+                raise ObservationError(code, "Measurement change numbers are inconsistent.")
+        return MeasurementChange(raw["pattern"], raw["previous_value"], raw["delta"], raw["elapsed_seconds"])
 
     @staticmethod
     def _validate_event_order(previous: Observation | None, current: Measurement | EventReport | None) -> None:
