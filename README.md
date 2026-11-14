@@ -68,6 +68,7 @@ https://<このPCのIPアドレス>:55601/ui/
 
 専用 PC で常時起動する場合は、repository を `/opt/OtomeKairo` に置き、単一の systemd service として起動する。
 この構成では OtomeKairo server、Tapo C220 connector、Tapo C220 watcher、MCP client connector を 1 つの service lifecycle でまとめて扱う。
+USB接続のPico環境センサーも利用できる。初回の書き込みと登録・常駐手順は [Pico環境センサー](connectors/pico_environment/README.md) を参照する。
 daemon 用の初回セットアップでは `./scripts/setup_venv.sh` を別途実行しない。
 `./scripts/prepare_service_env.sh` が server 用 `./scripts/setup_venv.sh` を内部で実行し、そのうえで connector 用 `.venv`、watcher 用 `.venv`、`var/otomekairo/`、TLS 証明書まで準備する。
 

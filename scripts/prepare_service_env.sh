@@ -14,6 +14,8 @@ TAPO_WATCHER_DIR="${REPO_ROOT}/watchers/tapo_c220"
 TAPO_WATCHER_VENV_DIR="${TAPO_WATCHER_DIR}/.venv"
 MCP_CONNECTOR_DIR="${REPO_ROOT}/connectors/mcp_client"
 MCP_VENV_DIR="${MCP_CONNECTOR_DIR}/.venv"
+PICO_CONNECTOR_DIR="${REPO_ROOT}/connectors/pico_environment"
+PICO_VENV_DIR="${PICO_CONNECTOR_DIR}/.venv"
 TLS_DIR="${REPO_ROOT}/var/dev-tls"
 DATA_DIR="${REPO_ROOT}/var/otomekairo"
 CERT_FILE="${TLS_DIR}/cert.pem"
@@ -42,6 +44,10 @@ fi
   "${MCP_VENV_DIR}" \
   "${MCP_CONNECTOR_DIR}" \
   "otomekairo_mcp_client_connector"
+"${SCRIPT_DIR}/ensure_editable_install.sh" \
+  "${PICO_VENV_DIR}" \
+  "${PICO_CONNECTOR_DIR}" \
+  "otomekairo_pico_environment_connector"
 
 mkdir -p "${TLS_DIR}"
 mkdir -p "${DATA_DIR}"
@@ -64,5 +70,6 @@ echo "Mic    : ${MICROPHONE_VENV_DIR}/bin/python"
 echo "Tapo   : ${TAPO_VENV_DIR}/bin/python"
 echo "Watcher: ${TAPO_WATCHER_VENV_DIR}/bin/python"
 echo "MCP    : ${MCP_VENV_DIR}/bin/python"
+echo "Pico   : ${PICO_VENV_DIR}/bin/python"
 echo "Data   : ${DATA_DIR}"
 echo "TLS    : ${CERT_FILE}"

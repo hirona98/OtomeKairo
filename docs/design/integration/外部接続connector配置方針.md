@@ -46,6 +46,7 @@ watchers/<name>/
 | connector | `connectors/microphone/` | OS audio から PCM を `/api/audio/stream` へ送る |
 | connector | `connectors/tapo_c220/` | camera source の `vision.capture` / `camera.ptz` |
 | connector | `connectors/mcp_client/` | 許可済み MCP tool を `mcp.call_tool` として実行する |
+| sensor producer | `connectors/pico_environment/` | USB接続のPico環境センサーを観測入力APIへ報告する |
 | watcher | `watchers/tapo_c220/` | 軽量 CV 監視し、変化時に参照付き `/api/wake` を送る |
 
 Webカメラは新しい capability id にせず、`vision.capture` の `VisionSource(kind=camera, source_owner=self)` として登録する。
@@ -60,6 +61,7 @@ Webカメラは新しい capability id にせず、`vision.capture` の `VisionS
 - server は `0.0.0.0:55601` で listen し、同一 PC 上の connector / watcher は `https://127.0.0.1:55601` へ接続する
 - どれか 1 つの process が終了した場合は service 全体を終了し、systemd の restart に任せる
 - microphone connector は音声入力が無効でも idle process として起動する
+- Pico環境センサーproducerの起動条件・機器設定・運用手順は [専用README](../../../connectors/pico_environment/README.md) を正とする
 - camera source または MCP server の runtime config が未登録の場合、対象 connector は起動しない
 - watcher は `camera_source.watcher` が登録済みなら、`watcher.enabled=false` でも idle process として起動する
 - watcher runtime config 自体が未登録の場合だけ watcher は起動しない
@@ -137,3 +139,4 @@ microphone connector は加えて VAD、STT、音声起動ワード判定、話�
 ## センサーproducer
 
 producerは取得値・単位・取得時刻を正規化し、[観測入力 API](../api/観測入力.md) へ報告する。機器固有の接続設定はconnector側に置く。受信はruntime更新だけを行い、起床や意味判断を自動で開始しない。
+Pico環境センサーの参照実装とUSB契約は [connectors/pico_environment/README.md](../../../connectors/pico_environment/README.md) を参照する。

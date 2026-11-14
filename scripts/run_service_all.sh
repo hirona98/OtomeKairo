@@ -17,6 +17,9 @@ TAPO_WATCHER_VENV_DIR="${TAPO_WATCHER_DIR}/.venv"
 MCP_CONNECTOR_DIR="${REPO_ROOT}/connectors/mcp_client"
 MCP_VENV_DIR="${MCP_CONNECTOR_DIR}/.venv"
 MCP_CONFIG_FILE="${MCP_CONNECTOR_DIR}/config.local.json"
+PICO_CONNECTOR_DIR="${REPO_ROOT}/connectors/pico_environment"
+PICO_VENV_DIR="${PICO_CONNECTOR_DIR}/.venv"
+PICO_CONFIG_FILE="${PICO_CONNECTOR_DIR}/config.local.json"
 TLS_DIR="${REPO_ROOT}/var/dev-tls"
 DATA_DIR="${REPO_ROOT}/var/otomekairo"
 CERT_FILE="${TLS_DIR}/cert.pem"
@@ -30,6 +33,7 @@ MICROPHONE_PID=""
 TAPO_PID=""
 TAPO_WATCHER_PID=""
 MCP_PID=""
+PICO_PID=""
 CHILD_PIDS=()
 
 require_executable() {
@@ -49,13 +53,13 @@ cleanup() {
 
   trap - EXIT INT TERM
 
-  for pid in "${MCP_PID}" "${TAPO_WATCHER_PID}" "${TAPO_PID}" "${MICROPHONE_PID}" "${SERVER_PID}"; do
+  for pid in "${PICO_PID}" "${MCP_PID}" "${TAPO_WATCHER_PID}" "${TAPO_PID}" "${MICROPHONE_PID}" "${SERVER_PID}"; do
     if [[ -n "${pid}" ]] && kill -0 "${pid}" >/dev/null 2>&1; then
       kill "${pid}" >/dev/null 2>&1 || true
     fi
   done
 
-  for pid in "${MCP_PID}" "${TAPO_WATCHER_PID}" "${TAPO_PID}" "${MICROPHONE_PID}" "${SERVER_PID}"; do
+  for pid in "${PICO_PID}" "${MCP_PID}" "${TAPO_WATCHER_PID}" "${TAPO_PID}" "${MICROPHONE_PID}" "${SERVER_PID}"; do
     if [[ -n "${pid}" ]]; then
       wait "${pid}" >/dev/null 2>&1 || true
     fi
@@ -213,6 +217,14 @@ if connector_runtime_config_ready "MCP client" "mcp_client" "mcp-client-connecto
   "${MCP_VENV_DIR}/bin/python" -m otomekairo_mcp_client_connector "${mcp_args[@]}" &
   MCP_PID="$!"
   CHILD_PIDS+=("${MCP_PID}")
+fi
+
+if [[ -f "${PICO_CONFIG_FILE}" ]]; then
+  require_executable "${PICO_VENV_DIR}/bin/python" "Pico environment connector venv"
+  echo "starting Pico environment sensor producer" >&2
+  "${PICO_VENV_DIR}/bin/python" -m otomekairo_pico_environment_connector --config "${PICO_CONFIG_FILE}" &
+  PICO_PID="$!"
+  CHILD_PIDS+=("${PICO_PID}")
 fi
 
 CHILD_PIDS+=("${SERVER_PID}")

@@ -1,0 +1,15 @@
+{
+  "server": {
+    "base_url": "https://127.0.0.1:55601",
+    "config_db_path": "../../var/otomekairo/config.db",
+    "tls_verify": false,
+    "request_timeout_seconds": 10
+  },
+  "connector": {
+    "client_id": "pico-environment-main",
+    "sensor_source_id": "sensor_source:pico_environment",
+    "serial_port": "/dev/serial/by-id/REPLACE_WITH_PICO_DEVICE",
+    "poll_interval_seconds": 10,
+    "serial_timeout_seconds": 10
+  }
+}
